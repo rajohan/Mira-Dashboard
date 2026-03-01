@@ -3,6 +3,7 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const path = require("path");
+const { getMetrics } = require("./metrics");
 
 const app = express();
 const server = http.createServer(app);
@@ -18,6 +19,8 @@ let sessionList = [];
 let isGatewayConnected = false;
 let reconnectTimer = null;
 let connectionAttempts = 0;
+let requestId = 1000;
+let pendingRequests = new Map(); // id -> { clientWs, resolve }
 
 // CORS
 app.use((req, res, next) => {
@@ -40,7 +43,7 @@ function connectToGateway(token) {
     console.log("[Backend] Connecting to Gateway:", gatewayUrl);
     
     try {
-        const ws = new WebSocket(`${gatewayUrl}?token=${encodeURIComponent(token)}`);
+        const ws = new WebSocket(gatewayUrl + "?token=" + encodeURIComponent(token));
         gatewayWs = ws;
         connectionAttempts++;
         
@@ -67,19 +70,22 @@ function connectToGateway(token) {
             try {
                 const msg = JSON.parse(data.toString());
                 
+                // Handle connect response
                 if (msg.type === "res" && msg.id === "connect-1") {
                     if (msg.ok) {
                         console.log("[Backend] Gateway connected!");
                         isGatewayConnected = true;
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
-                        ws.send(JSON.stringify({ type: "req", id: "sessions-1", method: "sessions.list", params: {} }));
+                        // Request initial session list
+                        sendGatewayRequest("sessions.list", {});
                     } else {
                         console.error("[Backend] Connect failed:", msg.error);
                     }
                     return;
                 }
                 
+                // Handle sessions.list response
                 if (msg.type === "res" && msg.id === "sessions-1") {
                     if (msg.ok && msg.payload?.sessions) {
                         sessionList = msg.payload.sessions;
@@ -88,6 +94,29 @@ function connectToGateway(token) {
                     return;
                 }
                 
+                // Handle forwarded request responses
+                if (msg.type === "res" && pendingRequests.has(msg.id)) {
+                    const pending = pendingRequests.get(msg.id);
+                    pendingRequests.delete(msg.id);
+                    
+                    if (pending.clientWs && pending.clientWs.readyState === WebSocket.OPEN) {
+                        pending.clientWs.send(JSON.stringify({
+                            type: "res",
+                            id: pending.clientId,
+                            ok: msg.ok,
+                            payload: msg.payload,
+                            error: msg.error,
+                        }));
+                    }
+                    
+                    // Refresh session list after mutations
+                    if (pending.method && pending.method.startsWith("sessions.")) {
+                        sendGatewayRequest("sessions.list", {});
+                    }
+                    return;
+                }
+                
+                // Broadcast events to all clients
                 if (msg.type === "event") {
                     broadcast({ type: "event", event: msg.event, payload: msg.payload });
                 }
@@ -116,8 +145,24 @@ function connectToGateway(token) {
 function scheduleReconnect(token) {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delay = Math.min(5000 * Math.pow(1.5, connectionAttempts), 60000);
-    console.log(`[Backend] Reconnecting in ${delay}ms...`);
+    console.log("[Backend] Reconnecting in " + delay + "ms...");
     reconnectTimer = setTimeout(() => connectToGateway(token), delay);
+}
+
+function sendGatewayRequest(method, params, clientWs = null, clientId = null) {
+    if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+        return false;
+    }
+    
+    const id = String(++requestId);
+    const req = { type: "req", id, method, params };
+    
+    if (clientWs && clientId) {
+        pendingRequests.set(id, { clientWs, clientId, method });
+    }
+    
+    gatewayWs.send(JSON.stringify(req));
+    return true;
 }
 
 function broadcast(msg) {
@@ -138,6 +183,15 @@ app.get("/api/sessions", (req, res) => {
     res.json({ sessions: sessionList });
 });
 
+app.get("/api/metrics", (req, res) => {
+    try {
+        const metrics = getMetrics();
+        res.json(metrics);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // SPA fallback
 app.get("*", (req, res) => {
     res.sendFile(path.join(frontendPath, "index.html"));
@@ -154,6 +208,29 @@ wss.on("connection", (ws) => {
         sessions: sessionList,
     }));
     
+    ws.on("message", (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            
+            // Handle request forwarding to Gateway
+            if (msg.type === "req" && msg.method) {
+                if (!isGatewayConnected) {
+                    ws.send(JSON.stringify({
+                        type: "res",
+                        id: msg.id,
+                        ok: false,
+                        error: { message: "Gateway not connected" },
+                    }));
+                    return;
+                }
+                
+                sendGatewayRequest(msg.method, msg.params || {}, ws, msg.id);
+            }
+        } catch (e) {
+            console.error("[Frontend] Parse error:", e.message);
+        }
+    });
+    
     ws.on("close", () => {
         subscribers.delete(ws);
         console.log("[Frontend] Client disconnected");
@@ -162,8 +239,8 @@ wss.on("connection", (ws) => {
 
 const PORT = process.env.PORT || 3100;
 server.listen(PORT, () => {
-    console.log(`[Backend] Running on port ${PORT}`);
-    console.log(`[Backend] Frontend: ${frontendPath}`);
+    console.log("[Backend] Running on port " + PORT);
+    console.log("[Backend] Frontend: " + frontendPath);
     
     const token = process.env.OPENCLAW_TOKEN;
     if (token) {
