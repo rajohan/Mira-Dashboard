@@ -14,13 +14,20 @@ export interface AgentStatus {
 
 export interface Session {
     id: string;
-    agentId: string;
-    agentName: string;
-    type: "main" | "hook" | "cron" | "subagent";
+    key: string;
+    type: string;
+    agentType: string;
+    hookName: string;
+    kind: string;
     model: string;
     tokenCount: number;
-    createdAt: string;
-    updatedAt: string;
+    maxTokens: number;
+    createdAt: string | null;
+    updatedAt: number | null;
+    displayName: string;
+    label: string;
+    displayLabel: string;
+    channel: string;
 }
 
 export function useOpenClaw(token: string | null) {
@@ -34,12 +41,6 @@ export function useOpenClaw(token: string | null) {
             case "status":
                 setStatus(params);
                 break;
-            case "sessions":
-                setSessions(params);
-                break;
-            case "sessions.list":
-                setSessions(params?.sessions || []);
-                break;
             case "agents":
                 setAgents(params);
                 break;
@@ -52,9 +53,15 @@ export function useOpenClaw(token: string | null) {
         }
     }, []);
 
+    const handleSessions = useCallback((sessionData: any[]) => {
+        console.log("[useOpenClaw] Setting sessions:", sessionData.length);
+        setSessions(sessionData);
+    }, []);
+
     const { isConnected, error, connect, disconnect, request } = useOpenClawSocket({
         token: token || "",
         onMessage: handleMessage,
+        onSessions: handleSessions,
     });
 
     const fetchStatus = useCallback(async () => {
@@ -71,7 +78,9 @@ export function useOpenClaw(token: string | null) {
         if (!isConnected) return;
         try {
             const result = await request("sessions.list");
-            setSessions(result?.sessions || []);
+            if (result?.sessions) {
+                setSessions(result.sessions);
+            }
         } catch (e) {
             console.error("Failed to fetch sessions:", e);
         }
@@ -87,9 +96,14 @@ export function useOpenClaw(token: string | null) {
         }
     }, [isConnected, request]);
 
-    const killSession = useCallback(async (sessionId: string) => {
-        if (!isConnected) return;
-        await request("sessions.kill", { sessionId });
+    const deleteSession = useCallback(async (sessionKey: string) => {
+        if (!isConnected) throw new Error("Not connected");
+        console.log("[useOpenClaw] Deleting session:", sessionKey);
+        await request("sessions.delete", { 
+            key: sessionKey,
+            deleteTranscript: true,
+            emitLifecycleHooks: false,
+        });
         await fetchSessions();
     }, [isConnected, request, fetchSessions]);
 
@@ -105,7 +119,7 @@ export function useOpenClaw(token: string | null) {
         fetchStatus,
         fetchSessions,
         fetchAgents,
-        killSession,
+        deleteSession,
         request,
     };
 }

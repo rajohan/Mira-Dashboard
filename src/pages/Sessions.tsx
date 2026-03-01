@@ -10,30 +10,55 @@ import {
     Trash2,
     Clock,
     Cpu,
-    MessageSquare,
-
+    Coins,
     AlertTriangle,
 } from "lucide-react";
 
-function formatDuration(createdAt: string): string {
-    const start = new Date(createdAt).getTime();
+function formatDuration(updatedAt: number | null | undefined): string {
+    if (!updatedAt) return "Unknown";
     const now = Date.now();
-    const diffMs = now - start;
+    const diffMs = now - updatedAt;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
 
     if (diffDays > 0) {
-        return `${diffDays}d ${diffHours % 24}h`;
+        return diffDays + "d " + (diffHours % 24) + "h ago";
     }
     if (diffHours > 0) {
-        return `${diffHours}h ${diffMins % 60}m`;
+        return diffHours + "h " + (diffMins % 60) + "m ago";
     }
-    return `${diffMins}m`;
+    if (diffMins < 1) return "Just now";
+    return diffMins + "m ago";
 }
 
-function getTypeBadgeColor(type: string): string {
-    switch (type.toUpperCase()) {
+function formatTokens(current: number, max: number): string {
+    const currentK = (current / 1000).toFixed(1);
+    const maxK = (max / 1000).toFixed(0);
+    return currentK + "k / " + maxK + "k";
+}
+
+function getTokenPercent(current: number, max: number): number {
+    return Math.min(Math.round((current / max) * 100), 100);
+}
+
+function getTokenColor(percent: number): string {
+    if (percent < 50) return "text-green-400";
+    if (percent < 75) return "text-yellow-400";
+    if (percent < 90) return "text-orange-400";
+    return "text-red-400";
+}
+
+function getTokenBarColor(percent: number): string {
+    if (percent < 50) return "bg-green-500";
+    if (percent < 75) return "bg-yellow-500";
+    if (percent < 90) return "bg-orange-500";
+    return "bg-red-500";
+}
+
+function getTypeBadgeColor(type: string | null | undefined): string {
+    const t = (type || "unknown").toUpperCase();
+    switch (t) {
         case "MAIN":
             return "bg-blue-500/20 text-blue-400 border-blue-500/30";
         case "HOOK":
@@ -43,18 +68,50 @@ function getTypeBadgeColor(type: string): string {
         case "SUBAGENT":
             return "bg-orange-500/20 text-orange-400 border-orange-500/30";
         default:
-            return "bg-primary-600/20 text-primary-300 border-primary-500/30";
+            return "bg-slate-500/20 text-slate-400 border-slate-500/30";
     }
 }
 
-interface KillConfirmDialogProps {
+function formatSessionType(session: Session): string {
+    const type = (session.type || "unknown").toUpperCase();
+    if (type === "SUBAGENT" && session.agentType) {
+        return session.agentType.toUpperCase();
+    }
+    return type;
+}
+
+// Sort sessions by type: MAIN first, then SUBAGENT, HOOK, CRON, others
+function getTypeSortOrder(type: string | null | undefined): number {
+    const t = (type || "unknown").toUpperCase();
+    switch (t) {
+        case "MAIN": return 0;
+        case "SUBAGENT": return 1;
+        case "HOOK": return 2;
+        case "CRON": return 3;
+        default: return 4;
+    }
+}
+
+function sortSessions(sessions: Session[]): Session[] {
+    return [...sessions].sort((a, b) => {
+        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
+        if (typeOrder !== 0) return typeOrder;
+        // Secondary sort by updatedAt (newest first)
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+}
+
+interface DeleteConfirmDialogProps {
     session: Session;
     onConfirm: () => void;
     onCancel: () => void;
     isLoading: boolean;
 }
 
-function KillConfirmDialog({ session, onConfirm, onCancel, isLoading }: KillConfirmDialogProps) {
+function DeleteConfirmDialog({ session, onConfirm, onCancel, isLoading }: DeleteConfirmDialogProps) {
+    const displayName = session.displayLabel || session.label || session.displayName || session.id;
+    const isMain = (session.type || "").toUpperCase() === "MAIN";
+    
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <Card variant="bordered" className="max-w-md w-full mx-4">
@@ -63,20 +120,24 @@ function KillConfirmDialog({ session, onConfirm, onCancel, isLoading }: KillConf
                         <AlertTriangle className="w-6 h-6 text-red-400" />
                     </div>
                     <div className="flex-1">
-                        <CardTitle className="mb-2">Kill Session?</CardTitle>
-                        <p className="text-primary-300 text-sm mb-4">
-                            Are you sure you want to kill session{" "}
-                            <span className="font-mono text-primary-100">
-                                {session.id.slice(0, 12)}...
+                        <CardTitle className="mb-2">Delete Session?</CardTitle>
+                        <p className="text-slate-300 text-sm mb-2">
+                            Are you sure you want to delete this session?
+                            <span className="block mt-1 text-slate-400 text-xs">
+                                {displayName}
                             </span>
-                            ? This action cannot be undone.
                         </p>
+                        {isMain && (
+                            <p className="text-yellow-400 text-xs mb-4">
+                                ⚠️ This is a MAIN session. Deleting it will terminate the primary conversation.
+                            </p>
+                        )}
                         <div className="flex gap-2 justify-end">
                             <Button variant="secondary" onClick={onCancel} disabled={isLoading}>
                                 Cancel
                             </Button>
                             <Button variant="danger" onClick={onConfirm} disabled={isLoading}>
-                                {isLoading ? "Killing..." : "Kill Session"}
+                                {isLoading ? "Deleting..." : "Delete Session"}
                             </Button>
                         </div>
                     </div>
@@ -88,11 +149,11 @@ function KillConfirmDialog({ session, onConfirm, onCancel, isLoading }: KillConf
 
 export function Sessions() {
     const { token } = useAuthStore();
-    const { isConnected, error, connect, sessions, fetchSessions, killSession } = useOpenClaw(token);
+    const { isConnected, error, connect, sessions, fetchSessions, deleteSession } = useOpenClaw(token);
     const hasConnected = useRef(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [killTarget, setKillTarget] = useState<Session | null>(null);
-    const [isKilling, setIsKilling] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         if (token && !hasConnected.current) {
@@ -116,26 +177,28 @@ export function Sessions() {
         }
     };
 
-    const handleKillClick = (session: Session) => {
-        setKillTarget(session);
+    const handleDeleteClick = (session: Session) => {
+        setDeleteTarget(session);
     };
 
-    const handleKillConfirm = async () => {
-        if (!killTarget) return;
-        setIsKilling(true);
+    const handleDeleteConfirm = async () => {
+        if (!deleteTarget || !deleteTarget.key) return;
+        setIsDeleting(true);
         try {
-            await killSession(killTarget.id);
-            setKillTarget(null);
+            await deleteSession(deleteTarget.key);
+            setDeleteTarget(null);
         } catch (e) {
-            console.error("Failed to kill session:", e);
+            console.error("Failed to delete session:", e);
         } finally {
-            setIsKilling(false);
+            setIsDeleting(false);
         }
     };
 
-    const handleKillCancel = () => {
-        setKillTarget(null);
+    const handleDeleteCancel = () => {
+        setDeleteTarget(null);
     };
+
+    const sortedSessions = sessions ? sortSessions(sessions) : [];
 
     return (
         <div className="p-6">
@@ -148,7 +211,7 @@ export function Sessions() {
                         onClick={handleRefresh}
                         disabled={!isConnected || isLoading}
                     >
-                        <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+                        <RefreshCw className={"w-4 h-4 mr-2" + (isLoading ? " animate-spin" : "")} />
                         Refresh
                     </Button>
                     <div className="flex items-center gap-2">
@@ -173,84 +236,101 @@ export function Sessions() {
 
             {!isConnected && !error && (
                 <Card className="text-center py-8">
-                    <WifiOff className="w-12 h-12 mx-auto text-primary-400 mb-4" />
-                    <p className="text-primary-300">Connecting to OpenClaw...</p>
+                    <WifiOff className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+                    <p className="text-slate-300">Connecting to OpenClaw...</p>
                 </Card>
             )}
 
             {isConnected && (
                 <>
-                    {sessions && sessions.length > 0 ? (
+                    {sortedSessions.length > 0 ? (
                         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {sessions.map((session) => (
-                                <Card key={session.id} variant="bordered">
-                                    <div className="flex items-start justify-between mb-3">
-                                        <div className="flex items-center gap-2">
-                                            <span
-                                                className={`px-2 py-0.5 text-xs font-medium rounded border ${getTypeBadgeColor(
-                                                    session.type
-                                                )}`}
-                                            >
-                                                {session.type.toUpperCase()}
-                                            </span>
-                                        </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleKillClick(session)}
-                                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-2 text-sm">
-                                            <span className="text-primary-400 font-mono text-xs truncate max-w-[200px]">
-                                                {session.id}
-                                            </span>
-                                        </div>
-
-                                        <div className="flex items-center gap-4 text-sm">
-                                            <div className="flex items-center gap-1 text-primary-300">
-                                                <Cpu className="w-4 h-4 text-primary-400" />
-                                                <span className="truncate max-w-[120px]">
-                                                    {session.model || "Unknown"}
+                            {sortedSessions.map((session) => {
+                                const sessionId = session.id || "unknown-" + Math.random();
+                                const sessionType = session.type || "unknown";
+                                const sessionModel = session.model || "Unknown";
+                                const sessionTokens = session.tokenCount || 0;
+                                const sessionMaxTokens = session.maxTokens || 200000;
+                                const tokenPercent = getTokenPercent(sessionTokens, sessionMaxTokens);
+                                const tokenColor = getTokenColor(tokenPercent);
+                                const tokenBarColor = getTokenBarColor(tokenPercent);
+                                const sessionChannel = session.channel || "unknown";
+                                const sessionLabel = session.displayLabel || session.label || session.displayName || "";
+                                
+                                return (
+                                    <Card key={sessionId} variant="bordered" className="p-4">
+                                        {/* Header: Type badge + Channel + Delete */}
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className={"px-2 py-0.5 text-xs font-medium rounded border " + getTypeBadgeColor(sessionType)}>
+                                                    {formatSessionType(session)}
                                                 </span>
-                                            </div>
-                                            <div className="flex items-center gap-1 text-primary-300">
-                                                <MessageSquare className="w-4 h-4 text-primary-400" />
-                                                <span>
-                                                    {(session.tokenCount ?? 0).toLocaleString()} tokens
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-1 text-xs text-primary-400">
-                                            <Clock className="w-3 h-3" />
-                                            <span>
-                                                {session.createdAt
-                                                    ? formatDuration(session.createdAt)
-                                                    : "Unknown"}
-                                            </span>
-                                            {session.agentName && (
-                                                <>
-                                                    <span className="mx-1">•</span>
-                                                    <span className="truncate max-w-[100px]">
-                                                        {session.agentName}
+                                                {sessionChannel && sessionChannel !== "unknown" && (
+                                                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-700 text-slate-300">
+                                                        {sessionChannel}
                                                     </span>
-                                                </>
-                                            )}
+                                                )}
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleDeleteClick(session)}
+                                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
                                         </div>
-                                    </div>
-                                </Card>
-                            ))}
+
+                                        {/* Label */}
+                                        {sessionLabel && (
+                                            <div className="text-sm text-slate-200 font-medium mb-2 truncate" title={sessionLabel}>
+                                                {sessionLabel}
+                                            </div>
+                                        )}
+
+                                        {/* Session ID */}
+                                        <div className="text-xs text-slate-500 font-mono truncate mb-3" title={sessionId}>
+                                            {sessionId}
+                                        </div>
+
+                                        {/* Model + Tokens row */}
+                                        <div className="flex items-center gap-3 mb-3">
+                                            <div className="flex items-center gap-1.5 text-sm text-slate-300">
+                                                <Cpu className="w-4 h-4 text-slate-400" />
+                                                <span className="truncate max-w-[100px]" title={sessionModel}>
+                                                    {sessionModel}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <Coins className="w-4 h-4 text-slate-400" />
+                                                <span className={"text-sm " + tokenColor}>
+                                                    {formatTokens(sessionTokens, sessionMaxTokens)}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Token progress bar */}
+                                        <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden mb-3">
+                                            <div
+                                                className={"h-full transition-all duration-300 " + tokenBarColor}
+                                                style={{ width: tokenPercent + "%" }}
+                                            />
+                                        </div>
+
+                                        {/* Timestamp */}
+                                        <div className="flex items-center gap-1 text-xs text-slate-400">
+                                            <Clock className="w-3 h-3" />
+                                            <span>{formatDuration(session.updatedAt)}</span>
+                                        </div>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     ) : (
                         <Card className="text-center py-12">
-                            <MessageSquare className="w-12 h-12 mx-auto text-primary-400 mb-4" />
-                            <p className="text-primary-300 text-lg mb-1">No Active Sessions</p>
-                            <p className="text-primary-400 text-sm">
+                            <div className="text-4xl mb-4">💬</div>
+                            <p className="text-slate-300 text-lg mb-1">No Active Sessions</p>
+                            <p className="text-slate-400 text-sm">
                                 There are no active OpenClaw sessions at the moment.
                             </p>
                         </Card>
@@ -258,12 +338,12 @@ export function Sessions() {
                 </>
             )}
 
-            {killTarget && (
-                <KillConfirmDialog
-                    session={killTarget}
-                    onConfirm={handleKillConfirm}
-                    onCancel={handleKillCancel}
-                    isLoading={isKilling}
+            {deleteTarget && (
+                <DeleteConfirmDialog
+                    session={deleteTarget}
+                    onConfirm={handleDeleteConfirm}
+                    onCancel={handleDeleteCancel}
+                    isLoading={isDeleting}
                 />
             )}
         </div>

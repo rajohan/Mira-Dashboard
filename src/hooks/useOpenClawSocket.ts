@@ -7,11 +7,11 @@ const getBackendUrl = () => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.hostname;
     const port = window.location.port || "5173";
-    return `${protocol}//${host}:${port === "5173" ? "3100" : port}/ws`;
+    return protocol + "//" + host + ":" + (port === "5173" ? "3100" : port) + "/ws";
 };
 
 interface OpenClawMessage {
-    type: "req" | "res" | "event" | "state" | "connected" | "disconnected";
+    type: "req" | "res" | "event" | "state" | "connected" | "disconnected" | "sessions";
     id?: string;
     method?: string;
     params?: any;
@@ -28,9 +28,10 @@ interface UseOpenClawSocketOptions {
     onMessage?: (method: string, params: any) => void;
     onConnect?: () => void;
     onDisconnect?: () => void;
+    onSessions?: (sessions: any[]) => void;
 }
 
-export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect }: UseOpenClawSocketOptions) {
+export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect, onSessions }: UseOpenClawSocketOptions) {
     const wsRef = useRef<WebSocket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect }:
                 
                 // Request session list
                 ws.send(JSON.stringify({
+                    type: "req",
                     method: "sessions.list",
                     id: Date.now().toString(),
                 }));
@@ -73,8 +75,18 @@ export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect }:
             ws.onmessage = (event) => {
                 try {
                     const data: OpenClawMessage = JSON.parse(event.data);
+                    console.log("[WebSocket] Received:", data.type, data.sessions?.length || "");
                     
-                    if (data.type === "state" || data.type === "connected") {
+                    // Handle initial state
+                    if (data.type === "state") {
+                        setIsConnected(data.gatewayConnected ?? true);
+                        if (data.sessions) {
+                            onSessions?.(data.sessions);
+                        }
+                    }
+                    
+                    // Handle connection status
+                    if (data.type === "connected") {
                         setIsConnected(data.gatewayConnected ?? true);
                     }
                     
@@ -83,10 +95,18 @@ export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect }:
                         onDisconnect?.();
                     }
                     
+                    // Handle session updates from backend
+                    if (data.type === "sessions" && data.sessions) {
+                        console.log("[WebSocket] Sessions update:", data.sessions.length);
+                        onSessions?.(data.sessions);
+                    }
+                    
+                    // Handle events
                     if (data.type === "event" && data.event) {
                         onMessage?.(data.event, data.payload);
                     }
                     
+                    // Handle request responses
                     if (data.type === "res" && data.id) {
                         const pending = pendingRequestsRef.current.get(data.id);
                         if (pending) {
@@ -125,7 +145,7 @@ export function useOpenClawSocket({ token, onMessage, onConnect, onDisconnect }:
             console.error("[WebSocket] Failed to create:", e);
             setError("Failed to create WebSocket");
         }
-    }, [token, onMessage, onConnect, onDisconnect]);
+    }, [token, onMessage, onConnect, onDisconnect, onSessions]);
 
     const disconnect = useCallback(() => {
         shouldReconnectRef.current = false;

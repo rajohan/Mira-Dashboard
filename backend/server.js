@@ -20,7 +20,7 @@ let isGatewayConnected = false;
 let reconnectTimer = null;
 let connectionAttempts = 0;
 let requestId = 1000;
-let pendingRequests = new Map(); // id -> { clientWs, resolve }
+let pendingRequests = new Map(); // id -> { clientWs, clientId, resolve }
 
 // CORS
 app.use((req, res, next) => {
@@ -33,6 +33,71 @@ app.use((req, res, next) => {
 
 // Static files
 app.use(express.static(frontendPath));
+
+// Transform OpenClaw session format to frontend format
+function transformSession(session) {
+    // Determine type from key
+    // Keys like: "agent:main:main", "agent:main:cron:xxx", "agent:main:hook:agentmail", "agent:coder:subagent:xxx"
+    let type = "UNKNOWN";
+    let agentType = "";
+    const key = session.key || "";
+    
+    // Extract agent type from key (coder, researcher, etc.)
+    const keyParts = key.split(":");
+    if (keyParts.length >= 2) {
+        agentType = keyParts[1] || ""; // coder, researcher, main
+    }
+    
+    // Extract hook/cron name from key
+    let hookName = "";
+    if (key.includes(":hook:")) {
+        type = "HOOK";
+        // agent:main:hook:agentmail -> agentmail
+        const hookIndex = keyParts.indexOf("hook");
+        if (hookIndex !== -1 && keyParts[hookIndex + 1]) {
+            hookName = keyParts[hookIndex + 1];
+        }
+    } else if (key.includes(":cron:")) {
+        type = "CRON";
+    } else if (key.includes(":subagent:")) {
+        type = "SUBAGENT";
+    } else if (key.startsWith("agent:main:")) {
+        type = "MAIN";
+    } else if (key.startsWith("agent:")) {
+        type = "SUBAGENT";
+    }
+    
+    // Build display label
+    let displayLabel = session.label || "";
+    
+    // For HOOK without label, use hook name
+    if (!displayLabel && type === "HOOK" && hookName) {
+        displayLabel = hookName.charAt(0).toUpperCase() + hookName.slice(1);
+    }
+    
+    // For SUBAGENT without label, show agent type
+    if (!displayLabel && type === "SUBAGENT" && agentType) {
+        displayLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
+    }
+    
+    return {
+        id: session.sessionId || session.key || "unknown",
+        key: session.key,
+        type: type,
+        agentType: agentType,
+        hookName: hookName,
+        kind: session.kind,
+        model: session.model || "Unknown",
+        tokenCount: session.totalTokens || 0,
+        maxTokens: session.contextTokens || 200000,
+        createdAt: session.updatedAt ? new Date(session.updatedAt).toISOString() : null,
+        updatedAt: session.updatedAt,
+        displayName: session.displayName || "",
+        label: session.label || "",
+        displayLabel: displayLabel,
+        channel: session.channel || "unknown",
+    };
+}
 
 function connectToGateway(token) {
     if (gatewayWs && (gatewayWs.readyState === WebSocket.OPEN || gatewayWs.readyState === WebSocket.CONNECTING)) {
@@ -58,7 +123,7 @@ function connectToGateway(token) {
                     maxProtocol: 3,
                     client: { id: "cli", version: "1.0.0", platform: "node", mode: "backend" },
                     role: "operator",
-                    scopes: ["operator.read", "operator.write"],
+                    scopes: ["operator.read", "operator.write", "operator.admin"],
                     caps: ["tool-events"],
                     auth: { token },
                 },
@@ -78,19 +143,29 @@ function connectToGateway(token) {
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
                         // Request initial session list
-                        sendGatewayRequest("sessions.list", {});
+                        const sessionsReq = { type: "req", id: "sessions-init", method: "sessions.list", params: {} };
+                        ws.send(JSON.stringify(sessionsReq));
                     } else {
                         console.error("[Backend] Connect failed:", msg.error);
                     }
                     return;
                 }
                 
-                // Handle sessions.list response
-                if (msg.type === "res" && msg.id === "sessions-1") {
+                // Handle sessions.list response (initial or refresh)
+                if (msg.type === "res" && (msg.id === "sessions-init" || msg.id === "sessions-refresh")) {
                     if (msg.ok && msg.payload?.sessions) {
-                        sessionList = msg.payload.sessions;
+                        sessionList = msg.payload.sessions.map(transformSession);
+                        console.log("[Backend] Sessions updated:", sessionList.length, "sessions");
                         broadcast({ type: "sessions", sessions: sessionList });
                     }
+                    return;
+                }
+                
+                // Handle any sessions.list response by method
+                if (msg.type === "res" && msg.method === "sessions.list" && msg.ok && msg.payload?.sessions) {
+                    sessionList = msg.payload.sessions.map(transformSession);
+                    console.log("[Backend] Sessions updated via method match:", sessionList.length, "sessions");
+                    broadcast({ type: "sessions", sessions: sessionList });
                     return;
                 }
                 
@@ -111,7 +186,8 @@ function connectToGateway(token) {
                     
                     // Refresh session list after mutations
                     if (pending.method && pending.method.startsWith("sessions.")) {
-                        sendGatewayRequest("sessions.list", {});
+                        const refreshReq = { type: "req", id: "sessions-refresh", method: "sessions.list", params: {} };
+                        ws.send(JSON.stringify(refreshReq));
                     }
                     return;
                 }
@@ -149,8 +225,9 @@ function scheduleReconnect(token) {
     reconnectTimer = setTimeout(() => connectToGateway(token), delay);
 }
 
-function sendGatewayRequest(method, params, clientWs = null, clientId = null) {
+function sendGatewayRequest(method, params, clientWs, clientId) {
     if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+        console.log("[Backend] Cannot send request - gateway not connected");
         return false;
     }
     
@@ -161,6 +238,7 @@ function sendGatewayRequest(method, params, clientWs = null, clientId = null) {
         pendingRequests.set(id, { clientWs, clientId, method });
     }
     
+    console.log("[Backend] Sending request:", method, "id:", id);
     gatewayWs.send(JSON.stringify(req));
     return true;
 }
@@ -176,7 +254,7 @@ function broadcast(msg) {
 
 // API
 app.get("/health", (req, res) => {
-    res.json({ status: "ok", gatewayConnected: isGatewayConnected });
+    res.json({ status: "ok", gatewayConnected: isGatewayConnected, sessionCount: sessionList.length });
 });
 
 app.get("/api/sessions", (req, res) => {
