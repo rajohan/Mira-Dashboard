@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/layout/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Sessions } from "./pages/Sessions";
+import { Logs } from "./pages/Logs";
 import { Login } from "./pages/Login";
 import { useAuthStore } from "./stores/authStore";
 
@@ -30,7 +31,7 @@ function App() {
                                         <Route path="/" element={<Dashboard />} />
                                         <Route path="/tasks" element={<div className="p-6"><h1 className="text-2xl font-bold">Tasks</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
                                         <Route path="/sessions" element={<Sessions />} />
-                                        <Route path="/logs" element={<div className="p-6"><h1 className="text-2xl font-bold">Logs</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
+                                        <Route path="/logs" element={<Logs />} />
                                         <Route path="/files" element={<div className="p-6"><h1 className="text-2xl font-bold">Files</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
                                         <Route path="/metrics" element={<div className="p-6"><h1 className="text-2xl font-bold">Metrics</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
                                         <Route path="/moltbook" element={<div className="p-6"><h1 className="text-2xl font-bold">Moltbook</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />

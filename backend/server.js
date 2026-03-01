@@ -21,38 +21,22 @@ let reconnectTimer = null;
 let connectionAttempts = 0;
 let requestId = 1000;
 let pendingRequests = new Map(); // id -> { clientWs, clientId, resolve }
-
-// CORS
-app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-    if (req.method === "OPTIONS") return res.sendStatus(200);
-    next();
-});
-
-// Static files
-app.use(express.static(frontendPath));
+let logSubscribers = new Set(); // Clients subscribed to logs
 
 // Transform OpenClaw session format to frontend format
 function transformSession(session) {
-    // Determine type from key
-    // Keys like: "agent:main:main", "agent:main:cron:xxx", "agent:main:hook:agentmail", "agent:coder:subagent:xxx"
     let type = "UNKNOWN";
     let agentType = "";
     const key = session.key || "";
     
-    // Extract agent type from key (coder, researcher, etc.)
     const keyParts = key.split(":");
     if (keyParts.length >= 2) {
-        agentType = keyParts[1] || ""; // coder, researcher, main
+        agentType = keyParts[1] || "";
     }
     
-    // Extract hook/cron name from key
     let hookName = "";
     if (key.includes(":hook:")) {
         type = "HOOK";
-        // agent:main:hook:agentmail -> agentmail
         const hookIndex = keyParts.indexOf("hook");
         if (hookIndex !== -1 && keyParts[hookIndex + 1]) {
             hookName = keyParts[hookIndex + 1];
@@ -67,15 +51,10 @@ function transformSession(session) {
         type = "SUBAGENT";
     }
     
-    // Build display label
     let displayLabel = session.label || "";
-    
-    // For HOOK without label, use hook name
     if (!displayLabel && type === "HOOK" && hookName) {
         displayLabel = hookName.charAt(0).toUpperCase() + hookName.slice(1);
     }
-    
-    // For SUBAGENT without label, show agent type
     if (!displayLabel && type === "SUBAGENT" && agentType) {
         displayLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
     }
@@ -135,14 +114,12 @@ function connectToGateway(token) {
             try {
                 const msg = JSON.parse(data.toString());
                 
-                // Handle connect response
                 if (msg.type === "res" && msg.id === "connect-1") {
                     if (msg.ok) {
                         console.log("[Backend] Gateway connected!");
                         isGatewayConnected = true;
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
-                        // Request initial session list
                         const sessionsReq = { type: "req", id: "sessions-init", method: "sessions.list", params: {} };
                         ws.send(JSON.stringify(sessionsReq));
                     } else {
@@ -151,7 +128,6 @@ function connectToGateway(token) {
                     return;
                 }
                 
-                // Handle sessions.list response (initial or refresh)
                 if (msg.type === "res" && (msg.id === "sessions-init" || msg.id === "sessions-refresh")) {
                     if (msg.ok && msg.payload?.sessions) {
                         sessionList = msg.payload.sessions.map(transformSession);
@@ -161,7 +137,6 @@ function connectToGateway(token) {
                     return;
                 }
                 
-                // Handle any sessions.list response by method
                 if (msg.type === "res" && msg.method === "sessions.list" && msg.ok && msg.payload?.sessions) {
                     sessionList = msg.payload.sessions.map(transformSession);
                     console.log("[Backend] Sessions updated via method match:", sessionList.length, "sessions");
@@ -169,7 +144,6 @@ function connectToGateway(token) {
                     return;
                 }
                 
-                // Handle forwarded request responses
                 if (msg.type === "res" && pendingRequests.has(msg.id)) {
                     const pending = pendingRequests.get(msg.id);
                     pendingRequests.delete(msg.id);
@@ -184,7 +158,6 @@ function connectToGateway(token) {
                         }));
                     }
                     
-                    // Refresh session list after mutations
                     if (pending.method && pending.method.startsWith("sessions.")) {
                         const refreshReq = { type: "req", id: "sessions-refresh", method: "sessions.list", params: {} };
                         ws.send(JSON.stringify(refreshReq));
@@ -192,9 +165,27 @@ function connectToGateway(token) {
                     return;
                 }
                 
-                // Broadcast events to all clients
+                // Handle events - forward to log subscribers
                 if (msg.type === "event") {
+                    // Broadcast to all clients
                     broadcast({ type: "event", event: msg.event, payload: msg.payload });
+                    
+                    // Send to log subscribers
+                    if (logSubscribers.size > 0) {
+                        const logEntry = {
+                            type: "log",
+                            timestamp: new Date().toISOString(),
+                            level: msg.event?.includes("error") ? "error" : msg.event?.includes("warn") ? "warn" : "info",
+                            source: "gateway",
+                            message: JSON.stringify(msg.payload || msg.event),
+                        };
+                        const logData = JSON.stringify(logEntry);
+                        for (const client of logSubscribers) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(logData);
+                            }
+                        }
+                    }
                 }
             } catch (e) {
                 console.error("[Backend] Parse error:", e.message);
@@ -290,6 +281,20 @@ wss.on("connection", (ws) => {
         try {
             const msg = JSON.parse(data.toString());
             
+            // Handle log subscription
+            if (msg.type === "subscribe" && msg.channel === "logs") {
+                console.log("[Frontend] Client subscribed to logs");
+                logSubscribers.add(ws);
+                return;
+            }
+            
+            // Handle log unsubscription
+            if (msg.type === "unsubscribe" && msg.channel === "logs") {
+                console.log("[Frontend] Client unsubscribed from logs");
+                logSubscribers.delete(ws);
+                return;
+            }
+            
             // Handle request forwarding to Gateway
             if (msg.type === "req" && msg.method) {
                 if (!isGatewayConnected) {
@@ -311,6 +316,7 @@ wss.on("connection", (ws) => {
     
     ws.on("close", () => {
         subscribers.delete(ws);
+        logSubscribers.delete(ws);
         console.log("[Frontend] Client disconnected");
     });
 });
