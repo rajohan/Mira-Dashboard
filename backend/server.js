@@ -23,6 +23,74 @@ let requestId = 1000;
 let pendingRequests = new Map(); // id -> { clientWs, clientId, resolve }
 let logSubscribers = new Set(); // Clients subscribed to logs
 
+// Log file watcher for real-time updates
+let logWatcher = null;
+let lastLogSize = 0;
+let lastLogFile = "";
+
+function startLogWatcher(logsDir = "/tmp/openclaw") {
+    if (logWatcher) {
+        logWatcher.close();
+    }
+    
+    const fs = require("fs");
+    const path = require("path");
+    
+    const today = new Date().toISOString().split("T")[0];
+    const logFile = path.join(logsDir, "openclaw-" + today + ".log");
+    
+    try {
+        // Get initial file size
+        if (fs.existsSync(logFile)) {
+            lastLogSize = fs.statSync(logFile).size;
+            lastLogFile = logFile;
+        }
+        
+        // Watch the log file for changes
+        logWatcher = fs.watch(logsDir, (eventType, filename) => {
+            if (filename && filename.startsWith("openclaw-") && filename.endsWith(".log")) {
+                const changedFile = path.join(logsDir, filename);
+                if (filename === "openclaw-" + today + ".log") {
+                    try {
+                        const stats = fs.statSync(changedFile);
+                        if (stats.size > lastLogSize) {
+                            // Read new content
+                            const fd = fs.openSync(changedFile, "r");
+                            const buffer = Buffer.alloc(stats.size - lastLogSize);
+                            fs.readSync(fd, buffer, 0, buffer.length, lastLogSize);
+                            fs.closeSync(fd);
+                            
+                            const newLines = buffer.toString("utf-8").split("\n").filter(l => l.trim());
+                            
+                            for (const line of newLines) {
+                                const msg = JSON.stringify({ type: "log", line: line });
+                                for (const client of logSubscribers) {
+                                    if (client.readyState === WebSocket.OPEN) {
+                                        client.send(msg);
+                                    }
+                                }
+                            }
+                            
+                            lastLogSize = stats.size;
+                        }
+                    } catch (e) {
+                        // File might not exist yet
+                    }
+                }
+            }
+        });
+        
+        logWatcher.on("error", (err) => {
+            console.error("[Backend] Log watcher error:", err.message);
+        });
+        
+    } catch (e) {
+        console.error("[Backend] Failed to start log watcher:", e.message);
+    }
+}
+
+startLogWatcher();
+
 // Transform OpenClaw session format to frontend format
 function transformSession(session) {
     let type = "UNKNOWN";
@@ -165,27 +233,10 @@ function connectToGateway(token) {
                     return;
                 }
                 
-                // Handle events - forward to log subscribers
+                // Handle events
                 if (msg.type === "event") {
                     // Broadcast to all clients
                     broadcast({ type: "event", event: msg.event, payload: msg.payload });
-                    
-                    // Send to log subscribers
-                    if (logSubscribers.size > 0) {
-                        const logEntry = {
-                            type: "log",
-                            timestamp: new Date().toISOString(),
-                            level: msg.event?.includes("error") ? "error" : msg.event?.includes("warn") ? "warn" : "info",
-                            source: "gateway",
-                            message: JSON.stringify(msg.payload || msg.event),
-                        };
-                        const logData = JSON.stringify(logEntry);
-                        for (const client of logSubscribers) {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(logData);
-                            }
-                        }
-                    }
                 }
             } catch (e) {
                 console.error("[Backend] Parse error:", e.message);
@@ -255,11 +306,175 @@ app.get("/api/sessions", (req, res) => {
 app.get("/api/metrics", (req, res) => {
     try {
         const metrics = getMetrics();
+        
+        // Calculate token usage from sessions
+        if (sessionList && sessionList.length > 0) {
+            let totalTokens = 0;
+            const byModel = {};
+            
+            for (const session of sessionList) {
+                const tokens = session.tokenCount || 0;
+                totalTokens += tokens;
+                
+                const model = session.model || "unknown";
+                byModel[model] = (byModel[model] || 0) + tokens;
+            }
+            
+            // Calculate sessions per model and tokens per agent
+            const sessionsByModel = {};
+            const tokensByAgent = [];
+            
+            for (const session of sessionList) {
+                const model = session.model || "unknown";
+                sessionsByModel[model] = (sessionsByModel[model] || 0) + 1;
+                
+                const agentType = (session.type || "unknown").toUpperCase();
+                const tokens = session.tokenCount || 0;
+                const label = session.displayLabel || session.label || session.id?.slice(0, 8) || "unknown";
+                tokensByAgent.push({
+                    type: agentType,
+                    label: label,
+                    model: model,
+                    tokens: tokens
+                });
+            }
+            
+            // Sort by tokens descending
+            tokensByAgent.sort((a, b) => b.tokens - a.tokens);
+            
+            metrics.tokens = {
+                total: totalTokens,
+                byModel: byModel,
+                sessionsByModel: sessionsByModel,
+                byAgent: tokensByAgent
+            };
+        }
+        
         res.json(metrics);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
+
+// Serve static files (JS, CSS)
+
+// Execute shell command
+app.post("/api/exec", express.json(), async (req, res) => {
+    const { command, args } = req.body;
+    
+    if (!command) {
+        return res.status(400).json({ error: "Command required" });
+    }
+    
+    try {
+        const { spawn } = require("child_process");
+        const child = spawn(command, args || [], { shell: false });
+        
+        let stdout = "";
+        let stderr = "";
+        
+        child.stdout.on("data", (data) => { stdout += data; });
+        child.stderr.on("data", (data) => { stderr += data; });
+        
+        child.on("close", (code) => {
+            res.json({ stdout, stderr, code });
+        });
+        
+        child.on("error", (err) => {
+            res.status(500).json({ error: err.message });
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Log files info
+app.get("/api/logs/info", (req, res) => {
+    try {
+        const logsDir = "/tmp/openclaw";
+        const fs = require("fs");
+        const path = require("path");
+        const files = fs.readdirSync(logsDir)
+            .filter(f => f.startsWith("openclaw-") && f.endsWith(".log"))
+            .map(f => {
+                const stat = fs.statSync(path.join(logsDir, f));
+                return { name: f, size: stat.size, modified: stat.mtime };
+            })
+            .sort((a, b) => b.modified - a.modified);
+        res.json({ files, logsDir });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Log file content
+app.get("/api/logs/content", (req, res) => {
+    try {
+        const fs = require("fs");
+        const path = require("path");
+        const logsDir = "/tmp/openclaw";
+        const file = req.query.file;
+        const lines = parseInt(req.query.lines) || 100;
+        
+        if (!file) {
+            const today = new Date().toISOString().split("T")[0];
+            const defaultFile = "openclaw-" + today + ".log";
+            const filePath = path.join(logsDir, defaultFile);
+            if (fs.existsSync(filePath)) {
+                const content = fs.readFileSync(filePath, "utf-8");
+                const contentLines = content.split("\n").filter(l => l.trim()).slice(-lines).join("\n");
+                return res.json({ content: contentLines, file: defaultFile });
+            }
+            return res.json({ content: "", file: defaultFile });
+        }
+        
+        const filePath = path.join(logsDir, file);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: "File not found" });
+        }
+        const content = fs.readFileSync(filePath, "utf-8");
+        const contentLines = content.split("\n").filter(l => l.trim()).slice(-lines).join("\n");
+        res.json({ content: contentLines, file });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Session history endpoint
+app.get("/api/sessions/:key/history", async (req, res) => {
+    const sessionKey = req.params.key;
+    if (!isGatewayConnected || !gatewayWs) {
+        return res.status(503).json({ error: "Gateway not connected" });
+    }
+    // TODO: Implement Gateway API call for session history
+    res.json({ messages: [], sessionKey });
+});
+
+// Session action endpoint (pause, resume, kill)
+app.post("/api/sessions/:key/action", express.json(), async (req, res) => {
+    const sessionKey = req.params.key;
+    const { action } = req.body;
+    
+    if (!isGatewayConnected || !gatewayWs) {
+        return res.status(503).json({ error: "Gateway not connected" });
+    }
+    
+    // Send action to Gateway
+    try {
+        const requestId = Date.now().toString();
+        gatewayWs.send(JSON.stringify({
+            jsonrpc: "2.0",
+            id: requestId,
+            method: "sessions." + action,
+            params: { sessionKey: sessionKey }
+        }));
+        res.json({ success: true, sessionKey, action });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.use(express.static(frontendPath));
 
 // SPA fallback
 app.get("*", (req, res) => {
@@ -285,6 +500,30 @@ wss.on("connection", (ws) => {
             if (msg.type === "subscribe" && msg.channel === "logs") {
                 console.log("[Frontend] Client subscribed to logs");
                 logSubscribers.add(ws);
+                
+                // Send log history
+                try {
+                    const fs = require("fs");
+                    const path = require("path");
+                    const logsDir = "/tmp/openclaw";
+                    const today = new Date().toISOString().split("T")[0];
+                    const logFile = path.join(logsDir, "openclaw-" + today + ".log");
+                    
+                    if (fs.existsSync(logFile)) {
+                        ws.send(JSON.stringify({ type: "log_file", file: "openclaw-" + today + ".log" }));
+                        
+                        const content = fs.readFileSync(logFile, "utf-8");
+                        const lines = content.split("\n").filter(l => l.trim()).slice(-100);
+                        
+                        for (const line of lines) {
+                            ws.send(JSON.stringify({ type: "log", line: line }));
+                        }
+                        
+                        ws.send(JSON.stringify({ type: "log_history_complete", count: lines.length }));
+                    }
+                } catch (e) {
+                    console.error("[Backend] Error sending log history:", e.message);
+                }
                 return;
             }
             
