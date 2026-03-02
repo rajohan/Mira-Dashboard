@@ -144,6 +144,15 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
     const [error, setError] = useState<string | null>(null);
     const [showActions, setShowActions] = useState(false);
 
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = () => setShowActions(false);
+        if (showActions) {
+            document.addEventListener('click', handleClickOutside);
+            return () => document.removeEventListener('click', handleClickOutside);
+        }
+    }, [showActions]);
+
     const fetchHistory = async () => {
         setLoading(true);
         setError(null);
@@ -516,7 +525,7 @@ export function Sessions() {
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-slate-400">{formatDuration(session.updatedAt)}</td>
                                                 <td className="px-4 py-3 text-right">
-                                                    <div className="relative">
+                                                    <div className="relative inline-block">
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
@@ -524,6 +533,7 @@ export function Sessions() {
                                                             className="flex items-center gap-1"
                                                         >
                                                             <MoreVertical className="w-4 h-4" />
+                                                            <ChevronDown className={"w-3 h-3 transition-transform " + (activeDropdown === session.key ? "rotate-180" : "")} />
                                                         </Button>
                                                         {activeDropdown === session.key && (
                                                             <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
