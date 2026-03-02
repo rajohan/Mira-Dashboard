@@ -1,7 +1,16 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
-import { Wifi, WifiOff, Terminal, RefreshCw, Download, FileText, ChevronDown } from "lucide-react";
+import {
+    Wifi,
+    WifiOff,
+    Terminal,
+    RefreshCw,
+    Download,
+    FileText,
+    ChevronDown,
+} from "lucide-react";
 
 interface LogEntry {
     ts?: string;
@@ -40,7 +49,7 @@ export function Logs() {
 
     const levels = ["trace", "debug", "info", "warn", "error", "fatal"];
 
-    const parseLogLine = (line: string): LogEntry | null => {
+    const parseLogLine = useCallback((line: string): LogEntry | null => {
         if (!line || !line.trim()) return null;
 
         let jsonStr = line;
@@ -112,7 +121,7 @@ export function Logs() {
         } catch {
             return { msg: line, raw: line };
         }
-    };
+    }, []);
 
     // Fetch log files on mount
     useEffect(() => {
@@ -122,7 +131,9 @@ export function Logs() {
                 const data = await response.json();
                 if (data.logs) {
                     // Sort by filename descending (newest first) - filenames are openclaw-YYYY-MM-DD.log
-                    const sorted = [...data.logs].sort((a, b) => b.name.localeCompare(a.name));
+                    const sorted = [...data.logs].sort((a, b) =>
+                        b.name.localeCompare(a.name),
+                    );
                     setLogFiles(sorted);
                     // Select today's file by default
                     const today = new Date().toISOString().split("T")[0];
@@ -141,24 +152,31 @@ export function Logs() {
     }, []);
 
     // Load log content when file or line count changes
-    const loadLogContent = async (file: string, lines: number) => {
-        setIsLoading(true);
-        try {
-            const response = await fetch(`/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`);
-            const data = await response.json();
-            if (data.content) {
-                const logLines = data.content.split("\n").filter((l: string) => l.trim());
-                const parsedLogs = logLines
-                    .map((line: string) => parseLogLine(line))
-                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                setLogs(parsedLogs);
+    const loadLogContent = useCallback(
+        async (file: string, lines: number) => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(
+                    `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`,
+                );
+                const data = await response.json();
+                if (data.content) {
+                    const logLines = data.content
+                        .split("\n")
+                        .filter((l: string) => l.trim());
+                    const parsedLogs = logLines
+                        .map((line: string) => parseLogLine(line))
+                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                    setLogs(parsedLogs);
+                }
+            } catch (e) {
+                console.error("Failed to load log content:", e);
+            } finally {
+                setIsLoading(false);
             }
-        } catch (e) {
-            console.error("Failed to load log content:", e);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        },
+        [parseLogLine],
+    );
 
     // Handle file selection
     const handleFileSelect = (file: string) => {
@@ -197,7 +215,6 @@ export function Logs() {
                 const data = JSON.parse(event.data);
 
                 if (data.type === "log_history_complete") {
-                    console.log("[Logs] History complete, got", data.count, "lines");
                     isReceivingHistoryRef.current = false;
                     setLogs(historyBufferRef.current.slice(-2000));
                     historyBufferRef.current = [];
@@ -242,17 +259,61 @@ export function Logs() {
             ws.send(JSON.stringify({ type: "unsubscribe", channel: "logs" }));
             ws.close();
         };
-    }, []);
+    }, [parseLogLine]);
 
-    useEffect(() => {
-        if (autoFollow && logContainerRef.current) {
-            requestAnimationFrame(() => {
-                if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-                }
-            });
+    const filteredLogs = useMemo(() => {
+        return logs.filter((log) => {
+            if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
+            if (search && !log.raw.toLowerCase().includes(search.toLowerCase()))
+                return false;
+            return true;
+        });
+    }, [logs, levelFilter, search]);
+
+    const toggleLevel = (level: string) => {
+        const newFilter = new Set(levelFilter);
+        if (newFilter.has(level)) {
+            newFilter.delete(level);
+        } else {
+            newFilter.add(level);
         }
-    }, [logs, autoFollow]);
+        setLevelFilter(newFilter);
+    };
+
+    const handleRefresh = async () => {
+        if (selectedFile) {
+            await loadLogContent(selectedFile, lineCount);
+        } else {
+            try {
+                const response = await fetch(`/api/logs/content?lines=${lineCount}`);
+                const data = await response.json();
+                if (data.content) {
+                    const lines = data.content
+                        .split("\n")
+                        .filter((l: string) => l.trim());
+                    const parsedLogs = lines
+                        .map((line: string) => parseLogLine(line))
+                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                    setLogs(parsedLogs);
+                }
+            } catch (e) {
+                console.error("Failed to refresh logs:", e);
+            }
+        }
+    };
+
+    const handleExport = () => {
+        const content = filteredLogs.map((l) => l.raw).join("\n");
+        const blob = new Blob([content], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${selectedFile || "logs"}-${new Date().toISOString().slice(0, 10)}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleClear = () => setLogs([]);
 
     const formatTime = (ts?: string): string => {
         if (!ts) return "";
@@ -321,54 +382,20 @@ export function Logs() {
         }
     };
 
-    const filteredLogs = logs.filter((log) => {
-        if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
-        if (search && !log.raw.toLowerCase().includes(search.toLowerCase())) return false;
-        return true;
+    // Virtualizer for efficient rendering
+    const rowVirtualizer = useVirtualizer({
+        count: filteredLogs.length,
+        getScrollElement: () => logContainerRef.current,
+        estimateSize: () => 22, // Approximate row height
+        overscan: 10, // Render extra rows outside viewport for smooth scrolling
     });
 
-    const toggleLevel = (level: string) => {
-        const newFilter = new Set(levelFilter);
-        if (newFilter.has(level)) {
-            newFilter.delete(level);
-        } else {
-            newFilter.add(level);
+    // Auto-scroll to bottom when new logs arrive
+    useEffect(() => {
+        if (autoFollow && filteredLogs.length > 0 && !isReceivingHistoryRef.current) {
+            rowVirtualizer.scrollToIndex(filteredLogs.length - 1);
         }
-        setLevelFilter(newFilter);
-    };
-
-    const handleRefresh = async () => {
-        if (selectedFile) {
-            await loadLogContent(selectedFile, lineCount);
-        } else {
-            try {
-                const response = await fetch(`/api/logs/content?lines=${lineCount}`);
-                const data = await response.json();
-                if (data.content) {
-                    const lines = data.content.split("\n").filter((l: string) => l.trim());
-                    const parsedLogs = lines
-                        .map((line: string) => parseLogLine(line))
-                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                    setLogs(parsedLogs);
-                }
-            } catch (e) {
-                console.error("Failed to refresh logs:", e);
-            }
-        }
-    };
-
-    const handleExport = () => {
-        const content = filteredLogs.map((l) => l.raw).join("\n");
-        const blob = new Blob([content], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${selectedFile || "logs"}-${new Date().toISOString().slice(0, 10)}.txt`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    const handleClear = () => setLogs([]);
+    }, [filteredLogs.length, autoFollow, rowVirtualizer]);
 
     return (
         <div className="p-6 h-[calc(100vh-2rem)] flex flex-col">
@@ -401,19 +428,25 @@ export function Logs() {
                         <span className="flex-1 text-left truncate">
                             {selectedFile || "Select file..."}
                         </span>
-                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${showFileDropdown ? "rotate-180" : ""}`} />
+                        <ChevronDown
+                            className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${showFileDropdown ? "rotate-180" : ""}`}
+                        />
                     </button>
                     {showFileDropdown && (
                         <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10 max-h-60 overflow-y-auto min-w-[300px]">
                             {logFiles.length === 0 ? (
-                                <div className="px-3 py-2 text-sm text-slate-400">No log files found</div>
+                                <div className="px-3 py-2 text-sm text-slate-400">
+                                    No log files found
+                                </div>
                             ) : (
                                 logFiles.map((file) => (
                                     <button
                                         key={file.name}
                                         onClick={() => handleFileSelect(file.name)}
                                         className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center justify-between gap-3 ${
-                                            selectedFile === file.name ? "bg-slate-700 text-indigo-400" : ""
+                                            selectedFile === file.name
+                                                ? "bg-slate-700 text-indigo-400"
+                                                : ""
                                         }`}
                                     >
                                         <span className="truncate">{file.name}</span>
@@ -434,7 +467,9 @@ export function Logs() {
                         className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-indigo-500 transition-colors min-w-[100px]"
                     >
                         <span>{lineCount} lines</span>
-                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`} />
+                        <ChevronDown
+                            className={`w-4 h-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`}
+                        />
                     </button>
                     {showLineDropdown && (
                         <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10">
@@ -443,7 +478,9 @@ export function Logs() {
                                     key={lines}
                                     onClick={() => handleLineSelect(lines)}
                                     className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 ${
-                                        lineCount === lines ? "bg-slate-700 text-indigo-400" : ""
+                                        lineCount === lines
+                                            ? "bg-slate-700 text-indigo-400"
+                                            : ""
                                     }`}
                                 >
                                     {lines} lines
@@ -484,11 +521,9 @@ export function Logs() {
             {/* Second row: Auto-follow and action buttons */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div className="text-sm text-slate-400">
-                    {isLoading ? (
-                        "Loading..."
-                    ) : (
-                        `${filteredLogs.length} of ${logs.length} entries`
-                    )}
+                    {isLoading
+                        ? "Loading..."
+                        : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -503,8 +538,15 @@ export function Logs() {
                     </label>
 
                     <div className="flex items-center gap-2">
-                        <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
-                            <RefreshCw className={`w-4 h-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleRefresh}
+                            disabled={isLoading}
+                        >
+                            <RefreshCw
+                                className={`w-4 h-4 mr-1 ${isLoading ? "animate-spin" : ""}`}
+                            />
                             Refresh
                         </Button>
                         <Button
@@ -531,7 +573,7 @@ export function Logs() {
             <Card className="flex-1 overflow-hidden" variant="bordered">
                 <div
                     ref={logContainerRef}
-                    className="h-full overflow-y-auto font-mono text-xs p-4 space-y-0.5 bg-slate-900/50"
+                    className="h-full overflow-y-auto font-mono text-xs bg-slate-900/50"
                 >
                     {filteredLogs.length === 0 ? (
                         <div className="text-slate-400 text-center py-8">
@@ -540,35 +582,54 @@ export function Logs() {
                                 : "No logs match your filter."}
                         </div>
                     ) : (
-                        filteredLogs.map((log, i) => (
-                            <div
-                                key={i}
-                                className="flex items-start gap-2 py-0.5 px-1 -mx-1 rounded hover:bg-slate-800/50"
-                            >
-                                {log.ts && (
-                                    <span className="text-slate-500 whitespace-nowrap flex-shrink-0">
-                                        {formatTime(log.ts)}
-                                    </span>
-                                )}
-                                {log.level && (
-                                    <span
-                                        className={`px-1 py-0.5 text-xs rounded flex-shrink-0 ${getLevelColor(log.level)}`}
+                        <div
+                            style={{
+                                height: `${rowVirtualizer.getTotalSize()}px`,
+                                width: "100%",
+                                position: "relative",
+                            }}
+                        >
+                            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                const log = filteredLogs[virtualRow.index];
+                                return (
+                                    <div
+                                        key={virtualRow.key}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            height: `${virtualRow.size}px`,
+                                            transform: `translateY(${virtualRow.start}px)`,
+                                        }}
+                                        className="flex items-start gap-2 py-0.5 px-4 hover:bg-slate-800/50"
                                     >
-                                        {log.level.toUpperCase().slice(0, 5)}
-                                    </span>
-                                )}
-                                {log.subsystem && (
-                                    <span
-                                        className={`whitespace-nowrap flex-shrink-0 ${getSubsystemColor(log.subsystem)}`}
-                                    >
-                                        [{log.subsystem}]
-                                    </span>
-                                )}
-                                <span className="text-slate-200 flex-1 break-all">
-                                    {log.msg}
-                                </span>
-                            </div>
-                        ))
+                                        {log.ts && (
+                                            <span className="text-slate-500 whitespace-nowrap flex-shrink-0">
+                                                {formatTime(log.ts)}
+                                            </span>
+                                        )}
+                                        {log.level && (
+                                            <span
+                                                className={`px-1 py-0.5 text-xs rounded flex-shrink-0 ${getLevelColor(log.level)}`}
+                                            >
+                                                {log.level.toUpperCase().slice(0, 5)}
+                                            </span>
+                                        )}
+                                        {log.subsystem && (
+                                            <span
+                                                className={`whitespace-nowrap flex-shrink-0 ${getSubsystemColor(log.subsystem)}`}
+                                            >
+                                                [{log.subsystem}]
+                                            </span>
+                                        )}
+                                        <span className="text-slate-200 flex-1 break-all">
+                                            {log.msg}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     )}
                 </div>
             </Card>
