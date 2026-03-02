@@ -1,25 +1,26 @@
-import { useState, useEffect, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
 import ReactJsonView from "@microlink/react-json-view";
+import JSON5 from "json5";
+import {
+    AlertTriangle,
+    ChevronDown,
+    ChevronRight,
+    Code,
+    Eye,
+    File,
+    Folder,
+    RefreshCw,
+    Save,
+    Settings,
+    X,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
-import JSON5 from "json5";
-import { Card, CardTitle } from "../components/ui/Card";
+
 import { Button } from "../components/ui/Button";
+import { Card, CardTitle } from "../components/ui/Card";
 import { useAuthStore } from "../stores/authStore";
-import {
-    Folder,
-    File,
-    ChevronRight,
-    ChevronDown,
-    Save,
-    RefreshCw,
-    AlertTriangle,
-    X,
-    Settings,
-    Eye,
-    Code,
-} from "lucide-react";
 
 interface FileNode {
     name: string;
@@ -253,7 +254,7 @@ function getSyntaxClass(filename: string): string {
 
 function getFileIcon(filename: string, type: "file" | "directory") {
     if (type === "directory")
-        return <Folder size={16} className="text-yellow-400 flex-shrink-0" />;
+        return <Folder size={16} className="flex-shrink-0 text-yellow-400" />;
 
     const ext = getFileExtension(filename);
     const iconMap: Record<string, { icon: string; color: string }> = {
@@ -283,7 +284,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         return (
             <span
                 className={
-                    "text-[10px] font-bold flex-shrink-0 w-4 h-4 flex items-center justify-center " +
+                    "flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px] font-bold " +
                     iconInfo.color
                 }
             >
@@ -292,7 +293,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         );
     }
 
-    return <File size={16} className="text-slate-400 flex-shrink-0" />;
+    return <File size={16} className="flex-shrink-0 text-slate-400" />;
 }
 
 function FileTreeItem({
@@ -321,7 +322,7 @@ function FileTreeItem({
         <div>
             <div
                 className={
-                    "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded " +
+                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-primary-700/50 " +
                     (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")
                 }
                 style={{ paddingLeft: depth * 12 + 8 }}
@@ -344,7 +345,7 @@ function FileTreeItem({
                         ) : isLoading ? (
                             <RefreshCw
                                 size={14}
-                                className="text-slate-400 animate-spin"
+                                className="animate-spin text-slate-400"
                             />
                         ) : (
                             <span className="w-3.5" />
@@ -408,7 +409,7 @@ function ConfigSection({
             {/* config/ subdirectory */}
             <div
                 className={
-                    "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"
+                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
                 }
                 onClick={onConfigDirToggle}
             >
@@ -417,7 +418,7 @@ function ConfigSection({
                 ) : (
                     <ChevronRight size={14} className="text-slate-400" />
                 )}
-                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">config</span>
             </div>
             {configDirExpanded &&
@@ -427,7 +428,7 @@ function ConfigSection({
                         <div
                             key={file.path}
                             className={
-                                "flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " +
+                                "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
                                 (isSelected
                                     ? "bg-accent-500/20 text-accent-400"
                                     : "text-primary-200")
@@ -435,7 +436,7 @@ function ConfigSection({
                             style={{ paddingLeft: 28 }}
                             onClick={() => onSelect(file.path)}
                         >
-                            <File size={14} className="text-slate-400 flex-shrink-0" />
+                            <File size={14} className="flex-shrink-0 text-slate-400" />
                             <span className="truncate font-mono">{file.label}</span>
                         </div>
                     );
@@ -444,7 +445,7 @@ function ConfigSection({
             {/* cron/ subdirectory */}
             <div
                 className={
-                    "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"
+                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
                 }
                 onClick={onCronDirToggle}
             >
@@ -453,7 +454,7 @@ function ConfigSection({
                 ) : (
                     <ChevronRight size={14} className="text-slate-400" />
                 )}
-                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">cron</span>
             </div>
             {cronDirExpanded &&
@@ -463,7 +464,7 @@ function ConfigSection({
                         <div
                             key={file.path}
                             className={
-                                "flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " +
+                                "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
                                 (isSelected
                                     ? "bg-accent-500/20 text-accent-400"
                                     : "text-primary-200")
@@ -471,7 +472,7 @@ function ConfigSection({
                             style={{ paddingLeft: 28 }}
                             onClick={() => onSelect(file.path)}
                         >
-                            <File size={14} className="text-slate-400 flex-shrink-0" />
+                            <File size={14} className="flex-shrink-0 text-slate-400" />
                             <span className="truncate font-mono">{file.label}</span>
                         </div>
                     );
@@ -480,7 +481,7 @@ function ConfigSection({
             {/* hooks/ subdirectory */}
             <div
                 className={
-                    "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"
+                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
                 }
                 onClick={onHooksDirToggle}
             >
@@ -489,19 +490,19 @@ function ConfigSection({
                 ) : (
                     <ChevronRight size={14} className="text-slate-400" />
                 )}
-                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">hooks</span>
             </div>
             {hooksDirExpanded && (
                 <>
                     <div
                         className={
-                            "flex items-center gap-1 py-1 px-2 text-sm text-primary-200"
+                            "flex items-center gap-1 px-2 py-1 text-sm text-primary-200"
                         }
                         style={{ paddingLeft: 20 }}
                     >
                         <ChevronDown size={14} className="text-slate-400" />
-                        <Folder size={14} className="text-yellow-400 flex-shrink-0" />
+                        <Folder size={14} className="flex-shrink-0 text-yellow-400" />
                         <span className="truncate">transforms</span>
                     </div>
                     {HOOKS_DIR_FILES.map((file) => {
@@ -510,7 +511,7 @@ function ConfigSection({
                             <div
                                 key={file.path}
                                 className={
-                                    "flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " +
+                                    "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
                                     (isSelected
                                         ? "bg-accent-500/20 text-accent-400"
                                         : "text-primary-200")
@@ -520,7 +521,7 @@ function ConfigSection({
                             >
                                 <File
                                     size={14}
-                                    className="text-slate-400 flex-shrink-0"
+                                    className="flex-shrink-0 text-slate-400"
                                 />
                                 <span className="truncate font-mono">{file.label}</span>
                             </div>
@@ -536,7 +537,7 @@ function ConfigSection({
                     <div
                         key={file.path}
                         className={
-                            "flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " +
+                            "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
                             (isSelected
                                 ? "bg-accent-500/20 text-accent-400"
                                 : "text-primary-200")
@@ -544,7 +545,7 @@ function ConfigSection({
                         style={{ paddingLeft: 22 }}
                         onClick={() => onSelect(file.path)}
                     >
-                        <File size={14} className="text-slate-400 flex-shrink-0" />
+                        <File size={14} className="flex-shrink-0 text-slate-400" />
                         <span className="truncate font-mono">{file.label}</span>
                     </div>
                 );
@@ -587,14 +588,16 @@ export function Files() {
                 if (!res.ok) throw new Error("Failed to fetch files");
                 const data = await res.json();
                 return data.files || [];
-            } catch (e) {
-                setError(e instanceof Error ? e.message : "Failed to load files");
+            } catch (error_) {
+                setError(
+                    error_ instanceof Error ? error_.message : "Failed to load files"
+                );
                 return [];
             } finally {
                 setIsLoading(false);
             }
         },
-        [token],
+        [token]
     );
 
     const fetchRootFiles = useCallback(async () => {
@@ -649,13 +652,15 @@ export function Files() {
                     setEditedContent(data.content);
                     if (data.size > MAX_PREVIEW_SIZE) setLargeFileWarning(true);
                 }
-            } catch (e) {
-                setError(e instanceof Error ? e.message : "Failed to load file");
+            } catch (error_) {
+                setError(
+                    error_ instanceof Error ? error_.message : "Failed to load file"
+                );
             } finally {
                 setIsLoading(false);
             }
         },
-        [token],
+        [token]
     );
 
     const saveFile = async () => {
@@ -684,8 +689,8 @@ export function Files() {
             }
             setHasChanges(false);
             await fetchFileContent(selectedPath);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : "Failed to save file");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save file");
         } finally {
             setIsSaving(false);
         }
@@ -746,8 +751,8 @@ export function Files() {
         : "";
 
     return (
-        <div className="p-6 h-full flex flex-col">
-            <div className="flex items-center justify-between mb-4">
+        <div className="flex h-full flex-col p-6">
+            <div className="mb-4 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Files</h1>
                 <Button
                     variant="secondary"
@@ -764,7 +769,7 @@ export function Files() {
             </div>
 
             {error && (
-                <div className="bg-red-500/20 border border-red-500 text-red-400 p-3 rounded-lg mb-4 flex items-center gap-2">
+                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
                     <AlertTriangle size={16} />
                     {error}
                     <button
@@ -776,27 +781,27 @@ export function Files() {
                 </div>
             )}
 
-            <div className="flex-1 flex gap-4 min-h-0">
+            <div className="flex min-h-0 flex-1 gap-4">
                 {/* Sidebar: Workspace + Config */}
                 <div className="w-72 flex-shrink-0">
                     <Card
                         variant="bordered"
-                        className="h-full overflow-hidden flex flex-col p-0"
+                        className="flex h-full flex-col overflow-hidden p-0"
                     >
                         {/* Workspace */}
-                        <div className="p-3 border-b border-slate-700">
-                            <CardTitle className="text-sm flex items-center gap-2">
+                        <div className="border-b border-slate-700 p-3">
+                            <CardTitle className="flex items-center gap-2 text-sm">
                                 <Folder size={14} />
                                 Workspace
                             </CardTitle>
                         </div>
-                        <div className="overflow-auto p-2 border-b border-slate-700">
+                        <div className="overflow-auto border-b border-slate-700 p-2">
                             {isLoading && files.length === 0 ? (
-                                <div className="text-slate-400 text-sm p-2">
+                                <div className="p-2 text-sm text-slate-400">
                                     Loading...
                                 </div>
                             ) : files.length === 0 ? (
-                                <div className="text-slate-400 text-sm p-2">
+                                <div className="p-2 text-sm text-slate-400">
                                     No files found
                                 </div>
                             ) : (
@@ -820,13 +825,13 @@ export function Files() {
                         </div>
                         {/* Config */}
                         <div className="border-t border-slate-700">
-                            <div className="p-3 border-b border-slate-700">
-                                <CardTitle className="text-sm flex items-center gap-2">
+                            <div className="border-b border-slate-700 p-3">
+                                <CardTitle className="flex items-center gap-2 text-sm">
                                     <Settings size={14} />
                                     Config
                                 </CardTitle>
                             </div>
-                            <div className="overflow-auto max-h-64">
+                            <div className="max-h-64 overflow-auto">
                                 <ConfigSection
                                     selectedPath={selectedPath}
                                     onSelect={handleSelect}
@@ -851,38 +856,38 @@ export function Files() {
                 {/* File Content */}
                 <Card
                     variant="bordered"
-                    className="flex-1 flex flex-col overflow-hidden p-0"
+                    className="flex flex-1 flex-col overflow-hidden p-0"
                 >
                     {selectedPath ? (
                         <>
                             {/* Header */}
-                            <div className="p-3 border-b border-slate-700 flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center justify-between gap-4 border-b border-slate-700 p-3">
+                                <div className="flex min-w-0 items-center gap-2">
                                     <File
                                         size={16}
-                                        className="text-slate-400 flex-shrink-0"
+                                        className="flex-shrink-0 text-slate-400"
                                     />
                                     <span
-                                        className="font-mono text-sm truncate"
+                                        className="truncate font-mono text-sm"
                                         title={selectedPath}
                                     >
                                         {selectedPath}
                                     </span>
                                     {fileContent && (
-                                        <span className="text-xs text-slate-400 flex-shrink-0">
+                                        <span className="flex-shrink-0 text-xs text-slate-400">
                                             {formatSize(fileContent.size)}
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="flex flex-shrink-0 items-center gap-2">
                                     {/* Markdown preview toggle */}
                                     {fileContent &&
                                         isMarkdownFile(fileContent.path) &&
                                         isEditable && (
-                                            <div className="flex items-center gap-1 bg-slate-700 rounded p-0.5">
+                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
                                                 <button
                                                     className={
-                                                        "px-2 py-1 text-xs rounded " +
+                                                        "rounded px-2 py-1 text-xs " +
                                                         (markdownPreview
                                                             ? "bg-accent-500 text-white"
                                                             : "text-slate-300 hover:text-white")
@@ -893,16 +898,16 @@ export function Files() {
                                                 >
                                                     <Eye
                                                         size={14}
-                                                        className="inline mr-1"
+                                                        className="mr-1 inline"
                                                     />
                                                     Preview
                                                 </button>
                                                 <button
                                                     className={
-                                                        "px-2 py-1 text-xs rounded " +
-                                                        (!markdownPreview
-                                                            ? "bg-accent-500 text-white"
-                                                            : "text-slate-300 hover:text-white")
+                                                        "rounded px-2 py-1 text-xs " +
+                                                        (markdownPreview
+                                                            ? "text-slate-300 hover:text-white"
+                                                            : "bg-accent-500 text-white")
                                                     }
                                                     onClick={() =>
                                                         setMarkdownPreview(false)
@@ -910,7 +915,7 @@ export function Files() {
                                                 >
                                                     <Code
                                                         size={14}
-                                                        className="inline mr-1"
+                                                        className="mr-1 inline"
                                                     />
                                                     Raw
                                                 </button>
@@ -920,10 +925,10 @@ export function Files() {
                                     {fileContent &&
                                         isJsonFile(fileContent.path) &&
                                         isEditable && (
-                                            <div className="flex items-center gap-1 bg-slate-700 rounded p-0.5">
+                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
                                                 <button
                                                     className={
-                                                        "px-2 py-1 text-xs rounded " +
+                                                        "rounded px-2 py-1 text-xs " +
                                                         (jsonPreview
                                                             ? "bg-accent-500 text-white"
                                                             : "text-slate-300 hover:text-white")
@@ -932,22 +937,22 @@ export function Files() {
                                                 >
                                                     <Eye
                                                         size={14}
-                                                        className="inline mr-1"
+                                                        className="mr-1 inline"
                                                     />
                                                     Preview
                                                 </button>
                                                 <button
                                                     className={
-                                                        "px-2 py-1 text-xs rounded " +
-                                                        (!jsonPreview
-                                                            ? "bg-accent-500 text-white"
-                                                            : "text-slate-300 hover:text-white")
+                                                        "rounded px-2 py-1 text-xs " +
+                                                        (jsonPreview
+                                                            ? "text-slate-300 hover:text-white"
+                                                            : "bg-accent-500 text-white")
                                                     }
                                                     onClick={() => setJsonPreview(false)}
                                                 >
                                                     <Code
                                                         size={14}
-                                                        className="inline mr-1"
+                                                        className="mr-1 inline"
                                                     />
                                                     Raw
                                                 </button>
@@ -975,51 +980,51 @@ export function Files() {
                             {/* Content */}
                             <div className="flex-1 overflow-auto">
                                 {isLoading ? (
-                                    <div className="flex items-center justify-center h-full text-slate-400">
+                                    <div className="flex h-full items-center justify-center text-slate-400">
                                         Loading...
                                     </div>
                                 ) : fileContent ? (
-                                    <div className="h-full flex flex-col">
+                                    <div className="flex h-full flex-col">
                                         {largeFileWarning && (
-                                            <div className="bg-yellow-500/20 border-b border-yellow-500/50 text-yellow-400 px-4 py-2 text-sm flex items-center gap-2">
+                                            <div className="flex items-center gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-4 py-2 text-sm text-yellow-400">
                                                 <AlertTriangle size={14} />
                                                 Large file ({formatSize(fileContent.size)}
                                                 ) - preview only, editing disabled
                                             </div>
                                         )}
                                         {fileContent.isBinary ? (
-                                            <div className="flex items-center justify-center h-full text-slate-400">
+                                            <div className="flex h-full items-center justify-center text-slate-400">
                                                 <div className="text-center">
                                                     <File
                                                         size={48}
                                                         className="mx-auto mb-2 opacity-50"
                                                     />
                                                     <p>Binary file</p>
-                                                    <p className="text-xs mt-1">
+                                                    <p className="mt-1 text-xs">
                                                         Cannot display binary content
                                                     </p>
                                                 </div>
                                             </div>
                                         ) : isMarkdownFile(fileContent.path) &&
                                           markdownPreview ? (
-                                            <div className="p-6 prose prose-invert max-w-none prose-headings:mt-6 prose-headings:mb-4 prose-p:my-4 prose-li:my-1 prose-ul:my-4 prose-ol:my-4 prose-pre:my-4 prose-table:my-4 prose-blockquote:my-4 prose-hr:my-6">
+                                            <div className="prose prose-invert max-w-none p-6 prose-headings:mb-4 prose-headings:mt-6 prose-p:my-4 prose-blockquote:my-4 prose-pre:my-4 prose-ol:my-4 prose-ul:my-4 prose-li:my-1 prose-table:my-4 prose-hr:my-6">
                                                 <ReactMarkdown>
                                                     {editedContent}
                                                 </ReactMarkdown>
                                             </div>
                                         ) : isJsonFile(fileContent.path) &&
                                           jsonPreview ? (
-                                            <div className="p-4 overflow-auto">
+                                            <div className="overflow-auto p-4">
                                                 <ReactJsonView
                                                     src={(() => {
                                                         try {
                                                             return JSON5.parse(
-                                                                editedContent,
+                                                                editedContent
                                                             );
                                                         } catch {
                                                             try {
                                                                 return JSON.parse(
-                                                                    editedContent,
+                                                                    editedContent
                                                                 );
                                                             } catch {
                                                                 return {
@@ -1042,7 +1047,7 @@ export function Files() {
                                             <div className="h-full overflow-auto">
                                                 <SyntaxHighlighter
                                                     language={getLanguage(
-                                                        fileContent.path,
+                                                        fileContent.path
                                                     )}
                                                     style={monokai}
                                                     customStyle={{
@@ -1065,7 +1070,7 @@ export function Files() {
                                         ) : isEditable ? (
                                             <textarea
                                                 className={
-                                                    "w-full h-full bg-transparent p-4 font-mono text-sm resize-none focus:outline-none " +
+                                                    "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
                                                     syntaxClass
                                                 }
                                                 value={editedContent}
@@ -1077,7 +1082,7 @@ export function Files() {
                                         ) : (
                                             <pre
                                                 className={
-                                                    "p-4 font-mono text-sm whitespace-pre-wrap " +
+                                                    "whitespace-pre-wrap p-4 font-mono text-sm " +
                                                     syntaxClass
                                                 }
                                             >
@@ -1086,7 +1091,7 @@ export function Files() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="flex items-center justify-center h-full text-slate-400">
+                                    <div className="flex h-full items-center justify-center text-slate-400">
                                         Failed to load file
                                     </div>
                                 )}
@@ -1094,13 +1099,13 @@ export function Files() {
 
                             {/* Footer */}
                             {fileContent && (
-                                <div className="p-2 border-t border-slate-700 text-xs text-slate-400">
+                                <div className="border-t border-slate-700 p-2 text-xs text-slate-400">
                                     Modified: {formatDate(fileContent.modified)}
                                 </div>
                             )}
                         </>
                     ) : (
-                        <div className="flex items-center justify-center h-full text-slate-400">
+                        <div className="flex h-full items-center justify-center text-slate-400">
                             <div className="text-center">
                                 <Folder size={48} className="mx-auto mb-2 opacity-50" />
                                 <p>Select a file to view</p>

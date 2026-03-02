@@ -22,7 +22,7 @@ function sanitizeConfig(config) {
     return sanitized;
 }
 
-module.exports = function(app, express, getGatewayStatus) {
+module.exports = function (app, express, getGatewayStatus) {
     // Get config
     app.get("/api/config", async (req, res) => {
         try {
@@ -40,7 +40,7 @@ module.exports = function(app, express, getGatewayStatus) {
     app.patch("/api/config", express.json(), async (req, res) => {
         try {
             const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
-            
+
             for (const [key, value] of Object.entries(req.body)) {
                 if (!ALLOWED_CONFIG_FIELDS.includes(key)) {
                     return res.status(400).json({ error: "Field not allowed: " + key });
@@ -53,7 +53,7 @@ module.exports = function(app, express, getGatewayStatus) {
                 }
                 obj[parts[parts.length - 1]] = value;
             }
-            
+
             fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
             res.json({ success: true });
         } catch (e) {
@@ -67,15 +67,16 @@ module.exports = function(app, express, getGatewayStatus) {
             if (!fs.existsSync(SKILLS_DIR)) {
                 return res.json({ skills: [] });
             }
-            
-            const skills = fs.readdirSync(SKILLS_DIR)
-                .filter(name => fs.statSync(path.join(SKILLS_DIR, name)).isDirectory())
-                .map(name => ({
+
+            const skills = fs
+                .readdirSync(SKILLS_DIR)
+                .filter((name) => fs.statSync(path.join(SKILLS_DIR, name)).isDirectory())
+                .map((name) => ({
                     name: name,
                     enabled: true,
-                    path: path.join(SKILLS_DIR, name)
+                    path: path.join(SKILLS_DIR, name),
                 }));
-            
+
             res.json({ skills });
         } catch (e) {
             res.status(500).json({ error: e.message });
@@ -108,9 +109,15 @@ module.exports = function(app, express, getGatewayStatus) {
             const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
             const backupFile = "/tmp/openclaw-backup-" + timestamp + ".tar.gz";
             const workspacePath = path.join(process.env.HOME, ".openclaw");
-            
-            spawn("tar", ["-czf", backupFile, "-C", path.dirname(workspacePath), path.basename(workspacePath)]);
-            
+
+            spawn("tar", [
+                "-czf",
+                backupFile,
+                "-C",
+                path.dirname(workspacePath),
+                path.basename(workspacePath),
+            ]);
+
             res.json({ success: true, file: backupFile });
         } catch (e) {
             res.status(500).json({ error: e.message });
@@ -119,7 +126,9 @@ module.exports = function(app, express, getGatewayStatus) {
 
     // Operations status
     app.get("/api/operations/status", async (req, res) => {
-        const status = getGatewayStatus ? getGatewayStatus() : { gateway: "unknown", sessions: 0 };
+        const status = getGatewayStatus
+            ? getGatewayStatus()
+            : { gateway: "unknown", sessions: 0 };
         res.json(status);
     });
 };

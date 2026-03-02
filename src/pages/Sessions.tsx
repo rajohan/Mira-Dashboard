@@ -1,43 +1,45 @@
-import { useEffect, useState, useRef, useMemo } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import {
-    useReactTable,
-    getCoreRowModel,
-    getSortedRowModel,
-    getFilteredRowModel,
-    flexRender,
     createColumnHelper,
+    flexRender,
+    getCoreRowModel,
+    getFilteredRowModel,
+    getSortedRowModel,
     type SortingState,
+    useReactTable,
 } from "@tanstack/react-table";
-import { useOpenClaw, type Session } from "../hooks/useOpenClaw";
-import { useAuthStore } from "../stores/authStore";
-import { Card } from "../components/ui/Card";
-import { Button } from "../components/ui/Button";
 import {
-    Wifi,
-    WifiOff,
-    RefreshCw,
-    Trash2,
     AlertTriangle,
-    X,
-    Square,
-    Database,
-    RotateCcw,
-    MessageSquare,
+    ArrowDown,
+    ArrowUp,
+    ChevronDown,
     Clock,
     Cpu,
+    Database,
     Hash,
-    ChevronDown,
+    MessageSquare,
     MoreVertical,
-    ArrowUp,
-    ArrowDown,
+    RefreshCw,
+    RotateCcw,
+    Square,
+    Trash2,
+    Wifi,
+    WifiOff,
+    X,
 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { Modal } from "../components/ui/Modal";
+import { type Session, useOpenClaw } from "../hooks/useOpenClaw";
+import { useAuthStore } from "../stores/authStore";
 
 function formatDuration(updatedAt: number | null | undefined): string {
     if (!updatedAt) return "Unknown";
     const now = Date.now();
     const diffMs = now - updatedAt;
-    const diffMins = Math.floor(diffMs / 60000);
+    const diffMins = Math.floor(diffMs / 60_000);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
 
@@ -72,16 +74,21 @@ function getTokenBarColor(percent: number): string {
 function getTypeBadgeColor(type: string | null | undefined): string {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
-        case "MAIN":
+        case "MAIN": {
             return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-        case "HOOK":
+        }
+        case "HOOK": {
             return "bg-green-500/20 text-green-400 border-green-500/30";
-        case "CRON":
+        }
+        case "CRON": {
             return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-        case "SUBAGENT":
+        }
+        case "SUBAGENT": {
             return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-        default:
+        }
+        default: {
             return "bg-slate-500/20 text-slate-400 border-slate-500/30";
+        }
     }
 }
 
@@ -96,7 +103,7 @@ const SESSION_TYPES = ["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"] as const;
 const columnHelper = createColumnHelper<Session>();
 
 interface DeleteConfirmDialogProps {
-    session: Session;
+    session: Session | null;
     onConfirm: () => void;
     onCancel: () => void;
     isLoading: boolean;
@@ -109,57 +116,54 @@ function DeleteConfirmDialog({
     isLoading,
 }: DeleteConfirmDialogProps) {
     const displayName =
-        session.displayLabel || session.label || session.displayName || session.id;
-    const isMain = (session.type || "").toUpperCase() === "MAIN";
+        session?.displayLabel || session?.label || session?.displayName || session?.id;
+    const isMain = (session?.type || "").toUpperCase() === "MAIN";
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <Card className="max-w-md w-full mx-4 p-6">
-                <div className="flex items-start gap-3">
-                    <div className="p-2 bg-red-500/20 rounded-lg">
-                        <AlertTriangle className="w-6 h-6 text-red-400" />
-                    </div>
-                    <div className="flex-1">
-                        <h2 className="text-lg font-semibold text-slate-100 mb-2">
-                            Delete Session?
-                        </h2>
-                        <p className="text-slate-300 text-sm mb-2">
-                            Are you sure you want to delete this session?
-                            <span className="block mt-1 text-slate-400 text-xs">
-                                {displayName}
-                            </span>
+        <Modal
+            isOpen={!!session}
+            onClose={onCancel}
+            title="Delete Session?"
+            size="md"
+            closeOnOverlayClick={false}
+        >
+            <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-red-500/20 p-2">
+                    <AlertTriangle className="h-6 w-6 text-red-400" />
+                </div>
+                <div className="flex-1">
+                    <p className="mb-2 text-sm text-slate-300">
+                        Are you sure you want to delete this session?
+                        <span className="mt-1 block text-xs text-slate-400">
+                            {displayName}
+                        </span>
+                    </p>
+                    {isMain && (
+                        <p className="mb-4 text-xs text-yellow-400">
+                            This is a MAIN session. Deleting it will terminate the primary
+                            conversation.
                         </p>
-                        {isMain && (
-                            <p className="text-yellow-400 text-xs mb-4">
-                                This is a MAIN session. Deleting it will terminate the
-                                primary conversation.
-                            </p>
-                        )}
-                        <div className="flex gap-2 justify-end">
-                            <Button
-                                variant="secondary"
-                                onClick={onCancel}
-                                disabled={isLoading}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="danger"
-                                onClick={onConfirm}
-                                disabled={isLoading}
-                            >
-                                {isLoading ? "Deleting..." : "Delete Session"}
-                            </Button>
-                        </div>
+                    )}
+                    <div className="flex justify-end gap-2">
+                        <Button
+                            variant="secondary"
+                            onClick={onCancel}
+                            disabled={isLoading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button variant="danger" onClick={onConfirm} disabled={isLoading}>
+                            {isLoading ? "Deleting..." : "Delete Session"}
+                        </Button>
                     </div>
                 </div>
-            </Card>
-        </div>
+            </div>
+        </Modal>
     );
 }
 
 interface SessionDetailsProps {
-    session: Session;
+    session: Session | null;
     onClose: () => void;
     onDelete: () => void;
     onStop: () => void;
@@ -184,12 +188,13 @@ function SessionDetails({
     const [error, setError] = useState<string | null>(null);
 
     const fetchHistory = async () => {
+        if (!session) return;
         setLoading(true);
         setError(null);
         setVisibleCount(50);
         try {
             const res = await fetch(
-                "/api/sessions/" + encodeURIComponent(session.key) + "/history",
+                "/api/sessions/" + encodeURIComponent(session.key) + "/history"
             );
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -198,49 +203,47 @@ function SessionDetails({
             const data = await res.json();
             setHistory(data.messages || []);
             setTotalCount(data.total || data.messages?.length || 0);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : "Unknown error");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Unknown error");
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchHistory();
-    }, [session.key]);
+        if (session) {
+            fetchHistory();
+        }
+    }, [session]);
+
+    if (!session) return null;
 
     const displayName =
         session.displayLabel || session.label || session.displayName || session.id;
     const sessionModel = session.model || "Unknown";
     const sessionTokens = session.tokenCount || 0;
-    const sessionMaxTokens = session.maxTokens || 200000;
+    const sessionMaxTokens = session.maxTokens || 200_000;
     const tokenPercent = getTokenPercent(sessionTokens, sessionMaxTokens);
 
     return (
-        <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={onClose}
-        >
-            <Card
-                className="max-w-3xl w-full max-h-[85vh] flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-            >
+        <Modal isOpen={!!session} onClose={onClose} size="3xl">
+            <div className="flex flex-col" style={{ maxHeight: "85vh" }}>
                 {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0">
-                    <div className="flex items-center gap-3 min-w-0">
+                <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 pb-4">
+                    <div className="flex min-w-0 items-center gap-3">
                         <span
                             className={
-                                "px-2 py-0.5 text-xs font-medium rounded border flex-shrink-0 " +
+                                "flex-shrink-0 rounded border px-2 py-0.5 text-xs font-medium " +
                                 getTypeBadgeColor(session.type)
                             }
                         >
                             {formatSessionType(session)}
                         </span>
-                        <h2 className="text-lg font-semibold text-slate-100 truncate">
+                        <h2 className="truncate text-lg font-semibold text-slate-100">
                             {displayName}
                         </h2>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-shrink-0 items-center gap-2">
                         <Menu>
                             {({ open }) => (
                                 <>
@@ -248,38 +251,47 @@ function SessionDetails({
                                         as={Button}
                                         variant="ghost"
                                         size="sm"
-                                        className={"flex items-center gap-1 text-slate-300 outline-none border-0 " + (open ? "bg-slate-700" : "")}
+                                        className={
+                                            "flex items-center gap-1 border-0 text-slate-300 outline-none " +
+                                            (open ? "bg-slate-700" : "")
+                                        }
                                     >
-                                        <MoreVertical className="w-4 h-4" />
-                                        <ChevronDown className={"w-3 h-3 transition-transform " + (open ? "rotate-180" : "")} />
+                                        <MoreVertical className="h-4 w-4" />
+                                        <ChevronDown
+                                            className={
+                                                "h-3 w-3 transition-transform " +
+                                                (open ? "rotate-180" : "")
+                                            }
+                                        />
                                     </MenuButton>
                                     <MenuItems
                                         anchor="bottom end"
-                                        className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px] outline-none focus:outline-none"
+                                        className="z-50 mt-1 min-w-[140px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
                                     >
                                         <MenuItem>
                                             <button
                                                 onClick={onStop}
-                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
                                             >
-                                                <Square className="w-4 h-4 text-slate-400" /> Stop
+                                                <Square className="h-4 w-4 text-slate-400" />{" "}
+                                                Stop
                                             </button>
                                         </MenuItem>
                                         <MenuItem>
                                             <button
                                                 onClick={onCompact}
-                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
                                             >
-                                                <Database className="w-4 h-4 text-slate-400" />{" "}
+                                                <Database className="h-4 w-4 text-slate-400" />{" "}
                                                 Compact
                                             </button>
                                         </MenuItem>
                                         <MenuItem>
                                             <button
                                                 onClick={onReset}
-                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
                                             >
-                                                <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
+                                                <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
                                                 Reset
                                             </button>
                                         </MenuItem>
@@ -287,9 +299,9 @@ function SessionDetails({
                                         <MenuItem>
                                             <button
                                                 onClick={onDelete}
-                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
                                             >
-                                                <Trash2 className="w-4 h-4" /> Delete
+                                                <Trash2 className="h-4 w-4" /> Delete
                                             </button>
                                         </MenuItem>
                                     </MenuItems>
@@ -297,30 +309,30 @@ function SessionDetails({
                             )}
                         </Menu>
                         <Button variant="ghost" size="sm" onClick={onClose}>
-                            <X className="w-4 h-4" />
+                            <X className="h-4 w-4" />
                         </Button>
                     </div>
                 </div>
 
                 {/* Stats */}
-                <div className="grid grid-cols-3 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
+                <div className="grid flex-shrink-0 grid-cols-3 border-b border-slate-700 bg-slate-800/30 py-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-700/50 rounded-lg">
-                            <Cpu className="w-4 h-4 text-slate-400" />
+                        <div className="rounded-lg bg-slate-700/50 p-2">
+                            <Cpu className="h-4 w-4 text-slate-400" />
                         </div>
                         <div>
-                            <span className="text-xs text-slate-400 block">Model</span>
-                            <p className="text-sm text-slate-200 font-medium truncate max-w-[150px]">
+                            <span className="block text-xs text-slate-400">Model</span>
+                            <p className="max-w-[150px] truncate text-sm font-medium text-slate-200">
                                 {sessionModel}
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center justify-center gap-3">
-                        <div className="p-2 bg-slate-700/50 rounded-lg">
-                            <Hash className="w-4 h-4 text-slate-400" />
+                        <div className="rounded-lg bg-slate-700/50 p-2">
+                            <Hash className="h-4 w-4 text-slate-400" />
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <span className="text-xs text-slate-400 block">Tokens</span>
+                        <div className="min-w-0 flex-1">
+                            <span className="block text-xs text-slate-400">Tokens</span>
                             <div className="flex items-center gap-2">
                                 <p
                                     className={
@@ -330,7 +342,7 @@ function SessionDetails({
                                 >
                                     {formatTokens(sessionTokens, sessionMaxTokens)}
                                 </p>
-                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full max-w-[100px]">
+                                <div className="h-1.5 max-w-[100px] flex-1 rounded-full bg-slate-700">
                                     <div
                                         className={
                                             "h-full rounded-full transition-all " +
@@ -342,15 +354,15 @@ function SessionDetails({
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 justify-end">
-                        <div className="p-2 bg-slate-700/50 rounded-lg">
-                            <Clock className="w-4 h-4 text-slate-400" />
+                    <div className="flex items-center justify-end gap-3">
+                        <div className="rounded-lg bg-slate-700/50 p-2">
+                            <Clock className="h-4 w-4 text-slate-400" />
                         </div>
                         <div>
-                            <span className="text-xs text-slate-400 block">
+                            <span className="block text-xs text-slate-400">
                                 Last Active
                             </span>
-                            <p className="text-sm text-slate-200 font-medium">
+                            <p className="text-sm font-medium text-slate-200">
                                 {formatDuration(session.updatedAt)}
                             </p>
                         </div>
@@ -358,10 +370,10 @@ function SessionDetails({
                 </div>
 
                 {/* Message History */}
-                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                    <div className="px-4 py-3 border-b border-slate-700 flex-shrink-0 flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4" /> Message History
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 py-3">
+                        <h3 className="flex items-center gap-2 text-sm font-medium text-slate-300">
+                            <MessageSquare className="h-4 w-4" /> Message History
                         </h3>
                         <Button
                             variant="ghost"
@@ -370,26 +382,26 @@ function SessionDetails({
                             disabled={loading}
                         >
                             <RefreshCw
-                                className={"w-4 h-4 " + (loading ? "animate-spin" : "")}
+                                className={"h-4 w-4 " + (loading ? "animate-spin" : "")}
                             />
                         </Button>
                     </div>
-                    <div className="flex-1 overflow-auto p-4">
+                    <div className="flex-1 overflow-auto py-4">
                         {loading ? (
                             <div className="flex items-center justify-center py-8">
-                                <RefreshCw className="w-5 h-5 animate-spin text-slate-400" />
+                                <RefreshCw className="h-5 w-5 animate-spin text-slate-400" />
                                 <span className="ml-2 text-slate-400">
                                     Loading history...
                                 </span>
                             </div>
                         ) : error ? (
-                            <div className="text-center py-8">
-                                <AlertTriangle className="w-8 h-8 mx-auto text-yellow-400 mb-2" />
+                            <div className="py-8 text-center">
+                                <AlertTriangle className="mx-auto mb-2 h-8 w-8 text-yellow-400" />
                                 <p className="text-slate-400">{error}</p>
                             </div>
                         ) : history.length === 0 ? (
-                            <div className="text-center py-8">
-                                <MessageSquare className="w-8 h-8 mx-auto text-slate-500 mb-2" />
+                            <div className="py-8 text-center">
+                                <MessageSquare className="mx-auto mb-2 h-8 w-8 text-slate-500" />
                                 <p className="text-slate-400">
                                     No message history available
                                 </p>
@@ -397,49 +409,59 @@ function SessionDetails({
                         ) : (
                             <div className="space-y-3">
                                 {[...history]
+                                    .slice()
                                     .reverse()
                                     .slice(0, visibleCount)
-                                    .map((msg, i) => (
-                                        <div
-                                            key={i}
-                                            className={
-                                                "p-3 rounded-lg " +
-                                                (msg.role === "user"
-                                                    ? "bg-blue-500/10 border border-blue-500/20"
-                                                    : "bg-slate-700/50 border border-slate-600/50")
-                                            }
-                                        >
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span
-                                                    className={
-                                                        "text-xs font-medium uppercase " +
-                                                        (msg.role === "user"
-                                                            ? "text-blue-400"
-                                                            : "text-green-400")
-                                                    }
-                                                >
-                                                    {msg.role}
-                                                </span>
-                                                {msg.timestamp && (
-                                                    <span className="text-xs text-slate-500">
-                                                        {new Date(
-                                                            msg.timestamp,
-                                                        ).toLocaleString("no-NO", {
-                                                            day: "2-digit",
-                                                            month: "2-digit",
-                                                            year: "numeric",
-                                                            hour: "2-digit",
-                                                            minute: "2-digit",
-                                                        })}
+                                    .map(
+                                        (
+                                            msg: {
+                                                role: string;
+                                                content: string;
+                                                timestamp?: string;
+                                            },
+                                            i: number
+                                        ) => (
+                                            <div
+                                                key={i}
+                                                className={
+                                                    "rounded-lg p-3 " +
+                                                    (msg.role === "user"
+                                                        ? "border border-blue-500/20 bg-blue-500/10"
+                                                        : "border border-slate-600/50 bg-slate-700/50")
+                                                }
+                                            >
+                                                <div className="mb-1 flex items-center justify-between">
+                                                    <span
+                                                        className={
+                                                            "text-xs font-medium uppercase " +
+                                                            (msg.role === "user"
+                                                                ? "text-blue-400"
+                                                                : "text-green-400")
+                                                        }
+                                                    >
+                                                        {msg.role}
                                                     </span>
-                                                )}
+                                                    {msg.timestamp && (
+                                                        <span className="text-xs text-slate-500">
+                                                            {new Date(
+                                                                msg.timestamp
+                                                            ).toLocaleString("no-NO", {
+                                                                day: "2-digit",
+                                                                month: "2-digit",
+                                                                year: "numeric",
+                                                                hour: "2-digit",
+                                                                minute: "2-digit",
+                                                            })}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="whitespace-pre-wrap break-words text-sm text-slate-200">
+                                                    {msg.content?.slice(0, 500)}
+                                                    {msg.content?.length > 500 && "..."}
+                                                </p>
                                             </div>
-                                            <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">
-                                                {msg.content?.slice(0, 500)}
-                                                {msg.content?.length > 500 && "..."}
-                                            </p>
-                                        </div>
-                                    ))}
+                                        )
+                                    )}
                                 {history.length > visibleCount && (
                                     <div className="text-center">
                                         <Button
@@ -453,7 +475,7 @@ function SessionDetails({
                                     </div>
                                 )}
                                 {totalCount > history.length && (
-                                    <p className="text-center text-slate-500 text-xs mt-2">
+                                    <p className="mt-2 text-center text-xs text-slate-500">
                                         {totalCount - history.length} older messages on
                                         server
                                     </p>
@@ -462,8 +484,8 @@ function SessionDetails({
                         )}
                     </div>
                 </div>
-            </Card>
-        </div>
+            </div>
+        </Modal>
     );
 }
 
@@ -505,8 +527,8 @@ export function Sessions() {
         try {
             await deleteSession(deleteTarget.key);
             setDeleteTarget(null);
-        } catch (e) {
-            console.error("Failed to delete session:", e);
+        } catch (error_) {
+            console.error("Failed to delete session:", error_);
         } finally {
             setIsDeleting(false);
         }
@@ -519,8 +541,8 @@ export function Sessions() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action: "stop" }),
             });
-        } catch (e) {
-            console.error("Failed to stop session:", e);
+        } catch (error_) {
+            console.error("Failed to stop session:", error_);
         }
     };
 
@@ -531,8 +553,8 @@ export function Sessions() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action: "compact" }),
             });
-        } catch (e) {
-            console.error("Failed to compact session:", e);
+        } catch (error_) {
+            console.error("Failed to compact session:", error_);
         }
     };
 
@@ -543,24 +565,29 @@ export function Sessions() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action: "reset" }),
             });
-        } catch (e) {
-            console.error("Failed to reset session:", e);
+        } catch (error_) {
+            console.error("Failed to reset session:", error_);
         }
     };
 
     const getTypeSortOrder = (type: string | null | undefined): number => {
         const t = (type || "unknown").toUpperCase();
         switch (t) {
-            case "MAIN":
+            case "MAIN": {
                 return 0;
-            case "SUBAGENT":
+            }
+            case "SUBAGENT": {
                 return 1;
-            case "HOOK":
+            }
+            case "HOOK": {
                 return 2;
-            case "CRON":
+            }
+            case "CRON": {
                 return 3;
-            default:
+            }
+            default: {
                 return 4;
+            }
         }
     };
 
@@ -575,9 +602,7 @@ export function Sessions() {
 
     const filteredSessions = useMemo(() => {
         if (typeFilter === "ALL") return sortedSessions;
-        return sortedSessions.filter(
-            (s) => (s.type || "").toUpperCase() === typeFilter,
-        );
+        return sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
     }, [sortedSessions, typeFilter]);
 
     const columns = useMemo(
@@ -587,7 +612,7 @@ export function Sessions() {
                 cell: (info) => (
                     <span
                         className={
-                            "px-2 py-0.5 text-xs font-medium rounded border " +
+                            "rounded border px-2 py-0.5 text-xs font-medium " +
                             getTypeBadgeColor(info.getValue())
                         }
                     >
@@ -606,11 +631,11 @@ export function Sessions() {
                     id: "name",
                     header: "Name",
                     cell: (info) => (
-                        <span className="text-sm text-slate-200 truncate max-w-xs block">
+                        <span className="block max-w-xs truncate text-sm text-slate-200">
                             {info.getValue()?.slice(0, 40) || "unknown"}
                         </span>
                     ),
-                },
+                }
             ),
             columnHelper.accessor("model", {
                 header: "Model",
@@ -624,14 +649,14 @@ export function Sessions() {
                 header: "Tokens",
                 cell: (info) => {
                     const current = info.getValue() || 0;
-                    const max = info.row.original.maxTokens || 200000;
+                    const max = info.row.original.maxTokens || 200_000;
                     const percent = getTokenPercent(current, max);
                     return (
                         <div className="flex items-center gap-2">
                             <span className={"text-sm " + getTokenColor(percent)}>
                                 {formatTokens(current, max)}
                             </span>
-                            <div className="w-16 h-1 bg-slate-700 rounded-full">
+                            <div className="h-1 w-16 rounded-full bg-slate-700">
                                 <div
                                     className={
                                         "h-full rounded-full " + getTokenBarColor(percent)
@@ -655,7 +680,10 @@ export function Sessions() {
                 id: "actions",
                 header: "",
                 cell: ({ row }) => (
-                    <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                    <div
+                        className="flex justify-end"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <Menu>
                             {({ open }) => (
                                 <>
@@ -663,63 +691,72 @@ export function Sessions() {
                                         as={Button}
                                         variant="ghost"
                                         size="sm"
-                                        className={"flex items-center gap-1 text-slate-300 outline-none border-0 " + (open ? "bg-slate-700" : "")}
+                                        className={
+                                            "flex items-center gap-1 border-0 text-slate-300 outline-none " +
+                                            (open ? "bg-slate-700" : "")
+                                        }
                                     >
-                                        <MoreVertical className="w-4 h-4" />
-                                        <ChevronDown className={"w-3 h-3 transition-transform " + (open ? "rotate-180" : "")} />
+                                        <MoreVertical className="h-4 w-4" />
+                                        <ChevronDown
+                                            className={
+                                                "h-3 w-3 transition-transform " +
+                                                (open ? "rotate-180" : "")
+                                            }
+                                        />
                                     </MenuButton>
-                            <MenuItems
-                                anchor="bottom end"
-                                className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px] outline-none focus:outline-none"
-                            >
-                                <MenuItem>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleStop(row.original.key);
-                                        }}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                    <MenuItems
+                                        anchor="bottom end"
+                                        className="z-50 mt-1 min-w-[120px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
                                     >
-                                        <Square className="w-4 h-4 text-slate-400" /> Stop
-                                    </button>
-                                </MenuItem>
-                                <MenuItem>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleCompact(row.original.key);
-                                        }}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                    >
-                                        <Database className="w-4 h-4 text-slate-400" />{" "}
-                                        Compact
-                                    </button>
-                                </MenuItem>
-                                <MenuItem>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleReset(row.original.key);
-                                        }}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                    >
-                                        <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
-                                        Reset
-                                    </button>
-                                </MenuItem>
-                                <div className="border-t border-slate-700" />
-                                <MenuItem>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setDeleteTarget(row.original);
-                                        }}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
-                                    >
-                                        <Trash2 className="w-4 h-4" /> Delete
-                                    </button>
-                                </MenuItem>
-                            </MenuItems>
+                                        <MenuItem>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleStop(row.original.key);
+                                                }}
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Square className="h-4 w-4 text-slate-400" />{" "}
+                                                Stop
+                                            </button>
+                                        </MenuItem>
+                                        <MenuItem>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleCompact(row.original.key);
+                                                }}
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Database className="h-4 w-4 text-slate-400" />{" "}
+                                                Compact
+                                            </button>
+                                        </MenuItem>
+                                        <MenuItem>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleReset(row.original.key);
+                                                }}
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
+                                                Reset
+                                            </button>
+                                        </MenuItem>
+                                        <div className="border-t border-slate-700" />
+                                        <MenuItem>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeleteTarget(row.original);
+                                                }}
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Trash2 className="h-4 w-4" /> Delete
+                                            </button>
+                                        </MenuItem>
+                                    </MenuItems>
                                 </>
                             )}
                         </Menu>
@@ -727,7 +764,7 @@ export function Sessions() {
                 ),
             }),
         ],
-        [],
+        []
     );
 
     const table = useReactTable({
@@ -742,7 +779,7 @@ export function Sessions() {
 
     return (
         <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Sessions</h1>
                 <div className="flex items-center gap-4">
                     <Button
@@ -753,18 +790,18 @@ export function Sessions() {
                     >
                         <RefreshCw
                             className={
-                                "w-4 h-4 mr-2 " + (isLoading ? "animate-spin" : "")
+                                "mr-2 h-4 w-4 " + (isLoading ? "animate-spin" : "")
                             }
                         />
                         Refresh
                     </Button>
                     <div className="flex items-center gap-2">
                         {isConnected ? (
-                            <span className="flex items-center gap-1 text-green-400 text-sm">
+                            <span className="flex items-center gap-1 text-sm text-green-400">
                                 <Wifi size={16} /> Connected
                             </span>
                         ) : (
-                            <span className="flex items-center gap-1 text-red-400 text-sm">
+                            <span className="flex items-center gap-1 text-sm text-red-400">
                                 <WifiOff size={16} /> Disconnected
                             </span>
                         )}
@@ -773,7 +810,7 @@ export function Sessions() {
             </div>
 
             {/* Type filter buttons */}
-            <div className="flex gap-2 mb-4">
+            <div className="mb-4 flex gap-2">
                 {SESSION_TYPES.map((type) => (
                     <Button
                         key={type}
@@ -787,14 +824,14 @@ export function Sessions() {
             </div>
 
             {error && (
-                <div className="bg-red-500/20 border border-red-500 text-red-400 p-3 rounded-lg mb-4">
+                <div className="mb-4 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
                     {error}
                 </div>
             )}
 
             {!isConnected && !error && (
-                <Card className="text-center py-8">
-                    <WifiOff className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+                <Card className="py-8 text-center">
+                    <WifiOff className="mx-auto mb-4 h-12 w-12 text-slate-400" />
                     <p className="text-slate-300">Connecting to OpenClaw...</p>
                 </Card>
             )}
@@ -811,7 +848,7 @@ export function Sessions() {
                                                 <th
                                                     key={header.id}
                                                     className={
-                                                        "px-4 py-3 text-xs font-medium text-slate-400 uppercase " +
+                                                        "px-4 py-3 text-xs font-medium uppercase text-slate-400 " +
                                                         (header.column.getCanSort()
                                                             ? "cursor-pointer select-none hover:text-slate-200"
                                                             : "") +
@@ -825,14 +862,14 @@ export function Sessions() {
                                                         {flexRender(
                                                             header.column.columnDef
                                                                 .header,
-                                                            header.getContext(),
+                                                            header.getContext()
                                                         )}
                                                         {{
                                                             asc: (
-                                                                <ArrowUp className="w-3 h-3" />
+                                                                <ArrowUp className="h-3 w-3" />
                                                             ),
                                                             desc: (
-                                                                <ArrowDown className="w-3 h-3" />
+                                                                <ArrowDown className="h-3 w-3" />
                                                             ),
                                                         }[
                                                             header.column.getIsSorted() as string
@@ -847,7 +884,7 @@ export function Sessions() {
                                     {table.getRowModel().rows.map((row) => (
                                         <tr
                                             key={row.id}
-                                            className="hover:bg-slate-700/50 cursor-pointer transition-colors"
+                                            className="cursor-pointer transition-colors hover:bg-slate-700/50"
                                             onClick={() =>
                                                 setSelectedSession(row.original)
                                             }
@@ -864,7 +901,7 @@ export function Sessions() {
                                                 >
                                                     {flexRender(
                                                         cell.column.columnDef.cell,
-                                                        cell.getContext(),
+                                                        cell.getContext()
                                                     )}
                                                 </td>
                                             ))}
@@ -874,12 +911,12 @@ export function Sessions() {
                             </table>
                         </Card>
                     ) : (
-                        <Card className="text-center py-12">
-                            <div className="text-4xl mb-4">?</div>
-                            <p className="text-slate-300 text-lg mb-1">
+                        <Card className="py-12 text-center">
+                            <div className="mb-4 text-4xl">?</div>
+                            <p className="mb-1 text-lg text-slate-300">
                                 No Active Sessions
                             </p>
-                            <p className="text-slate-400 text-sm">
+                            <p className="text-sm text-slate-400">
                                 There are no active OpenClaw sessions at the moment.
                             </p>
                         </Card>
@@ -887,28 +924,30 @@ export function Sessions() {
                 </>
             )}
 
-            {selectedSession && (
-                <SessionDetails
-                    session={selectedSession}
-                    onClose={() => setSelectedSession(null)}
-                    onDelete={() => {
-                        setDeleteTarget(selectedSession);
-                        setSelectedSession(null);
-                    }}
-                    onStop={() => handleStop(selectedSession.key)}
-                    onCompact={() => handleCompact(selectedSession.key)}
-                    onReset={() => handleReset(selectedSession.key)}
-                />
-            )}
+            <SessionDetails
+                session={selectedSession}
+                onClose={() => setSelectedSession(null)}
+                onDelete={() => {
+                    setDeleteTarget(selectedSession);
+                    setSelectedSession(null);
+                }}
+                onStop={() => {
+                    if (selectedSession) handleStop(selectedSession.key);
+                }}
+                onCompact={() => {
+                    if (selectedSession) handleCompact(selectedSession.key);
+                }}
+                onReset={() => {
+                    if (selectedSession) handleReset(selectedSession.key);
+                }}
+            />
 
-            {deleteTarget && (
-                <DeleteConfirmDialog
-                    session={deleteTarget}
-                    onConfirm={handleDeleteConfirm}
-                    onCancel={() => setDeleteTarget(null)}
-                    isLoading={isDeleting}
-                />
-            )}
+            <DeleteConfirmDialog
+                session={deleteTarget}
+                onConfirm={handleDeleteConfirm}
+                onCancel={() => setDeleteTarget(null)}
+                isLoading={isDeleting}
+            />
         </div>
     );
 }

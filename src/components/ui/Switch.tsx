@@ -1,4 +1,5 @@
-import { type InputHTMLAttributes, forwardRef } from "react";
+import { forwardRef, type InputHTMLAttributes } from "react";
+
 import { cn } from "../../utils/cn";
 
 interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
@@ -9,18 +10,32 @@ interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"
 export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
     ({ className, label, description, checked, onChange, disabled, ...props }, ref) => {
         return (
-            <label className={cn("flex items-center justify-between cursor-pointer", disabled && "opacity-50 cursor-not-allowed", className)}>
+            <label
+                className={cn(
+                    "flex cursor-pointer items-center justify-between",
+                    disabled && "cursor-not-allowed opacity-50",
+                    className
+                )}
+            >
                 {(label || description) && (
                     <div className="flex flex-col">
-                        {label && <span className="text-sm font-medium text-primary-200">{label}</span>}
-                        {description && <span className="text-xs text-primary-400">{description}</span>}
+                        {label && (
+                            <span className="text-sm font-medium text-primary-200">
+                                {label}
+                            </span>
+                        )}
+                        {description && (
+                            <span className="text-xs text-primary-400">
+                                {description}
+                            </span>
+                        )}
                     </div>
                 )}
                 <div className="relative">
                     <input
                         ref={ref}
                         type="checkbox"
-                        className="sr-only peer"
+                        className="peer sr-only"
                         checked={checked}
                         onChange={onChange}
                         disabled={disabled}
@@ -28,14 +43,14 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
                     />
                     <div
                         className={cn(
-                            "w-11 h-6 rounded-full transition-colors",
+                            "h-6 w-11 rounded-full transition-colors",
                             "bg-primary-600 peer-checked:bg-accent-500",
                             "peer-focus:ring-2 peer-focus:ring-accent-500 peer-focus:ring-offset-2 peer-focus:ring-offset-primary-800"
                         )}
                     />
                     <div
                         className={cn(
-                            "absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform",
+                            "absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform",
                             "peer-checked:translate-x-5"
                         )}
                     />

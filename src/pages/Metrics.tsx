@@ -1,6 +1,15 @@
+import {
+    BarChart3,
+    Clock,
+    Coins,
+    Cpu,
+    HardDrive,
+    MemoryStick,
+    Users,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { Card } from "../components/ui/Card";
-import { Cpu, HardDrive, MemoryStick, Clock, Coins, BarChart3, Users } from "lucide-react";
 
 interface AgentToken {
     type: string;
@@ -14,7 +23,12 @@ interface MetricsData {
     memory: { total: number; used: number; free: number; percent: number };
     disk: { total: number; used: number; percent: number };
     system: { uptime: number; platform: string; hostname: string };
-    tokens?: { total: number; byModel: Record<string, number>; sessionsByModel: Record<string, number>; byAgent: AgentToken[] };
+    tokens?: {
+        total: number;
+        byModel: Record<string, number>;
+        sessionsByModel: Record<string, number>;
+        byAgent: AgentToken[];
+    };
 }
 
 export function Metrics() {
@@ -30,8 +44,8 @@ export function Metrics() {
                 const data = await res.json();
                 setMetrics(data);
                 setError(null);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : "Unknown error");
+            } catch (error_) {
+                setError(error_ instanceof Error ? error_.message : "Unknown error");
             } finally {
                 setLoading(false);
             }
@@ -48,24 +62,34 @@ export function Metrics() {
     };
 
     const formatUptime = (seconds: number) => {
-        const days = Math.floor(seconds / 86400);
-        const hours = Math.floor((seconds % 86400) / 3600);
+        const days = Math.floor(seconds / 86_400);
+        const hours = Math.floor((seconds % 86_400) / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
         return days + "d " + hours + "h " + mins + "m";
     };
 
     const formatTokens = (tokens: number) => {
-        if (tokens >= 1000000) return (tokens / 1000000).toFixed(2) + "M";
+        if (tokens >= 1_000_000) return (tokens / 1_000_000).toFixed(2) + "M";
         if (tokens >= 1000) return (tokens / 1000).toFixed(1) + "K";
         return tokens.toString();
     };
 
     if (loading) {
-        return <div className="p-6"><h1 className="text-2xl font-bold text-slate-100">Metrics</h1><p className="text-slate-400 mt-4">Loading...</p></div>;
+        return (
+            <div className="p-6">
+                <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
+                <p className="mt-4 text-slate-400">Loading...</p>
+            </div>
+        );
     }
 
     if (error) {
-        return <div className="p-6"><h1 className="text-2xl font-bold text-slate-100">Metrics</h1><p className="text-red-400 mt-4">Error: {error}</p></div>;
+        return (
+            <div className="p-6">
+                <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
+                <p className="mt-4 text-red-400">Error: {error}</p>
+            </div>
+        );
     }
 
     const totalTokens = metrics?.tokens?.total || 0;
@@ -75,91 +99,131 @@ export function Metrics() {
     const sortedModels = Object.entries(byModel).sort((a, b) => b[1] - a[1]);
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="space-y-6 p-6">
             <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
 
             {/* System Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card className="p-4">
                     <div className="flex items-center gap-3">
-                        <Cpu className="w-8 h-8 text-blue-400" />
+                        <Cpu className="h-8 w-8 text-blue-400" />
                         <div>
                             <p className="text-sm text-slate-400">CPU</p>
-                            <p className="text-2xl font-bold text-slate-100">{metrics?.cpu.loadPercent || 0}%</p>
+                            <p className="text-2xl font-bold text-slate-100">
+                                {metrics?.cpu.loadPercent || 0}%
+                            </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 transition-all" style={{ width: (metrics?.cpu.loadPercent || 0) + "%" }} />
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
+                        <div
+                            className="h-full bg-blue-500 transition-all"
+                            style={{ width: (metrics?.cpu.loadPercent || 0) + "%" }}
+                        />
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">{metrics?.cpu.count}x {metrics?.cpu.model?.split(" ")[0] || "Unknown"}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                        {metrics?.cpu.count}x{" "}
+                        {metrics?.cpu.model?.split(" ")[0] || "Unknown"}
+                    </p>
                 </Card>
 
                 <Card className="p-4">
                     <div className="flex items-center gap-3">
-                        <MemoryStick className="w-8 h-8 text-green-400" />
+                        <MemoryStick className="h-8 w-8 text-green-400" />
                         <div>
                             <p className="text-sm text-slate-400">Memory</p>
-                            <p className="text-2xl font-bold text-slate-100">{metrics?.memory.percent || 0}%</p>
+                            <p className="text-2xl font-bold text-slate-100">
+                                {metrics?.memory.percent || 0}%
+                            </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500 transition-all" style={{ width: (metrics?.memory.percent || 0) + "%" }} />
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
+                        <div
+                            className="h-full bg-green-500 transition-all"
+                            style={{ width: (metrics?.memory.percent || 0) + "%" }}
+                        />
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">{formatBytes(metrics?.memory.used || 0)} / {formatBytes(metrics?.memory.total || 0)}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                        {formatBytes(metrics?.memory.used || 0)} /{" "}
+                        {formatBytes(metrics?.memory.total || 0)}
+                    </p>
                 </Card>
 
                 <Card className="p-4">
                     <div className="flex items-center gap-3">
-                        <HardDrive className="w-8 h-8 text-orange-400" />
+                        <HardDrive className="h-8 w-8 text-orange-400" />
                         <div>
                             <p className="text-sm text-slate-400">Disk</p>
-                            <p className="text-2xl font-bold text-slate-100">{metrics?.disk.percent || 0}%</p>
+                            <p className="text-2xl font-bold text-slate-100">
+                                {metrics?.disk.percent || 0}%
+                            </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-orange-500 transition-all" style={{ width: (metrics?.disk.percent || 0) + "%" }} />
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
+                        <div
+                            className="h-full bg-orange-500 transition-all"
+                            style={{ width: (metrics?.disk.percent || 0) + "%" }}
+                        />
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">{formatBytes(metrics?.disk.used || 0)} / {formatBytes(metrics?.disk.total || 0)}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                        {formatBytes(metrics?.disk.used || 0)} /{" "}
+                        {formatBytes(metrics?.disk.total || 0)}
+                    </p>
                 </Card>
 
                 <Card className="p-4">
                     <div className="flex items-center gap-3">
-                        <Clock className="w-8 h-8 text-purple-400" />
+                        <Clock className="h-8 w-8 text-purple-400" />
                         <div>
                             <p className="text-sm text-slate-400">Uptime</p>
-                            <p className="text-xl font-bold text-slate-100">{formatUptime(metrics?.system?.uptime || 0)}</p>
+                            <p className="text-xl font-bold text-slate-100">
+                                {formatUptime(metrics?.system?.uptime || 0)}
+                            </p>
                         </div>
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">{metrics?.system?.hostname} ({metrics?.system?.platform})</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                        {metrics?.system?.hostname} ({metrics?.system?.platform})
+                    </p>
                 </Card>
             </div>
 
             {/* Token Usage */}
             {totalTokens > 0 && (
                 <Card className="p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <Coins className="w-6 h-6 text-yellow-400" />
-                        <h2 className="text-lg font-semibold text-slate-100">Token Usage</h2>
-                        <span className="ml-auto text-2xl font-bold text-slate-100">{formatTokens(totalTokens)}</span>
+                    <div className="mb-6 flex items-center gap-3">
+                        <Coins className="h-6 w-6 text-yellow-400" />
+                        <h2 className="text-lg font-semibold text-slate-100">
+                            Token Usage
+                        </h2>
+                        <span className="ml-auto text-2xl font-bold text-slate-100">
+                            {formatTokens(totalTokens)}
+                        </span>
                     </div>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                    <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
                         {/* Tokens by Model */}
                         <div>
-                            <h3 className="text-sm font-medium text-slate-400 mb-4 flex items-center gap-2">
-                                <BarChart3 className="w-4 h-4" /> By Model
+                            <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-slate-400">
+                                <BarChart3 className="h-4 w-4" /> By Model
                             </h3>
                             <div className="space-y-3">
                                 {sortedModels.map(([model, count]) => {
-                                    const percent = totalTokens > 0 ? (count / totalTokens) * 100 : 0;
+                                    const percent =
+                                        totalTokens > 0 ? (count / totalTokens) * 100 : 0;
                                     return (
                                         <div key={model}>
-                                            <div className="flex justify-between text-sm mb-1">
-                                                <span className="text-slate-300">{model}</span>
-                                                <span className="text-slate-400">{formatTokens(count)}</span>
+                                            <div className="mb-1 flex justify-between text-sm">
+                                                <span className="text-slate-300">
+                                                    {model}
+                                                </span>
+                                                <span className="text-slate-400">
+                                                    {formatTokens(count)}
+                                                </span>
                                             </div>
-                                            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                                                <div className="h-full bg-blue-500 rounded-full" style={{ width: percent + "%" }} />
+                                            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
+                                                <div
+                                                    className="h-full rounded-full bg-blue-500"
+                                                    style={{ width: percent + "%" }}
+                                                />
                                             </div>
                                         </div>
                                     );
@@ -169,19 +233,34 @@ export function Metrics() {
 
                         {/* Tokens by Agent */}
                         <div>
-                            <h3 className="text-sm font-medium text-slate-400 mb-4 flex items-center gap-2">
-                                <BarChart3 className="w-4 h-4" /> By Agent
+                            <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-slate-400">
+                                <BarChart3 className="h-4 w-4" /> By Agent
                             </h3>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                            <div className="max-h-64 space-y-2 overflow-y-auto">
                                 {byAgent.map((agent, i) => {
-                                    const percent = totalTokens > 0 ? (agent.tokens / totalTokens) * 100 : 0;
+                                    const percent =
+                                        totalTokens > 0
+                                            ? (agent.tokens / totalTokens) * 100
+                                            : 0;
                                     return (
                                         <div key={i} className="flex items-center gap-3">
-                                            <span className="w-16 text-xs text-slate-500">{agent.type}</span>
-                                            <span className="flex-1 text-sm text-slate-300 truncate" title={agent.label}>{agent.label}</span>
-                                            <span className="w-16 text-right text-sm text-slate-400">{formatTokens(agent.tokens)}</span>
-                                            <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                <div className="h-full bg-purple-500 rounded-full" style={{ width: percent + "%" }} />
+                                            <span className="w-16 text-xs text-slate-500">
+                                                {agent.type}
+                                            </span>
+                                            <span
+                                                className="flex-1 truncate text-sm text-slate-300"
+                                                title={agent.label}
+                                            >
+                                                {agent.label}
+                                            </span>
+                                            <span className="w-16 text-right text-sm text-slate-400">
+                                                {formatTokens(agent.tokens)}
+                                            </span>
+                                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-700">
+                                                <div
+                                                    className="h-full rounded-full bg-purple-500"
+                                                    style={{ width: percent + "%" }}
+                                                />
                                             </div>
                                         </div>
                                     );
@@ -195,18 +274,32 @@ export function Metrics() {
             {/* Sessions by Model */}
             {Object.keys(sessionsByModel).length > 0 && (
                 <Card className="p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                        <Users className="w-6 h-6 text-cyan-400" />
-                        <h2 className="text-lg font-semibold text-slate-100">Sessions by Model</h2>
+                    <div className="mb-4 flex items-center gap-3">
+                        <Users className="h-6 w-6 text-cyan-400" />
+                        <h2 className="text-lg font-semibold text-slate-100">
+                            Sessions by Model
+                        </h2>
                     </div>
-                    
-                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                        {Object.entries(sessionsByModel).sort((a, b) => b[1] - a[1]).map(([model, count]) => (
-                            <div key={model} className="p-3 bg-slate-800/50 rounded-lg text-center">
-                                <p className="text-2xl font-bold text-slate-100">{count}</p>
-                                <p className="text-xs text-slate-400 truncate mt-1" title={model}>{model}</p>
-                            </div>
-                        ))}
+
+                    <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-6">
+                        {Object.entries(sessionsByModel)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([model, count]) => (
+                                <div
+                                    key={model}
+                                    className="rounded-lg bg-slate-800/50 p-3 text-center"
+                                >
+                                    <p className="text-2xl font-bold text-slate-100">
+                                        {count}
+                                    </p>
+                                    <p
+                                        className="mt-1 truncate text-xs text-slate-400"
+                                        title={model}
+                                    >
+                                        {model}
+                                    </p>
+                                </div>
+                            ))}
                     </div>
                 </Card>
             )}

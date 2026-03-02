@@ -1,5 +1,6 @@
+import { useCallback, useState } from "react";
+
 import { useOpenClawSocket } from "./useOpenClawSocket";
-import { useState, useCallback } from "react";
 
 export interface AgentStatus {
     version: string;
@@ -38,18 +39,22 @@ export function useOpenClaw(token: string | null) {
 
     const handleMessage = useCallback((method: string, params: any) => {
         switch (method) {
-            case "status":
+            case "status": {
                 setStatus(params);
                 break;
-            case "agents":
+            }
+            case "agents": {
                 setAgents(params);
                 break;
-            case "agents.list":
+            }
+            case "agents.list": {
                 setAgents(params?.agents || []);
                 break;
-            case "log":
-                setLogs(prev => [...prev.slice(-100), params]);
+            }
+            case "log": {
+                setLogs((prev) => [...prev.slice(-100), params]);
                 break;
+            }
         }
     }, []);
 
@@ -69,8 +74,8 @@ export function useOpenClaw(token: string | null) {
         try {
             const result = await request("status");
             setStatus(result);
-        } catch (e) {
-            console.error("Failed to fetch status:", e);
+        } catch (error_) {
+            console.error("Failed to fetch status:", error_);
         }
     }, [isConnected, request]);
 
@@ -81,8 +86,8 @@ export function useOpenClaw(token: string | null) {
             if (result?.sessions) {
                 setSessions(result.sessions);
             }
-        } catch (e) {
-            console.error("Failed to fetch sessions:", e);
+        } catch (error_) {
+            console.error("Failed to fetch sessions:", error_);
         }
     }, [isConnected, request]);
 
@@ -91,21 +96,24 @@ export function useOpenClaw(token: string | null) {
         try {
             const result = await request("agents.list");
             setAgents(result?.agents || []);
-        } catch (e) {
-            console.error("Failed to fetch agents:", e);
+        } catch (error_) {
+            console.error("Failed to fetch agents:", error_);
         }
     }, [isConnected, request]);
 
-    const deleteSession = useCallback(async (sessionKey: string) => {
-        if (!isConnected) throw new Error("Not connected");
-        console.log("[useOpenClaw] Deleting session:", sessionKey);
-        await request("sessions.delete", { 
-            key: sessionKey,
-            deleteTranscript: true,
-            emitLifecycleHooks: false,
-        });
-        await fetchSessions();
-    }, [isConnected, request, fetchSessions]);
+    const deleteSession = useCallback(
+        async (sessionKey: string) => {
+            if (!isConnected) throw new Error("Not connected");
+            console.log("[useOpenClaw] Deleting session:", sessionKey);
+            await request("sessions.delete", {
+                key: sessionKey,
+                deleteTranscript: true,
+                emitLifecycleHooks: false,
+            });
+            await fetchSessions();
+        },
+        [isConnected, request, fetchSessions]
+    );
 
     return {
         isConnected,

@@ -1,6 +1,16 @@
-import { type ReactNode } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
-import { Home, CheckSquare, Users, FileText, Activity, FolderOpen, MessageSquare, Settings } from "lucide-react";
+import {
+    Activity,
+    CheckSquare,
+    FileText,
+    FolderOpen,
+    Home,
+    MessageSquare,
+    Settings,
+    Users,
+} from "lucide-react";
+import { type ReactNode } from "react";
+
 import { cn } from "../../utils/cn";
 
 const navItems = [
@@ -22,15 +32,15 @@ export function Layout({ children }: LayoutProps) {
     const location = useLocation();
 
     return (
-        <div className="min-h-screen bg-primary-900 text-primary-50 flex">
-            <aside className="w-64 bg-primary-800 border-r border-primary-700 flex flex-col">
-                <div className="p-4 border-b border-primary-700">
-                    <h1 className="text-xl font-bold flex items-center gap-2">
+        <div className="flex min-h-screen bg-primary-900 text-primary-50">
+            <aside className="flex w-64 flex-col border-r border-primary-700 bg-primary-800">
+                <div className="border-b border-primary-700 p-4">
+                    <h1 className="flex items-center gap-2 text-xl font-bold">
                         <span className="text-2xl">👩‍💻</span>
                         <span>Mira Dashboard</span>
                     </h1>
                 </div>
-                
+
                 <nav className="flex-1 p-2">
                     {navItems.map((item) => {
                         const isActive = location.pathname === item.to;
@@ -39,7 +49,7 @@ export function Layout({ children }: LayoutProps) {
                                 key={item.to}
                                 to={item.to}
                                 className={cn(
-                                    "flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors",
+                                    "mb-1 flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
                                     isActive
                                         ? "bg-accent-500 text-white"
                                         : "text-primary-300 hover:bg-primary-700 hover:text-primary-50"
@@ -52,7 +62,7 @@ export function Layout({ children }: LayoutProps) {
                     })}
                 </nav>
 
-                <div className="p-4 border-t border-primary-700">
+                <div className="border-t border-primary-700 p-4">
                     <div className="text-xs text-primary-400">
                         <div>OpenClaw Dashboard</div>
                         <div className="text-primary-500">v1.0.0</div>
@@ -60,9 +70,7 @@ export function Layout({ children }: LayoutProps) {
                 </div>
             </aside>
 
-            <main className="flex-1 overflow-auto">
-                {children}
-            </main>
+            <main className="flex-1 overflow-auto">{children}</main>
         </div>
     );
 }

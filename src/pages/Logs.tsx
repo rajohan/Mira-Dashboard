@@ -1,16 +1,17 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Card } from "../components/ui/Card";
-import { Button } from "../components/ui/Button";
 import {
-    Wifi,
-    WifiOff,
-    Terminal,
-    RefreshCw,
+    ChevronDown,
     Download,
     FileText,
-    ChevronDown,
+    RefreshCw,
+    Terminal,
+    Wifi,
+    WifiOff,
 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 
 interface LogEntry {
     ts?: string;
@@ -38,7 +39,7 @@ export function Logs() {
     const [showFileDropdown, setShowFileDropdown] = useState(false);
     const [showLineDropdown, setShowLineDropdown] = useState(false);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
-        new Set(["trace", "debug", "info", "warn", "error", "fatal"]),
+        new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -133,7 +134,7 @@ export function Logs() {
                 if (data.logs) {
                     // Sort by filename descending (newest first) - filenames are openclaw-YYYY-MM-DD.log
                     const sorted = [...data.logs].sort((a, b) =>
-                        b.name.localeCompare(a.name),
+                        b.name.localeCompare(a.name)
                     );
                     setLogFiles(sorted);
                     // Select today's file by default
@@ -145,8 +146,8 @@ export function Logs() {
                         setSelectedFile(sorted[0].name);
                     }
                 }
-            } catch (e) {
-                console.error("Failed to fetch log files:", e);
+            } catch (error) {
+                console.error("Failed to fetch log files:", error);
             }
         };
         fetchLogFiles();
@@ -158,7 +159,7 @@ export function Logs() {
             setIsLoading(true);
             try {
                 const response = await fetch(
-                    `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`,
+                    `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
                 );
                 const data = await response.json();
                 if (data.content) {
@@ -170,13 +171,13 @@ export function Logs() {
                         .filter((l: LogEntry | null): l is LogEntry => l !== null);
                     setLogs(parsedLogs);
                 }
-            } catch (e) {
-                console.error("Failed to load log content:", e);
+            } catch (error) {
+                console.error("Failed to load log content:", error);
             } finally {
                 setIsLoading(false);
             }
         },
-        [parseLogLine],
+        [parseLogLine]
     );
 
     // Handle file selection
@@ -210,8 +211,8 @@ export function Logs() {
         if (selectedFile && logFiles.length > 0) {
             loadLogContent(selectedFile, lineCount);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedFile]); // Only when selectedFile changes
+        // Intentionally only run when selectedFile changes
+    }, [selectedFile]);
 
     useEffect(() => {
         const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
@@ -222,12 +223,12 @@ export function Logs() {
         isReceivingHistoryRef.current = true;
         historyBufferRef.current = [];
 
-        ws.onopen = () => {
+        ws.addEventListener("open", () => {
             setIsConnected(true);
             isReceivingHistoryRef.current = true;
             historyBufferRef.current = [];
             ws.send(JSON.stringify({ type: "subscribe", channel: "logs" }));
-        };
+        });
 
         ws.onmessage = (event) => {
             try {
@@ -267,11 +268,11 @@ export function Logs() {
             }
         };
 
-        ws.onclose = () => {
+        ws.addEventListener("close", () => {
             setIsConnected(false);
             isReceivingHistoryRef.current = true;
             historyBufferRef.current = [];
-        };
+        });
         ws.onerror = () => {
             setIsConnected(false);
             isReceivingHistoryRef.current = true;
@@ -319,8 +320,8 @@ export function Logs() {
                         .filter((l: LogEntry | null): l is LogEntry => l !== null);
                     setLogs(parsedLogs);
                 }
-            } catch (e) {
-                console.error("Failed to refresh logs:", e);
+            } catch (error) {
+                console.error("Failed to refresh logs:", error);
             }
         }
     };
@@ -361,20 +362,27 @@ export function Logs() {
     const getLevelColor = (level?: string): string => {
         const l = (level || "info").toLowerCase();
         switch (l) {
-            case "fatal":
+            case "fatal": {
                 return "text-red-400 bg-red-500/20";
-            case "error":
+            }
+            case "error": {
                 return "text-red-400 bg-red-500/20";
-            case "warn":
+            }
+            case "warn": {
                 return "text-yellow-400 bg-yellow-500/20";
-            case "info":
+            }
+            case "info": {
                 return "text-blue-400 bg-blue-500/20";
-            case "debug":
+            }
+            case "debug": {
                 return "text-slate-400 bg-slate-500/20";
-            case "trace":
+            }
+            case "trace": {
                 return "text-slate-500 bg-slate-500/10";
-            default:
+            }
+            default: {
                 return "text-slate-400 bg-slate-500/20";
+            }
         }
     };
 
@@ -382,26 +390,36 @@ export function Logs() {
         if (!subsystem) return "";
         const s = subsystem.toLowerCase();
         switch (s) {
-            case "exec":
+            case "exec": {
                 return "text-green-400";
-            case "tools":
+            }
+            case "tools": {
                 return "text-orange-400";
-            case "agent":
+            }
+            case "agent": {
                 return "text-purple-400";
-            case "gateway":
+            }
+            case "gateway": {
                 return "text-cyan-400";
-            case "cron":
+            }
+            case "cron": {
                 return "text-pink-400";
-            case "session":
+            }
+            case "session": {
                 return "text-indigo-400";
-            case "http":
+            }
+            case "http": {
                 return "text-teal-400";
-            case "ws":
+            }
+            case "ws": {
                 return "text-amber-400";
-            case "memory":
+            }
+            case "memory": {
                 return "text-emerald-400";
-            default:
+            }
+            default: {
                 return "text-purple-400";
+            }
         }
     };
 
@@ -416,10 +434,10 @@ export function Logs() {
     // Handle scroll - re-enable autoFollow when user scrolls to bottom
     const handleScroll = useCallback(() => {
         if (!logContainerRef.current || isAutoScrollingRef.current) return;
-        
+
         const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 30; // 30px threshold
-        
+
         if (isAtBottom && !autoFollow) {
             setAutoFollow(true);
         } else if (!isAtBottom && autoFollow) {
@@ -432,14 +450,15 @@ export function Logs() {
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
             isAutoScrollingRef.current = true;
-            
+
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
-            
+
             requestAnimationFrame(() => {
                 scrollToBottom();
                 setTimeout(() => {
@@ -454,14 +473,15 @@ export function Logs() {
     useEffect(() => {
         if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
             isAutoScrollingRef.current = true;
-            
+
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
-            
+
             requestAnimationFrame(() => {
                 scrollToBottom();
                 setTimeout(() => {
@@ -473,42 +493,42 @@ export function Logs() {
     }, [selectedFile, lineCount]);
 
     return (
-        <div className="p-6 h-[calc(100vh-2rem)] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
+        <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
+            <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <Terminal className="w-6 h-6 text-slate-400" />
+                    <Terminal className="h-6 w-6 text-slate-400" />
                     <h1 className="text-2xl font-bold">Logs</h1>
                 </div>
                 <div className="flex items-center gap-2">
                     {isConnected ? (
-                        <span className="flex items-center gap-1 text-green-400 text-sm">
+                        <span className="flex items-center gap-1 text-sm text-green-400">
                             <Wifi size={16} /> Connected
                         </span>
                     ) : (
-                        <span className="flex items-center gap-1 text-red-400 text-sm">
+                        <span className="flex items-center gap-1 text-sm text-red-400">
                             <WifiOff size={16} /> Disconnected
                         </span>
                     )}
                 </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
                 {/* File selector dropdown */}
                 <div className="relative">
                     <button
                         onClick={() => setShowFileDropdown(!showFileDropdown)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-indigo-500 transition-colors min-w-[220px]"
+                        className="flex min-w-[220px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
                     >
-                        <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                        <span className="flex-1 text-left truncate">
+                        <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                        <span className="flex-1 truncate text-left">
                             {selectedFile || "Select file..."}
                         </span>
                         <ChevronDown
-                            className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${showFileDropdown ? "rotate-180" : ""}`}
+                            className={`h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${showFileDropdown ? "rotate-180" : ""}`}
                         />
                     </button>
                     {showFileDropdown && (
-                        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10 max-h-60 overflow-y-auto min-w-[300px]">
+                        <div className="absolute left-0 top-full z-10 mt-1 max-h-60 min-w-[300px] overflow-y-auto rounded border border-slate-700 bg-slate-800 shadow-lg">
                             {logFiles.length === 0 ? (
                                 <div className="px-3 py-2 text-sm text-slate-400">
                                     No log files found
@@ -518,14 +538,14 @@ export function Logs() {
                                     <button
                                         key={file.name}
                                         onClick={() => handleFileSelect(file.name)}
-                                        className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center justify-between gap-3 ${
+                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-700 ${
                                             selectedFile === file.name
                                                 ? "bg-slate-700 text-indigo-400"
                                                 : ""
                                         }`}
                                     >
                                         <span className="truncate">{file.name}</span>
-                                        <span className="text-slate-500 text-xs flex-shrink-0">
+                                        <span className="flex-shrink-0 text-xs text-slate-500">
                                             {formatFileSize(file.size)}
                                         </span>
                                     </button>
@@ -539,20 +559,20 @@ export function Logs() {
                 <div className="relative">
                     <button
                         onClick={() => setShowLineDropdown(!showLineDropdown)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-indigo-500 transition-colors min-w-[100px]"
+                        className="flex min-w-[100px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
                     >
                         <span>{lineCount} lines</span>
                         <ChevronDown
-                            className={`w-4 h-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`}
+                            className={`h-4 w-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`}
                         />
                     </button>
                     {showLineDropdown && (
-                        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10">
+                        <div className="absolute left-0 top-full z-10 mt-1 rounded border border-slate-700 bg-slate-800 shadow-lg">
                             {LINE_OPTIONS.map((lines) => (
                                 <button
                                     key={lines}
                                     onClick={() => handleLineSelect(lines)}
-                                    className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 ${
+                                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-700 ${
                                         lineCount === lines
                                             ? "bg-slate-700 text-indigo-400"
                                             : ""
@@ -565,13 +585,13 @@ export function Logs() {
                     )}
                 </div>
 
-                <div className="relative flex-1 min-w-[200px] max-w-md">
+                <div className="relative min-w-[200px] max-w-md flex-1">
                     <input
                         type="text"
                         placeholder="Search logs..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm focus:outline-none focus:border-indigo-500"
+                        className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
                     />
                 </div>
 
@@ -581,7 +601,7 @@ export function Logs() {
                         <button
                             key={level}
                             onClick={() => toggleLevel(level)}
-                            className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                            className={`rounded px-2 py-0.5 text-xs transition-colors ${
                                 levelFilter.has(level)
                                     ? getLevelColor(level)
                                     : "bg-slate-700 text-slate-500"
@@ -594,7 +614,7 @@ export function Logs() {
             </div>
 
             {/* Second row: Auto-follow and action buttons */}
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-slate-400">
                     {isLoading
                         ? "Loading..."
@@ -620,7 +640,7 @@ export function Logs() {
                             disabled={isLoading}
                         >
                             <RefreshCw
-                                className={`w-4 h-4 mr-1 ${isLoading ? "animate-spin" : ""}`}
+                                className={`mr-1 h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
                             />
                             Refresh
                         </Button>
@@ -630,7 +650,7 @@ export function Logs() {
                             onClick={handleExport}
                             disabled={filteredLogs.length === 0}
                         >
-                            <Download className="w-4 h-4 mr-1" />
+                            <Download className="mr-1 h-4 w-4" />
                             Export
                         </Button>
                         <Button
@@ -649,10 +669,10 @@ export function Logs() {
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="h-full overflow-y-auto font-mono text-xs bg-slate-900/50"
+                    className="h-full overflow-y-auto bg-slate-900/50 font-mono text-xs"
                 >
                     {filteredLogs.length === 0 ? (
-                        <div className="text-slate-400 text-center py-8">
+                        <div className="py-8 text-center text-slate-400">
                             {logs.length === 0
                                 ? "Waiting for logs..."
                                 : "No logs match your filter."}
@@ -679,28 +699,28 @@ export function Logs() {
                                             width: "100%",
                                             transform: `translateY(${virtualRow.start}px)`,
                                         }}
-                                        className="flex items-start gap-2 py-0.5 px-4 hover:bg-slate-800/50"
+                                        className="flex items-start gap-2 px-4 py-0.5 hover:bg-slate-800/50"
                                     >
                                         {log.ts && (
-                                            <span className="text-slate-500 whitespace-nowrap flex-shrink-0">
+                                            <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
                                                 {formatTime(log.ts)}
                                             </span>
                                         )}
                                         {log.level && (
                                             <span
-                                                className={`px-1 py-0.5 text-xs rounded flex-shrink-0 ${getLevelColor(log.level)}`}
+                                                className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(log.level)}`}
                                             >
                                                 {log.level.toUpperCase().slice(0, 5)}
                                             </span>
                                         )}
                                         {log.subsystem && (
                                             <span
-                                                className={`whitespace-nowrap flex-shrink-0 ${getSubsystemColor(log.subsystem)}`}
+                                                className={`flex-shrink-0 whitespace-nowrap ${getSubsystemColor(log.subsystem)}`}
                                             >
                                                 [{log.subsystem}]
                                             </span>
                                         )}
-                                        <span className="text-slate-200 flex-1 break-all whitespace-pre-wrap">
+                                        <span className="flex-1 whitespace-pre-wrap break-all text-slate-200">
                                             {log.msg}
                                         </span>
                                     </div>

@@ -40,9 +40,15 @@ function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
         content: (apiPost.content || apiPost.content_preview || "") as string,
         content_preview: apiPost.content_preview as string | undefined,
         author: {
-            name: (apiPost.author_name || (apiPost.author as Record<string, unknown>)?.name || "unknown") as string,
-            display_name: ((apiPost.author as Record<string, unknown>)?.display_name) as string | undefined,
-            avatar_url: ((apiPost.author as Record<string, unknown>)?.avatar_url) as string | undefined,
+            name: (apiPost.author_name ||
+                (apiPost.author as Record<string, unknown>)?.name ||
+                "unknown") as string,
+            display_name: (apiPost.author as Record<string, unknown>)?.display_name as
+                | string
+                | undefined,
+            avatar_url: (apiPost.author as Record<string, unknown>)?.avatar_url as
+                | string
+                | undefined,
         },
         upvotes: (apiPost.upvotes || 0) as number,
         downvotes: (apiPost.downvotes || 0) as number,
@@ -59,7 +65,9 @@ export async function getHome(): Promise<MoltbookHome> {
         headers: { "Content-Type": "application/json" },
     });
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Failed to fetch home" }));
+        const error = await response
+            .json()
+            .catch(() => ({ error: "Failed to fetch home" }));
         throw new Error(error.error || "Failed to fetch home feed");
     }
     return response.json();
@@ -72,10 +80,12 @@ export async function getFeed(sort?: "hot" | "new"): Promise<MoltbookPost[]> {
         headers: { "Content-Type": "application/json" },
     });
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Failed to fetch feed" }));
+        const error = await response
+            .json()
+            .catch(() => ({ error: "Failed to fetch feed" }));
         throw new Error(error.error || "Failed to fetch feed");
     }
     const data = await response.json();
-    const rawPosts = Array.isArray(data) ? data : (data.posts || []);
+    const rawPosts = Array.isArray(data) ? data : data.posts || [];
     return rawPosts.map(transformPost);
 }

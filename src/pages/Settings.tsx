@@ -1,26 +1,27 @@
-import { useState, useEffect, useCallback } from "react";
 import { useForm } from "@tanstack/react-form";
-import { Card, CardTitle } from "../components/ui/Card";
-import { Button } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
-import { Switch } from "../components/ui/Switch";
-import { Modal } from "../components/ui/Modal";
 import {
-    Server,
-    Users,
-    MessageSquare,
-    Clock,
-    Wrench,
-    Heart,
-    RefreshCw,
-    Download,
-    ChevronDown,
-    ChevronRight,
-    Shield,
     AlertCircle,
     Check,
+    ChevronDown,
+    ChevronRight,
+    Clock,
+    Download,
+    Heart,
     Loader2,
+    MessageSquare,
+    RefreshCw,
+    Server,
+    Shield,
+    Users,
+    Wrench,
 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+
+import { Button } from "../components/ui/Button";
+import { Card, CardTitle } from "../components/ui/Card";
+import { Input } from "../components/ui/Input";
+import { Modal } from "../components/ui/Modal";
+import { Switch } from "../components/ui/Switch";
 
 // Types
 interface Skill {
@@ -101,7 +102,7 @@ function ExpandableCard({
         <Card variant="bordered" className="mb-4">
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between py-1"
+                className="flex w-full items-center justify-between py-1"
             >
                 <div className="flex items-center gap-2">
                     <Icon size={18} className="text-accent-400" />
@@ -110,7 +111,7 @@ function ExpandableCard({
                 {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
             </button>
             {isExpanded && (
-                <div className="mt-4 pt-4 border-t border-primary-700">{children}</div>
+                <div className="mt-4 border-t border-primary-700 pt-4">{children}</div>
             )}
         </Card>
     );
@@ -125,9 +126,9 @@ function ReadOnlyField({
     value?: string | number | boolean;
 }) {
     return (
-        <div className="flex justify-between items-center py-2">
-            <span className="text-slate-400 text-sm">{label}</span>
-            <span className="text-primary-100 font-mono text-sm">
+        <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-slate-400">{label}</span>
+            <span className="font-mono text-sm text-primary-100">
                 {value === undefined || value === null ? "—" : String(value)}
             </span>
         </div>
@@ -185,9 +186,11 @@ export function Settings() {
                     const data = await res.json();
                     setError(data.error || "Failed to save configuration");
                 }
-            } catch (e: unknown) {
+            } catch (error_: unknown) {
                 const errorMessage =
-                    e instanceof Error ? e.message : "Failed to save configuration";
+                    error_ instanceof Error
+                        ? error_.message
+                        : "Failed to save configuration";
                 setError(errorMessage);
             } finally {
                 setSaving(false);
@@ -208,12 +211,15 @@ export function Settings() {
                 const data = await res.json();
                 setConfig(data);
                 // Update form with fetched values
-                form.setFieldValue("idleMinutes", data?.session?.reset?.idleMinutes || 30);
+                form.setFieldValue(
+                    "idleMinutes",
+                    data?.session?.reset?.idleMinutes || 30
+                );
                 form.setFieldValue("heartbeatEvery", data?.heartbeat?.every || 60);
                 form.setFieldValue("heartbeatTarget", data?.heartbeat?.target || "");
             }
-        } catch (e) {
-            console.error("Failed to fetch config:", e);
+        } catch (error_) {
+            console.error("Failed to fetch config:", error_);
         } finally {
             setLoading(false);
         }
@@ -226,8 +232,8 @@ export function Settings() {
                 const data = await res.json();
                 setSkills(data.skills || []);
             }
-        } catch (e) {
-            console.error("Failed to fetch skills:", e);
+        } catch (error_) {
+            console.error("Failed to fetch skills:", error_);
         }
     }
 
@@ -243,8 +249,8 @@ export function Settings() {
                     prev.map((s) => (s.name === name ? { ...s, enabled: enable } : s))
                 );
             }
-        } catch (e) {
-            console.error("Failed to toggle skill:", e);
+        } catch (error_) {
+            console.error("Failed to toggle skill:", error_);
         }
     }, []);
 
@@ -262,9 +268,9 @@ export function Settings() {
                 const data = await res.json();
                 setError(data.error || "Failed to restart gateway");
             }
-        } catch (e: unknown) {
+        } catch (error_: unknown) {
             const errorMessage =
-                e instanceof Error ? e.message : "Failed to restart gateway";
+                error_ instanceof Error ? error_.message : "Failed to restart gateway";
             setError(errorMessage);
         } finally {
             setRestarting(false);
@@ -285,9 +291,9 @@ export function Settings() {
                 const data = await res.json();
                 setError(data.error || "Failed to create backup");
             }
-        } catch (e: unknown) {
+        } catch (error_: unknown) {
             const errorMessage =
-                e instanceof Error ? e.message : "Failed to create backup";
+                error_ instanceof Error ? error_.message : "Failed to create backup";
             setError(errorMessage);
         } finally {
             setBackingUp(false);
@@ -296,20 +302,20 @@ export function Settings() {
 
     if (loading) {
         return (
-            <div className="p-6 flex items-center justify-center min-h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-accent-400" />
+            <div className="flex min-h-64 items-center justify-center p-6">
+                <Loader2 className="h-8 w-8 animate-spin text-accent-400" />
             </div>
         );
     }
 
     return (
         <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Settings</h1>
                 <Button onClick={() => form.handleSubmit()} disabled={saving}>
                     {saving ? (
                         <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Saving...
                         </>
                     ) : (
@@ -322,14 +328,14 @@ export function Settings() {
             </div>
 
             {error && (
-                <div className="bg-red-500/20 border border-red-500 text-red-400 p-3 rounded-lg mb-4 flex items-center gap-2">
+                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
                     <AlertCircle size={18} />
                     {error}
                 </div>
             )}
 
             {success && (
-                <div className="bg-green-500/20 border border-green-500 text-green-400 p-3 rounded-lg mb-4 flex items-center gap-2">
+                <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-500 bg-green-500/20 p-3 text-green-400">
                     <Check size={18} />
                     {success}
                 </div>
@@ -342,7 +348,10 @@ export function Settings() {
                     <div className="space-y-1">
                         <ReadOnlyField label="Port" value={config?.gateway?.port} />
                         <ReadOnlyField label="Mode" value={config?.gateway?.mode} />
-                        <ReadOnlyField label="Auth Type" value={config?.gateway?.auth?.type} />
+                        <ReadOnlyField
+                            label="Auth Type"
+                            value={config?.gateway?.auth?.type}
+                        />
                         <ReadOnlyField
                             label="Auth Enabled"
                             value={config?.gateway?.auth?.enabled ? "Yes" : "No"}
@@ -353,17 +362,20 @@ export function Settings() {
                 {/* Agents */}
                 <ExpandableCard title="Agents" icon={Users}>
                     <div className="space-y-1">
-                        <ReadOnlyField label="Default Model" value={config?.agents?.defaultModel} />
+                        <ReadOnlyField
+                            label="Default Model"
+                            value={config?.agents?.defaultModel}
+                        />
                         {config?.agents?.fallbacks?.length ? (
                             <div className="py-2">
-                                <span className="text-slate-400 text-sm block mb-1">
+                                <span className="mb-1 block text-sm text-slate-400">
                                     Fallbacks
                                 </span>
                                 <div className="flex flex-wrap gap-1">
                                     {config.agents.fallbacks.map((m, i) => (
                                         <span
                                             key={i}
-                                            className="px-2 py-0.5 bg-primary-700 rounded text-xs"
+                                            className="rounded bg-primary-700 px-2 py-0.5 text-xs"
                                         >
                                             {m}
                                         </span>
@@ -388,12 +400,13 @@ export function Settings() {
                 <ExpandableCard title="Channels" icon={MessageSquare}>
                     <div className="space-y-3">
                         {config?.channels?.discord ? (
-                            <div className="flex justify-between items-center py-2 border-b border-primary-700 last:border-0">
+                            <div className="flex items-center justify-between border-b border-primary-700 py-2 last:border-0">
                                 <div className="flex items-center gap-2">
                                     <span className="text-primary-200">Discord</span>
                                     {config.channels.discord.botId && (
-                                        <span className="text-xs text-primary-500 font-mono">
-                                            ({config.channels.discord.botId.slice(0, 8)}...)
+                                        <span className="font-mono text-xs text-primary-500">
+                                            ({config.channels.discord.botId.slice(0, 8)}
+                                            ...)
                                         </span>
                                     )}
                                 </div>
@@ -404,7 +417,9 @@ export function Settings() {
                                             : "text-red-400"
                                     }
                                 >
-                                    {config.channels.discord.enabled ? "Enabled" : "Disabled"}
+                                    {config.channels.discord.enabled
+                                        ? "Enabled"
+                                        : "Disabled"}
                                 </span>
                             </div>
                         ) : (
@@ -416,7 +431,10 @@ export function Settings() {
                 {/* Session */}
                 <ExpandableCard title="Session" icon={Clock} defaultExpanded>
                     <div className="space-y-1">
-                        <ReadOnlyField label="Reset Mode" value={config?.session?.reset?.mode} />
+                        <ReadOnlyField
+                            label="Reset Mode"
+                            value={config?.session?.reset?.mode}
+                        />
                         <form.Field name="idleMinutes">
                             {(field) => (
                                 <div className="py-2">
@@ -425,7 +443,9 @@ export function Settings() {
                                         type="number"
                                         value={field.state.value?.toString() ?? ""}
                                         onChange={(e) =>
-                                            field.handleChange(parseInt(e.target.value) || 0)
+                                            field.handleChange(
+                                                Number.parseInt(e.target.value) || 0
+                                            )
                                         }
                                         onBlur={field.handleBlur}
                                         placeholder="30"
@@ -440,10 +460,10 @@ export function Settings() {
                 {/* Tools */}
                 <ExpandableCard title="Tools" icon={Wrench}>
                     <div className="space-y-3">
-                        <div className="flex justify-between items-center py-2 border-b border-primary-700">
+                        <div className="flex items-center justify-between border-b border-primary-700 py-2">
                             <div>
                                 <span className="text-primary-200">Web Search</span>
-                                <span className="text-xs text-primary-500 ml-2">
+                                <span className="ml-2 text-xs text-primary-500">
                                     ({config?.tools?.webSearch?.provider || "default"})
                                 </span>
                             </div>
@@ -454,13 +474,15 @@ export function Settings() {
                                         : "text-red-400"
                                 }
                             >
-                                {config?.tools?.webSearch?.enabled ? "Enabled" : "Disabled"}
+                                {config?.tools?.webSearch?.enabled
+                                    ? "Enabled"
+                                    : "Disabled"}
                             </span>
                         </div>
-                        <div className="flex justify-between items-center py-2">
+                        <div className="flex items-center justify-between py-2">
                             <div>
                                 <span className="text-primary-200">Exec</span>
-                                <span className="text-xs text-primary-500 ml-2">
+                                <span className="ml-2 text-xs text-primary-500">
                                     ({config?.tools?.exec?.mode || "default"})
                                 </span>
                             </div>
@@ -492,7 +514,9 @@ export function Settings() {
                                         type="number"
                                         value={field.state.value?.toString() ?? ""}
                                         onChange={(e) =>
-                                            field.handleChange(parseInt(e.target.value) || 0)
+                                            field.handleChange(
+                                                Number.parseInt(e.target.value) || 0
+                                            )
                                         }
                                         onBlur={field.handleBlur}
                                         placeholder="60"
@@ -508,7 +532,9 @@ export function Settings() {
                                         label="Target Channel"
                                         type="text"
                                         value={field.state.value ?? ""}
-                                        onChange={(e) => field.handleChange(e.target.value)}
+                                        onChange={(e) =>
+                                            field.handleChange(e.target.value)
+                                        }
                                         onBlur={field.handleBlur}
                                         placeholder="channel-id or name"
                                         className="text-sm"
@@ -526,10 +552,12 @@ export function Settings() {
                             {skills.map((skill) => (
                                 <div
                                     key={skill.name}
-                                    className="flex justify-between items-center py-2 border-b border-primary-700 last:border-0"
+                                    className="flex items-center justify-between border-b border-primary-700 py-2 last:border-0"
                                 >
                                     <div className="flex flex-col">
-                                        <span className="text-primary-200">{skill.name}</span>
+                                        <span className="text-primary-200">
+                                            {skill.name}
+                                        </span>
                                         {skill.description && (
                                             <span className="text-xs text-primary-500">
                                                 {skill.description}
@@ -538,28 +566,37 @@ export function Settings() {
                                     </div>
                                     <Switch
                                         checked={skill.enabled}
-                                        onChange={() => handleToggleSkill(skill.name, !skill.enabled)}
+                                        onChange={() =>
+                                            handleToggleSkill(skill.name, !skill.enabled)
+                                        }
                                     />
                                 </div>
                             ))}
                         </div>
                     ) : (
-                        <p className="text-primary-500 text-sm">No skills installed</p>
+                        <p className="text-sm text-primary-500">No skills installed</p>
                     )}
                 </ExpandableCard>
 
                 {/* Operations */}
                 <Card variant="bordered" className="mt-6">
                     <CardTitle className="mb-4">Operations</CardTitle>
-                    <p className="text-primary-400 text-sm mb-4">
+                    <p className="mb-4 text-sm text-primary-400">
                         Manage OpenClaw gateway and workspace operations.
                     </p>
                     <div className="flex gap-4">
-                        <Button variant="danger" onClick={() => setShowRestartModal(true)}>
+                        <Button
+                            variant="danger"
+                            onClick={() => setShowRestartModal(true)}
+                        >
                             <RefreshCw size={16} className="mr-2" />
                             Restart Gateway
                         </Button>
-                        <Button variant="secondary" onClick={handleBackup} disabled={backingUp}>
+                        <Button
+                            variant="secondary"
+                            onClick={handleBackup}
+                            disabled={backingUp}
+                        >
                             {backingUp ? (
                                 <Loader2 size={16} className="mr-2 animate-spin" />
                             ) : (
@@ -578,15 +615,19 @@ export function Settings() {
                 title="Confirm Restart"
                 size="sm"
             >
-                <p className="text-primary-300 mb-4">
+                <p className="mb-4 text-primary-300">
                     Are you sure you want to restart the Gateway? This will temporarily
                     disconnect all sessions.
                 </p>
-                <div className="flex gap-3 justify-end">
+                <div className="flex justify-end gap-3">
                     <Button variant="ghost" onClick={() => setShowRestartModal(false)}>
                         Cancel
                     </Button>
-                    <Button variant="danger" onClick={handleRestart} disabled={restarting}>
+                    <Button
+                        variant="danger"
+                        onClick={handleRestart}
+                        disabled={restarting}
+                    >
                         {restarting ? (
                             <>
                                 <Loader2 size={16} className="mr-2 animate-spin" />

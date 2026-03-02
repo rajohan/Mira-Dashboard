@@ -1,4 +1,5 @@
 import { type ButtonHTMLAttributes, forwardRef } from "react";
+
 import { cn } from "../../utils/cn";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,7 +13,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             <button
                 ref={ref}
                 className={cn(
-                    "inline-flex items-center justify-center font-medium rounded-lg transition-colors",
+                    "inline-flex items-center justify-center rounded-lg font-medium transition-colors",
                     "outline-none ring-0",
                     {
                         "bg-accent-500 text-white hover:bg-accent-600":
@@ -28,14 +29,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                         "px-4 py-2 text-sm": size === "md",
                         "px-6 py-3 text-base": size === "lg",
                     },
-                    className,
+                    className
                 )}
                 {...props}
             >
                 {children}
             </button>
         );
-    },
+    }
 );
 
 Button.displayName = "Button";

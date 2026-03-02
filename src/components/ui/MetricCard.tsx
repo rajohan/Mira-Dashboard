@@ -25,7 +25,14 @@ const barColorClasses = {
     red: "bg-red-500",
 };
 
-export function MetricCard({ title, value, subtitle, percent, color = "blue", icon }: MetricCardProps) {
+export function MetricCard({
+    title,
+    value,
+    subtitle,
+    percent,
+    color = "blue",
+    icon,
+}: MetricCardProps) {
     const getColor = (p: number): "green" | "blue" | "orange" | "red" => {
         if (p < 50) return "green";
         if (p < 75) return "blue";
@@ -33,13 +40,13 @@ export function MetricCard({ title, value, subtitle, percent, color = "blue", ic
         return "red";
     };
 
-    const effectiveColor = percent !== undefined ? getColor(percent) : color;
+    const effectiveColor = percent === undefined ? color : getColor(percent);
 
     return (
         <Card>
-            <div className="flex items-center gap-3 mb-3">
+            <div className="mb-3 flex items-center gap-3">
                 {icon && (
-                    <div className={"p-2 rounded-lg " + colorClasses[effectiveColor]}>
+                    <div className={"rounded-lg p-2 " + colorClasses[effectiveColor]}>
                         {icon}
                     </div>
                 )}
@@ -48,16 +55,21 @@ export function MetricCard({ title, value, subtitle, percent, color = "blue", ic
             <div className="flex items-end justify-between">
                 <div>
                     <div className="text-2xl font-bold">{value}</div>
-                    {subtitle && <div className="text-xs text-slate-500 mt-1">{subtitle}</div>}
+                    {subtitle && (
+                        <div className="mt-1 text-xs text-slate-500">{subtitle}</div>
+                    )}
                 </div>
                 {percent !== undefined && (
                     <div className="text-lg font-semibold text-slate-400">{percent}%</div>
                 )}
             </div>
             {percent !== undefined && (
-                <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
                     <div
-                        className={"h-full transition-all duration-500 " + barColorClasses[effectiveColor]}
+                        className={
+                            "h-full transition-all duration-500 " +
+                            barColorClasses[effectiveColor]
+                        }
                         style={{ width: Math.min(percent, 100) + "%" }}
                     />
                 </div>

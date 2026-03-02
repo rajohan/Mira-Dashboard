@@ -7,18 +7,18 @@ function getSystemMetrics() {
     // CPU
     const cpus = os.cpus();
     const loadAvg = os.loadavg();
-    
+
     // Memory
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
     const memPercent = Math.round((usedMem / totalMem) * 100);
-    
+
     // Disk
     let diskTotal = 0;
     let diskUsed = 0;
     let diskPercent = 0;
-    
+
     try {
         const dfOutput = execSync("df -B1 / | tail -1", { encoding: "utf8" });
         const parts = dfOutput.trim().split(/\s+/);
@@ -30,10 +30,10 @@ function getSystemMetrics() {
     } catch (e) {
         console.error("[Metrics] df error:", e.message);
     }
-    
+
     // Uptime
     const uptime = os.uptime();
-    
+
     return {
         cpu: {
             count: cpus.length,
@@ -71,18 +71,18 @@ function getTokenMetrics() {
     const byModel = {};
     const sessionsByModel = {};
     const byAgent = [];
-    
+
     for (const session of sessions) {
         const model = session.model || "unknown";
         const tokens = session.tokenCount || 0;
-        
+
         totalTokens += tokens;
         byModel[model] = (byModel[model] || 0) + tokens;
-        
+
         // Count sessions by model
         const modelKey = model.split("/").pop(); // Remove provider prefix
         sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
-        
+
         // Agent data
         if (session.displayLabel || session.label) {
             byAgent.push({
@@ -93,7 +93,7 @@ function getTokenMetrics() {
             });
         }
     }
-    
+
     return {
         total: totalTokens,
         byModel,
@@ -102,12 +102,12 @@ function getTokenMetrics() {
     };
 }
 
-module.exports = function(app) {
+module.exports = function (app) {
     app.get("/api/metrics", (req, res) => {
         try {
             const system = getSystemMetrics();
             const tokens = getTokenMetrics();
-            
+
             res.json({
                 ...system,
                 tokens,

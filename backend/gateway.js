@@ -15,7 +15,7 @@ function transformSession(session) {
     let agentType = "";
     const key = session.key || "";
     const keyParts = key.split(":");
-    
+
     if (keyParts.length >= 2) {
         agentType = keyParts[1] || "";
     }
@@ -67,12 +67,20 @@ function transformSession(session) {
 function broadcast(msg) {
     const data = JSON.stringify(msg);
     for (const ws of subscribers) {
-        try { ws.send(data); } catch {}
+        try {
+            ws.send(data);
+        } catch {
+            // Ignore errors from closed connections
+        }
     }
 }
 
 function connect(token) {
-    if (gatewayWs && (gatewayWs.readyState === WebSocket.OPEN || gatewayWs.readyState === WebSocket.CONNECTING)) {
+    if (
+        gatewayWs &&
+        (gatewayWs.readyState === WebSocket.OPEN ||
+            gatewayWs.readyState === WebSocket.CONNECTING)
+    ) {
         return;
     }
 
@@ -86,25 +94,27 @@ function connect(token) {
 
         ws.on("open", () => {
             console.log("[Gateway] WS open, sending connect...");
-            ws.send(JSON.stringify({
-                type: "req",
-                id: "connect-1",
-                method: "connect",
-                params: {
-                    minProtocol: 3,
-                    maxProtocol: 3,
-                    client: {
-                        id: "cli",
-                        version: "1.0.0",
-                        platform: "node",
-                        mode: "backend",
+            ws.send(
+                JSON.stringify({
+                    type: "req",
+                    id: "connect-1",
+                    method: "connect",
+                    params: {
+                        minProtocol: 3,
+                        maxProtocol: 3,
+                        client: {
+                            id: "cli",
+                            version: "1.0.0",
+                            platform: "node",
+                            mode: "backend",
+                        },
+                        role: "operator",
+                        scopes: ["operator.read", "operator.write", "operator.admin"],
+                        caps: ["tool-events"],
+                        auth: { token },
                     },
-                    role: "operator",
-                    scopes: ["operator.read", "operator.write", "operator.admin"],
-                    caps: ["tool-events"],
-                    auth: { token },
-                },
-            }));
+                })
+            );
         });
 
         ws.on("message", (data) => {
@@ -117,19 +127,24 @@ function connect(token) {
                         isGatewayConnected = true;
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
-                        ws.send(JSON.stringify({
-                            type: "req",
-                            id: "sessions-init",
-                            method: "sessions.list",
-                            params: {},
-                        }));
+                        ws.send(
+                            JSON.stringify({
+                                type: "req",
+                                id: "sessions-init",
+                                method: "sessions.list",
+                                params: {},
+                            })
+                        );
                     } else {
                         console.error("[Gateway] Connect failed:", msg.error);
                     }
                     return;
                 }
 
-                if (msg.type === "res" && (msg.id === "sessions-init" || msg.id === "sessions-refresh")) {
+                if (
+                    msg.type === "res" &&
+                    (msg.id === "sessions-init" || msg.id === "sessions-refresh")
+                ) {
                     if (msg.ok && msg.payload?.sessions) {
                         sessionList = msg.payload.sessions.map(transformSession);
                         broadcast({ type: "sessions", sessions: sessionList });
@@ -137,7 +152,12 @@ function connect(token) {
                     return;
                 }
 
-                if (msg.type === "res" && msg.method === "sessions.list" && msg.ok && msg.payload?.sessions) {
+                if (
+                    msg.type === "res" &&
+                    msg.method === "sessions.list" &&
+                    msg.ok &&
+                    msg.payload?.sessions
+                ) {
                     sessionList = msg.payload.sessions.map(transformSession);
                     broadcast({ type: "sessions", sessions: sessionList });
                     return;
@@ -147,23 +167,30 @@ function connect(token) {
                     const pending = pendingRequests.get(msg.id);
                     pendingRequests.delete(msg.id);
 
-                    if (pending.clientWs && pending.clientWs.readyState === WebSocket.OPEN) {
-                        pending.clientWs.send(JSON.stringify({
-                            type: "res",
-                            id: pending.clientId,
-                            ok: msg.ok,
-                            payload: msg.payload,
-                            error: msg.error,
-                        }));
+                    if (
+                        pending.clientWs &&
+                        pending.clientWs.readyState === WebSocket.OPEN
+                    ) {
+                        pending.clientWs.send(
+                            JSON.stringify({
+                                type: "res",
+                                id: pending.clientId,
+                                ok: msg.ok,
+                                payload: msg.payload,
+                                error: msg.error,
+                            })
+                        );
                     }
 
                     if (pending.method && pending.method.startsWith("sessions.")) {
-                        ws.send(JSON.stringify({
-                            type: "req",
-                            id: "sessions-refresh",
-                            method: "sessions.list",
-                            params: {},
-                        }));
+                        ws.send(
+                            JSON.stringify({
+                                type: "req",
+                                id: "sessions-refresh",
+                                method: "sessions.list",
+                                params: {},
+                            })
+                        );
                     }
                     return;
                 }
@@ -218,11 +245,13 @@ function sendRequest(method, params, clientWs, clientId) {
 
 function handleClient(ws) {
     subscribers.add(ws);
-    ws.send(JSON.stringify({
-        type: "state",
-        gatewayConnected: isGatewayConnected,
-        sessions: sessionList
-    }));
+    ws.send(
+        JSON.stringify({
+            type: "state",
+            gatewayConnected: isGatewayConnected,
+            sessions: sessionList,
+        })
+    );
 
     ws.on("message", (data) => {
         try {
@@ -244,7 +273,7 @@ function handleClient(ws) {
 function getStatus() {
     return {
         gateway: isGatewayConnected ? "connected" : "disconnected",
-        sessions: sessionList.length
+        sessions: sessionList.length,
     };
 }
 

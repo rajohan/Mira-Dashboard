@@ -9,7 +9,7 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const ALLOWED_CONFIG_FILES = [
     "openclaw.json",
     "config/agents.json5",
-    "config/channels.json5", 
+    "config/channels.json5",
     "config/models.json5",
     "cron/jobs.json",
     "hooks/transforms/agentmail.ts",
@@ -24,7 +24,7 @@ function isBinaryFile(content) {
 
 function listConfigFiles() {
     const files = [];
-    
+
     for (const relPath of ALLOWED_CONFIG_FILES) {
         const fullPath = path.join(OPENCLAW_ROOT, relPath);
         try {
@@ -37,15 +37,15 @@ function listConfigFiles() {
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
             });
-        } catch (e) {
+        } catch {
             // File doesn't exist, skip
         }
     }
-    
+
     return files;
 }
 
-module.exports = function(app, express) {
+module.exports = function (app, express) {
     // List config files
     app.get("/api/config-files", (req, res) => {
         try {
@@ -60,34 +60,36 @@ module.exports = function(app, express) {
     // Read config file content
     app.get("/api/config-files/*", (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
-        
+
         // Check if file is in whitelist
         if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
-            return res.status(403).json({ error: "Access denied: file not in allowed list" });
+            return res
+                .status(403)
+                .json({ error: "Access denied: file not in allowed list" });
         }
-        
+
         try {
             const fullPath = path.join(OPENCLAW_ROOT, filePath);
-            
+
             if (!fs.existsSync(fullPath)) {
                 return res.status(404).json({ error: "File not found" });
             }
-            
+
             const stat = fs.statSync(fullPath);
-            
+
             if (stat.isDirectory()) {
                 return res.status(400).json({ error: "Path is a directory, not a file" });
             }
-            
+
             if (stat.size > MAX_FILE_SIZE) {
                 const fd = fs.openSync(fullPath, "r");
                 const buffer = Buffer.alloc(MAX_FILE_SIZE);
                 const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
                 fs.closeSync(fd);
-                
+
                 const content = buffer.toString("utf-8", 0, bytesRead);
                 const isBinary = isBinaryFile(content);
-                
+
                 return res.json({
                     path: "config:" + filePath,
                     relPath: filePath,
@@ -98,10 +100,10 @@ module.exports = function(app, express) {
                     truncated: true,
                 });
             }
-            
+
             const content = fs.readFileSync(fullPath, "utf-8");
             const isBinary = isBinaryFile(content);
-            
+
             res.json({
                 path: "config:" + filePath,
                 relPath: filePath,
@@ -120,19 +122,21 @@ module.exports = function(app, express) {
     app.put("/api/config-files/*", express.json(), (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
         const { content } = req.body;
-        
+
         if (content === undefined) {
             return res.status(400).json({ error: "Content required" });
         }
-        
+
         // Check if file is in whitelist
         if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
-            return res.status(403).json({ error: "Access denied: file not in allowed list" });
+            return res
+                .status(403)
+                .json({ error: "Access denied: file not in allowed list" });
         }
-        
+
         try {
             const fullPath = path.join(OPENCLAW_ROOT, filePath);
-            
+
             // Create backup
             if (fs.existsSync(fullPath)) {
                 const backupPath = fullPath + ".bak";
@@ -143,10 +147,10 @@ module.exports = function(app, express) {
                     fs.mkdirSync(parentDir, { recursive: true });
                 }
             }
-            
+
             fs.writeFileSync(fullPath, content, "utf-8");
             const stat = fs.statSync(fullPath);
-            
+
             res.json({
                 success: true,
                 path: "config:" + filePath,

@@ -1,9 +1,10 @@
-import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useAuthStore } from "../stores/authStore";
+import { useState } from "react";
+
 import { Button } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
 import { Card, CardTitle } from "../components/ui/Card";
+import { Input } from "../components/ui/Input";
+import { useAuthStore } from "../stores/authStore";
 
 export function Login() {
     const [token, setToken] = useState("");
@@ -19,12 +20,14 @@ export function Login() {
     };
 
     return (
-        <div className="min-h-screen bg-primary-900 flex items-center justify-center p-4">
+        <div className="flex min-h-screen items-center justify-center bg-primary-900 p-4">
             <Card className="w-full max-w-md" variant="bordered">
-                <div className="text-center mb-4">
-                    <div className="text-4xl mb-2">👩‍💻</div>
+                <div className="mb-4 text-center">
+                    <div className="mb-2 text-4xl">👩‍💻</div>
                     <CardTitle className="text-center">Mira Dashboard</CardTitle>
-                    <p className="text-primary-400 mt-2">Enter your OpenClaw token to continue</p>
+                    <p className="mt-2 text-primary-400">
+                        Enter your OpenClaw token to continue
+                    </p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -40,7 +43,7 @@ export function Login() {
                     </Button>
                 </form>
 
-                <p className="text-xs text-primary-500 mt-4 text-center">
+                <p className="mt-4 text-center text-xs text-primary-500">
                     Token can be found in your OpenClaw gateway URL
                 </p>
             </Card>

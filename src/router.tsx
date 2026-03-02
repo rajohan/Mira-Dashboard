@@ -1,14 +1,20 @@
-import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import {
+    createRootRoute,
+    createRoute,
+    createRouter,
+    Outlet,
+} from "@tanstack/react-router";
+
 import { Layout } from "./components/layout/Layout";
 import { Dashboard } from "./pages/Dashboard";
-import { Sessions } from "./pages/Sessions";
-import { Logs } from "./pages/Logs";
-import { Metrics } from "./pages/Metrics";
-import { Tasks } from "./pages/Tasks";
 import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
+import { Logs } from "./pages/Logs";
+import { Metrics } from "./pages/Metrics";
 import { Moltbook } from "./pages/Moltbook";
+import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
+import { Tasks } from "./pages/Tasks";
 
 // Root route (no component, just outlet)
 const rootRoute = createRootRoute({
