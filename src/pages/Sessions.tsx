@@ -331,7 +331,7 @@ export function Sessions() {
                 <h1 className="text-2xl font-bold">Sessions</h1>
                 <div className="flex items-center gap-4">
                     <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={!isConnected || isLoading}>
-                        <RefreshCw className={"w-4 h-4 mr-2" + (isLoading ? " animate-spin" : "")} />
+                        <RefreshCw className={"w-4 h-4 mr-2 " + (isLoading ? " animate-spin" : "")} />
                         Refresh
                     </Button>
                     <div className="flex items-center gap-2">
