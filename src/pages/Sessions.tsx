@@ -201,13 +201,13 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
                         <h2 className="text-lg font-semibold text-slate-100 truncate">{displayName}</h2>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="relative">
+                        <div className="actions-dropdown relative">
                             <Button variant="ghost" size="sm" onClick={() => setShowActions(!showActions)} className="flex items-center gap-1">
                                 <MoreVertical className="w-4 h-4" />
                                 <ChevronDown className={"w-3 h-3 transition-transform " + (showActions ? "rotate-180" : "")} />
                             </Button>
                             {showActions && (
-                                <div className="actions-dropdown absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[140px]">
+                                <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[140px]">
                                     <button onClick={() => { setShowActions(false); onStop(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
                                         <Square className="w-4 h-4" /> Stop
                                     </button>
@@ -530,7 +530,7 @@ export function Sessions() {
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-slate-400">{formatDuration(session.updatedAt)}</td>
                                                 <td className="px-4 py-3 text-right">
-                                                    <div className="relative inline-block">
+                                                    <div className="actions-dropdown relative inline-block">
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
@@ -541,7 +541,7 @@ export function Sessions() {
                                                             <ChevronDown className={"w-3 h-3 transition-transform " + (activeDropdown === session.key ? "rotate-180" : "")} />
                                                         </Button>
                                                         {activeDropdown === session.key && (
-                                                            <div className="actions-dropdown absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
+                                                            <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
                                                                 <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
                                                                     <Square className="w-4 h-4" /> Stop
                                                                 </button>
