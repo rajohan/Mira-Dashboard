@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { Menu } from "@headlessui/react";
 import { useOpenClaw, type Session } from "../hooks/useOpenClaw";
 import { useAuthStore } from "../stores/authStore";
 import { Card } from "../components/ui/Card";
@@ -142,21 +143,8 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
     const [visibleCount, setVisibleCount] = useState(50);
     const [totalCount, setTotalCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
-    const [showActions, setShowActions] = useState(false);
-
-    // Close dropdown when clicking outside (modal)
-    useEffect(() => {
-        if (!showActions) return;
-        const handleClick = (e: MouseEvent) => {
-            const el = e.target as HTMLElement;
-            // Close if click is outside the dropdown menu
-            if (!el.closest('.dropdown-menu')) {
-                setShowActions(false);
-            }
-        };
-        document.addEventListener('click', handleClick);
-        return () => document.removeEventListener('click', handleClick);
-    }, [showActions]);
+    
+    
 
     const fetchHistory = async () => {
         setLoading(true);
@@ -353,8 +341,7 @@ export function Sessions() {
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-    const [typeFilter, setTypeFilter] = useState<string>("ALL");
+        const [typeFilter, setTypeFilter] = useState<string>("ALL");
 
     useEffect(() => {
         // Call fetchHistory defined above
