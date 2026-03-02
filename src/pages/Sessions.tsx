@@ -133,7 +133,7 @@ interface SessionDetailsProps {
 }
 
 function SessionDetails({ session, onClose, onDelete, onPause, onResume }: SessionDetailsProps) {
-    const [history, setHistory] = useState<Array<{ role: string; content: string }>>([]);
+    const [history, setHistory] = useState<Array<{ role: string; content: string; timestamp?: string }>>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -260,15 +260,27 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {history.slice(0, 50).map((msg, i) => (
+                                {[...history].reverse().slice(0, 50).map((msg, i) => (
                                     <div 
                                         key={i} 
                                         className={"p-3 rounded-lg " + (msg.role === "user" ? "bg-blue-500/10 border border-blue-500/20" : "bg-slate-700/50 border border-slate-600/50")}
                                     >
-                                        <span className={"text-xs font-medium uppercase " + (msg.role === "user" ? "text-blue-400" : "text-green-400")}>
-                                            {msg.role}
-                                        </span>
-                                        <p className="text-sm text-slate-200 mt-1 whitespace-pre-wrap break-words">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className={"text-xs font-medium uppercase " + (msg.role === "user" ? "text-blue-400" : "text-green-400")}>
+                                                {msg.role}
+                                            </span>
+                                            {msg.timestamp && (
+                                                <span className="text-xs text-slate-500">
+                                                    {new Date(msg.timestamp).toLocaleString("no-NO", { 
+                                                        day: "2-digit", 
+                                                        month: "2-digit",
+                                                        hour: "2-digit", 
+                                                        minute: "2-digit" 
+                                                    })}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">
                                             {msg.content?.slice(0, 500)}
                                             {msg.content?.length > 500 && "..."}
                                         </p>
@@ -276,7 +288,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                 ))}
                                 {history.length > 50 && (
                                     <p className="text-center text-slate-500 text-sm">
-                                        Showing first 50 of {history.length} messages
+                                        Showing newest 50 of {history.length} messages
                                     </p>
                                 )}
                             </div>
