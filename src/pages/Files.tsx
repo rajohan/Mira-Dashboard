@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import ReactJsonView from "@microlink/react-json-view";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 import JSON5 from "json5";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -123,6 +125,44 @@ function getSyntaxClass(filename: string): string {
     return syntaxMap[ext] || "text-slate-300";
 }
 
+function getFileIcon(filename: string, type: "file" | "directory") {
+    if (type === "directory") return <Folder size={16} className="text-yellow-400 flex-shrink-0" />;
+    
+    const ext = getFileExtension(filename);
+    const iconMap: Record<string, { icon: string; color: string }> = {
+        ts: { icon: "TS", color: "text-blue-400" },
+        tsx: { icon: "TSX", color: "text-blue-400" },
+        js: { icon: "JS", color: "text-yellow-300" },
+        jsx: { icon: "JSX", color: "text-yellow-300" },
+        py: { icon: "PY", color: "text-green-400" },
+        sh: { icon: "SH", color: "text-green-300" },
+        bash: { icon: "SH", color: "text-green-300" },
+        json: { icon: "{ }", color: "text-yellow-400" },
+        json5: { icon: "{ }", color: "text-yellow-400" },
+        md: { icon: "MD", color: "text-slate-400" },
+        markdown: { icon: "MD", color: "text-slate-400" },
+        go: { icon: "GO", color: "text-cyan-400" },
+        rs: { icon: "RS", color: "text-orange-400" },
+        java: { icon: "JV", color: "text-red-400" },
+        c: { icon: "C", color: "text-blue-300" },
+        cpp: { icon: "C++", color: "text-blue-300" },
+        css: { icon: "CSS", color: "text-pink-400" },
+        html: { icon: "HTML", color: "text-orange-400" },
+        sql: { icon: "SQL", color: "text-purple-400" },
+    };
+    
+    const iconInfo = iconMap[ext];
+    if (iconInfo) {
+        return (
+            <span className={"text-[10px] font-bold flex-shrink-0 w-4 h-4 flex items-center justify-center " + iconInfo.color}>
+                {iconInfo.icon}
+            </span>
+        );
+    }
+    
+    return <File size={16} className="text-slate-400 flex-shrink-0" />;
+}
+
 function FileTreeItem({
     node,
     selectedPath,
@@ -165,12 +205,12 @@ function FileTreeItem({
                         ) : (
                             <span className="w-3.5" />
                         )}
-                        <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                        {getFileIcon(node.name, node.type)}
                     </>
                 ) : (
                     <>
                         <span className="w-3.5" />
-                        <File size={16} className="text-slate-400 flex-shrink-0" />
+                        {getFileIcon(node.name, node.type)}
                     </>
                 )}
                 <span className="truncate text-sm">{node.name}</span>
@@ -495,13 +535,16 @@ export function Files() {
 
             <div className="flex-1 flex gap-4 min-h-0">
                 {/* Sidebar: Workspace + Config */}
-                <div className="w-72 flex-shrink-0 flex flex-col gap-4">
-                    {/* Workspace */}
-                    <Card variant="bordered" className="flex-1 overflow-hidden flex flex-col p-0">
+                <div className="w-72 flex-shrink-0">
+                    <Card variant="bordered" className="h-full overflow-hidden flex flex-col p-0">
+                        {/* Workspace */}
                         <div className="p-3 border-b border-slate-700">
-                            <CardTitle className="text-sm">Workspace</CardTitle>
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <Folder size={14} />
+                                Workspace
+                            </CardTitle>
                         </div>
-                        <div className="flex-1 overflow-auto p-2">
+                        <div className="flex-1 overflow-auto p-2 border-b border-slate-700">
                             {isLoading && files.length === 0 ? (
                                 <div className="text-slate-400 text-sm p-2">Loading...</div>
                             ) : files.length === 0 ? (
@@ -524,26 +567,27 @@ export function Files() {
                                     ))
                             )}
                         </div>
-                    </Card>
-
-                    {/* Config */}
-                    <Card variant="bordered" className="flex-shrink-0 p-0">
-                        <div className="p-3 border-b border-slate-700">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                                <Settings size={14} />
-                                Config
-                            </CardTitle>
+                        {/* Config */}
+                        <div className="border-t border-slate-700">
+                            <div className="p-3 border-b border-slate-700">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <Settings size={14} />
+                                    Config
+                                </CardTitle>
+                            </div>
+                            <div className="overflow-auto max-h-64">
+                                <ConfigSection
+                                    selectedPath={selectedPath}
+                                    onSelect={handleSelect}
+                                    configDirExpanded={configDirExpanded}
+                                    onConfigDirToggle={() => setConfigDirExpanded(!configDirExpanded)}
+                                    cronDirExpanded={cronDirExpanded}
+                                    onCronDirToggle={() => setCronDirExpanded(!cronDirExpanded)}
+                                    hooksDirExpanded={hooksDirExpanded}
+                                    onHooksDirToggle={() => setHooksDirExpanded(!hooksDirExpanded)}
+                                />
+                            </div>
                         </div>
-                        <ConfigSection
-                            selectedPath={selectedPath}
-                            onSelect={handleSelect}
-                            configDirExpanded={configDirExpanded}
-                            onConfigDirToggle={() => setConfigDirExpanded(!configDirExpanded)}
-                            cronDirExpanded={cronDirExpanded}
-                            onCronDirToggle={() => setCronDirExpanded(!cronDirExpanded)}
-                            hooksDirExpanded={hooksDirExpanded}
-                            onHooksDirToggle={() => setHooksDirExpanded(!hooksDirExpanded)}
-                        />
                     </Card>
                 </div>
 
@@ -633,11 +677,11 @@ export function Files() {
                                                     <p className="text-xs mt-1">Cannot display binary content</p>
                                                 </div>
                                             </div>
-                                        ) : isMarkdownFile(fileContent.path) && isEditable && markdownPreview ? (
+                                        ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
                                             <div className="p-6 prose prose-invert max-w-none prose-headings:mt-6 prose-headings:mb-4 prose-p:my-4 prose-li:my-1 prose-ul:my-4 prose-ol:my-4 prose-pre:my-4 prose-table:my-4 prose-blockquote:my-4 prose-hr:my-6">
                                                 <ReactMarkdown>{editedContent}</ReactMarkdown>
                                             </div>
-                                        ) : isJsonFile(fileContent.path) && isEditable && jsonPreview ? (
+                                        ) : isJsonFile(fileContent.path) && jsonPreview ? (
                                             <div className="p-4 overflow-auto">
                                                 <ReactJsonView
                                                     src={(() => {
@@ -653,11 +697,11 @@ export function Files() {
                                                     style={{ fontSize: "13px" }}
                                                 />
                                             </div>
-                                        ) : isCodeFile(fileContent.path) && isEditable ? (
+                                        ) : isCodeFile(fileContent.path) ? (
                                             <div className="h-full overflow-auto">
                                                 <SyntaxHighlighter
                                                     language={getLanguage(fileContent.path)}
-                                                    style={oneDark}
+                                                    style={monokai}
                                                     customStyle={{ margin: 0, padding: "1rem", background: "transparent", fontSize: "13px", height: "100%" }}
                                                     showLineNumbers={true}
                                                     lineNumberStyle={{ minWidth: "2.5em", paddingRight: "1em", color: "#6b7280" }}
