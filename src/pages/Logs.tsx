@@ -46,6 +46,7 @@ export function Logs() {
     const wsRef = useRef<WebSocket | null>(null);
     const historyBufferRef = useRef<LogEntry[]>([]);
     const isReceivingHistoryRef = useRef(true);
+    const isAutoScrollingRef = useRef(false); // Track programmatic scroll
 
     const levels = ["trace", "debug", "info", "warn", "error", "fatal"];
 
@@ -194,6 +195,24 @@ export function Logs() {
         }
     };
 
+    // Track selected file and line count for WebSocket loading
+    const selectedFileRef = useRef<string>(selectedFile);
+    const lineCountRef = useRef<number>(lineCount);
+
+    // Keep refs in sync
+    useEffect(() => {
+        selectedFileRef.current = selectedFile;
+        lineCountRef.current = lineCount;
+    }, [selectedFile, lineCount]);
+
+    // Load log content when file selection changes
+    useEffect(() => {
+        if (selectedFile && logFiles.length > 0) {
+            loadLogContent(selectedFile, lineCount);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedFile]); // Only when selectedFile changes
+
     useEffect(() => {
         const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
 
@@ -216,7 +235,9 @@ export function Logs() {
 
                 if (data.type === "log_history_complete") {
                     isReceivingHistoryRef.current = false;
-                    setLogs(historyBufferRef.current.slice(-2000));
+                    // Use lineCount from ref to respect user's selection
+                    const maxLines = lineCountRef.current;
+                    setLogs(historyBufferRef.current.slice(-maxLines));
                     historyBufferRef.current = [];
                     return;
                 }
@@ -232,9 +253,11 @@ export function Logs() {
                             historyBufferRef.current.push(parsed);
                         } else {
                             setLogs((prev) => {
+                                // Use lineCount from ref for live logs too
+                                const maxLines = lineCountRef.current;
                                 const exists = prev.some((l) => l.raw === parsed.raw);
                                 if (exists) return prev;
-                                return [...prev.slice(-2000), parsed];
+                                return [...prev.slice(-(maxLines - 1)), parsed];
                             });
                         }
                     }
@@ -382,20 +405,72 @@ export function Logs() {
         }
     };
 
-    // Virtualizer for efficient rendering
+    // Virtualizer for efficient rendering with variable row heights
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
         getScrollElement: () => logContainerRef.current,
-        estimateSize: () => 22, // Approximate row height
-        overscan: 10, // Render extra rows outside viewport for smooth scrolling
+        estimateSize: () => 22, // Base height
+        overscan: 15,
     });
 
-    // Auto-scroll to bottom when new logs arrive
+    // Handle scroll - re-enable autoFollow when user scrolls to bottom
+    const handleScroll = useCallback(() => {
+        if (!logContainerRef.current || isAutoScrollingRef.current) return;
+        
+        const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30; // 30px threshold
+        
+        if (isAtBottom && !autoFollow) {
+            setAutoFollow(true);
+        } else if (!isAtBottom && autoFollow) {
+            // User scrolled up - disable autoFollow
+            setAutoFollow(false);
+        }
+    }, [autoFollow]);
+
+    // Auto-scroll to bottom when logs load or autoFollow is enabled
     useEffect(() => {
-        if (autoFollow && filteredLogs.length > 0 && !isReceivingHistoryRef.current) {
-            rowVirtualizer.scrollToIndex(filteredLogs.length - 1);
+        if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
+            isAutoScrollingRef.current = true;
+            
+            const scrollToBottom = () => {
+                if (logContainerRef.current) {
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                }
+                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+            };
+            
+            requestAnimationFrame(() => {
+                scrollToBottom();
+                setTimeout(() => {
+                    scrollToBottom();
+                    isAutoScrollingRef.current = false;
+                }, 150);
+            });
         }
     }, [filteredLogs.length, autoFollow, rowVirtualizer]);
+
+    // Handle file/line count changes - scroll to bottom after loading new content
+    useEffect(() => {
+        if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
+            isAutoScrollingRef.current = true;
+            
+            const scrollToBottom = () => {
+                if (logContainerRef.current) {
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                }
+                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+            };
+            
+            requestAnimationFrame(() => {
+                scrollToBottom();
+                setTimeout(() => {
+                    scrollToBottom();
+                    isAutoScrollingRef.current = false;
+                }, 150);
+            });
+        }
+    }, [selectedFile, lineCount]);
 
     return (
         <div className="p-6 h-[calc(100vh-2rem)] flex flex-col">
@@ -573,6 +648,7 @@ export function Logs() {
             <Card className="flex-1 overflow-hidden" variant="bordered">
                 <div
                     ref={logContainerRef}
+                    onScroll={handleScroll}
                     className="h-full overflow-y-auto font-mono text-xs bg-slate-900/50"
                 >
                     {filteredLogs.length === 0 ? (
@@ -594,12 +670,13 @@ export function Logs() {
                                 return (
                                     <div
                                         key={virtualRow.key}
+                                        data-index={virtualRow.index}
+                                        ref={rowVirtualizer.measureElement}
                                         style={{
                                             position: "absolute",
                                             top: 0,
                                             left: 0,
                                             width: "100%",
-                                            height: `${virtualRow.size}px`,
                                             transform: `translateY(${virtualRow.start}px)`,
                                         }}
                                         className="flex items-start gap-2 py-0.5 px-4 hover:bg-slate-800/50"
@@ -623,7 +700,7 @@ export function Logs() {
                                                 [{log.subsystem}]
                                             </span>
                                         )}
-                                        <span className="text-slate-200 flex-1 break-all">
+                                        <span className="text-slate-200 flex-1 break-all whitespace-pre-wrap">
                                             {log.msg}
                                         </span>
                                     </div>
