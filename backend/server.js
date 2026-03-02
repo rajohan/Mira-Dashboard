@@ -11,7 +11,7 @@ const execRoutes = require("./routes/exec");
 const metricsRoutes = require("./routes/metrics");
 const moltbookRoutes = require("./routes/moltbook");
 const settingsRoutes = require("./routes/settings");
-const gateway = require("./routes/gateway");
+const gateway = require("./gateway");
 const staticRoutes = require("./routes/static");
 
 const app = express();
