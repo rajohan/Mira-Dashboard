@@ -6,6 +6,7 @@ const path = require("path");
 
 // Route modules
 const filesRoutes = require("./routes/files");
+const configFilesRoutes = require("./routes/config-files");
 const logsRoutes = require("./routes/logs");
 const execRoutes = require("./routes/exec");
 const metricsRoutes = require("./routes/metrics");
@@ -39,6 +40,7 @@ app.get("/api/sessions", (req, res) => {
 
 // Route modules
 filesRoutes(app, express);
+configFilesRoutes(app, express);
 logsRoutes(app);
 execRoutes(app, express);
 metricsRoutes(app);

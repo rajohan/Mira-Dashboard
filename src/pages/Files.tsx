@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import ReactJsonView from "@microlink/react-json-view";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import JSON5 from "json5";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { useAuthStore } from "../stores/authStore";
-import { Folder, File, ChevronRight, ChevronDown, Save, RefreshCw, AlertTriangle, X, Settings } from "lucide-react";
+import { Folder, File, ChevronRight, ChevronDown, Save, RefreshCw, AlertTriangle, X, Settings, Eye, Code } from "lucide-react";
 
 interface FileNode {
     name: string;
@@ -11,7 +16,7 @@ interface FileNode {
     size?: number;
     modified?: string;
     children?: FileNode[];
-    loaded?: boolean; // Track if directory children are loaded
+    loaded?: boolean;
 }
 
 interface FileContent {
@@ -22,14 +27,25 @@ interface FileContent {
     isBinary: boolean;
 }
 
-const MAX_PREVIEW_SIZE = 1024 * 1024; // 1MB
+const MAX_PREVIEW_SIZE = 1024 * 1024;
 
-// Config files to show in sidebar
-const CONFIG_FILES = [
-    { path: "/home/ubuntu/.openclaw/openclaw.json", label: "openclaw.json" },
-    { path: "/home/ubuntu/.openclaw/config/agents.json5", label: "config/agents.json5" },
-    { path: "/home/ubuntu/.openclaw/config/channels.json5", label: "config/channels.json5" },
-    { path: "/home/ubuntu/.openclaw/config/models.json5", label: "config/models.json5" },
+// Config files to show in sidebar (matches backend whitelist)
+const CONFIG_TOP_FILES = [
+    { path: "config:openclaw.json", label: "openclaw.json", relPath: "openclaw.json" },
+];
+
+const CONFIG_DIR_FILES = [
+    { path: "config:config/agents.json5", label: "agents.json5", relPath: "config/agents.json5" },
+    { path: "config:config/channels.json5", label: "channels.json5", relPath: "config/channels.json5" },
+    { path: "config:config/models.json5", label: "models.json5", relPath: "config/models.json5" },
+];
+
+const CRON_DIR_FILES = [
+    { path: "config:cron/jobs.json", label: "jobs.json", relPath: "cron/jobs.json" },
+];
+
+const HOOKS_DIR_FILES = [
+    { path: "config:hooks/transforms/agentmail.ts", label: "agentmail.ts", relPath: "hooks/transforms/agentmail.ts" },
 ];
 
 function formatSize(bytes: number): string {
@@ -52,10 +68,39 @@ function getFileExtension(filename: string): string {
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
 }
 
+function isMarkdownFile(filename: string): boolean {
+    const ext = getFileExtension(filename);
+    return ext === "md" || ext === "markdown";
+}
+
+function isJsonFile(filename: string): boolean {
+    const ext = getFileExtension(filename);
+    return ext === "json" || ext === "json5";
+}
+
+function isCodeFile(filename: string): boolean {
+    const ext = getFileExtension(filename);
+    const codeExts = ["js", "jsx", "ts", "tsx", "py", "sh", "bash", "zsh", "fish", "go", "rs", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "swift", "kt", "scala", "lua", "sql", "graphql", "proto"];
+    return codeExts.includes(ext);
+}
+
+function getLanguage(filename: string): string {
+    const ext = getFileExtension(filename);
+    const langMap: Record<string, string> = {
+        js: "javascript", jsx: "jsx", ts: "typescript", tsx: "tsx",
+        py: "python", sh: "bash", bash: "bash", zsh: "bash", fish: "bash",
+        go: "go", rs: "rust", java: "java", c: "c", cpp: "cpp",
+        h: "c", hpp: "cpp", cs: "csharp", rb: "ruby", php: "php",
+        swift: "swift", kt: "kotlin", scala: "scala", lua: "lua",
+        sql: "sql", graphql: "graphql", proto: "protobuf",
+    };
+    return langMap[ext] || "text";
+}
+
 export function isTextFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const textExtensions = [
-        "txt", "md", "json", "json5", "js", "jsx", "ts", "tsx", "html", "css", "scss",
+        "txt", "md", "markdown", "json", "json5", "js", "jsx", "ts", "tsx", "html", "css", "scss",
         "py", "rb", "go", "rs", "java", "c", "cpp", "h", "hpp", "cs",
         "sh", "bash", "zsh", "fish", "ps1",
         "yml", "yaml", "toml", "ini", "cfg", "conf", "config",
@@ -66,25 +111,14 @@ export function isTextFile(filename: string): boolean {
     return textExtensions.includes(ext) || filename.startsWith(".") || !ext;
 }
 
-// Syntax highlighting class map
 function getSyntaxClass(filename: string): string {
     const ext = getFileExtension(filename);
     const syntaxMap: Record<string, string> = {
-        "js": "text-yellow-400",
-        "jsx": "text-yellow-400",
-        "ts": "text-blue-400",
-        "tsx": "text-blue-400",
-        "json": "text-green-400",
-        "json5": "text-green-400",
-        "md": "text-slate-300",
-        "html": "text-orange-400",
-        "css": "text-pink-400",
-        "py": "text-blue-300",
-        "go": "text-cyan-400",
-        "rs": "text-orange-300",
-        "sh": "text-green-300",
-        "yml": "text-purple-400",
-        "yaml": "text-purple-400",
+        js: "text-yellow-400", jsx: "text-yellow-400", ts: "text-blue-400", tsx: "text-blue-400",
+        json: "text-green-400", json5: "text-green-400", md: "text-slate-300",
+        html: "text-orange-400", css: "text-pink-400", py: "text-blue-300",
+        go: "text-cyan-400", rs: "text-orange-300", sh: "text-green-300",
+        yml: "text-purple-400", yaml: "text-purple-400",
     };
     return syntaxMap[ext] || "text-slate-300";
 }
@@ -145,7 +179,6 @@ function FileTreeItem({
                 <div>
                     {node.children
                         .sort((a, b) => {
-                            // Directories first, then files, alphabetically
                             if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
                             return a.name.localeCompare(b.name);
                         })
@@ -166,23 +199,124 @@ function FileTreeItem({
     );
 }
 
-function ConfigItem({
-    file,
+function ConfigSection({
     selectedPath,
     onSelect,
+    configDirExpanded,
+    onConfigDirToggle,
+    cronDirExpanded,
+    onCronDirToggle,
+    hooksDirExpanded,
+    onHooksDirToggle,
 }: {
-    file: { path: string; label: string };
     selectedPath: string | null;
     onSelect: (path: string) => void;
+    configDirExpanded: boolean;
+    onConfigDirToggle: () => void;
+    cronDirExpanded: boolean;
+    onCronDirToggle: () => void;
+    hooksDirExpanded: boolean;
+    onHooksDirToggle: () => void;
 }) {
-    const isSelected = selectedPath === file.path;
     return (
-        <div
-            className={"flex items-center gap-2 py-1.5 px-3 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
-            onClick={() => onSelect(file.path)}
-        >
-            <File size={14} className="text-slate-400 flex-shrink-0" />
-            <span className="truncate font-mono">{file.label}</span>
+        <div className="p-2">
+            {/* Directories first */}
+            {/* config/ subdirectory */}
+            <div
+                className={"flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"}
+                onClick={onConfigDirToggle}
+            >
+                {configDirExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <span className="truncate">config</span>
+            </div>
+            {configDirExpanded && CONFIG_DIR_FILES.map((file) => {
+                const isSelected = selectedPath === file.path;
+                return (
+                    <div
+                        key={file.path}
+                        className={"flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
+                        style={{ paddingLeft: 28 }}
+                        onClick={() => onSelect(file.path)}
+                    >
+                        <File size={14} className="text-slate-400 flex-shrink-0" />
+                        <span className="truncate font-mono">{file.label}</span>
+                    </div>
+                );
+            })}
+
+            {/* cron/ subdirectory */}
+            <div
+                className={"flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"}
+                onClick={onCronDirToggle}
+            >
+                {cronDirExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <span className="truncate">cron</span>
+            </div>
+            {cronDirExpanded && CRON_DIR_FILES.map((file) => {
+                const isSelected = selectedPath === file.path;
+                return (
+                    <div
+                        key={file.path}
+                        className={"flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
+                        style={{ paddingLeft: 28 }}
+                        onClick={() => onSelect(file.path)}
+                    >
+                        <File size={14} className="text-slate-400 flex-shrink-0" />
+                        <span className="truncate font-mono">{file.label}</span>
+                    </div>
+                );
+            })}
+
+            {/* hooks/ subdirectory */}
+            <div
+                className={"flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm text-primary-200"}
+                onClick={onHooksDirToggle}
+            >
+                {hooksDirExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                <Folder size={16} className="text-yellow-400 flex-shrink-0" />
+                <span className="truncate">hooks</span>
+            </div>
+            {hooksDirExpanded && (
+                <>
+                    <div className={"flex items-center gap-1 py-1 px-2 text-sm text-primary-200"} style={{ paddingLeft: 20 }}>
+                        <ChevronDown size={14} className="text-slate-400" />
+                        <Folder size={14} className="text-yellow-400 flex-shrink-0" />
+                        <span className="truncate">transforms</span>
+                    </div>
+                    {HOOKS_DIR_FILES.map((file) => {
+                        const isSelected = selectedPath === file.path;
+                        return (
+                            <div
+                                key={file.path}
+                                className={"flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
+                                style={{ paddingLeft: 44 }}
+                                onClick={() => onSelect(file.path)}
+                            >
+                                <File size={14} className="text-slate-400 flex-shrink-0" />
+                                <span className="truncate font-mono">{file.label}</span>
+                            </div>
+                        );
+                    })}
+                </>
+            )}
+
+            {/* Files after directories */}
+            {CONFIG_TOP_FILES.map((file) => {
+                const isSelected = selectedPath === file.path;
+                return (
+                    <div
+                        key={file.path}
+                        className={"flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
+                        style={{ paddingLeft: 22 }}
+                        onClick={() => onSelect(file.path)}
+                    >
+                        <File size={14} className="text-slate-400 flex-shrink-0" />
+                        <span className="truncate font-mono">{file.label}</span>
+                    </div>
+                );
+            })}
         </div>
     );
 }
@@ -192,6 +326,9 @@ export function Files() {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+    const [configDirExpanded, setConfigDirExpanded] = useState(false);
+    const [cronDirExpanded, setCronDirExpanded] = useState(false);
+    const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
     const [fileContent, setFileContent] = useState<FileContent | null>(null);
     const [editedContent, setEditedContent] = useState<string>("");
     const [isLoading, setIsLoading] = useState(false);
@@ -199,6 +336,8 @@ export function Files() {
     const [error, setError] = useState<string | null>(null);
     const [hasChanges, setHasChanges] = useState(false);
     const [largeFileWarning, setLargeFileWarning] = useState(false);
+    const [markdownPreview, setMarkdownPreview] = useState(true);
+    const [jsonPreview, setJsonPreview] = useState(true);
 
     const apiBase = "/api/files";
 
@@ -207,9 +346,7 @@ export function Files() {
         setError(null);
         try {
             const url = dirPath ? apiBase + "?path=" + encodeURIComponent(dirPath) : apiBase;
-            const res = await fetch(url, {
-                headers: { Authorization: "Bearer " + token },
-            });
+            const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
             if (!res.ok) throw new Error("Failed to fetch files");
             const data = await res.json();
             return data.files || [];
@@ -233,11 +370,16 @@ export function Files() {
         setEditedContent("");
         setHasChanges(false);
         setLargeFileWarning(false);
+        setMarkdownPreview(true);
+        setJsonPreview(true);
 
         try {
-            const res = await fetch(apiBase + "/" + encodeURIComponent(filePath), {
-                headers: { Authorization: "Bearer " + token },
-            });
+            const isConfigFile = filePath.startsWith("config:");
+            const apiEndpoint = isConfigFile
+                ? "/api/config-files/" + encodeURIComponent(filePath.replace("config:", ""))
+                : apiBase + "/" + encodeURIComponent(filePath);
+
+            const res = await fetch(apiEndpoint, { headers: { Authorization: "Bearer " + token } });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error || "Failed to fetch file");
@@ -245,27 +387,12 @@ export function Files() {
             const data = await res.json();
 
             if (data.isBinary) {
-                setFileContent({
-                    content: "[Binary file - cannot display]",
-                    path: filePath,
-                    size: data.size,
-                    modified: data.modified,
-                    isBinary: true,
-                });
+                setFileContent({ content: "[Binary file - cannot display]", path: filePath, size: data.size, modified: data.modified, isBinary: true });
                 setEditedContent("");
             } else {
-                setFileContent({
-                    content: data.content,
-                    path: filePath,
-                    size: data.size,
-                    modified: data.modified,
-                    isBinary: false,
-                });
+                setFileContent({ content: data.content, path: filePath, size: data.size, modified: data.modified, isBinary: false });
                 setEditedContent(data.content);
-
-                if (data.size > MAX_PREVIEW_SIZE) {
-                    setLargeFileWarning(true);
-                }
+                if (data.size > MAX_PREVIEW_SIZE) setLargeFileWarning(true);
             }
         } catch (e) {
             setError(e instanceof Error ? e.message : "Failed to load file");
@@ -276,17 +403,18 @@ export function Files() {
 
     const saveFile = async () => {
         if (!selectedPath || !fileContent || fileContent.isBinary) return;
-
         setIsSaving(true);
         setError(null);
 
         try {
-            const res = await fetch(apiBase + "/" + encodeURIComponent(selectedPath), {
+            const isConfigFile = selectedPath.startsWith("config:");
+            const apiEndpoint = isConfigFile
+                ? "/api/config-files/" + encodeURIComponent(selectedPath.replace("config:", ""))
+                : apiBase + "/" + encodeURIComponent(selectedPath);
+
+            const res = await fetch(apiEndpoint, {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: "Bearer " + token,
-                },
+                headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
                 body: JSON.stringify({ content: editedContent }),
             });
             if (!res.ok) {
@@ -294,7 +422,6 @@ export function Files() {
                 throw new Error(err.error || "Failed to save file");
             }
             setHasChanges(false);
-            // Refresh file info
             await fetchFileContent(selectedPath);
         } catch (e) {
             setError(e instanceof Error ? e.message : "Failed to save file");
@@ -305,42 +432,24 @@ export function Files() {
 
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
-        
         if (isCurrentlyExpanded) {
-            // Just collapse
-            setExpandedPaths((prev) => {
-                const next = new Set(prev);
-                next.delete(path);
-                return next;
-            });
+            setExpandedPaths((prev) => { const next = new Set(prev); next.delete(path); return next; });
         } else {
-            // Expand and load children if not loaded
             setExpandedPaths((prev) => new Set(prev).add(path));
-            
-            // Find the node and check if it needs loading
             const findNode = (nodes: FileNode[]): FileNode | undefined => {
                 for (const node of nodes) {
                     if (node.path === path) return node;
-                    if (node.children) {
-                        const found = findNode(node.children);
-                        if (found) return found;
-                    }
+                    if (node.children) { const found = findNode(node.children); if (found) return found; }
                 }
                 return undefined;
             };
-            
             const node = findNode(files);
             if (node && node.type === "directory" && !node.loaded) {
                 const children = await fetchFiles(path);
-                // Merge children into tree
                 const updateNode = (nodes: FileNode[]): FileNode[] => {
                     return nodes.map((n) => {
-                        if (n.path === path) {
-                            return { ...n, children, loaded: true };
-                        }
-                        if (n.children) {
-                            return { ...n, children: updateNode(n.children) };
-                        }
+                        if (n.path === path) return { ...n, children, loaded: true };
+                        if (n.children) return { ...n, children: updateNode(n.children) };
                         return n;
                     });
                 };
@@ -359,9 +468,7 @@ export function Files() {
         setHasChanges(value !== fileContent?.content);
     };
 
-    useEffect(() => {
-        fetchRootFiles();
-    }, [fetchRootFiles]);
+    useEffect(() => { fetchRootFiles(); }, [fetchRootFiles]);
 
     const isEditable = fileContent && !fileContent.isBinary && !largeFileWarning;
     const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
@@ -427,16 +534,16 @@ export function Files() {
                                 Config
                             </CardTitle>
                         </div>
-                        <div className="p-2">
-                            {CONFIG_FILES.map((file) => (
-                                <ConfigItem
-                                    key={file.path}
-                                    file={file}
-                                    selectedPath={selectedPath}
-                                    onSelect={handleSelect}
-                                />
-                            ))}
-                        </div>
+                        <ConfigSection
+                            selectedPath={selectedPath}
+                            onSelect={handleSelect}
+                            configDirExpanded={configDirExpanded}
+                            onConfigDirToggle={() => setConfigDirExpanded(!configDirExpanded)}
+                            cronDirExpanded={cronDirExpanded}
+                            onCronDirToggle={() => setCronDirExpanded(!cronDirExpanded)}
+                            hooksDirExpanded={hooksDirExpanded}
+                            onHooksDirToggle={() => setHooksDirExpanded(!hooksDirExpanded)}
+                        />
                     </Card>
                 </div>
 
@@ -458,16 +565,47 @@ export function Files() {
                                     )}
                                 </div>
                                 <div className="flex items-center gap-2 flex-shrink-0">
-                                    {hasChanges && (
-                                        <span className="text-xs text-yellow-400">Unsaved changes</span>
+                                    {/* Markdown preview toggle */}
+                                    {fileContent && isMarkdownFile(fileContent.path) && isEditable && (
+                                        <div className="flex items-center gap-1 bg-slate-700 rounded p-0.5">
+                                            <button
+                                                className={"px-2 py-1 text-xs rounded " + (markdownPreview ? "bg-accent-500 text-white" : "text-slate-300 hover:text-white")}
+                                                onClick={() => setMarkdownPreview(true)}
+                                            >
+                                                <Eye size={14} className="inline mr-1" />
+                                                Preview
+                                            </button>
+                                            <button
+                                                className={"px-2 py-1 text-xs rounded " + (!markdownPreview ? "bg-accent-500 text-white" : "text-slate-300 hover:text-white")}
+                                                onClick={() => setMarkdownPreview(false)}
+                                            >
+                                                <Code size={14} className="inline mr-1" />
+                                                Raw
+                                            </button>
+                                        </div>
                                     )}
+                                    {/* JSON preview toggle */}
+                                    {fileContent && isJsonFile(fileContent.path) && isEditable && (
+                                        <div className="flex items-center gap-1 bg-slate-700 rounded p-0.5">
+                                            <button
+                                                className={"px-2 py-1 text-xs rounded " + (jsonPreview ? "bg-accent-500 text-white" : "text-slate-300 hover:text-white")}
+                                                onClick={() => setJsonPreview(true)}
+                                            >
+                                                <Eye size={14} className="inline mr-1" />
+                                                Preview
+                                            </button>
+                                            <button
+                                                className={"px-2 py-1 text-xs rounded " + (!jsonPreview ? "bg-accent-500 text-white" : "text-slate-300 hover:text-white")}
+                                                onClick={() => setJsonPreview(false)}
+                                            >
+                                                <Code size={14} className="inline mr-1" />
+                                                Raw
+                                            </button>
+                                        </div>
+                                    )}
+                                    {hasChanges && <span className="text-xs text-yellow-400">Unsaved changes</span>}
                                     {isEditable && (
-                                        <Button
-                                            variant="primary"
-                                            size="sm"
-                                            onClick={saveFile}
-                                            disabled={isSaving || !hasChanges}
-                                        >
+                                        <Button variant="primary" size="sm" onClick={saveFile} disabled={isSaving || !hasChanges}>
                                             <Save size={14} className="mr-1" />
                                             {isSaving ? "Saving..." : "Save"}
                                         </Button>
@@ -478,9 +616,7 @@ export function Files() {
                             {/* Content */}
                             <div className="flex-1 overflow-auto">
                                 {isLoading ? (
-                                    <div className="flex items-center justify-center h-full text-slate-400">
-                                        Loading...
-                                    </div>
+                                    <div className="flex items-center justify-center h-full text-slate-400">Loading...</div>
                                 ) : fileContent ? (
                                     <div className="h-full flex flex-col">
                                         {largeFileWarning && (
@@ -497,6 +633,38 @@ export function Files() {
                                                     <p className="text-xs mt-1">Cannot display binary content</p>
                                                 </div>
                                             </div>
+                                        ) : isMarkdownFile(fileContent.path) && isEditable && markdownPreview ? (
+                                            <div className="p-6 prose prose-invert max-w-none prose-headings:mt-6 prose-headings:mb-4 prose-p:my-4 prose-li:my-1 prose-ul:my-4 prose-ol:my-4 prose-pre:my-4 prose-table:my-4 prose-blockquote:my-4 prose-hr:my-6">
+                                                <ReactMarkdown>{editedContent}</ReactMarkdown>
+                                            </div>
+                                        ) : isJsonFile(fileContent.path) && isEditable && jsonPreview ? (
+                                            <div className="p-4 overflow-auto">
+                                                <ReactJsonView
+                                                    src={(() => {
+                                                        try { return JSON5.parse(editedContent); }
+                                                        catch { try { return JSON.parse(editedContent); } catch { return { error: "Failed to parse JSON", raw: editedContent }; } }
+                                                    })()}
+                                                    theme="monokai"
+                                                    collapsed={false}
+                                                    enableClipboard={true}
+                                                    displayDataTypes={false}
+                                                    displayObjectSize={true}
+                                                    indentWidth={2}
+                                                    style={{ fontSize: "13px" }}
+                                                />
+                                            </div>
+                                        ) : isCodeFile(fileContent.path) && isEditable ? (
+                                            <div className="h-full overflow-auto">
+                                                <SyntaxHighlighter
+                                                    language={getLanguage(fileContent.path)}
+                                                    style={oneDark}
+                                                    customStyle={{ margin: 0, padding: "1rem", background: "transparent", fontSize: "13px", height: "100%" }}
+                                                    showLineNumbers={true}
+                                                    lineNumberStyle={{ minWidth: "2.5em", paddingRight: "1em", color: "#6b7280" }}
+                                                >
+                                                    {editedContent}
+                                                </SyntaxHighlighter>
+                                            </div>
                                         ) : isEditable ? (
                                             <textarea
                                                 className={"w-full h-full bg-transparent p-4 font-mono text-sm resize-none focus:outline-none " + syntaxClass}
@@ -505,15 +673,11 @@ export function Files() {
                                                 spellCheck={false}
                                             />
                                         ) : (
-                                            <pre className={"p-4 font-mono text-sm whitespace-pre-wrap " + syntaxClass}>
-                                                {editedContent}
-                                            </pre>
+                                            <pre className={"p-4 font-mono text-sm whitespace-pre-wrap " + syntaxClass}>{editedContent}</pre>
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="flex items-center justify-center h-full text-slate-400">
-                                        Failed to load file
-                                    </div>
+                                    <div className="flex items-center justify-center h-full text-slate-400">Failed to load file</div>
                                 )}
                             </div>
 
