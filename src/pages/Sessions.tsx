@@ -297,7 +297,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                 {history.length > visibleCount && (
                                     <div className="text-center">
                                         <Button variant="secondary" size="sm" onClick={() => setVisibleCount(c => c + 50)}>
-                                            Load more ({Math.min(visibleCount + 50, history.length)} of {history.length} messages)
+                                            Load more ({visibleCount} of {history.length} messages)
                                         </Button>
                                     </div>
                                 )}
