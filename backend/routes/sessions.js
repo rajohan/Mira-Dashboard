@@ -1,20 +1,23 @@
 // Sessions API routes
 const gateway = require("../gateway");
+const fs = require("fs");
+const readline = require("readline");
 
 module.exports = function(app) {
-    // Get session history via sessions.resolve (returns transcript)
+    // Get session history by reading session file directly
     app.get("/api/sessions/:key/history", async (req, res) => {
         try {
             const key = req.params.key;
             
+            // Get session file path from sessions.usage
             const gwWs = gateway.getGatewayWs ? gateway.getGatewayWs() : null;
             
             if (!gwWs || gwWs.readyState !== 1) {
                 return res.status(503).json({ error: "Gateway not connected" });
             }
 
-            const result = await new Promise((resolve, reject) => {
-                const id = "history-" + Date.now();
+            const usageResult = await new Promise((resolve, reject) => {
+                const id = "usage-" + Date.now();
                 const timer = setTimeout(() => reject(new Error("Timeout")), 10000);
                 
                 const handler = (data) => {
@@ -32,34 +35,72 @@ module.exports = function(app) {
                 gwWs.send(JSON.stringify({
                     type: "req",
                     id,
-                    method: "sessions.resolve",
+                    method: "sessions.usage",
                     params: { key }
                 }));
             });
 
-            if (result.ok && result.payload) {
-                // sessions.resolve returns the session with transcript
-                const session = result.payload;
-                const messages = [];
-                
-                // Extract messages from transcript if available
-                if (session.transcript && Array.isArray(session.transcript)) {
-                    for (const entry of session.transcript) {
-                        if (entry.role && entry.content) {
-                            messages.push({
-                                role: entry.role,
-                                content: typeof entry.content === "string" 
-                                    ? entry.content 
-                                    : JSON.stringify(entry.content)
-                            });
-                        }
-                    }
-                }
-                
-                res.json({ messages, session });
-            } else {
-                res.json({ messages: [], error: result.error?.message || "Failed to get session" });
+            if (!usageResult.ok || !usageResult.payload?.sessions?.[0]?.usage?.sessionFile) {
+                return res.json({ messages: [], error: "Session file not found" });
             }
+
+            const sessionFile = usageResult.payload.sessions[0].usage.sessionFile;
+            
+            // Read messages from session file
+            const messages = [];
+            const maxMessages = 100;
+            
+            if (fs.existsSync(sessionFile)) {
+                const fileStream = fs.createReadStream(sessionFile);
+                const rl = readline.createInterface({
+                    input: fileStream,
+                    crlfDelay: Infinity
+                });
+
+                for await (const line of rl) {
+                    if (!line.trim()) continue;
+                    try {
+                        const entry = JSON.parse(line);
+                        
+                        // Handle message type entries
+                        if (entry.type === "message" && entry.message) {
+                            const msg = entry.message;
+                            if (msg.role && msg.content) {
+                                // Extract text content
+                                let content = "";
+                                if (typeof msg.content === "string") {
+                                    content = msg.content;
+                                } else if (Array.isArray(msg.content)) {
+                                    // Handle content blocks
+                                    for (const block of msg.content) {
+                                        if (block.type === "text" && block.text) {
+                                            content += block.text;
+                                        } else if (block.type === "thinking" && block.thinking) {
+                                            // Skip thinking blocks for now
+                                        } else if (typeof block === "string") {
+                                            content += block;
+                                        }
+                                    }
+                                }
+                                
+                                if (content.trim()) {
+                                    messages.push({
+                                        role: msg.role,
+                                        content: content.trim(),
+                                        timestamp: entry.timestamp
+                                    });
+                                }
+                            }
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // Return last maxMessages messages
+            res.json({ 
+                messages: messages.slice(-maxMessages),
+                total: messages.length 
+            });
         } catch (e) {
             console.error("[Sessions] History error:", e.message);
             res.status(500).json({ error: e.message });
