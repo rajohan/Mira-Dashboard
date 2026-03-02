@@ -6,7 +6,10 @@ import { Sessions } from "./pages/Sessions";
 import { Logs } from "./pages/Logs";
 import { Metrics } from "./pages/Metrics";
 import { Tasks } from "./pages/Tasks";
+import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
+import { Moltbook } from "./pages/Moltbook";
+import { Settings } from "./pages/Settings";
 import { useAuthStore } from "./stores/authStore";
 
 const queryClient = new QueryClient({
@@ -34,10 +37,10 @@ function App() {
                                         <Route path="/tasks" element={<Tasks />} />
                                         <Route path="/sessions" element={<Sessions />} />
                                         <Route path="/logs" element={<Logs />} />
-                                        <Route path="/files" element={<div className="p-6"><h1 className="text-2xl font-bold text-primary-50">Files</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
+                                        <Route path="/files" element={<Files />} />
                                         <Route path="/metrics" element={<Metrics />} />
-                                        <Route path="/moltbook" element={<div className="p-6"><h1 className="text-2xl font-bold text-primary-50">Moltbook</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
-                                        <Route path="/settings" element={<div className="p-6"><h1 className="text-2xl font-bold text-primary-50">Settings</h1><p className="text-primary-400 mt-2">Coming soon...</p></div>} />
+                                        <Route path="/moltbook" element={<Moltbook />} />
+                                        <Route path="/settings" element={<Settings />} />
                                     </Routes>
                                 </Layout>
                             </PrivateRoute>
