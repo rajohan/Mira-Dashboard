@@ -1,17 +1,17 @@
 import { type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "@tanstack/react-router";
 import { Home, CheckSquare, Users, FileText, Activity, FolderOpen, MessageSquare, Settings } from "lucide-react";
 import { cn } from "../../utils/cn";
 
 const navItems = [
-    { href: "/", icon: Home, label: "Dashboard" },
-    { href: "/tasks", icon: CheckSquare, label: "Tasks" },
-    { href: "/sessions", icon: Users, label: "Sessions" },
-    { href: "/logs", icon: FileText, label: "Logs" },
-    { href: "/files", icon: FolderOpen, label: "Files" },
-    { href: "/metrics", icon: Activity, label: "Metrics" },
-    { href: "/moltbook", icon: MessageSquare, label: "Moltbook" },
-    { href: "/settings", icon: Settings, label: "Settings" },
+    { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/tasks", icon: CheckSquare, label: "Tasks" },
+    { to: "/sessions", icon: Users, label: "Sessions" },
+    { to: "/logs", icon: FileText, label: "Logs" },
+    { to: "/files", icon: FolderOpen, label: "Files" },
+    { to: "/metrics", icon: Activity, label: "Metrics" },
+    { to: "/moltbook", icon: MessageSquare, label: "Moltbook" },
+    { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
 interface LayoutProps {
@@ -33,11 +33,11 @@ export function Layout({ children }: LayoutProps) {
                 
                 <nav className="flex-1 p-2">
                     {navItems.map((item) => {
-                        const isActive = location.pathname === item.href;
+                        const isActive = location.pathname === item.to;
                         return (
                             <Link
-                                key={item.href}
-                                to={item.href}
+                                key={item.to}
+                                to={item.to}
                                 className={cn(
                                     "flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors",
                                     isActive

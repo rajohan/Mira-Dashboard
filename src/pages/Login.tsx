@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "../stores/authStore";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -14,7 +14,7 @@ export function Login() {
         e.preventDefault();
         if (token.trim()) {
             login(token.trim());
-            navigate("/");
+            navigate({ to: "/" });
         }
     };
 
