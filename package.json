@@ -11,6 +11,7 @@
     },
     "dependencies": {
         "@headlessui/react": "^2.2.9",
+        "@tanstack/db": "^0.5.30",
         "@tanstack/react-form": "^1.28.3",
         "@tanstack/react-query": "^5.90.21",
         "@tanstack/react-router": "^1.163.3",

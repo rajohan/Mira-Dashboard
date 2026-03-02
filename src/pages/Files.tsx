@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { useAuthStore } from "../stores/authStore";
-import { Folder, File, ChevronRight, ChevronDown, Save, RefreshCw, AlertTriangle, X } from "lucide-react";
+import { Folder, File, ChevronRight, ChevronDown, Save, RefreshCw, AlertTriangle, X, Settings } from "lucide-react";
 
 interface FileNode {
     name: string;
@@ -11,6 +11,7 @@ interface FileNode {
     size?: number;
     modified?: string;
     children?: FileNode[];
+    loaded?: boolean; // Track if directory children are loaded
 }
 
 interface FileContent {
@@ -22,6 +23,14 @@ interface FileContent {
 }
 
 const MAX_PREVIEW_SIZE = 1024 * 1024; // 1MB
+
+// Config files to show in sidebar
+const CONFIG_FILES = [
+    { path: "/home/ubuntu/.openclaw/openclaw.json", label: "openclaw.json" },
+    { path: "/home/ubuntu/.openclaw/config/agents.json5", label: "config/agents.json5" },
+    { path: "/home/ubuntu/.openclaw/config/channels.json5", label: "config/channels.json5" },
+    { path: "/home/ubuntu/.openclaw/config/models.json5", label: "config/models.json5" },
+];
 
 function formatSize(bytes: number): string {
     if (bytes < 1024) return bytes + " B";
@@ -46,7 +55,7 @@ function getFileExtension(filename: string): string {
 export function isTextFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const textExtensions = [
-        "txt", "md", "json", "js", "jsx", "ts", "tsx", "html", "css", "scss",
+        "txt", "md", "json", "json5", "js", "jsx", "ts", "tsx", "html", "css", "scss",
         "py", "rb", "go", "rs", "java", "c", "cpp", "h", "hpp", "cs",
         "sh", "bash", "zsh", "fish", "ps1",
         "yml", "yaml", "toml", "ini", "cfg", "conf", "config",
@@ -66,6 +75,7 @@ function getSyntaxClass(filename: string): string {
         "ts": "text-blue-400",
         "tsx": "text-blue-400",
         "json": "text-green-400",
+        "json5": "text-green-400",
         "md": "text-slate-300",
         "html": "text-orange-400",
         "css": "text-pink-400",
@@ -97,6 +107,7 @@ function FileTreeItem({
     const isSelected = selectedPath === node.path;
     const isExpanded = expandedPaths.has(node.path);
     const hasChildren = node.type === "directory" && node.children && node.children.length > 0;
+    const isLoading = node.type === "directory" && !node.loaded && expandedPaths.has(node.path);
 
     return (
         <div>
@@ -115,6 +126,8 @@ function FileTreeItem({
                     <>
                         {hasChildren ? (
                             isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />
+                        ) : isLoading ? (
+                            <RefreshCw size={14} className="text-slate-400 animate-spin" />
                         ) : (
                             <span className="w-3.5" />
                         )}
@@ -153,6 +166,27 @@ function FileTreeItem({
     );
 }
 
+function ConfigItem({
+    file,
+    selectedPath,
+    onSelect,
+}: {
+    file: { path: string; label: string };
+    selectedPath: string | null;
+    onSelect: (path: string) => void;
+}) {
+    const isSelected = selectedPath === file.path;
+    return (
+        <div
+            className={"flex items-center gap-2 py-1.5 px-3 cursor-pointer hover:bg-primary-700/50 rounded text-sm " + (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")}
+            onClick={() => onSelect(file.path)}
+        >
+            <File size={14} className="text-slate-400 flex-shrink-0" />
+            <span className="truncate font-mono">{file.label}</span>
+        </div>
+    );
+}
+
 export function Files() {
     const { token } = useAuthStore();
     const [files, setFiles] = useState<FileNode[]>([]);
@@ -178,13 +212,19 @@ export function Files() {
             });
             if (!res.ok) throw new Error("Failed to fetch files");
             const data = await res.json();
-            setFiles(data.files || []);
+            return data.files || [];
         } catch (e) {
             setError(e instanceof Error ? e.message : "Failed to load files");
+            return [];
         } finally {
             setIsLoading(false);
         }
     }, [token]);
+
+    const fetchRootFiles = useCallback(async () => {
+        const rootFiles = await fetchFiles();
+        setFiles(rootFiles);
+    }, [fetchFiles]);
 
     const fetchFileContent = useCallback(async (filePath: string) => {
         setIsLoading(true);
@@ -263,16 +303,50 @@ export function Files() {
         }
     };
 
-    const handleToggle = (path: string) => {
-        setExpandedPaths((prev) => {
-            const next = new Set(prev);
-            if (next.has(path)) {
+    const handleToggle = async (path: string) => {
+        const isCurrentlyExpanded = expandedPaths.has(path);
+        
+        if (isCurrentlyExpanded) {
+            // Just collapse
+            setExpandedPaths((prev) => {
+                const next = new Set(prev);
                 next.delete(path);
-            } else {
-                next.add(path);
+                return next;
+            });
+        } else {
+            // Expand and load children if not loaded
+            setExpandedPaths((prev) => new Set(prev).add(path));
+            
+            // Find the node and check if it needs loading
+            const findNode = (nodes: FileNode[]): FileNode | undefined => {
+                for (const node of nodes) {
+                    if (node.path === path) return node;
+                    if (node.children) {
+                        const found = findNode(node.children);
+                        if (found) return found;
+                    }
+                }
+                return undefined;
+            };
+            
+            const node = findNode(files);
+            if (node && node.type === "directory" && !node.loaded) {
+                const children = await fetchFiles(path);
+                // Merge children into tree
+                const updateNode = (nodes: FileNode[]): FileNode[] => {
+                    return nodes.map((n) => {
+                        if (n.path === path) {
+                            return { ...n, children, loaded: true };
+                        }
+                        if (n.children) {
+                            return { ...n, children: updateNode(n.children) };
+                        }
+                        return n;
+                    });
+                };
+                setFiles((prev) => updateNode(prev));
             }
-            return next;
-        });
+        }
     };
 
     const handleSelect = (path: string) => {
@@ -286,8 +360,8 @@ export function Files() {
     };
 
     useEffect(() => {
-        fetchFiles();
-    }, [fetchFiles]);
+        fetchRootFiles();
+    }, [fetchRootFiles]);
 
     const isEditable = fileContent && !fileContent.isBinary && !largeFileWarning;
     const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
@@ -296,7 +370,7 @@ export function Files() {
         <div className="p-6 h-full flex flex-col">
             <div className="flex items-center justify-between mb-4">
                 <h1 className="text-2xl font-bold">Files</h1>
-                <Button variant="secondary" size="sm" onClick={() => fetchFiles()} disabled={isLoading}>
+                <Button variant="secondary" size="sm" onClick={() => fetchRootFiles()} disabled={isLoading}>
                     <RefreshCw size={16} className={"mr-1 " + (isLoading ? "animate-spin" : "")} />
                     Refresh
                 </Button>
@@ -313,35 +387,58 @@ export function Files() {
             )}
 
             <div className="flex-1 flex gap-4 min-h-0">
-                {/* File Tree */}
-                <Card variant="bordered" className="w-72 flex-shrink-0 overflow-hidden flex flex-col p-0">
-                    <div className="p-3 border-b border-slate-700">
-                        <CardTitle className="text-sm">Workspace</CardTitle>
-                    </div>
-                    <div className="flex-1 overflow-auto p-2">
-                        {isLoading && files.length === 0 ? (
-                            <div className="text-slate-400 text-sm p-2">Loading...</div>
-                        ) : files.length === 0 ? (
-                            <div className="text-slate-400 text-sm p-2">No files found</div>
-                        ) : (
-                            files
-                                .sort((a, b) => {
-                                    if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
-                                    return a.name.localeCompare(b.name);
-                                })
-                                .map((node) => (
-                                    <FileTreeItem
-                                        key={node.path}
-                                        node={node}
-                                        selectedPath={selectedPath}
-                                        expandedPaths={expandedPaths}
-                                        onSelect={handleSelect}
-                                        onToggle={handleToggle}
-                                    />
-                                ))
-                        )}
-                    </div>
-                </Card>
+                {/* Sidebar: Workspace + Config */}
+                <div className="w-72 flex-shrink-0 flex flex-col gap-4">
+                    {/* Workspace */}
+                    <Card variant="bordered" className="flex-1 overflow-hidden flex flex-col p-0">
+                        <div className="p-3 border-b border-slate-700">
+                            <CardTitle className="text-sm">Workspace</CardTitle>
+                        </div>
+                        <div className="flex-1 overflow-auto p-2">
+                            {isLoading && files.length === 0 ? (
+                                <div className="text-slate-400 text-sm p-2">Loading...</div>
+                            ) : files.length === 0 ? (
+                                <div className="text-slate-400 text-sm p-2">No files found</div>
+                            ) : (
+                                files
+                                    .sort((a, b) => {
+                                        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+                                        return a.name.localeCompare(b.name);
+                                    })
+                                    .map((node) => (
+                                        <FileTreeItem
+                                            key={node.path}
+                                            node={node}
+                                            selectedPath={selectedPath}
+                                            expandedPaths={expandedPaths}
+                                            onSelect={handleSelect}
+                                            onToggle={handleToggle}
+                                        />
+                                    ))
+                            )}
+                        </div>
+                    </Card>
+
+                    {/* Config */}
+                    <Card variant="bordered" className="flex-shrink-0 p-0">
+                        <div className="p-3 border-b border-slate-700">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <Settings size={14} />
+                                Config
+                            </CardTitle>
+                        </div>
+                        <div className="p-2">
+                            {CONFIG_FILES.map((file) => (
+                                <ConfigItem
+                                    key={file.path}
+                                    file={file}
+                                    selectedPath={selectedPath}
+                                    onSelect={handleSelect}
+                                />
+                            ))}
+                        </div>
+                    </Card>
+                </div>
 
                 {/* File Content */}
                 <Card variant="bordered" className="flex-1 flex flex-col overflow-hidden p-0">
