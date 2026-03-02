@@ -12,6 +12,7 @@ const metricsRoutes = require("./routes/metrics");
 const moltbookRoutes = require("./routes/moltbook");
 const settingsRoutes = require("./routes/settings");
 const gateway = require("./gateway");
+const sessionsRoutes = require("./routes/sessions");
 const staticRoutes = require("./routes/static");
 
 const app = express();
@@ -43,6 +44,7 @@ execRoutes(app, express);
 metricsRoutes(app);
 moltbookRoutes(app);
 settingsRoutes(app, express, gateway.getStatus);
+sessionsRoutes(app);
 
 // Static files & SPA (must be last)
 staticRoutes(app, frontendPath);

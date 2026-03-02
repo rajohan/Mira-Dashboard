@@ -256,10 +256,15 @@ function isConnected() {
     return isGatewayConnected;
 }
 
+function getGatewayWs() {
+    return gatewayWs;
+}
+
 module.exports = {
     init: connect,
     handleClient,
     getStatus,
     getSessions,
     isConnected,
+    getGatewayWs,
 };
