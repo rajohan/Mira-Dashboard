@@ -198,8 +198,8 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                 </div>
 
                 {/* Stats */}
-                <div className="grid grid-cols-3 gap-4 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
-                    <div className="flex items-center gap-3">
+                <div className="grid grid-cols-3 gap-6 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
+                    <div className="flex items-center gap-3 flex-1">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Cpu className="w-4 h-4 text-slate-400" />
                         </div>
@@ -208,7 +208,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                             <p className="text-sm text-slate-200 font-medium truncate">{sessionModel}</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Hash className="w-4 h-4 text-slate-400" />
                         </div>
@@ -224,7 +224,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Clock className="w-4 h-4 text-slate-400" />
                         </div>

@@ -1,49 +1,13 @@
 // Sessions API routes
 const gateway = require("../gateway");
 
-// Promise-based request to gateway
-function gatewayRequest(method, params, timeout = 10000) {
-    return new Promise((resolve, reject) => {
-        const gw = gateway.getGatewayWs ? gateway.getGatewayWs() : null;
-        if (!gw || gw.readyState !== 1) {
-            reject(new Error("Gateway not connected"));
-            return;
-        }
-
-        const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        const timer = setTimeout(() => {
-            reject(new Error("Request timeout"));
-        }, timeout);
-
-        const handler = (data) => {
-            try {
-                const msg = JSON.parse(data.toString());
-                if (msg.id === id) {
-                    clearTimeout(timer);
-                    gw.off("message", handler);
-                    if (msg.ok) {
-                        resolve(msg.payload);
-                    } else {
-                        reject(new Error(msg.error?.message || "Request failed"));
-                    }
-                }
-            } catch (e) {}
-        };
-
-        gw.on("message", handler);
-        gw.send(JSON.stringify({ type: "req", id, method, params }));
-    });
-}
-
 module.exports = function(app) {
-    // Get session history
+    // Get session history via sessions.resolve (returns transcript)
     app.get("/api/sessions/:key/history", async (req, res) => {
         try {
             const key = req.params.key;
             
-            // Try to get history from gateway
-            const gw = require("../gateway");
-            const gwWs = gw.getGatewayWs ? gw.getGatewayWs() : null;
+            const gwWs = gateway.getGatewayWs ? gateway.getGatewayWs() : null;
             
             if (!gwWs || gwWs.readyState !== 1) {
                 return res.status(503).json({ error: "Gateway not connected" });
@@ -68,18 +32,33 @@ module.exports = function(app) {
                 gwWs.send(JSON.stringify({
                     type: "req",
                     id,
-                    method: "sessions.history",
+                    method: "sessions.resolve",
                     params: { key }
                 }));
             });
 
             if (result.ok && result.payload) {
-                // Transform messages if needed
-                const messages = result.payload.messages || result.payload || [];
-                res.json({ messages });
+                // sessions.resolve returns the session with transcript
+                const session = result.payload;
+                const messages = [];
+                
+                // Extract messages from transcript if available
+                if (session.transcript && Array.isArray(session.transcript)) {
+                    for (const entry of session.transcript) {
+                        if (entry.role && entry.content) {
+                            messages.push({
+                                role: entry.role,
+                                content: typeof entry.content === "string" 
+                                    ? entry.content 
+                                    : JSON.stringify(entry.content)
+                            });
+                        }
+                    }
+                }
+                
+                res.json({ messages, session });
             } else {
-                // Return empty history if method not available
-                res.json({ messages: [] });
+                res.json({ messages: [], error: result.error?.message || "Failed to get session" });
             }
         } catch (e) {
             console.error("[Sessions] History error:", e.message);
@@ -93,8 +72,7 @@ module.exports = function(app) {
             const key = req.params.key;
             const { action } = req.body;
             
-            const gw = require("../gateway");
-            const gwWs = gw.getGatewayWs ? gw.getGatewayWs() : null;
+            const gwWs = gateway.getGatewayWs ? gateway.getGatewayWs() : null;
             
             if (!gwWs || gwWs.readyState !== 1) {
                 return res.status(503).json({ error: "Gateway not connected" });
