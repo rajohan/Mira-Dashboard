@@ -203,7 +203,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                 </div>
 
                 {/* Stats */}
-                <div className="flex items-center gap-8 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
+                <div className="flex items-center justify-around p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Cpu className="w-4 h-4 text-slate-400" />
@@ -213,7 +213,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                             <p className="text-sm text-slate-200 font-medium truncate max-w-[150px]">{sessionModel}</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 flex-1">
+                    <div className="flex items-center gap-3">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Hash className="w-4 h-4 text-slate-400" />
                         </div>
@@ -268,7 +268,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {[...history].reverse().slice(0, 50).map((msg, i) => (
+                                {[...history].reverse().slice(0, visibleCount).map((msg, i) => (
                                     <div 
                                         key={i} 
                                         className={"p-3 rounded-lg " + (msg.role === "user" ? "bg-blue-500/10 border border-blue-500/20" : "bg-slate-700/50 border border-slate-600/50")}
@@ -294,12 +294,17 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                         </p>
                                     </div>
                                 ))}
-                                {totalCount > visibleCount && (
+                                {history.length > visibleCount && (
                                     <div className="text-center">
                                         <Button variant="secondary" size="sm" onClick={() => setVisibleCount(c => c + 50)}>
-                                            Load more ({totalCount - visibleCount} remaining)
+                                            Load more ({history.length - visibleCount} of {history.length} messages)
                                         </Button>
                                     </div>
+                                )}
+                                {totalCount > history.length && (
+                                    <p className="text-center text-slate-500 text-xs mt-2">
+                                        {totalCount - history.length} older messages on server
+                                    </p>
                                 )}
                             </div>
                         )}
