@@ -8,13 +8,17 @@ let lastLogSize = 0;
 let lastLogFile = "";
 let logSubscribers = new Set();
 
+function getTodayLogFile() {
+    const today = new Date().toISOString().split("T")[0];
+    return path.join(LOGS_DIR, "openclaw-" + today + ".log");
+}
+
 function startLogWatcher() {
     if (logWatcher) return;
     
     logWatcher = setInterval(() => {
         try {
-            const today = new Date().toISOString().split("T")[0];
-            const logFile = path.join(LOGS_DIR, "openclaw-" + today + ".log");
+            const logFile = getTodayLogFile();
             
             if (!fs.existsSync(logFile)) return;
             
@@ -47,8 +51,44 @@ function startLogWatcher() {
     }, 1000);
 }
 
+function sendLogHistory(ws) {
+    try {
+        const logFile = getTodayLogFile();
+        const fileName = path.basename(logFile);
+        
+        // Send file name
+        ws.send(JSON.stringify({ type: "log_file", file: fileName }));
+        
+        if (!fs.existsSync(logFile)) {
+            // No log file yet
+            ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+            return;
+        }
+        
+        // Read last 1000 lines
+        const content = fs.readFileSync(logFile, "utf-8");
+        const lines = content.split("\n").filter(l => l.trim()).slice(-100);
+        
+        // Send each line
+        for (const line of lines) {
+            ws.send(JSON.stringify({ type: "log", line }));
+        }
+        
+        // Send completion
+        ws.send(JSON.stringify({ type: "log_history_complete", count: lines.length }));
+    } catch (e) {
+        console.error("[Logs] Error sending history:", e.message);
+        ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+    }
+}
+
 function subscribeToLogs(ws) {
     logSubscribers.add(ws);
+    
+    // Send log history first
+    sendLogHistory(ws);
+    
+    // Start watching for new logs
     startLogWatcher();
 }
 
@@ -103,7 +143,7 @@ module.exports = function(app) {
             let content = fs.readFileSync(filePath, "utf-8");
             
             if (lines) {
-                const allLines = content.split("\n");
+                const allLines = content.split("\n").filter(l => l.trim());
                 content = allLines.slice(-lines).join("\n");
             }
             
