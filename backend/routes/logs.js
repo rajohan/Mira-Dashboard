@@ -80,10 +80,13 @@ module.exports = function(app) {
 
     // Get log file content
     app.get("/api/logs/content", (req, res) => {
-        const logFile = req.query.file;
+        let logFile = req.query.file;
+        const lines = req.query.lines ? parseInt(req.query.lines) : null;
         
+        // If no file specified, use today's log
         if (!logFile) {
-            return res.status(400).json({ error: "File parameter required" });
+            const today = new Date().toISOString().split("T")[0];
+            logFile = "openclaw-" + today + ".log";
         }
         
         try {
@@ -94,13 +97,17 @@ module.exports = function(app) {
             }
             
             if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: "File not found" });
+                return res.status(404).json({ error: "Log file not found" });
             }
             
-            const content = fs.readFileSync(filePath, "utf-8");
-            const lines = content.split("\n").slice(-5000).join("\n");
+            let content = fs.readFileSync(filePath, "utf-8");
             
-            res.json({ content: lines });
+            if (lines) {
+                const allLines = content.split("\n");
+                content = allLines.slice(-lines).join("\n");
+            }
+            
+            res.json({ content: content, file: logFile });
         } catch (e) {
             res.status(500).json({ error: e.message });
         }

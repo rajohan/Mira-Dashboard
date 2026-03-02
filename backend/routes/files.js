@@ -16,39 +16,42 @@ function shouldHideFile(name) {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-function listDirectory(dirPath, basePath) {
+function listDirectory(dirPath) {
     const items = [];
+    const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
+    
     try {
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        const entries = fs.readdirSync(fullPath, { withFileTypes: true });
         for (const entry of entries) {
             if (shouldHideFile(entry.name)) continue;
-            const itemPath = path.join(dirPath, entry.name);
-            const relativePath = path.relative(basePath, itemPath);
+            
+            const itemPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
+            
             if (entry.isDirectory()) {
                 items.push({
                     name: entry.name,
                     type: "directory",
-                    path: relativePath,
-                    children: listDirectory(itemPath, basePath),
+                    path: itemPath,
                 });
             } else {
                 try {
-                    const stat = fs.statSync(itemPath);
+                    const stat = fs.statSync(path.join(fullPath, entry.name));
                     items.push({
                         name: entry.name,
                         type: "file",
-                        path: relativePath,
+                        path: itemPath,
                         size: stat.size,
                         modified: stat.mtime.toISOString(),
                     });
                 } catch {
-                    items.push({ name: entry.name, type: "file", path: relativePath, error: true });
+                    items.push({ name: entry.name, type: "file", path: itemPath, error: true });
                 }
             }
         }
     } catch (e) {
         console.error("[Files] Error listing directory:", e.message);
     }
+    
     return items.sort((a, b) => {
         if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
         return a.name.localeCompare(b.name);
@@ -59,14 +62,16 @@ module.exports = function(app, express) {
     // List files
     app.get("/api/files", (req, res) => {
         try {
-            const items = listDirectory(WORKSPACE_ROOT, WORKSPACE_ROOT);
-            res.json({ root: WORKSPACE_ROOT, items });
+            const dirPath = req.query.path || "";
+            const files = listDirectory(dirPath);
+            res.json({ files, root: WORKSPACE_ROOT });
         } catch (e) {
+            console.error("[Backend] Files list error:", e.message);
             res.status(500).json({ error: e.message });
         }
     });
 
-    // Read file
+    // Read file content
     app.get("/api/files/*", (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
         
@@ -84,13 +89,18 @@ module.exports = function(app, express) {
             const stat = fs.statSync(fullPath);
             
             if (stat.isDirectory()) {
-                const items = listDirectory(fullPath, WORKSPACE_ROOT);
-                return res.json({ path: filePath, type: "directory", items });
+                return res.status(400).json({ error: "Path is a directory, not a file" });
             }
             
             if (stat.size > MAX_FILE_SIZE) {
-                const content = fs.readFileSync(fullPath, "utf-8").slice(0, MAX_FILE_SIZE);
+                const fd = fs.openSync(fullPath, "r");
+                const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+                fs.closeSync(fd);
+                
+                const content = buffer.toString("utf-8", 0, bytesRead);
                 const isBinary = isBinaryFile(content);
+                
                 return res.json({
                     path: filePath,
                     content: isBinary ? "[Binary file]" : content,

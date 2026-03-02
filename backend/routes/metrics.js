@@ -1,8 +1,9 @@
 // Metrics API routes
 const os = require("os");
 const { execSync } = require("child_process");
+const gateway = require("../gateway");
 
-function getMetrics() {
+function getSystemMetrics() {
     // CPU
     const cpus = os.cpus();
     const loadAvg = os.loadavg();
@@ -64,10 +65,53 @@ function getMetrics() {
     };
 }
 
+function getTokenMetrics() {
+    const sessions = gateway.getSessions();
+    let totalTokens = 0;
+    const byModel = {};
+    const sessionsByModel = {};
+    const byAgent = [];
+    
+    for (const session of sessions) {
+        const model = session.model || "unknown";
+        const tokens = session.tokenCount || 0;
+        
+        totalTokens += tokens;
+        byModel[model] = (byModel[model] || 0) + tokens;
+        
+        // Count sessions by model
+        const modelKey = model.split("/").pop(); // Remove provider prefix
+        sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
+        
+        // Agent data
+        if (session.displayLabel || session.label) {
+            byAgent.push({
+                label: session.displayLabel || session.label || "Unknown",
+                model: model,
+                tokens: tokens,
+                type: session.type || "Unknown",
+            });
+        }
+    }
+    
+    return {
+        total: totalTokens,
+        byModel,
+        sessionsByModel,
+        byAgent: byAgent.sort((a, b) => b.tokens - a.tokens).slice(0, 10),
+    };
+}
+
 module.exports = function(app) {
     app.get("/api/metrics", (req, res) => {
         try {
-            res.json(getMetrics());
+            const system = getSystemMetrics();
+            const tokens = getTokenMetrics();
+            
+            res.json({
+                ...system,
+                tokens,
+            });
         } catch (e) {
             res.status(500).json({ error: e.message });
         }
