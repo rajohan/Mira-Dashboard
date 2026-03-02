@@ -48,7 +48,7 @@ module.exports = function(app) {
             
             // Read messages from session file
             const messages = [];
-            const maxMessages = 100;
+            const maxMessages = 500;
             
             if (fs.existsSync(sessionFile)) {
                 const fileStream = fs.createReadStream(sessionFile);

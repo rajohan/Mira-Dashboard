@@ -136,28 +136,32 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
     const [history, setHistory] = useState<Array<{ role: string; content: string; timestamp?: string }>>([]);
     const [loading, setLoading] = useState(true);
     const [visibleCount, setVisibleCount] = useState(50);
+    const [totalCount, setTotalCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+
+    const fetchHistory = async () => {
+        setLoading(true);
+        setError(null);
+        setVisibleCount(50);
+        try {
+            const res = await fetch("/api/sessions/" + encodeURIComponent(session.key) + "/history");
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || "Failed to fetch history");
+            }
+            const data = await res.json();
+            setHistory(data.messages || []);
+            setTotalCount(data.total || data.messages?.length || 0);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Unknown error");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const isMain = (session.type || "").toUpperCase() === "MAIN";
 
     useEffect(() => {
-        const fetchHistory = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                const res = await fetch("/api/sessions/" + encodeURIComponent(session.key) + "/history");
-                if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
-                    throw new Error(data.error || "Failed to fetch history");
-                }
-                const data = await res.json();
-                setHistory(data.messages || []);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : "Unknown error");
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchHistory();
     }, [session.key]);
 
@@ -199,14 +203,14 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                 </div>
 
                 {/* Stats */}
-                <div className="flex items-center justify-between gap-6 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
-                    <div className="flex items-center gap-3 flex-1">
+                <div className="flex items-center gap-8 p-4 border-b border-slate-700 bg-slate-800/30 flex-shrink-0">
+                    <div className="flex items-center gap-3">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Cpu className="w-4 h-4 text-slate-400" />
                         </div>
                         <div>
                             <span className="text-xs text-slate-400 block">Model</span>
-                            <p className="text-sm text-slate-200 font-medium truncate">{sessionModel}</p>
+                            <p className="text-sm text-slate-200 font-medium truncate max-w-[150px]">{sessionModel}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3 flex-1">
@@ -219,13 +223,13 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                 <p className={"text-sm font-medium " + getTokenColor(tokenPercent)}>
                                     {formatTokens(sessionTokens, sessionMaxTokens)}
                                 </p>
-                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full max-w-[60px]">
+                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full max-w-[100px]">
                                     <div className={"h-full rounded-full transition-all " + getTokenBarColor(tokenPercent)} style={{ width: tokenPercent + "%" }} />
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 flex-1">
+                    <div className="flex items-center gap-3 ml-auto">
                         <div className="p-2 bg-slate-700/50 rounded-lg">
                             <Clock className="w-4 h-4 text-slate-400" />
                         </div>
@@ -238,10 +242,13 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
 
                 {/* Message History */}
                 <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                    <div className="px-4 py-3 border-b border-slate-700 flex-shrink-0">
+                    <div className="px-4 py-3 border-b border-slate-700 flex-shrink-0 flex items-center justify-between">
                         <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
                             <MessageSquare className="w-4 h-4" /> Message History
                         </h3>
+                        <Button variant="ghost" size="sm" onClick={fetchHistory} disabled={loading}>
+                            <RefreshCw className={"w-4 h-4 " + (loading ? "animate-spin" : "")} />
+                        </Button>
                     </div>
                     <div className="flex-1 overflow-auto p-4">
                         {loading ? (
@@ -287,10 +294,10 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                         </p>
                                     </div>
                                 ))}
-                                {history.length > visibleCount && (
+                                {totalCount > visibleCount && (
                                     <div className="text-center">
                                         <Button variant="secondary" size="sm" onClick={() => setVisibleCount(c => c + 50)}>
-                                            Load more ({history.length - visibleCount} remaining)
+                                            Load more ({totalCount - visibleCount} remaining)
                                         </Button>
                                     </div>
                                 )}
@@ -316,6 +323,7 @@ export function Sessions() {
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
 
     useEffect(() => {
+        // Call fetchHistory defined above
         if (token && !hasConnected.current) {
             hasConnected.current = true;
             connect();
@@ -323,6 +331,7 @@ export function Sessions() {
     }, [token, connect]);
 
     useEffect(() => {
+        // Call fetchHistory defined above
         if (isConnected) handleRefresh();
     }, [isConnected]);
 
