@@ -135,6 +135,7 @@ interface SessionDetailsProps {
 function SessionDetails({ session, onClose, onDelete, onPause, onResume }: SessionDetailsProps) {
     const [history, setHistory] = useState<Array<{ role: string; content: string; timestamp?: string }>>([]);
     const [loading, setLoading] = useState(true);
+    const [visibleCount, setVisibleCount] = useState(50);
     const [error, setError] = useState<string | null>(null);
 
     const isMain = (session.type || "").toUpperCase() === "MAIN";
@@ -273,7 +274,7 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                                 <span className="text-xs text-slate-500">
                                                     {new Date(msg.timestamp).toLocaleString("no-NO", { 
                                                         day: "2-digit", 
-                                                        month: "2-digit",
+                                                        month: "2-digit", year: "numeric",
                                                         hour: "2-digit", 
                                                         minute: "2-digit" 
                                                     })}
@@ -286,10 +287,12 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                                         </p>
                                     </div>
                                 ))}
-                                {history.length > 50 && (
-                                    <p className="text-center text-slate-500 text-sm">
-                                        Showing newest 50 of {history.length} messages
-                                    </p>
+                                {history.length > visibleCount && (
+                                    <div className="text-center">
+                                        <Button variant="secondary" size="sm" onClick={() => setVisibleCount(c => c + 50)}>
+                                            Load more ({history.length - visibleCount} remaining)
+                                        </Button>
+                                    </div>
                                 )}
                             </div>
                         )}
