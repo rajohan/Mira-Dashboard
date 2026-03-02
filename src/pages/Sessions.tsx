@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Menu } from "@headlessui/react";
+import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useOpenClaw, type Session } from "../hooks/useOpenClaw";
 import { useAuthStore } from "../stores/authStore";
 import { Card } from "../components/ui/Card";
@@ -190,41 +190,33 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <Menu>
-                            <Menu.Button as={Button} variant="ghost" size="sm" className="flex items-center gap-1">
+                            <MenuButton as={Button} variant="ghost" size="sm" className="flex items-center gap-1 data-[open]:bg-slate-700">
                                 <MoreVertical className="w-4 h-4" />
-                                <ChevronDown className="w-3 h-3 transition-transform ui-open:rotate-180" />
-                            </Menu.Button>
-                            <Menu.Items className="absolute right-4 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px]">
-                                <Menu.Item>
-                                    {({ active }) => (
-                                        <button onClick={onStop} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                            <Square className="w-4 h-4" /> Stop
-                                        </button>
-                                    )}
-                                </Menu.Item>
-                                <Menu.Item>
-                                    {({ active }) => (
-                                        <button onClick={onCompact} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                            <Database className="w-4 h-4" /> Compact
-                                        </button>
-                                    )}
-                                </Menu.Item>
-                                <Menu.Item>
-                                    {({ active }) => (
-                                        <button onClick={onReset} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                            <RotateCcw className="w-4 h-4" /> Reset
-                                        </button>
-                                    )}
-                                </Menu.Item>
+                                <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
+                            </MenuButton>
+                            <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px]">
+                                <MenuItem>
+                                    <button onClick={onStop} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                        <Square className="w-4 h-4" /> Stop
+                                    </button>
+                                </MenuItem>
+                                <MenuItem>
+                                    <button onClick={onCompact} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                        <Database className="w-4 h-4" /> Compact
+                                    </button>
+                                </MenuItem>
+                                <MenuItem>
+                                    <button onClick={onReset} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                        <RotateCcw className="w-4 h-4" /> Reset
+                                    </button>
+                                </MenuItem>
                                 <div className="border-t border-slate-700" />
-                                <Menu.Item>
-                                    {({ active }) => (
-                                        <button onClick={onDelete} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 " + (active ? "bg-slate-700" : "")}>
-                                            <Trash2 className="w-4 h-4" /> Delete
-                                        </button>
-                                    )}
-                                </Menu.Item>
-                            </Menu.Items>
+                                <MenuItem>
+                                    <button onClick={onDelete} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[focus]:bg-slate-700">
+                                        <Trash2 className="w-4 h-4" /> Delete
+                                    </button>
+                                </MenuItem>
+                            </MenuItems>
                         </Menu>
                         <Button variant="ghost" size="sm" onClick={onClose}>
                             <X className="w-4 h-4" />
@@ -532,41 +524,33 @@ export function Sessions() {
                                                 <td className="px-4 py-3 text-sm text-slate-400">{formatDuration(session.updatedAt)}</td>
                                                 <td className="px-4 py-3 text-right">
                                                     <Menu>
-                                                        <Menu.Button as={Button} variant="ghost" size="sm" onClick={e => e.stopPropagation()} className="flex items-center gap-1">
+                                                        <MenuButton as={Button} variant="ghost" size="sm" onClick={e => e.stopPropagation()} className="flex items-center gap-1 data-[open]:bg-slate-700">
                                                             <MoreVertical className="w-4 h-4" />
-                                                            <ChevronDown className="w-3 h-3 transition-transform ui-open:rotate-180" />
-                                                        </Menu.Button>
-                                                        <Menu.Items className="absolute right-4 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px]">
-                                                            <Menu.Item>
-                                                                {({ active }) => (
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleStop(session.key); }} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                                                        <Square className="w-4 h-4" /> Stop
-                                                                    </button>
-                                                                )}
-                                                            </Menu.Item>
-                                                            <Menu.Item>
-                                                                {({ active }) => (
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleCompact(session.key); }} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                                                        <Database className="w-4 h-4" /> Compact
-                                                                    </button>
-                                                                )}
-                                                            </Menu.Item>
-                                                            <Menu.Item>
-                                                                {({ active }) => (
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleReset(session.key); }} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 " + (active ? "bg-slate-700" : "")}>
-                                                                        <RotateCcw className="w-4 h-4" /> Reset
-                                                                    </button>
-                                                                )}
-                                                            </Menu.Item>
+                                                            <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
+                                                        </MenuButton>
+                                                        <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px]">
+                                                            <MenuItem>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                                                    <Square className="w-4 h-4" /> Stop
+                                                                </button>
+                                                            </MenuItem>
+                                                            <MenuItem>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleCompact(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                                                    <Database className="w-4 h-4" /> Compact
+                                                                </button>
+                                                            </MenuItem>
+                                                            <MenuItem>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleReset(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 data-[focus]:bg-slate-700">
+                                                                    <RotateCcw className="w-4 h-4" /> Reset
+                                                                </button>
+                                                            </MenuItem>
                                                             <div className="border-t border-slate-700" />
-                                                            <Menu.Item>
-                                                                {({ active }) => (
-                                                                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(session); }} className={"w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 " + (active ? "bg-slate-700" : "")}>
-                                                                        <Trash2 className="w-4 h-4" /> Delete
-                                                                    </button>
-                                                                )}
-                                                            </Menu.Item>
-                                                        </Menu.Items>
+                                                            <MenuItem>
+                                                                <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(session); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[focus]:bg-slate-700">
+                                                                    <Trash2 className="w-4 h-4" /> Delete
+                                                                </button>
+                                                            </MenuItem>
+                                                        </MenuItems>
                                                     </Menu>
                                                 </td>
                                             </tr>
