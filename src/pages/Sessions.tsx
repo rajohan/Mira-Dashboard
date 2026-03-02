@@ -1,5 +1,14 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
+import {
+    useReactTable,
+    getCoreRowModel,
+    getSortedRowModel,
+    getFilteredRowModel,
+    flexRender,
+    createColumnHelper,
+    type SortingState,
+} from "@tanstack/react-table";
 import { useOpenClaw, type Session } from "../hooks/useOpenClaw";
 import { useAuthStore } from "../stores/authStore";
 import { Card } from "../components/ui/Card";
@@ -20,6 +29,8 @@ import {
     Hash,
     ChevronDown,
     MoreVertical,
+    ArrowUp,
+    ArrowDown,
 } from "lucide-react";
 
 function formatDuration(updatedAt: number | null | undefined): string {
@@ -80,21 +91,9 @@ function formatSessionType(session: Session): string {
     return type;
 }
 
-function getTypeSortOrder(type: string | null | undefined): number {
-    const t = (type || "unknown").toUpperCase();
-    switch (t) {
-        case "MAIN":
-            return 0;
-        case "SUBAGENT":
-            return 1;
-        case "HOOK":
-            return 2;
-        case "CRON":
-            return 3;
-        default:
-            return 4;
-    }
-}
+const SESSION_TYPES = ["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"] as const;
+
+const columnHelper = createColumnHelper<Session>();
 
 interface DeleteConfirmDialogProps {
     session: Session;
@@ -243,55 +242,59 @@ function SessionDetails({
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <Menu>
-                            <MenuButton
-                                as={Button}
-                                variant="ghost"
-                                size="sm"
-                                className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 outline-none border-0"
-                            >
-                                <MoreVertical className="w-4 h-4" />
-                                <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
-                            </MenuButton>
-                            <MenuItems
-                                anchor="bottom end"
-                                className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px] outline-none focus:outline-none"
-                            >
-                                <MenuItem>
-                                    <button
-                                        onClick={onStop}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                            {({ open }) => (
+                                <>
+                                    <MenuButton
+                                        as={Button}
+                                        variant="ghost"
+                                        size="sm"
+                                        className={"flex items-center gap-1 text-slate-300 outline-none border-0 " + (open ? "bg-slate-700" : "")}
                                     >
-                                        <Square className="w-4 h-4 text-slate-400" /> Stop
-                                    </button>
-                                </MenuItem>
-                                <MenuItem>
-                                    <button
-                                        onClick={onCompact}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                        <MoreVertical className="w-4 h-4" />
+                                        <ChevronDown className={"w-3 h-3 transition-transform " + (open ? "rotate-180" : "")} />
+                                    </MenuButton>
+                                    <MenuItems
+                                        anchor="bottom end"
+                                        className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px] outline-none focus:outline-none"
                                     >
-                                        <Database className="w-4 h-4 text-slate-400" />{" "}
-                                        Compact
-                                    </button>
-                                </MenuItem>
-                                <MenuItem>
-                                    <button
-                                        onClick={onReset}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                    >
-                                        <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
-                                        Reset
-                                    </button>
-                                </MenuItem>
-                                <div className="border-t border-slate-700" />
-                                <MenuItem>
-                                    <button
-                                        onClick={onDelete}
-                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
-                                    >
-                                        <Trash2 className="w-4 h-4" /> Delete
-                                    </button>
-                                </MenuItem>
-                            </MenuItems>
+                                        <MenuItem>
+                                            <button
+                                                onClick={onStop}
+                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Square className="w-4 h-4 text-slate-400" /> Stop
+                                            </button>
+                                        </MenuItem>
+                                        <MenuItem>
+                                            <button
+                                                onClick={onCompact}
+                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Database className="w-4 h-4 text-slate-400" />{" "}
+                                                Compact
+                                            </button>
+                                        </MenuItem>
+                                        <MenuItem>
+                                            <button
+                                                onClick={onReset}
+                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
+                                                Reset
+                                            </button>
+                                        </MenuItem>
+                                        <div className="border-t border-slate-700" />
+                                        <MenuItem>
+                                            <button
+                                                onClick={onDelete}
+                                                className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
+                                            >
+                                                <Trash2 className="w-4 h-4" /> Delete
+                                            </button>
+                                        </MenuItem>
+                                    </MenuItems>
+                                </>
+                            )}
                         </Menu>
                         <Button variant="ghost" size="sm" onClick={onClose}>
                             <X className="w-4 h-4" />
@@ -464,8 +467,6 @@ function SessionDetails({
     );
 }
 
-const SESSION_TYPES = ["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"];
-
 export function Sessions() {
     const { token } = useAuthStore();
     const { isConnected, error, connect, sessions, fetchSessions, deleteSession } =
@@ -475,10 +476,10 @@ export function Sessions() {
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+    const [sorting, setSorting] = useState<SortingState>([]);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
 
     useEffect(() => {
-        // Call fetchHistory defined above
         if (token && !hasConnected.current) {
             hasConnected.current = true;
             connect();
@@ -486,7 +487,6 @@ export function Sessions() {
     }, [token, connect]);
 
     useEffect(() => {
-        // Call fetchHistory defined above
         if (isConnected) handleRefresh();
     }, [isConnected]);
 
@@ -548,18 +548,197 @@ export function Sessions() {
         }
     };
 
-    const sortedSessions = sessions
-        ? [...sessions].sort((a, b) => {
-              const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
-              if (typeOrder !== 0) return typeOrder;
-              return (b.updatedAt || 0) - (a.updatedAt || 0);
-          })
-        : [];
+    const getTypeSortOrder = (type: string | null | undefined): number => {
+        const t = (type || "unknown").toUpperCase();
+        switch (t) {
+            case "MAIN":
+                return 0;
+            case "SUBAGENT":
+                return 1;
+            case "HOOK":
+                return 2;
+            case "CRON":
+                return 3;
+            default:
+                return 4;
+        }
+    };
 
-    const filteredSessions =
-        typeFilter === "ALL"
-            ? sortedSessions
-            : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
+    const sortedSessions = useMemo(() => {
+        if (!sessions) return [];
+        return [...sessions].sort((a, b) => {
+            const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
+            if (typeOrder !== 0) return typeOrder;
+            return (b.updatedAt || 0) - (a.updatedAt || 0);
+        });
+    }, [sessions]);
+
+    const filteredSessions = useMemo(() => {
+        if (typeFilter === "ALL") return sortedSessions;
+        return sortedSessions.filter(
+            (s) => (s.type || "").toUpperCase() === typeFilter,
+        );
+    }, [sortedSessions, typeFilter]);
+
+    const columns = useMemo(
+        () => [
+            columnHelper.accessor("type", {
+                header: "Type",
+                cell: (info) => (
+                    <span
+                        className={
+                            "px-2 py-0.5 text-xs font-medium rounded border " +
+                            getTypeBadgeColor(info.getValue())
+                        }
+                    >
+                        {formatSessionType(info.row.original)}
+                    </span>
+                ),
+                sortingFn: (a, b) => {
+                    const orderA = getTypeSortOrder(a.original.type);
+                    const orderB = getTypeSortOrder(b.original.type);
+                    return orderA - orderB;
+                },
+            }),
+            columnHelper.accessor(
+                (row) => row.displayLabel || row.label || row.displayName || row.id,
+                {
+                    id: "name",
+                    header: "Name",
+                    cell: (info) => (
+                        <span className="text-sm text-slate-200 truncate max-w-xs block">
+                            {info.getValue()?.slice(0, 40) || "unknown"}
+                        </span>
+                    ),
+                },
+            ),
+            columnHelper.accessor("model", {
+                header: "Model",
+                cell: (info) => (
+                    <span className="text-sm text-slate-300">
+                        {info.getValue() || "Unknown"}
+                    </span>
+                ),
+            }),
+            columnHelper.accessor("tokenCount", {
+                header: "Tokens",
+                cell: (info) => {
+                    const current = info.getValue() || 0;
+                    const max = info.row.original.maxTokens || 200000;
+                    const percent = getTokenPercent(current, max);
+                    return (
+                        <div className="flex items-center gap-2">
+                            <span className={"text-sm " + getTokenColor(percent)}>
+                                {formatTokens(current, max)}
+                            </span>
+                            <div className="w-16 h-1 bg-slate-700 rounded-full">
+                                <div
+                                    className={
+                                        "h-full rounded-full " + getTokenBarColor(percent)
+                                    }
+                                    style={{ width: percent + "%" }}
+                                />
+                            </div>
+                        </div>
+                    );
+                },
+            }),
+            columnHelper.accessor("updatedAt", {
+                header: "Last Active",
+                cell: (info) => (
+                    <span className="text-sm text-slate-400">
+                        {formatDuration(info.getValue())}
+                    </span>
+                ),
+            }),
+            columnHelper.display({
+                id: "actions",
+                header: "",
+                cell: ({ row }) => (
+                    <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                        <Menu>
+                            {({ open }) => (
+                                <>
+                                    <MenuButton
+                                        as={Button}
+                                        variant="ghost"
+                                        size="sm"
+                                        className={"flex items-center gap-1 text-slate-300 outline-none border-0 " + (open ? "bg-slate-700" : "")}
+                                    >
+                                        <MoreVertical className="w-4 h-4" />
+                                        <ChevronDown className={"w-3 h-3 transition-transform " + (open ? "rotate-180" : "")} />
+                                    </MenuButton>
+                            <MenuItems
+                                anchor="bottom end"
+                                className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px] outline-none focus:outline-none"
+                            >
+                                <MenuItem>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleStop(row.original.key);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                    >
+                                        <Square className="w-4 h-4 text-slate-400" /> Stop
+                                    </button>
+                                </MenuItem>
+                                <MenuItem>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleCompact(row.original.key);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                    >
+                                        <Database className="w-4 h-4 text-slate-400" />{" "}
+                                        Compact
+                                    </button>
+                                </MenuItem>
+                                <MenuItem>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleReset(row.original.key);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                    >
+                                        <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
+                                        Reset
+                                    </button>
+                                </MenuItem>
+                                <div className="border-t border-slate-700" />
+                                <MenuItem>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteTarget(row.original);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
+                                    >
+                                        <Trash2 className="w-4 h-4" /> Delete
+                                    </button>
+                                </MenuItem>
+                            </MenuItems>
+                                </>
+                            )}
+                        </Menu>
+                    </div>
+                ),
+            }),
+        ],
+        [],
+    );
+
+    const table = useReactTable({
+        data: filteredSessions,
+        columns,
+        state: { sorting },
+        onSortingChange: setSorting,
+        getCoreRowModel: getCoreRowModel(),
+        getSortedRowModel: getSortedRowModel(),
+        getFilteredRowModel: getFilteredRowModel(),
+    });
 
     return (
         <div className="p-6">
@@ -626,184 +805,71 @@ export function Sessions() {
                         <Card>
                             <table className="w-full">
                                 <thead className="bg-slate-800/50">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                            Type
-                                        </th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                            Name
-                                        </th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                            Model
-                                        </th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                            Tokens
-                                        </th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                            Last Active
-                                        </th>
-                                        <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase">
-                                            Actions
-                                        </th>
-                                    </tr>
+                                    {table.getHeaderGroups().map((headerGroup) => (
+                                        <tr key={headerGroup.id}>
+                                            {headerGroup.headers.map((header) => (
+                                                <th
+                                                    key={header.id}
+                                                    className={
+                                                        "px-4 py-3 text-xs font-medium text-slate-400 uppercase " +
+                                                        (header.column.getCanSort()
+                                                            ? "cursor-pointer select-none hover:text-slate-200"
+                                                            : "") +
+                                                        (header.id === "actions"
+                                                            ? " text-right"
+                                                            : " text-left")
+                                                    }
+                                                    onClick={header.column.getToggleSortingHandler()}
+                                                >
+                                                    <div className="flex items-center gap-1">
+                                                        {flexRender(
+                                                            header.column.columnDef
+                                                                .header,
+                                                            header.getContext(),
+                                                        )}
+                                                        {{
+                                                            asc: (
+                                                                <ArrowUp className="w-3 h-3" />
+                                                            ),
+                                                            desc: (
+                                                                <ArrowDown className="w-3 h-3" />
+                                                            ),
+                                                        }[
+                                                            header.column.getIsSorted() as string
+                                                        ] || null}
+                                                    </div>
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    ))}
                                 </thead>
                                 <tbody className="divide-y divide-slate-700">
-                                    {filteredSessions.map((session, index) => {
-                                        const tokenPercent = getTokenPercent(
-                                            session.tokenCount || 0,
-                                            session.maxTokens || 200000,
-                                        );
-                                        return (
-                                            <tr
-                                                key={session.id || session.key || index}
-                                                className="hover:bg-slate-800/50 cursor-pointer"
-                                                onClick={() =>
-                                                    setSelectedSession(session)
-                                                }
-                                            >
-                                                <td className="px-4 py-3">
-                                                    <span
-                                                        className={
-                                                            "px-2 py-0.5 text-xs font-medium rounded border " +
-                                                            getTypeBadgeColor(
-                                                                session.type,
-                                                            )
-                                                        }
-                                                    >
-                                                        {formatSessionType(session)}
-                                                    </span>
+                                    {table.getRowModel().rows.map((row) => (
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-700/50 cursor-pointer transition-colors"
+                                            onClick={() =>
+                                                setSelectedSession(row.original)
+                                            }
+                                        >
+                                            {row.getVisibleCells().map((cell) => (
+                                                <td
+                                                    key={cell.id}
+                                                    className={
+                                                        "px-4 py-3 " +
+                                                        (cell.column.id === "actions"
+                                                            ? ""
+                                                            : "")
+                                                    }
+                                                >
+                                                    {flexRender(
+                                                        cell.column.columnDef.cell,
+                                                        cell.getContext(),
+                                                    )}
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-slate-200 truncate max-w-xs">
-                                                    {session.displayLabel ||
-                                                        session.label ||
-                                                        session.displayName ||
-                                                        (session.id || "unknown").slice(
-                                                            0,
-                                                            12,
-                                                        )}
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-slate-300">
-                                                    {session.model || "Unknown"}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <span
-                                                            className={
-                                                                "text-sm " +
-                                                                getTokenColor(
-                                                                    tokenPercent,
-                                                                )
-                                                            }
-                                                        >
-                                                            {formatTokens(
-                                                                session.tokenCount || 0,
-                                                                session.maxTokens ||
-                                                                    200000,
-                                                            )}
-                                                        </span>
-                                                        <div className="w-16 h-1 bg-slate-700 rounded-full">
-                                                            <div
-                                                                className={
-                                                                    "h-full rounded-full " +
-                                                                    getTokenBarColor(
-                                                                        tokenPercent,
-                                                                    )
-                                                                }
-                                                                style={{
-                                                                    width:
-                                                                        tokenPercent +
-                                                                        "%",
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-slate-400">
-                                                    {formatDuration(session.updatedAt)}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex justify-end">
-                                                        <Menu>
-                                                            <MenuButton
-                                                                as={Button}
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                onClick={(e) =>
-                                                                    e.stopPropagation()
-                                                                }
-                                                                className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 outline-none border-0"
-                                                            >
-                                                                <MoreVertical className="w-4 h-4" />
-                                                                <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
-                                                            </MenuButton>
-                                                            <MenuItems
-                                                                anchor="bottom end"
-                                                                className="mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px] outline-none focus:outline-none"
-                                                            >
-                                                                <MenuItem>
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleStop(
-                                                                                session.key,
-                                                                            );
-                                                                        }}
-                                                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                                                    >
-                                                                        <Square className="w-4 h-4 text-slate-400" />{" "}
-                                                                        Stop
-                                                                    </button>
-                                                                </MenuItem>
-                                                                <MenuItem>
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleCompact(
-                                                                                session.key,
-                                                                            );
-                                                                        }}
-                                                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                                                    >
-                                                                        <Database className="w-4 h-4 text-slate-400" />{" "}
-                                                                        Compact
-                                                                    </button>
-                                                                </MenuItem>
-                                                                <MenuItem>
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleReset(
-                                                                                session.key,
-                                                                            );
-                                                                        }}
-                                                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                                                    >
-                                                                        <RotateCcw className="w-4 h-4 text-slate-400" />{" "}
-                                                                        Reset
-                                                                    </button>
-                                                                </MenuItem>
-                                                                <div className="border-t border-slate-700" />
-                                                                <MenuItem>
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            setDeleteTarget(
-                                                                                session,
-                                                                            );
-                                                                        }}
-                                                                        className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 hover:bg-slate-700 focus:outline-none"
-                                                                    >
-                                                                        <Trash2 className="w-4 h-4" />{" "}
-                                                                        Delete
-                                                                    </button>
-                                                                </MenuItem>
-                                                            </MenuItems>
-                                                        </Menu>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                            ))}
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </Card>
