@@ -190,29 +190,29 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <Menu>
-                            <MenuButton as={Button} variant="ghost" size="sm" className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 focus:outline-none ring-0 border-0">
+                            <MenuButton as={Button} variant="ghost" size="sm" className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 outline-none border-0">
                                 <MoreVertical className="w-4 h-4" />
                                 <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
                             </MenuButton>
-                            <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px] py-1 focus:outline-none ring-0">
+                            <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[140px] py-1 outline-none">
                                 <MenuItem>
-                                    <button onClick={onStop} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                    <button onClick={onStop} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                         <Square className="w-4 h-4 text-slate-400" /> Stop
                                     </button>
                                 </MenuItem>
                                 <MenuItem>
-                                    <button onClick={onCompact} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                    <button onClick={onCompact} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                         <Database className="w-4 h-4 text-slate-400" /> Compact
                                     </button>
                                 </MenuItem>
                                 <MenuItem>
-                                    <button onClick={onReset} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                    <button onClick={onReset} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                         <RotateCcw className="w-4 h-4 text-slate-400" /> Reset
                                     </button>
                                 </MenuItem>
                                 <div className="border-t border-slate-700" />
                                 <MenuItem>
-                                    <button onClick={onDelete} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                    <button onClick={onDelete} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[hover]:bg-slate-700 outline-none">
                                         <Trash2 className="w-4 h-4" /> Delete
                                     </button>
                                 </MenuItem>
@@ -490,7 +490,7 @@ export function Sessions() {
                                         <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Model</th>
                                         <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Tokens</th>
                                         <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Last Active</th>
-                                        <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase">Actions</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-700">
@@ -525,29 +525,29 @@ export function Sessions() {
                                                 <td className="px-4 py-3">
                                                     <div className="flex justify-center">
                                                         <Menu>
-                                                            <MenuButton as={Button} variant="ghost" size="sm" onClick={e => e.stopPropagation()} className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 focus:outline-none ring-0 border-0">
+                                                            <MenuButton as={Button} variant="ghost" size="sm" onClick={e => e.stopPropagation()} className="flex items-center gap-1 data-[open]:bg-slate-700 text-slate-300 outline-none border-0">
                                                                 <MoreVertical className="w-4 h-4" />
                                                                 <ChevronDown className="w-3 h-3 transition-transform data-[open]:rotate-180" />
                                                             </MenuButton>
-                                                            <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px] py-1 focus:outline-none ring-0">
+                                                            <MenuItems anchor="bottom end" className="bg-slate-800 border border-slate-700 rounded shadow-lg z-50 min-w-[120px] py-1 outline-none">
                                                                 <MenuItem>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                                                    <button onClick={(e) => { e.stopPropagation(); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                                                         <Square className="w-4 h-4 text-slate-400" /> Stop
                                                                     </button>
                                                                 </MenuItem>
                                                                 <MenuItem>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleCompact(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                                                    <button onClick={(e) => { e.stopPropagation(); handleCompact(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                                                         <Database className="w-4 h-4 text-slate-400" /> Compact
                                                                     </button>
                                                                 </MenuItem>
                                                                 <MenuItem>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleReset(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                                                    <button onClick={(e) => { e.stopPropagation(); handleReset(session.key); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-slate-200 data-[hover]:bg-slate-700 outline-none">
                                                                         <RotateCcw className="w-4 h-4 text-slate-400" /> Reset
                                                                     </button>
                                                                 </MenuItem>
                                                                 <div className="border-t border-slate-700" />
                                                                 <MenuItem>
-                                                                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(session); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[hover]:bg-slate-700 focus:outline-none ring-0">
+                                                                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(session); }} className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 text-red-400 data-[hover]:bg-slate-700 outline-none">
                                                                         <Trash2 className="w-4 h-4" /> Delete
                                                                     </button>
                                                                 </MenuItem>
