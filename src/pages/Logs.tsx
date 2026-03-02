@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
-import { Wifi, WifiOff, Terminal, RefreshCw, Download, FileText } from "lucide-react";
+import { Wifi, WifiOff, Terminal, RefreshCw, Download, FileText, ChevronDown } from "lucide-react";
 
 interface LogEntry {
     ts?: string;
@@ -11,15 +11,28 @@ interface LogEntry {
     raw: string;
 }
 
+interface LogFile {
+    name: string;
+    size: number;
+    modified: string;
+}
+
+const LINE_OPTIONS = [100, 500, 1000, 2000, 5000];
+
 export function Logs() {
     const [isConnected, setIsConnected] = useState(false);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [autoFollow, setAutoFollow] = useState(true);
-    const [logFile, setLogFile] = useState<string | null>(null);
+    const [logFiles, setLogFiles] = useState<LogFile[]>([]);
+    const [selectedFile, setSelectedFile] = useState<string>("");
+    const [lineCount, setLineCount] = useState<number>(100);
+    const [showFileDropdown, setShowFileDropdown] = useState(false);
+    const [showLineDropdown, setShowLineDropdown] = useState(false);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
         new Set(["trace", "debug", "info", "warn", "error", "fatal"]),
     );
     const [search, setSearch] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const historyBufferRef = useRef<LogEntry[]>([]);
@@ -101,6 +114,68 @@ export function Logs() {
         }
     };
 
+    // Fetch log files on mount
+    useEffect(() => {
+        const fetchLogFiles = async () => {
+            try {
+                const response = await fetch("/api/logs/info");
+                const data = await response.json();
+                if (data.logs) {
+                    // Sort by filename descending (newest first) - filenames are openclaw-YYYY-MM-DD.log
+                    const sorted = [...data.logs].sort((a, b) => b.name.localeCompare(a.name));
+                    setLogFiles(sorted);
+                    // Select today's file by default
+                    const today = new Date().toISOString().split("T")[0];
+                    const todayFile = sorted.find((f: LogFile) => f.name.includes(today));
+                    if (todayFile) {
+                        setSelectedFile(todayFile.name);
+                    } else if (sorted.length > 0) {
+                        setSelectedFile(sorted[0].name);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch log files:", e);
+            }
+        };
+        fetchLogFiles();
+    }, []);
+
+    // Load log content when file or line count changes
+    const loadLogContent = async (file: string, lines: number) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`);
+            const data = await response.json();
+            if (data.content) {
+                const logLines = data.content.split("\n").filter((l: string) => l.trim());
+                const parsedLogs = logLines
+                    .map((line: string) => parseLogLine(line))
+                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                setLogs(parsedLogs);
+            }
+        } catch (e) {
+            console.error("Failed to load log content:", e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Handle file selection
+    const handleFileSelect = (file: string) => {
+        setSelectedFile(file);
+        setShowFileDropdown(false);
+        loadLogContent(file, lineCount);
+    };
+
+    // Handle line count selection
+    const handleLineSelect = (lines: number) => {
+        setLineCount(lines);
+        setShowLineDropdown(false);
+        if (selectedFile) {
+            loadLogContent(selectedFile, lines);
+        }
+    };
+
     useEffect(() => {
         const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
 
@@ -120,11 +195,6 @@ export function Logs() {
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-
-                if (data.type === "log_file") {
-                    setLogFile(data.file);
-                    return;
-                }
 
                 if (data.type === "log_history_complete") {
                     console.log("[Logs] History complete, got", data.count, "lines");
@@ -198,6 +268,12 @@ export function Logs() {
         }
     };
 
+    const formatFileSize = (bytes: number): string => {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    };
+
     const getLevelColor = (level?: string): string => {
         const l = (level || "info").toLowerCase();
         switch (l) {
@@ -262,21 +338,22 @@ export function Logs() {
     };
 
     const handleRefresh = async () => {
-        try {
-            const response = await fetch("/api/logs/content?lines=100");
-            const data = await response.json();
-            if (data.content) {
-                const lines = data.content.split("\n").filter((l: string) => l.trim());
-                const parsedLogs = lines
-                    .map((line: string) => parseLogLine(line))
-                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                setLogs(parsedLogs);
+        if (selectedFile) {
+            await loadLogContent(selectedFile, lineCount);
+        } else {
+            try {
+                const response = await fetch(`/api/logs/content?lines=${lineCount}`);
+                const data = await response.json();
+                if (data.content) {
+                    const lines = data.content.split("\n").filter((l: string) => l.trim());
+                    const parsedLogs = lines
+                        .map((line: string) => parseLogLine(line))
+                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                    setLogs(parsedLogs);
+                }
+            } catch (e) {
+                console.error("Failed to refresh logs:", e);
             }
-            if (data.file) {
-                setLogFile(data.file);
-            }
-        } catch (e) {
-            console.error("Failed to refresh logs:", e);
         }
     };
 
@@ -286,7 +363,7 @@ export function Logs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `logs-${new Date().toISOString().slice(0, 10)}.txt`;
+        a.download = `${selectedFile || "logs"}-${new Date().toISOString().slice(0, 10)}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -298,15 +375,7 @@ export function Logs() {
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                     <Terminal className="w-6 h-6 text-slate-400" />
-                    <div>
-                        <h1 className="text-2xl font-bold">Logs</h1>
-                        {logFile && (
-                            <div className="flex items-center gap-1 text-sm text-slate-400">
-                                <FileText className="w-3 h-3" />
-                                <span>{logFile}</span>
-                            </div>
-                        )}
-                    </div>
+                    <h1 className="text-2xl font-bold">Logs</h1>
                 </div>
                 <div className="flex items-center gap-2">
                     {isConnected ? (
@@ -322,6 +391,68 @@ export function Logs() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 mb-4">
+                {/* File selector dropdown */}
+                <div className="relative">
+                    <button
+                        onClick={() => setShowFileDropdown(!showFileDropdown)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-indigo-500 transition-colors min-w-[220px]"
+                    >
+                        <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        <span className="flex-1 text-left truncate">
+                            {selectedFile || "Select file..."}
+                        </span>
+                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${showFileDropdown ? "rotate-180" : ""}`} />
+                    </button>
+                    {showFileDropdown && (
+                        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10 max-h-60 overflow-y-auto min-w-[300px]">
+                            {logFiles.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-slate-400">No log files found</div>
+                            ) : (
+                                logFiles.map((file) => (
+                                    <button
+                                        key={file.name}
+                                        onClick={() => handleFileSelect(file.name)}
+                                        className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center justify-between gap-3 ${
+                                            selectedFile === file.name ? "bg-slate-700 text-indigo-400" : ""
+                                        }`}
+                                    >
+                                        <span className="truncate">{file.name}</span>
+                                        <span className="text-slate-500 text-xs flex-shrink-0">
+                                            {formatFileSize(file.size)}
+                                        </span>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Line count selector dropdown */}
+                <div className="relative">
+                    <button
+                        onClick={() => setShowLineDropdown(!showLineDropdown)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-indigo-500 transition-colors min-w-[100px]"
+                    >
+                        <span>{lineCount} lines</span>
+                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`} />
+                    </button>
+                    {showLineDropdown && (
+                        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10">
+                            {LINE_OPTIONS.map((lines) => (
+                                <button
+                                    key={lines}
+                                    onClick={() => handleLineSelect(lines)}
+                                    className={`w-full px-3 py-2 text-sm text-left hover:bg-slate-700 ${
+                                        lineCount === lines ? "bg-slate-700 text-indigo-400" : ""
+                                    }`}
+                                >
+                                    {lines} lines
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <div className="relative flex-1 min-w-[200px] max-w-md">
                     <input
                         type="text"
@@ -332,16 +463,7 @@ export function Logs() {
                     />
                 </div>
 
-                <label className="flex items-center gap-2 text-sm text-slate-300">
-                    <input
-                        type="checkbox"
-                        checked={autoFollow}
-                        onChange={(e) => setAutoFollow(e.target.checked)}
-                        className="rounded"
-                    />
-                    Auto-follow
-                </label>
-
+                {/* Level filters */}
                 <div className="flex items-center gap-1">
                     {levels.map((level) => (
                         <button
@@ -357,34 +479,53 @@ export function Logs() {
                         </button>
                     ))}
                 </div>
-
-                <div className="flex items-center gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleRefresh}>
-                        <RefreshCw className="w-4 h-4 mr-1" />
-                        Refresh
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleExport}
-                        disabled={filteredLogs.length === 0}
-                    >
-                        <Download className="w-4 h-4 mr-1" />
-                        Export
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleClear}
-                        disabled={logs.length === 0}
-                    >
-                        Clear
-                    </Button>
-                </div>
             </div>
 
-            <div className="text-sm text-slate-400 mb-2">
-                {filteredLogs.length} of {logs.length} entries
+            {/* Second row: Auto-follow and action buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="text-sm text-slate-400">
+                    {isLoading ? (
+                        "Loading..."
+                    ) : (
+                        `${filteredLogs.length} of ${logs.length} entries`
+                    )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                            type="checkbox"
+                            checked={autoFollow}
+                            onChange={(e) => setAutoFollow(e.target.checked)}
+                            className="rounded"
+                        />
+                        Auto-follow
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                        <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
+                            <RefreshCw className={`w-4 h-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
+                            Refresh
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleExport}
+                            disabled={filteredLogs.length === 0}
+                        >
+                            <Download className="w-4 h-4 mr-1" />
+                            Export
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleClear}
+                            disabled={logs.length === 0}
+                        >
+                            Clear
+                        </Button>
+                    </div>
+                </div>
             </div>
 
             <Card className="flex-1 overflow-hidden" variant="bordered">
