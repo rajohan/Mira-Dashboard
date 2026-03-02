@@ -17,6 +17,8 @@ import {
     Clock,
     Cpu,
     Hash,
+    ChevronDown,
+    MoreVertical,
 } from "lucide-react";
 
 function formatDuration(updatedAt: number | null | undefined): string {
@@ -140,6 +142,7 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
     const [visibleCount, setVisibleCount] = useState(50);
     const [totalCount, setTotalCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [showActions, setShowActions] = useState(false);
 
     const fetchHistory = async () => {
         setLoading(true);
@@ -184,18 +187,29 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
                         <h2 className="text-lg font-semibold text-slate-100 truncate">{displayName}</h2>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                        <Button variant="secondary" size="sm" onClick={onStop} title="Stop current run">
-                            <Square className="w-4 h-4 mr-1" /> Stop
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={onCompact} title="Compact context">
-                            <Database className="w-4 h-4 mr-1" /> Compact
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={onReset} title="Reset session">
-                            <RotateCcw className="w-4 h-4 mr-1" /> Reset
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={onDelete} className="text-red-400 hover:text-red-300">
-                            <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <div className="relative">
+                            <Button variant="ghost" size="sm" onClick={() => setShowActions(!showActions)} className="flex items-center gap-1">
+                                <MoreVertical className="w-4 h-4" />
+                                <ChevronDown className={"w-3 h-3 transition-transform " + (showActions ? "rotate-180" : "")} />
+                            </Button>
+                            {showActions && (
+                                <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[140px]">
+                                    <button onClick={() => { setShowActions(false); onStop(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                        <Square className="w-4 h-4" /> Stop
+                                    </button>
+                                    <button onClick={() => { setShowActions(false); onCompact(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                        <Database className="w-4 h-4" /> Compact
+                                    </button>
+                                    <button onClick={() => { setShowActions(false); onReset(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                        <RotateCcw className="w-4 h-4" /> Reset
+                                    </button>
+                                    <div className="border-t border-slate-700" />
+                                    <button onClick={() => { setShowActions(false); onDelete(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2 text-red-400">
+                                        <Trash2 className="w-4 h-4" /> Delete
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                         <Button variant="ghost" size="sm" onClick={onClose}>
                             <X className="w-4 h-4" />
                         </Button>
@@ -325,6 +339,7 @@ export function Sessions() {
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
 
     useEffect(() => {
@@ -349,13 +364,7 @@ export function Sessions() {
         }
     };
 
-    const handleDeleteClick = (e: React.MouseEvent, session: Session) => {
-        e.stopPropagation();
-        setDeleteTarget(session);
-        setSelectedSession(null);
-    };
-
-    const handleDeleteConfirm = async () => {
+        const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key) return;
         setIsDeleting(true);
         try {
@@ -507,14 +516,33 @@ export function Sessions() {
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-slate-400">{formatDuration(session.updatedAt)}</td>
                                                 <td className="px-4 py-3 text-right">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={(e) => handleDeleteClick(e, session)}
-                                                        className="text-red-400 hover:text-red-300"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </Button>
+                                                    <div className="relative">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === session.key ? null : session.key); }}
+                                                            className="flex items-center gap-1"
+                                                        >
+                                                            <MoreVertical className="w-4 h-4" />
+                                                        </Button>
+                                                        {activeDropdown === session.key && (
+                                                            <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
+                                                                <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                                                    <Square className="w-4 h-4" /> Stop
+                                                                </button>
+                                                                <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); handleCompact(session.key); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                                                    <Database className="w-4 h-4" /> Compact
+                                                                </button>
+                                                                <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); handleReset(session.key); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
+                                                                    <RotateCcw className="w-4 h-4" /> Reset
+                                                                </button>
+                                                                <div className="border-t border-slate-700" />
+                                                                <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); setDeleteTarget(session); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2 text-red-400">
+                                                                    <Trash2 className="w-4 h-4" /> Delete
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );
