@@ -3,12 +3,12 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const path = require("path");
-const { getMetrics } = require("./metrics");
 
 // Route modules
 const filesRoutes = require("./routes/files");
 const logsRoutes = require("./routes/logs");
 const execRoutes = require("./routes/exec");
+const metricsRoutes = require("./routes/metrics");
 const moltbookRoutes = require("./routes/moltbook");
 const settingsRoutes = require("./routes/settings");
 const gateway = require("./routes/gateway");
@@ -36,18 +36,11 @@ app.get("/api/sessions", (req, res) => {
     res.json(gateway.getSessions());
 });
 
-app.get("/api/metrics", (req, res) => {
-    try {
-        res.json(getMetrics());
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 // Route modules
 filesRoutes(app, express);
 logsRoutes(app);
 execRoutes(app, express);
+metricsRoutes(app);
 moltbookRoutes(app);
 settingsRoutes(app, express, gateway.getStatus);
 
