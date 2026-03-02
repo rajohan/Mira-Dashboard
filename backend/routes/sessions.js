@@ -107,7 +107,7 @@ module.exports = function(app) {
         }
     });
 
-    // Session actions (pause, resume, kill)
+    // Session actions (stop, compact, reset, delete)
     app.post("/api/sessions/:key/action", async (req, res) => {
         try {
             const key = req.params.key;
@@ -117,6 +117,25 @@ module.exports = function(app) {
             
             if (!gwWs || gwWs.readyState !== 1) {
                 return res.status(503).json({ error: "Gateway not connected" });
+            }
+
+            // Map action to gateway method
+            let method;
+            switch (action) {
+                case "stop":
+                    method = "chat.abort";
+                    break;
+                case "compact":
+                    method = "sessions.compact";
+                    break;
+                case "reset":
+                    method = "sessions.reset";
+                    break;
+                case "delete":
+                    method = "sessions.delete";
+                    break;
+                default:
+                    return res.status(400).json({ error: "Unknown action: " + action });
             }
 
             const result = await new Promise((resolve, reject) => {
@@ -136,15 +155,13 @@ module.exports = function(app) {
                 
                 gwWs.on("message", handler);
                 
-                let method = "sessions.pause";
-                if (action === "resume") method = "sessions.resume";
-                if (action === "kill") method = "sessions.delete";
+                const params = action === "stop" ? { sessionKey: key } : { key };
                 
                 gwWs.send(JSON.stringify({
                     type: "req",
                     id,
                     method,
-                    params: { key }
+                    params
                 }));
             });
 

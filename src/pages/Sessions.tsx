@@ -10,8 +10,9 @@ import {
     Trash2,
     AlertTriangle,
     X,
-    Play,
-    Pause,
+    Square,
+    Database,
+    RotateCcw,
     MessageSquare,
     Clock,
     Cpu,
@@ -128,11 +129,12 @@ interface SessionDetailsProps {
     session: Session;
     onClose: () => void;
     onDelete: () => void;
-    onPause: () => void;
-    onResume: () => void;
+    onStop: () => void;
+    onCompact: () => void;
+    onReset: () => void;
 }
 
-function SessionDetails({ session, onClose, onDelete, onPause, onResume }: SessionDetailsProps) {
+function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset }: SessionDetailsProps) {
     const [history, setHistory] = useState<Array<{ role: string; content: string; timestamp?: string }>>([]);
     const [loading, setLoading] = useState(true);
     const [visibleCount, setVisibleCount] = useState(50);
@@ -159,7 +161,6 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
         }
     };
 
-    const isMain = (session.type || "").toUpperCase() === "MAIN";
 
     useEffect(() => {
         fetchHistory();
@@ -183,16 +184,15 @@ function SessionDetails({ session, onClose, onDelete, onPause, onResume }: Sessi
                         <h2 className="text-lg font-semibold text-slate-100 truncate">{displayName}</h2>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                        {!isMain && (
-                            <>
-                                <Button variant="secondary" size="sm" onClick={onResume}>
-                                    <Play className="w-4 h-4 mr-1" /> Resume
-                                </Button>
-                                <Button variant="secondary" size="sm" onClick={onPause}>
-                                    <Pause className="w-4 h-4 mr-1" /> Pause
-                                </Button>
-                            </>
-                        )}
+                        <Button variant="secondary" size="sm" onClick={onStop} title="Stop current run">
+                            <Square className="w-4 h-4 mr-1" /> Stop
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={onCompact} title="Compact context">
+                            <Database className="w-4 h-4 mr-1" /> Compact
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={onReset} title="Reset session">
+                            <RotateCcw className="w-4 h-4 mr-1" /> Reset
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={onDelete} className="text-red-400 hover:text-red-300">
                             <Trash2 className="w-4 h-4" />
                         </Button>
@@ -368,27 +368,39 @@ export function Sessions() {
         }
     };
 
-    const handlePause = async (sessionKey: string) => {
+    const handleStop = async (sessionKey: string) => {
         try {
             await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "pause" })
+                body: JSON.stringify({ action: "stop" })
             });
         } catch (e) {
-            console.error("Failed to pause session:", e);
+            console.error("Failed to stop session:", e);
         }
     };
 
-    const handleResume = async (sessionKey: string) => {
+    const handleCompact = async (sessionKey: string) => {
         try {
             await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "resume" })
+                body: JSON.stringify({ action: "compact" })
             });
         } catch (e) {
-            console.error("Failed to resume session:", e);
+            console.error("Failed to compact session:", e);
+        }
+    };
+
+    const handleReset = async (sessionKey: string) => {
+        try {
+            await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "reset" })
+            });
+        } catch (e) {
+            console.error("Failed to reset session:", e);
         }
     };
 
@@ -528,8 +540,9 @@ export function Sessions() {
                         setDeleteTarget(selectedSession);
                         setSelectedSession(null);
                     }}
-                    onPause={() => handlePause(selectedSession.key)}
-                    onResume={() => handleResume(selectedSession.key)}
+                    onStop={() => handleStop(selectedSession.key)}
+                    onCompact={() => handleCompact(selectedSession.key)}
+                    onReset={() => handleReset(selectedSession.key)}
                 />
             )}
 
