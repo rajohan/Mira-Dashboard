@@ -228,7 +228,7 @@ function handleClient(ws) {
         try {
             const msg = JSON.parse(data.toString());
 
-            if (msg.type === "request" && msg.method) {
+            if ((msg.type === "request" || msg.type === "req") && msg.method) {
                 sendRequest(msg.method, msg.params || {}, ws, msg.id);
             }
         } catch (e) {
