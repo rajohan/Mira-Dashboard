@@ -1,4 +1,4 @@
-// Sessions API routes
+// Gateway WebSocket connection
 const WebSocket = require("ws");
 
 let gatewayWs = null;
@@ -9,16 +9,13 @@ let reconnectTimer = null;
 let connectionAttempts = 0;
 let requestId = 1000;
 let pendingRequests = new Map();
-let logSubscribers = new Set();
-let logWatcher = null;
-let lastLogSize = 0;
-let lastLogFile = "";
 
 function transformSession(session) {
     let type = "UNKNOWN";
     let agentType = "";
     const key = session.key || "";
     const keyParts = key.split(":");
+    
     if (keyParts.length >= 2) {
         agentType = keyParts[1] || "";
     }
@@ -67,48 +64,6 @@ function transformSession(session) {
     };
 }
 
-function startLogWatcher(logsDir = "/tmp/openclaw") {
-    if (logWatcher) return;
-    
-    const fs = require("fs");
-    const path = require("path");
-    
-    logWatcher = setInterval(() => {
-        try {
-            const today = new Date().toISOString().split("T")[0];
-            const logFile = path.join(logsDir, "openclaw-" + today + ".log");
-            
-            if (!fs.existsSync(logFile)) return;
-            
-            const stat = fs.statSync(logFile);
-            
-            if (logFile !== lastLogFile) {
-                lastLogFile = logFile;
-                lastLogSize = 0;
-            }
-            
-            if (stat.size > lastLogSize) {
-                const fd = fs.openSync(logFile, "r");
-                const buffer = Buffer.alloc(stat.size - lastLogSize);
-                fs.readSync(fd, buffer, 0, buffer.length, lastLogSize);
-                fs.closeSync(fd);
-                
-                const lines = buffer.toString("utf-8").split("\n").filter(l => l.trim());
-                lastLogSize = stat.size;
-                
-                for (const line of lines) {
-                    const msg = JSON.stringify({ type: "log", line });
-                    for (const ws of logSubscribers) {
-                        try { ws.send(msg); } catch {}
-                    }
-                }
-            }
-        } catch (e) {
-            console.error("[LogWatcher] Error:", e.message);
-        }
-    }, 1000);
-}
-
 function broadcast(msg) {
     const data = JSON.stringify(msg);
     for (const ws of subscribers) {
@@ -116,29 +71,13 @@ function broadcast(msg) {
     }
 }
 
-function sendGatewayRequest(method, params, clientWs, clientId) {
-    if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
-        return false;
-    }
-
-    const id = String(++requestId);
-    const req = { type: "req", id, method, params };
-
-    if (clientWs && clientId) {
-        pendingRequests.set(id, { clientWs, clientId, method });
-    }
-
-    gatewayWs.send(JSON.stringify(req));
-    return true;
-}
-
-function connectToGateway(token) {
+function connect(token) {
     if (gatewayWs && (gatewayWs.readyState === WebSocket.OPEN || gatewayWs.readyState === WebSocket.CONNECTING)) {
         return;
     }
 
     const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
-    console.log("[Backend] Connecting to Gateway:", gatewayUrl);
+    console.log("[Gateway] Connecting to:", gatewayUrl);
 
     try {
         const ws = new WebSocket(gatewayUrl + "?token=" + encodeURIComponent(token));
@@ -146,8 +85,8 @@ function connectToGateway(token) {
         connectionAttempts++;
 
         ws.on("open", () => {
-            console.log("[Backend] WS open, sending connect...");
-            const connectReq = {
+            console.log("[Gateway] WS open, sending connect...");
+            ws.send(JSON.stringify({
                 type: "req",
                 id: "connect-1",
                 method: "connect",
@@ -165,8 +104,7 @@ function connectToGateway(token) {
                     caps: ["tool-events"],
                     auth: { token },
                 },
-            };
-            ws.send(JSON.stringify(connectReq));
+            }));
         });
 
         ws.on("message", (data) => {
@@ -175,7 +113,7 @@ function connectToGateway(token) {
 
                 if (msg.type === "res" && msg.id === "connect-1") {
                     if (msg.ok) {
-                        console.log("[Backend] Gateway connected!");
+                        console.log("[Gateway] Connected!");
                         isGatewayConnected = true;
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
@@ -186,7 +124,7 @@ function connectToGateway(token) {
                             params: {},
                         }));
                     } else {
-                        console.error("[Backend] Connect failed:", msg.error);
+                        console.error("[Gateway] Connect failed:", msg.error);
                     }
                     return;
                 }
@@ -234,12 +172,12 @@ function connectToGateway(token) {
                     broadcast({ type: "event", event: msg.event, payload: msg.payload });
                 }
             } catch (e) {
-                console.error("[Backend] Parse error:", e.message);
+                console.error("[Gateway] Parse error:", e.message);
             }
         });
 
         ws.on("close", (code) => {
-            console.log("[Backend] Gateway closed:", code);
+            console.log("[Gateway] Closed:", code);
             gatewayWs = null;
             isGatewayConnected = false;
             broadcast({ type: "disconnected" });
@@ -247,10 +185,10 @@ function connectToGateway(token) {
         });
 
         ws.on("error", (err) => {
-            console.error("[Backend] WS error:", err.message);
+            console.error("[Gateway] Error:", err.message);
         });
     } catch (e) {
-        console.error("[Backend] Connect error:", e.message);
+        console.error("[Gateway] Connect error:", e.message);
         scheduleReconnect(token);
     }
 }
@@ -258,18 +196,27 @@ function connectToGateway(token) {
 function scheduleReconnect(token) {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delay = Math.min(5000 * Math.pow(1.5, connectionAttempts), 60000);
-    console.log("[Backend] Reconnecting in " + delay + "ms...");
-    reconnectTimer = setTimeout(() => connectToGateway(token), delay);
+    console.log("[Gateway] Reconnecting in " + delay + "ms...");
+    reconnectTimer = setTimeout(() => connect(token), delay);
 }
 
-function getGatewayStatus() {
-    return {
-        gateway: isGatewayConnected ? "connected" : "disconnected",
-        sessions: sessionList.length
-    };
+function sendRequest(method, params, clientWs, clientId) {
+    if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+        return false;
+    }
+
+    const id = String(++requestId);
+    const req = { type: "req", id, method, params };
+
+    if (clientWs && clientId) {
+        pendingRequests.set(id, { clientWs, clientId, method });
+    }
+
+    gatewayWs.send(JSON.stringify(req));
+    return true;
 }
 
-function handleClientConnection(ws) {
+function handleClient(ws) {
     subscribers.add(ws);
     ws.send(JSON.stringify({
         type: "state",
@@ -281,33 +228,38 @@ function handleClientConnection(ws) {
         try {
             const msg = JSON.parse(data.toString());
 
-            if (msg.type === "subscribe" && msg.channel === "logs") {
-                logSubscribers.add(ws);
-                startLogWatcher();
-            }
-
-            if (msg.type === "unsubscribe" && msg.channel === "logs") {
-                logSubscribers.delete(ws);
-            }
-
             if (msg.type === "request" && msg.method) {
-                sendGatewayRequest(msg.method, msg.params || {}, ws, msg.id);
+                sendRequest(msg.method, msg.params || {}, ws, msg.id);
             }
         } catch (e) {
-            console.error("[Frontend] Error handling message:", e.message);
+            console.error("[Gateway] Client message error:", e.message);
         }
     });
 
     ws.on("close", () => {
         subscribers.delete(ws);
-        logSubscribers.delete(ws);
     });
 }
 
+function getStatus() {
+    return {
+        gateway: isGatewayConnected ? "connected" : "disconnected",
+        sessions: sessionList.length
+    };
+}
+
+function getSessions() {
+    return sessionList;
+}
+
+function isConnected() {
+    return isGatewayConnected;
+}
+
 module.exports = {
-    init: (token) => connectToGateway(token),
-    getStatus: getGatewayStatus,
-    handleClient: handleClientConnection,
-    getSessions: () => sessionList,
-    isConnected: () => isGatewayConnected,
+    init: connect,
+    handleClient,
+    getStatus,
+    getSessions,
+    isConnected,
 };
