@@ -146,10 +146,15 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
 
     // Close dropdown when clicking outside
     useEffect(() => {
-        const handleClickOutside = () => setShowActions(false);
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.actions-dropdown')) {
+                setShowActions(false);
+            }
+        };
         if (showActions) {
-            document.addEventListener('click', handleClickOutside);
-            return () => document.removeEventListener('click', handleClickOutside);
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
         }
     }, [showActions]);
 
@@ -202,7 +207,7 @@ function SessionDetails({ session, onClose, onDelete, onStop, onCompact, onReset
                                 <ChevronDown className={"w-3 h-3 transition-transform " + (showActions ? "rotate-180" : "")} />
                             </Button>
                             {showActions && (
-                                <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[140px]">
+                                <div className="actions-dropdown absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[140px]">
                                     <button onClick={() => { setShowActions(false); onStop(); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
                                         <Square className="w-4 h-4" /> Stop
                                     </button>
@@ -536,7 +541,7 @@ export function Sessions() {
                                                             <ChevronDown className={"w-3 h-3 transition-transform " + (activeDropdown === session.key ? "rotate-180" : "")} />
                                                         </Button>
                                                         {activeDropdown === session.key && (
-                                                            <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
+                                                            <div className="actions-dropdown absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 min-w-[120px]" onClick={e => e.stopPropagation()}>
                                                                 <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); handleStop(session.key); }} className="w-full px-3 py-2 text-sm text-left hover:bg-slate-700 flex items-center gap-2">
                                                                     <Square className="w-4 h-4" /> Stop
                                                                 </button>
