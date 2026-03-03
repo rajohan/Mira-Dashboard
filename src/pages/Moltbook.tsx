@@ -1,5 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
-import { nb } from "date-fns/locale";
+import { enUS } from "date-fns/locale";
 import {
     Clock,
     ExternalLink,
@@ -54,7 +54,7 @@ interface MiraContent {
 const MOLTBOOK_URL = "https://www.moltbook.com";
 
 function formatTime(dateStr: string): string {
-    return formatDistanceToNow(new Date(dateStr), { addSuffix: true, locale: nb });
+    return formatDistanceToNow(new Date(dateStr), { addSuffix: true, locale: enUS });
 }
 
 function truncate(text: string, maxLen: number): string {

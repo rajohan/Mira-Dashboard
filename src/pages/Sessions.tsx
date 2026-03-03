@@ -9,7 +9,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { format, formatDistanceToNow } from "date-fns";
-import { nb } from "date-fns/locale";
+import { enUS } from "date-fns/locale";
 import {
     AlertTriangle,
     ArrowDown,
@@ -39,7 +39,7 @@ import { useAuthStore } from "../stores/authStore";
 
 function formatDuration(updatedAt: number | null | undefined): string {
     if (!updatedAt) return "Unknown";
-    return formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: nb });
+    return formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: enUS });
 }
 
 function formatTokens(current: number, max: number): string {
@@ -438,8 +438,8 @@ function SessionDetails({
                                                         <span className="text-xs text-slate-500">
                                                             {format(
                                                                 new Date(msg.timestamp),
-                                                                "dd.MM.yyyy HH:mm",
-                                                                { locale: nb }
+                                                                "MM/dd/yyyy HH:mm",
+                                                                { locale: enUS }
                                                             )}
                                                         </span>
                                                     )}

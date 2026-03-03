@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
-import { nb } from "date-fns/locale";
+import { enUS } from "date-fns/locale";
 import {
     ChevronDown,
     Download,
@@ -344,7 +344,7 @@ export function Logs() {
     const formatTime = (ts?: string): string => {
         if (!ts) return "";
         try {
-            return format(new Date(ts), "HH:mm:ss", { locale: nb });
+            return format(new Date(ts), "HH:mm:ss", { locale: enUS });
         } catch {
             return ts;
         }

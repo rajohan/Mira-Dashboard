@@ -1,6 +1,6 @@
 import ReactJsonView from "@microlink/react-json-view";
 import { format } from "date-fns";
-import { nb } from "date-fns/locale";
+import { enUS } from "date-fns/locale";
 import JSON5 from "json5";
 import {
     AlertTriangle,
@@ -91,7 +91,7 @@ function formatSize(bytes: number): string {
 
 function formatDate(dateStr: string): string {
     try {
-        return format(new Date(dateStr), "dd.MM.yyyy HH:mm", { locale: nb });
+        return format(new Date(dateStr), "MM/dd/yyyy HH:mm", { locale: enUS });
     } catch {
         return dateStr;
     }
