@@ -4,6 +4,7 @@ import { useForm } from "@tanstack/react-form";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
+import { Textarea } from "../../ui/Textarea";
 
 const PRIORITY_COLORS: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -51,35 +52,27 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
 
                 <form.Field name="title">
                     {(field) => (
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                                Title
-                            </label>
-                            <Input
-                                type="text"
-                                value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder="Task title..."
-                                autoFocus
-                            />
-                        </div>
+                        <Input
+                            label="Title"
+                            type="text"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="Task title..."
+                            autoFocus
+                        />
                     )}
                 </form.Field>
 
                 <form.Field name="body">
                     {(field) => (
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                                Description (optional)
-                            </label>
-                            <textarea
-                                value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder="Task description..."
-                                rows={4}
-                                className="w-full resize-none rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent-500 focus:outline-none"
-                            />
-                        </div>
+                        <Textarea
+                            label="Description (optional)"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="Task description..."
+                            rows={4}
+                            className="resize-none"
+                        />
                     )}
                 </form.Field>
 
