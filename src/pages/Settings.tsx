@@ -2,8 +2,6 @@ import { useForm } from "@tanstack/react-form";
 import {
     AlertCircle,
     Check,
-    ChevronDown,
-    ChevronRight,
     Clock,
     Download,
     Heart,
@@ -18,122 +16,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
-import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { Switch } from "../components/ui/Switch";
-
-// Types
-interface Skill {
-    name: string;
-    description?: string;
-    enabled: boolean;
-    location?: string;
-}
-
-interface Config {
-    gateway?: {
-        port?: number;
-        mode?: string;
-        auth?: {
-            type?: string;
-            enabled?: boolean;
-        };
-    };
-    agents?: {
-        defaultModel?: string;
-        fallbacks?: string[];
-        contextSettings?: {
-            maxTokens?: number;
-            temperature?: number;
-        };
-    };
-    channels?: {
-        discord?: {
-            enabled?: boolean;
-            botId?: string;
-        };
-        [key: string]: unknown;
-    };
-    session?: {
-        reset?: {
-            mode?: string;
-            idleMinutes?: number;
-        };
-    };
-    tools?: {
-        webSearch?: {
-            enabled?: boolean;
-            provider?: string;
-        };
-        exec?: {
-            enabled?: boolean;
-            mode?: string;
-        };
-    };
-    heartbeat?: {
-        enabled?: boolean;
-        every?: number;
-        target?: string;
-    };
-}
-
-interface SettingsForm {
-    idleMinutes: number;
-    heartbeatEvery: number;
-    heartbeatTarget: string;
-}
-
-// Expandable card component
-function ExpandableCard({
-    title,
-    icon: Icon,
-    children,
-    defaultExpanded = false,
-}: {
-    title: string;
-    icon: React.ElementType;
-    children: React.ReactNode;
-    defaultExpanded?: boolean;
-}) {
-    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-    return (
-        <Card variant="bordered" className="mb-4">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="flex w-full items-center justify-between py-1"
-            >
-                <div className="flex items-center gap-2">
-                    <Icon size={18} className="text-accent-400" />
-                    <CardTitle>{title}</CardTitle>
-                </div>
-                {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-            </button>
-            {isExpanded && (
-                <div className="mt-4 border-t border-primary-700 pt-4">{children}</div>
-            )}
-        </Card>
-    );
-}
-
-// Read-only field display
-function ReadOnlyField({
-    label,
-    value,
-}: {
-    label: string;
-    value?: string | number | boolean;
-}) {
-    return (
-        <div className="flex items-center justify-between py-2">
-            <span className="text-sm text-slate-400">{label}</span>
-            <span className="font-mono text-sm text-primary-100">
-                {value === undefined || value === null ? "—" : String(value)}
-            </span>
-        </div>
-    );
-}
+import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
+import { type Config, type Skill, type SettingsForm } from "../types/settings";
 
 export function Settings() {
     const [config, setConfig] = useState<Config | null>(null);
@@ -143,12 +30,10 @@ export function Settings() {
     const [success, setSuccess] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
-    // Operations
     const [showRestartModal, setShowRestartModal] = useState(false);
     const [restarting, setRestarting] = useState(false);
     const [backingUp, setBackingUp] = useState(false);
 
-    // Form using TanStack Form
     const form = useForm({
         defaultValues: {
             idleMinutes: 30,
@@ -198,7 +83,6 @@ export function Settings() {
         },
     });
 
-    // Fetch config and skills
     useEffect(() => {
         fetchConfig();
         fetchSkills();
@@ -210,7 +94,6 @@ export function Settings() {
             if (res.ok) {
                 const data = await res.json();
                 setConfig(data);
-                // Update form with fetched values
                 form.setFieldValue(
                     "idleMinutes",
                     data?.session?.reset?.idleMinutes || 30
@@ -237,406 +120,421 @@ export function Settings() {
         }
     }
 
-    const handleToggleSkill = useCallback(async (name: string, enable: boolean) => {
-        try {
-            const res = await fetch(
-                `/api/skills/${encodeURIComponent(name)}/${enable ? "enable" : "disable"}`,
-                { method: "POST" }
-            );
-
-            if (res.ok) {
-                setSkills((prev) =>
-                    prev.map((s) => (s.name === name ? { ...s, enabled: enable } : s))
-                );
-            }
-        } catch (error_) {
-            console.error("Failed to toggle skill:", error_);
-        }
-    }, []);
-
-    async function handleRestart() {
+    const handleRestart = useCallback(async () => {
         setRestarting(true);
-        setError(null);
-
         try {
-            const res = await fetch("/api/operations/restart", { method: "POST" });
+            const res = await fetch("/api/restart", { method: "POST" });
             if (res.ok) {
                 setShowRestartModal(false);
-                setSuccess("Gateway restart initiated");
-                setTimeout(() => setSuccess(null), 5000);
+                setTimeout(() => window.location.reload(), 2000);
             } else {
-                const data = await res.json();
-                setError(data.error || "Failed to restart gateway");
+                setError("Failed to initiate restart");
             }
         } catch (error_: unknown) {
             const errorMessage =
-                error_ instanceof Error ? error_.message : "Failed to restart gateway";
+                error_ instanceof Error ? error_.message : "Failed to restart";
             setError(errorMessage);
         } finally {
             setRestarting(false);
         }
-    }
+    }, []);
 
-    async function handleBackup() {
+    const handleBackup = useCallback(async () => {
         setBackingUp(true);
-        setError(null);
-
         try {
-            const res = await fetch("/api/operations/backup", { method: "POST" });
+            const res = await fetch("/api/backup", { method: "POST" });
             if (res.ok) {
-                const data = await res.json();
-                setSuccess("Backup created: " + (data.path || "workspace-backup.tar.gz"));
-                setTimeout(() => setSuccess(null), 5000);
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "openclaw-backup-" + new Date().toISOString().split("T")[0] + ".json";
+                a.click();
+                URL.revokeObjectURL(url);
             } else {
-                const data = await res.json();
-                setError(data.error || "Failed to create backup");
+                setError("Failed to create backup");
             }
         } catch (error_: unknown) {
             const errorMessage =
-                error_ instanceof Error ? error_.message : "Failed to create backup";
+                error_ instanceof Error ? error_.message : "Failed to backup";
             setError(errorMessage);
         } finally {
             setBackingUp(false);
         }
-    }
+    }, []);
+
+    const handleSkillToggle = useCallback(
+        async (skillName: string, enabled: boolean) => {
+            try {
+                const res = await fetch("/api/skills/" + skillName, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled }),
+                });
+                if (res.ok) {
+                    setSkills((prev) =>
+                        prev.map((s) =>
+                            s.name === skillName ? { ...s, enabled } : s
+                        )
+                    );
+                } else {
+                    setError("Failed to update skill");
+                }
+            } catch (error_: unknown) {
+                const errorMessage =
+                    error_ instanceof Error ? error_.message : "Failed to update skill";
+                setError(errorMessage);
+            }
+        },
+        []
+    );
 
     if (loading) {
         return (
-            <div className="flex min-h-64 items-center justify-center p-6">
+            <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-accent-400" />
             </div>
         );
     }
 
+    const modelInfo = {
+        defaultModel: config?.agents?.defaultModel || "Not set",
+        fallbacks: config?.agents?.fallbacks?.join(", ") || "None",
+        contextWindow: config?.agents?.contextSettings?.maxTokens || 128000,
+        temperature: config?.agents?.contextSettings?.temperature || 0.7,
+    };
+
+    const channelInfo = {
+        discordEnabled: config?.channels?.discord?.enabled || false,
+        discordBotId: config?.channels?.discord?.botId || "Not configured",
+    };
+
+    const toolInfo = {
+        webSearchEnabled: config?.tools?.webSearch?.enabled || false,
+        webSearchProvider: config?.tools?.webSearch?.provider || "None",
+        execEnabled: config?.tools?.exec?.enabled || false,
+        execMode: config?.tools?.exec?.mode || "disabled",
+    };
+
+    const securityInfo = {
+        gatewayPort: config?.gateway?.port || 18789,
+        gatewayMode: config?.gateway?.mode || "development",
+        authEnabled: config?.gateway?.auth?.enabled || false,
+        authType: config?.gateway?.auth?.type || "None",
+    };
+
     return (
         <div className="p-6">
             <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Settings</h1>
-                <Button onClick={() => form.handleSubmit()} disabled={saving}>
-                    {saving ? (
-                        <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Saving...
-                        </>
-                    ) : (
-                        <>
-                            <Check size={16} className="mr-2" />
-                            Save Changes
-                        </>
-                    )}
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="secondary" onClick={handleBackup} disabled={backingUp}>
+                        {backingUp ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Backing up...
+                            </>
+                        ) : (
+                            <>
+                                <Download className="h-4 w-4" />
+                                Backup
+                            </>
+                        )}
+                    </Button>
+                    <Button
+                        variant="danger"
+                        onClick={() => setShowRestartModal(true)}
+                    >
+                        <RefreshCw className="h-4 w-4" />
+                        Restart
+                    </Button>
+                </div>
             </div>
 
             {error && (
                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
-                    <AlertCircle size={18} />
+                    <AlertCircle size={16} />
                     {error}
+                    <button
+                        className="ml-auto text-red-300 hover:text-red-100"
+                        onClick={() => setError(null)}
+                    >
+                        ×
+                    </button>
                 </div>
             )}
 
             {success && (
                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-500 bg-green-500/20 p-3 text-green-400">
-                    <Check size={18} />
+                    <Check size={16} />
                     {success}
                 </div>
             )}
 
-            {/* Configuration Sections */}
-            <div className="space-y-4">
-                {/* Gateway */}
-                <ExpandableCard title="Gateway" icon={Server}>
-                    <div className="space-y-1">
-                        <ReadOnlyField label="Port" value={config?.gateway?.port} />
-                        <ReadOnlyField label="Mode" value={config?.gateway?.mode} />
-                        <ReadOnlyField
-                            label="Auth Type"
-                            value={config?.gateway?.auth?.type}
-                        />
-                        <ReadOnlyField
-                            label="Auth Enabled"
-                            value={config?.gateway?.auth?.enabled ? "Yes" : "No"}
-                        />
-                    </div>
-                </ExpandableCard>
+            {/* Model Configuration */}
+            <ExpandableCard title="Model Configuration" icon={Wrench} defaultExpanded>
+                <div className="space-y-2">
+                    <ReadOnlyField label="Default Model" value={modelInfo.defaultModel} />
+                    <ReadOnlyField label="Fallback Models" value={modelInfo.fallbacks} />
+                    <ReadOnlyField
+                        label="Context Window"
+                        value={modelInfo.contextWindow.toLocaleString() + " tokens"}
+                    />
+                    <ReadOnlyField label="Temperature" value={modelInfo.temperature} />
+                </div>
+            </ExpandableCard>
 
-                {/* Agents */}
-                <ExpandableCard title="Agents" icon={Users}>
-                    <div className="space-y-1">
-                        <ReadOnlyField
-                            label="Default Model"
-                            value={config?.agents?.defaultModel}
-                        />
-                        {config?.agents?.fallbacks?.length ? (
-                            <div className="py-2">
-                                <span className="mb-1 block text-sm text-slate-400">
-                                    Fallbacks
-                                </span>
-                                <div className="flex flex-wrap gap-1">
-                                    {config.agents.fallbacks.map((m, i) => (
-                                        <span
-                                            key={i}
-                                            className="rounded bg-primary-700 px-2 py-0.5 text-xs"
-                                        >
-                                            {m}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : (
-                            <ReadOnlyField label="Fallbacks" value="None" />
-                        )}
-                        <ReadOnlyField
-                            label="Max Tokens"
-                            value={config?.agents?.contextSettings?.maxTokens}
-                        />
-                        <ReadOnlyField
-                            label="Temperature"
-                            value={config?.agents?.contextSettings?.temperature}
-                        />
+            {/* Channel Configuration */}
+            <ExpandableCard title="Channels" icon={MessageSquare}>
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between py-2">
+                        <span className="text-sm text-slate-400">Discord</span>
+                        <span
+                            className={
+                                channelInfo.discordEnabled
+                                    ? "text-green-400"
+                                    : "text-slate-500"
+                            }
+                        >
+                            {channelInfo.discordEnabled ? "Enabled" : "Disabled"}
+                        </span>
                     </div>
-                </ExpandableCard>
+                    <ReadOnlyField label="Bot ID" value={channelInfo.discordBotId} />
+                </div>
+            </ExpandableCard>
 
-                {/* Channels */}
-                <ExpandableCard title="Channels" icon={MessageSquare}>
-                    <div className="space-y-3">
-                        {config?.channels?.discord ? (
-                            <div className="flex items-center justify-between border-b border-primary-700 py-2 last:border-0">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-primary-200">Discord</span>
-                                    {config.channels.discord.botId && (
-                                        <span className="font-mono text-xs text-primary-500">
-                                            ({config.channels.discord.botId.slice(0, 8)}
-                                            ...)
-                                        </span>
-                                    )}
-                                </div>
-                                <span
-                                    className={
-                                        config.channels.discord.enabled
-                                            ? "text-green-400"
-                                            : "text-red-400"
-                                    }
-                                >
-                                    {config.channels.discord.enabled
-                                        ? "Enabled"
-                                        : "Disabled"}
-                                </span>
-                            </div>
-                        ) : (
-                            <ReadOnlyField label="Discord" value="Not configured" />
-                        )}
+            {/* Tool Configuration */}
+            <ExpandableCard title="Tools" icon={Wrench}>
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between py-2">
+                        <span className="text-sm text-slate-400">Web Search</span>
+                        <span
+                            className={
+                                toolInfo.webSearchEnabled
+                                    ? "text-green-400"
+                                    : "text-slate-500"
+                            }
+                        >
+                            {toolInfo.webSearchEnabled
+                                ? "Enabled (" + toolInfo.webSearchProvider + ")"
+                                : "Disabled"}
+                        </span>
                     </div>
-                </ExpandableCard>
+                    <div className="flex items-center justify-between py-2">
+                        <span className="text-sm text-slate-400">Exec</span>
+                        <span
+                            className={
+                                toolInfo.execEnabled ? "text-green-400" : "text-slate-500"
+                            }
+                        >
+                            {toolInfo.execEnabled
+                                ? "Enabled (" + toolInfo.execMode + ")"
+                                : "Disabled"}
+                        </span>
+                    </div>
+                </div>
+            </ExpandableCard>
 
-                {/* Session */}
-                <ExpandableCard title="Session" icon={Clock} defaultExpanded>
-                    <div className="space-y-1">
-                        <ReadOnlyField
-                            label="Reset Mode"
-                            value={config?.session?.reset?.mode}
-                        />
+            {/* Security Configuration */}
+            <ExpandableCard title="Security" icon={Shield}>
+                <div className="space-y-2">
+                    <ReadOnlyField label="Gateway Port" value={securityInfo.gatewayPort} />
+                    <ReadOnlyField label="Mode" value={securityInfo.gatewayMode} />
+                    <ReadOnlyField
+                        label="Authentication"
+                        value={
+                            securityInfo.authEnabled
+                                ? securityInfo.authType
+                                : "Disabled"
+                        }
+                    />
+                </div>
+            </ExpandableCard>
+
+            {/* Session Configuration */}
+            <ExpandableCard title="Session" icon={Clock}>
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        form.handleSubmit();
+                    }}
+                    className="space-y-4"
+                >
+                    <div>
+                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                            Idle Timeout (minutes)
+                        </label>
                         <form.Field name="idleMinutes">
                             {(field) => (
-                                <div className="py-2">
-                                    <Input
-                                        label="Idle Timeout (minutes)"
-                                        type="number"
-                                        value={field.state.value?.toString() ?? ""}
-                                        onChange={(e) =>
-                                            field.handleChange(
-                                                Number.parseInt(e.target.value) || 0
-                                            )
-                                        }
-                                        onBlur={field.handleBlur}
-                                        placeholder="30"
-                                        className="text-sm"
-                                    />
-                                </div>
+                                <Input
+                                    type="number"
+                                    value={field.state.value}
+                                    onChange={(e) =>
+                                        field.handleChange(Number(e.target.value))
+                                    }
+                                    min={0}
+                                    max={1440}
+                                    className="w-32"
+                                />
                             )}
                         </form.Field>
                     </div>
-                </ExpandableCard>
-
-                {/* Tools */}
-                <ExpandableCard title="Tools" icon={Wrench}>
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between border-b border-primary-700 py-2">
-                            <div>
-                                <span className="text-primary-200">Web Search</span>
-                                <span className="ml-2 text-xs text-primary-500">
-                                    ({config?.tools?.webSearch?.provider || "default"})
-                                </span>
-                            </div>
-                            <span
-                                className={
-                                    config?.tools?.webSearch?.enabled
-                                        ? "text-green-400"
-                                        : "text-red-400"
-                                }
-                            >
-                                {config?.tools?.webSearch?.enabled
-                                    ? "Enabled"
-                                    : "Disabled"}
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between py-2">
-                            <div>
-                                <span className="text-primary-200">Exec</span>
-                                <span className="ml-2 text-xs text-primary-500">
-                                    ({config?.tools?.exec?.mode || "default"})
-                                </span>
-                            </div>
-                            <span
-                                className={
-                                    config?.tools?.exec?.enabled
-                                        ? "text-green-400"
-                                        : "text-red-400"
-                                }
-                            >
-                                {config?.tools?.exec?.enabled ? "Enabled" : "Disabled"}
-                            </span>
-                        </div>
+                    <div className="flex justify-end">
+                        <Button type="submit" variant="primary" disabled={saving}>
+                            {saving ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Saving...
+                                </>
+                            ) : (
+                                <>
+                                    <Check className="h-4 w-4" />
+                                    Save
+                                </>
+                            )}
+                        </Button>
                     </div>
-                </ExpandableCard>
+                </form>
+            </ExpandableCard>
 
-                {/* Heartbeat */}
-                <ExpandableCard title="Heartbeat" icon={Heart} defaultExpanded>
-                    <div className="space-y-1">
-                        <ReadOnlyField
-                            label="Enabled"
-                            value={config?.heartbeat?.enabled ? "Yes" : "No"}
-                        />
+            {/* Heartbeat Configuration */}
+            <ExpandableCard title="Heartbeat" icon={Heart}>
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        form.handleSubmit();
+                    }}
+                    className="space-y-4"
+                >
+                    <div>
+                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                            Interval (seconds)
+                        </label>
                         <form.Field name="heartbeatEvery">
                             {(field) => (
-                                <div className="py-2">
-                                    <Input
-                                        label="Interval (seconds)"
-                                        type="number"
-                                        value={field.state.value?.toString() ?? ""}
-                                        onChange={(e) =>
-                                            field.handleChange(
-                                                Number.parseInt(e.target.value) || 0
-                                            )
-                                        }
-                                        onBlur={field.handleBlur}
-                                        placeholder="60"
-                                        className="text-sm"
-                                    />
-                                </div>
+                                <Input
+                                    type="number"
+                                    value={field.state.value}
+                                    onChange={(e) =>
+                                        field.handleChange(Number(e.target.value))
+                                    }
+                                    min={60}
+                                    max={3600}
+                                    className="w-32"
+                                />
                             )}
                         </form.Field>
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                            Target Channel
+                        </label>
                         <form.Field name="heartbeatTarget">
                             {(field) => (
-                                <div className="py-2">
-                                    <Input
-                                        label="Target Channel"
-                                        type="text"
-                                        value={field.state.value ?? ""}
-                                        onChange={(e) =>
-                                            field.handleChange(e.target.value)
-                                        }
-                                        onBlur={field.handleBlur}
-                                        placeholder="channel-id or name"
-                                        className="text-sm"
-                                    />
-                                </div>
+                                <Input
+                                    type="text"
+                                    value={field.state.value}
+                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    placeholder="Channel ID or name"
+                                    className="w-64"
+                                />
                             )}
                         </form.Field>
                     </div>
-                </ExpandableCard>
-
-                {/* Skills */}
-                <ExpandableCard title="Installed Skills" icon={Shield} defaultExpanded>
-                    {skills.length > 0 ? (
-                        <div className="space-y-2">
-                            {skills.map((skill) => (
-                                <div
-                                    key={skill.name}
-                                    className="flex items-center justify-between border-b border-primary-700 py-2 last:border-0"
-                                >
-                                    <div className="flex flex-col">
-                                        <span className="text-primary-200">
-                                            {skill.name}
-                                        </span>
-                                        {skill.description && (
-                                            <span className="text-xs text-primary-500">
-                                                {skill.description}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <Switch
-                                        checked={skill.enabled}
-                                        onChange={() =>
-                                            handleToggleSkill(skill.name, !skill.enabled)
-                                        }
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <p className="text-sm text-primary-500">No skills installed</p>
-                    )}
-                </ExpandableCard>
-
-                {/* Operations */}
-                <Card variant="bordered" className="mt-6">
-                    <CardTitle className="mb-4">Operations</CardTitle>
-                    <p className="mb-4 text-sm text-primary-400">
-                        Manage OpenClaw gateway and workspace operations.
-                    </p>
-                    <div className="flex gap-4">
-                        <Button
-                            variant="danger"
-                            onClick={() => setShowRestartModal(true)}
-                        >
-                            <RefreshCw size={16} className="mr-2" />
-                            Restart Gateway
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={handleBackup}
-                            disabled={backingUp}
-                        >
-                            {backingUp ? (
-                                <Loader2 size={16} className="mr-2 animate-spin" />
+                    <div className="flex justify-end">
+                        <Button type="submit" variant="primary" disabled={saving}>
+                            {saving ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Saving...
+                                </>
                             ) : (
-                                <Download size={16} className="mr-2" />
+                                <>
+                                    <Check className="h-4 w-4" />
+                                    Save
+                                </>
                             )}
-                            Backup Workspace
                         </Button>
                     </div>
-                </Card>
-            </div>
+                </form>
+            </ExpandableCard>
 
-            {/* Restart Confirmation Modal */}
+            {/* Skills */}
+            <ExpandableCard title="Skills" icon={Users}>
+                <div className="space-y-2">
+                    {skills.length === 0 ? (
+                        <p className="text-sm text-slate-400">No skills configured</p>
+                    ) : (
+                        skills.map((skill) => (
+                            <div
+                                key={skill.name}
+                                className="flex items-center justify-between py-2"
+                            >
+                                <div>
+                                    <p className="text-sm font-medium text-slate-200">
+                                        {skill.name}
+                                    </p>
+                                    {skill.description && (
+                                        <p className="text-xs text-slate-400">
+                                            {skill.description}
+                                        </p>
+                                    )}
+                                </div>
+                                <Switch
+                                    checked={skill.enabled}
+                                    onChange={(e) =>
+                                        handleSkillToggle(skill.name, e.target.checked)
+                                    }
+                                />
+                            </div>
+                        ))
+                    )}
+                </div>
+            </ExpandableCard>
+
+            {/* Server Info */}
+            <ExpandableCard title="Server" icon={Server}>
+                <div className="space-y-2">
+                    <ReadOnlyField label="Version" value="2026.2.23" />
+                    <ReadOnlyField label="Platform" value={typeof window !== 'undefined' ? window.navigator.platform : 'Unknown'} />
+                </div>
+            </ExpandableCard>
+
+            {/* Restart Modal */}
             <Modal
                 isOpen={showRestartModal}
                 onClose={() => setShowRestartModal(false)}
-                title="Confirm Restart"
+                title="Restart Gateway"
                 size="sm"
             >
-                <p className="mb-4 text-primary-300">
-                    Are you sure you want to restart the Gateway? This will temporarily
-                    disconnect all sessions.
-                </p>
-                <div className="flex justify-end gap-3">
-                    <Button variant="ghost" onClick={() => setShowRestartModal(false)}>
-                        Cancel
-                    </Button>
-                    <Button
-                        variant="danger"
-                        onClick={handleRestart}
-                        disabled={restarting}
-                    >
-                        {restarting ? (
-                            <>
-                                <Loader2 size={16} className="mr-2 animate-spin" />
-                                Restarting...
-                            </>
-                        ) : (
-                            "Restart Gateway"
-                        )}
-                    </Button>
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-300">
+                        Are you sure you want to restart the gateway? This will
+                        temporarily disconnect all sessions.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setShowRestartModal(false)}
+                            disabled={restarting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="danger"
+                            onClick={handleRestart}
+                            disabled={restarting}
+                        >
+                            {restarting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Restarting...
+                                </>
+                            ) : (
+                                "Restart"
+                            )}
+                        </Button>
+                    </div>
                 </div>
             </Modal>
         </div>
