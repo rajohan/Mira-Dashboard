@@ -16,6 +16,7 @@ import {
     ExternalLink,
     GripVertical,
     Loader2,
+    Plus,
     RefreshCw,
     Search,
     X,
