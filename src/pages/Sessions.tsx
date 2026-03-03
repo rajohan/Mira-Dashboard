@@ -23,9 +23,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { DeleteConfirmDialog } from "../components/features/sessions/DeleteConfirmDialog";
-import { SessionDetails } from "../components/features/sessions/SessionDetails";
-import { formatSessionType, getTypeSortOrder, getTypeBadgeColor, SESSION_TYPES } from "../components/features/sessions/sessionUtils";
+import {
+    DeleteConfirmDialog,
+    SessionDetails,
+    formatSessionType,
+    getTypeSortOrder,
+    getTypeBadgeColor,
+    SESSION_TYPES,
+} from "../components/features/sessions";
 import {
     formatDuration,
     formatTokens,

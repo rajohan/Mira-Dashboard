@@ -18,8 +18,8 @@ import {
     ConfigSection,
     PreviewToggle,
     FileContentViewer,
+    MAX_PREVIEW_SIZE,
 } from "../components/features/files";
-import { MAX_PREVIEW_SIZE } from "../components/features/files/fileConstants";
 import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getSyntaxClass } from "../utils/fileUtils";
 import { useAuthStore } from "../stores/authStore";
 

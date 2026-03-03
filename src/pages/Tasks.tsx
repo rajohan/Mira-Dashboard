@@ -10,11 +10,14 @@ import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { TaskColumn } from "../components/features/tasks/TaskColumn";
-import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
-import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
-import { NewTaskModal } from "../components/features/tasks/NewTaskModal";
-import { COLUMN_CONFIG, getColumnId } from "../components/features/tasks/taskUtils";
+import {
+    TaskColumn,
+    TaskDetailModal,
+    TaskOverlay,
+    NewTaskModal,
+    COLUMN_CONFIG,
+    getColumnId,
+} from "../components/features/tasks";
 
 import type { Task, ColumnId } from "../types/task";
 
