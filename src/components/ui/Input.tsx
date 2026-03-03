@@ -12,7 +12,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 export const Input = forwardRef<HTMLInputElement, InputProps>(
     ({ className, label, description, error, ...props }, ref) => {
         return (
-            <Field className="w-full">
+            <Field>
                 {label && (
                     <Label className="mb-1 block text-sm font-medium text-primary-300">
                         {label}

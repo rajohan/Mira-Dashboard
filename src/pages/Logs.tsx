@@ -65,9 +65,7 @@ export function Logs() {
             );
             const data = await response.json();
             if (data.content) {
-                const logLines = data.content
-                    .split("\n")
-                    .filter((l: string) => l.trim());
+                const logLines = data.content.split("\n").filter((l: string) => l.trim());
                 const parsedLogs = logLines
                     .map((line: string) => parseLogLine(line))
                     .filter((l: LogEntry | null): l is LogEntry => l !== null);
@@ -177,8 +175,7 @@ export function Logs() {
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
-        if (search && !log.raw.toLowerCase().includes(search.toLowerCase()))
-            return false;
+        if (search && !log.raw.toLowerCase().includes(search.toLowerCase())) return false;
         return true;
     });
 
@@ -338,7 +335,7 @@ export function Logs() {
                     placeholder="Search logs..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="min-w-[200px] max-w-md flex-1"
+                    className="min-w-[200px] max-w-md"
                 />
 
                 <LevelFilter
