@@ -1,8 +1,6 @@
-import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { format } from "date-fns";
 import { enUS } from "date-fns/locale";
 import {
-    ChevronDown,
     Clock,
     Cpu,
     Database,
@@ -18,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { Button } from "../../../components/ui/Button";
+import { Dropdown } from "../../../components/ui/Dropdown";
 import { Modal } from "../../../components/ui/Modal";
 import {
     formatDuration,
@@ -118,70 +117,36 @@ export function SessionDetails({
                         </h2>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                        <Menu>
-                            {({ open }) => (
-                                <>
-                                    <MenuButton
-                                        as={Button}
-                                        variant="ghost"
-                                        size="sm"
-                                        className={
-                                            "flex items-center gap-1 border-0 text-slate-300 outline-none " +
-                                            (open ? "bg-slate-700" : "")
-                                        }
-                                    >
-                                        <MoreVertical className="h-4 w-4" />
-                                        <ChevronDown
-                                            className={
-                                                "h-3 w-3 transition-transform " +
-                                                (open ? "rotate-180" : "")
-                                            }
-                                        />
-                                    </MenuButton>
-                                    <MenuItems
-                                        anchor="bottom end"
-                                        className="z-50 mt-1 min-w-[140px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
-                                    >
-                                        <MenuItem>
-                                            <button
-                                                onClick={onStop}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Square className="h-4 w-4 text-slate-400" />{" "}
-                                                Stop
-                                            </button>
-                                        </MenuItem>
-                                        <MenuItem>
-                                            <button
-                                                onClick={onCompact}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Database className="h-4 w-4 text-slate-400" />{" "}
-                                                Compact
-                                            </button>
-                                        </MenuItem>
-                                        <MenuItem>
-                                            <button
-                                                onClick={onReset}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
-                                                Reset
-                                            </button>
-                                        </MenuItem>
-                                        <div className="border-t border-slate-700" />
-                                        <MenuItem>
-                                            <button
-                                                onClick={onDelete}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Trash2 className="h-4 w-4" /> Delete
-                                            </button>
-                                        </MenuItem>
-                                    </MenuItems>
-                                </>
-                            )}
-                        </Menu>
+                        <Dropdown
+                            trigger={
+                                <Button variant="ghost" size="sm" className="border-0 text-slate-300">
+                                    <MoreVertical className="h-4 w-4" />
+                                </Button>
+                            }
+                            items={[
+                                {
+                                    label: "Stop",
+                                    icon: <Square className="h-4 w-4 text-slate-400" />,
+                                    onClick: onStop,
+                                },
+                                {
+                                    label: "Compact",
+                                    icon: <Database className="h-4 w-4 text-slate-400" />,
+                                    onClick: onCompact,
+                                },
+                                {
+                                    label: "Reset",
+                                    icon: <RotateCcw className="h-4 w-4 text-slate-400" />,
+                                    onClick: onReset,
+                                },
+                                {
+                                    label: "Delete",
+                                    icon: <Trash2 className="h-4 w-4" />,
+                                    variant: "danger",
+                                    onClick: onDelete,
+                                },
+                            ]}
+                        />
                         <Button variant="ghost" size="sm" onClick={onClose}>
                             <X className="h-4 w-4" />
                         </Button>

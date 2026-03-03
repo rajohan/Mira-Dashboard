@@ -1,4 +1,3 @@
-import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import {
     createColumnHelper,
     flexRender,
@@ -23,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Dropdown } from "../components/ui/Dropdown";
 import {
     DeleteConfirmDialog,
     SessionDetails,
@@ -213,82 +213,36 @@ export function Sessions() {
                     className="flex justify-end"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <Menu>
-                        {({ open }) => (
-                            <>
-                                <MenuButton
-                                    as={Button}
-                                    variant="ghost"
-                                    size="sm"
-                                    className={
-                                        "flex items-center gap-1 border-0 text-slate-300 outline-none " +
-                                        (open ? "bg-slate-700" : "")
-                                    }
-                                >
-                                    <MoreVertical className="h-4 w-4" />
-                                    <ChevronDown
-                                        className={
-                                            "h-3 w-3 transition-transform " +
-                                            (open ? "rotate-180" : "")
-                                        }
-                                    />
-                                </MenuButton>
-                                <MenuItems
-                                    anchor="bottom end"
-                                    className="z-50 mt-1 min-w-[120px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
-                                >
-                                    <MenuItem>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleStop(row.original.key);
-                                            }}
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                        >
-                                            <Square className="h-4 w-4 text-slate-400" />{" "}
-                                            Stop
-                                        </button>
-                                    </MenuItem>
-                                    <MenuItem>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleCompact(row.original.key);
-                                            }}
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                        >
-                                            <Database className="h-4 w-4 text-slate-400" />{" "}
-                                            Compact
-                                        </button>
-                                    </MenuItem>
-                                    <MenuItem>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleReset(row.original.key);
-                                            }}
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                        >
-                                            <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
-                                            Reset
-                                        </button>
-                                    </MenuItem>
-                                    <div className="border-t border-slate-700" />
-                                    <MenuItem>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setDeleteTarget(row.original);
-                                            }}
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
-                                        >
-                                            <Trash2 className="h-4 w-4" /> Delete
-                                        </button>
-                                    </MenuItem>
-                                </MenuItems>
-                            </>
-                        )}
-                    </Menu>
+                    <Dropdown
+                        trigger={
+                            <Button variant="ghost" size="sm" className="border-0 text-slate-300">
+                                <MoreVertical className="h-4 w-4" />
+                            </Button>
+                        }
+                        items={[
+                            {
+                                label: "Stop",
+                                icon: <Square className="h-4 w-4 text-slate-400" />,
+                                onClick: () => handleStop(row.original.key),
+                            },
+                            {
+                                label: "Compact",
+                                icon: <Database className="h-4 w-4 text-slate-400" />,
+                                onClick: () => handleCompact(row.original.key),
+                            },
+                            {
+                                label: "Reset",
+                                icon: <RotateCcw className="h-4 w-4 text-slate-400" />,
+                                onClick: () => handleReset(row.original.key),
+                            },
+                            {
+                                label: "Delete",
+                                icon: <Trash2 className="h-4 w-4" />,
+                                variant: "danger",
+                                onClick: () => setDeleteTarget(row.original),
+                            },
+                        ]}
+                    />
                 </div>
             ),
         }),

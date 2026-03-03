@@ -1,7 +1,6 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { ChevronDown } from "lucide-react";
-import { clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { cn } from "../../utils/cn";
 
 interface DropdownItem {
     label: string;
@@ -20,12 +19,18 @@ interface DropdownProps {
 
 export function Dropdown({ trigger, items, align = "right", className }: DropdownProps) {
     return (
-        <Menu as="div" className={twMerge("relative inline-block text-left", className)}>
-            <MenuButton className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-600 focus:outline-none">
+        <Menu>
+            <MenuButton
+                className={cn(
+                    "inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-100",
+                    "data-hover:bg-slate-600 data-focus:outline-none data-focus:ring-2 data-focus:ring-accent-500",
+                    className
+                )}
+            >
                 {typeof trigger === "string" ? (
                     <>
                         {trigger}
-                        <ChevronDown className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4 ui-open:rotate-180 transition-transform" />
                     </>
                 ) : (
                     trigger
@@ -33,20 +38,17 @@ export function Dropdown({ trigger, items, align = "right", className }: Dropdow
             </MenuButton>
 
             <MenuItems
-                className={clsx(
-                    "absolute z-50 mt-2 min-w-[160px] origin-top-right rounded-lg border border-slate-600 bg-slate-800 p-1 shadow-lg focus:outline-none",
-                    align === "right" ? "right-0" : "left-0"
-                )}
+                anchor={align === "right" ? "bottom end" : "bottom start"}
+                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-slate-600 bg-slate-800 p-1 shadow-lg outline-none focus:outline-none"
             >
                 {items.map((item, index) => (
-                    <MenuItem key={index}>
-                        {({ active, disabled }) => (
+                    <MenuItem key={index} disabled={item.disabled}>
+                        {({ active }) => (
                             <button
                                 type="button"
                                 onClick={item.onClick}
-                                disabled={item.disabled || disabled}
-                                className={clsx(
-                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm",
+                                className={cn(
+                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
                                     item.variant === "danger"
                                         ? active
                                             ? "bg-red-500/20 text-red-400"
@@ -54,7 +56,7 @@ export function Dropdown({ trigger, items, align = "right", className }: Dropdow
                                         : active
                                           ? "bg-slate-700 text-slate-100"
                                           : "text-slate-300",
-                                    (item.disabled || disabled) && "cursor-not-allowed opacity-50"
+                                    item.disabled && "cursor-not-allowed opacity-50"
                                 )}
                             >
                                 {item.icon}
