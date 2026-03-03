@@ -1,4 +1,6 @@
 import ReactJsonView from "@microlink/react-json-view";
+import { format } from "date-fns";
+import { nb } from "date-fns/locale";
 import JSON5 from "json5";
 import {
     AlertTriangle,
@@ -15,10 +17,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkFrontmatter from "remark-frontmatter";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
+import remarkFrontmatter from "remark-frontmatter";
+import remarkGfm from "remark-gfm";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -89,12 +91,7 @@ function formatSize(bytes: number): string {
 
 function formatDate(dateStr: string): string {
     try {
-        const date = new Date(dateStr);
-        return (
-            date.toLocaleDateString() +
-            " " +
-            date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        );
+        return format(new Date(dateStr), "dd.MM.yyyy HH:mm", { locale: nb });
     } catch {
         return dateStr;
     }

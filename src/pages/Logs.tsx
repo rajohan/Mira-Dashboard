@@ -1,4 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { format } from "date-fns";
+import { nb } from "date-fns/locale";
 import {
     ChevronDown,
     Download,
@@ -138,7 +140,7 @@ export function Logs() {
                     );
                     setLogFiles(sorted);
                     // Select today's file by default
-                    const today = new Date().toISOString().split("T")[0];
+                    const today = format(new Date(), "yyyy-MM-dd");
                     const todayFile = sorted.find((f: LogFile) => f.name.includes(today));
                     if (todayFile) {
                         setSelectedFile(todayFile.name);
@@ -332,7 +334,7 @@ export function Logs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${selectedFile || "logs"}-${new Date().toISOString().slice(0, 10)}.txt`;
+        a.download = `${selectedFile || "logs"}-${format(new Date(), "yyyy-MM-dd")}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -342,12 +344,7 @@ export function Logs() {
     const formatTime = (ts?: string): string => {
         if (!ts) return "";
         try {
-            const date = new Date(ts);
-            return date.toLocaleTimeString("no-NO", {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-            });
+            return format(new Date(ts), "HH:mm:ss", { locale: nb });
         } catch {
             return ts;
         }

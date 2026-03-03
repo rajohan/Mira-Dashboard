@@ -8,6 +8,8 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
+import { format, formatDistanceToNow } from "date-fns";
+import { nb } from "date-fns/locale";
 import {
     AlertTriangle,
     ArrowDown,
@@ -37,16 +39,7 @@ import { useAuthStore } from "../stores/authStore";
 
 function formatDuration(updatedAt: number | null | undefined): string {
     if (!updatedAt) return "Unknown";
-    const now = Date.now();
-    const diffMs = now - updatedAt;
-    const diffMins = Math.floor(diffMs / 60_000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return diffDays + "d " + (diffHours % 24) + "h ago";
-    if (diffHours > 0) return diffHours + "h " + (diffMins % 60) + "m ago";
-    if (diffMins < 1) return "Just now";
-    return diffMins + "m ago";
+    return formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: nb });
 }
 
 function formatTokens(current: number, max: number): string {
@@ -443,15 +436,11 @@ function SessionDetails({
                                                     </span>
                                                     {msg.timestamp && (
                                                         <span className="text-xs text-slate-500">
-                                                            {new Date(
-                                                                msg.timestamp
-                                                            ).toLocaleString("no-NO", {
-                                                                day: "2-digit",
-                                                                month: "2-digit",
-                                                                year: "numeric",
-                                                                hour: "2-digit",
-                                                                minute: "2-digit",
-                                                            })}
+                                                            {format(
+                                                                new Date(msg.timestamp),
+                                                                "dd.MM.yyyy HH:mm",
+                                                                { locale: nb }
+                                                            )}
                                                         </span>
                                                     )}
                                                 </div>

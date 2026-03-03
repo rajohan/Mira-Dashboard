@@ -1,3 +1,5 @@
+import { formatDistanceToNow } from "date-fns";
+import { nb } from "date-fns/locale";
 import {
     Clock,
     ExternalLink,
@@ -52,17 +54,7 @@ interface MiraContent {
 const MOLTBOOK_URL = "https://www.moltbook.com";
 
 function formatTime(dateStr: string): string {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60_000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return diffDays + "d ago";
-    if (diffHours > 0) return diffHours + "h ago";
-    if (diffMins < 1) return "just now";
-    return diffMins + "m ago";
+    return formatDistanceToNow(new Date(dateStr), { addSuffix: true, locale: nb });
 }
 
 function truncate(text: string, maxLen: number): string {
