@@ -571,6 +571,7 @@ export function Files() {
     const [largeFileWarning, setLargeFileWarning] = useState(false);
     const [markdownPreview, setMarkdownPreview] = useState(true);
     const [jsonPreview, setJsonPreview] = useState(true);
+    const [codeEditMode, setCodeEditMode] = useState(false);
 
     const apiBase = "/api/files";
 
@@ -615,6 +616,7 @@ export function Files() {
             setLargeFileWarning(false);
             setMarkdownPreview(true);
             setJsonPreview(true);
+            setCodeEditMode(false);
 
             try {
                 const isConfigFile = filePath.startsWith("config:");
@@ -958,6 +960,43 @@ export function Files() {
                                                 </button>
                                             </div>
                                         )}
+                                    {/* Code edit toggle */}
+                                    {fileContent &&
+                                        isCodeFile(fileContent.path) &&
+                                        isEditable && (
+                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
+                                                <button
+                                                    className={
+                                                        "rounded px-2 py-1 text-xs " +
+                                                        (codeEditMode
+                                                            ? "text-slate-300 hover:text-white"
+                                                            : "bg-accent-500 text-white")
+                                                    }
+                                                    onClick={() => setCodeEditMode(false)}
+                                                >
+                                                    <Eye
+                                                        size={14}
+                                                        className="mr-1 inline"
+                                                    />
+                                                    Preview
+                                                </button>
+                                                <button
+                                                    className={
+                                                        "rounded px-2 py-1 text-xs " +
+                                                        (codeEditMode
+                                                            ? "bg-accent-500 text-white"
+                                                            : "text-slate-300 hover:text-white")
+                                                    }
+                                                    onClick={() => setCodeEditMode(true)}
+                                                >
+                                                    <Code
+                                                        size={14}
+                                                        className="mr-1 inline"
+                                                    />
+                                                    Edit
+                                                </button>
+                                            </div>
+                                        )}
                                     {hasChanges && (
                                         <span className="text-xs text-yellow-400">
                                             Unsaved changes
@@ -1044,29 +1083,45 @@ export function Files() {
                                                 />
                                             </div>
                                         ) : isCodeFile(fileContent.path) ? (
-                                            <div className="h-full overflow-auto">
-                                                <SyntaxHighlighter
-                                                    language={getLanguage(
-                                                        fileContent.path
-                                                    )}
-                                                    style={monokai}
-                                                    customStyle={{
-                                                        margin: 0,
-                                                        padding: "1rem",
-                                                        background: "transparent",
-                                                        fontSize: "13px",
-                                                        height: "100%",
-                                                    }}
-                                                    showLineNumbers={true}
-                                                    lineNumberStyle={{
-                                                        minWidth: "2.5em",
-                                                        paddingRight: "1em",
-                                                        color: "#6b7280",
-                                                    }}
-                                                >
-                                                    {editedContent}
-                                                </SyntaxHighlighter>
-                                            </div>
+                                            codeEditMode ? (
+                                                <textarea
+                                                    className={
+                                                        "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
+                                                        syntaxClass
+                                                    }
+                                                    value={editedContent}
+                                                    onChange={(e) =>
+                                                        handleContentChange(
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                    spellCheck={false}
+                                                />
+                                            ) : (
+                                                <div className="h-full overflow-auto">
+                                                    <SyntaxHighlighter
+                                                        language={getLanguage(
+                                                            fileContent.path
+                                                        )}
+                                                        style={monokai}
+                                                        customStyle={{
+                                                            margin: 0,
+                                                            padding: "1rem",
+                                                            background: "transparent",
+                                                            fontSize: "13px",
+                                                            height: "100%",
+                                                        }}
+                                                        showLineNumbers={true}
+                                                        lineNumberStyle={{
+                                                            minWidth: "2.5em",
+                                                            paddingRight: "1em",
+                                                            color: "#6b7280",
+                                                        }}
+                                                    >
+                                                        {editedContent}
+                                                    </SyntaxHighlighter>
+                                                </div>
+                                            )
                                         ) : isEditable ? (
                                             <textarea
                                                 className={
