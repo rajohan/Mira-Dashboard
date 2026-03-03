@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
+import { useState } from "react";
 
 import {
     CONFIG_DIR_FILES,
@@ -10,32 +11,19 @@ import {
 interface ConfigSectionProps {
     selectedPath: string | null;
     onSelect: (path: string) => void;
-    configDirExpanded: boolean;
-    onConfigDirToggle: () => void;
-    cronDirExpanded: boolean;
-    onCronDirToggle: () => void;
-    hooksDirExpanded: boolean;
-    onHooksDirToggle: () => void;
 }
 
-export function ConfigSection({
-    selectedPath,
-    onSelect,
-    configDirExpanded,
-    onConfigDirToggle,
-    cronDirExpanded,
-    onCronDirToggle,
-    hooksDirExpanded,
-    onHooksDirToggle,
-}: ConfigSectionProps) {
+export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
+    const [configDirExpanded, setConfigDirExpanded] = useState(false);
+    const [cronDirExpanded, setCronDirExpanded] = useState(false);
+    const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
+
     return (
         <div className="p-2">
             {/* config/ subdirectory */}
             <div
-                className={
-                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
-                }
-                onClick={onConfigDirToggle}
+                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
+                onClick={() => setConfigDirExpanded(!configDirExpanded)}
             >
                 {configDirExpanded ? (
                     <ChevronDown size={14} className="text-slate-400" />
@@ -68,10 +56,8 @@ export function ConfigSection({
 
             {/* cron/ subdirectory */}
             <div
-                className={
-                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
-                }
-                onClick={onCronDirToggle}
+                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
+                onClick={() => setCronDirExpanded(!cronDirExpanded)}
             >
                 {cronDirExpanded ? (
                     <ChevronDown size={14} className="text-slate-400" />
@@ -104,10 +90,8 @@ export function ConfigSection({
 
             {/* hooks/ subdirectory */}
             <div
-                className={
-                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
-                }
-                onClick={onHooksDirToggle}
+                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
+                onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
             >
                 {hooksDirExpanded ? (
                     <ChevronDown size={14} className="text-slate-400" />
@@ -120,9 +104,7 @@ export function ConfigSection({
             {hooksDirExpanded && (
                 <>
                     <div
-                        className={
-                            "flex items-center gap-1 px-2 py-1 text-sm text-primary-200"
-                        }
+                        className="flex items-center gap-1 px-2 py-1 text-sm text-primary-200"
                         style={{ paddingLeft: 20 }}
                     >
                         <ChevronDown size={14} className="text-slate-400" />

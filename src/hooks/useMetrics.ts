@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { apiFetch } from "./useApi";
+
 export interface Metrics {
     cpu: {
         count: number;
@@ -42,11 +44,7 @@ export interface Metrics {
 }
 
 async function fetchMetrics(): Promise<Metrics> {
-    const response = await fetch("/api/metrics");
-    if (!response.ok) {
-        throw new Error("Failed to fetch metrics");
-    }
-    return response.json();
+    return apiFetch<Metrics>("/metrics");
 }
 
 export function useMetrics(refreshInterval = 5000) {

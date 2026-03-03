@@ -1,11 +1,5 @@
 import type { Task } from "../../../types/task";
-import { getPriority } from "../../../utils/taskUtils";
-
-const PRIORITY_COLORS: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400 border-red-500/30",
-    medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-    low: "bg-slate-500/20 text-slate-400 border-slate-500/30",
-};
+import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 
 export function TaskOverlay({ task }: { task: Task }) {
     const priority = getPriority(task.labels);

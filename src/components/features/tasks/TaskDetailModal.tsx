@@ -1,18 +1,11 @@
-import { format, formatDistanceToNow } from "date-fns";
-import { enUS } from "date-fns/locale";
 import { ExternalLink, X } from "lucide-react";
 import { useState } from "react";
 
 import type { ColumnId, Task } from "../../../types/task";
-import { getColumnId, getPriority } from "../../../utils/taskUtils";
+import { formatDate, formatDuration } from "../../../utils/format";
+import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
 import { Modal } from "../../ui/Modal";
-
-const PRIORITY_COLORS: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400 border-red-500/30",
-    medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-    low: "bg-slate-500/20 text-slate-400 border-slate-500/30",
-};
 
 interface TaskDetailModalProps {
     task: Task | null;
@@ -112,18 +105,10 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                             <span>@{assignee.login || assignee.name}</span>
                         </div>
                     )}
-                    <span>
-                        Created{" "}
-                        {format(new Date(task.createdAt), "MMM d, yyyy", {
-                            locale: enUS,
-                        })}
-                    </span>
+                    <span>Created {formatDate(task.createdAt)}</span>
                     <span>
                         Updated{" "}
-                        {formatDistanceToNow(new Date(task.updatedAt), {
-                            addSuffix: true,
-                            locale: enUS,
-                        })}
+                        {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                 </div>
 

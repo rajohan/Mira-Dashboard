@@ -1,14 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
-// Connect to our Gateway Mirror backend, not directly to OpenClaw
-// This avoids CORS and WebSocket issues
-
-const getBackendUrl = () => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.hostname;
-    const port = window.location.port || "5173";
-    return protocol + "//" + host + ":" + (port === "5173" ? "3100" : port) + "/ws";
-};
+import { getWebSocketUrl } from "../utils/websocket";
 
 interface OpenClawMessage {
     type: "req" | "res" | "event" | "state" | "connected" | "disconnected" | "sessions";
@@ -50,7 +42,7 @@ export function useOpenClawSocket({
     const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
     const shouldReconnectRef = useRef(true);
 
-    const connect = useCallback(() => {
+    const connect = () => {
         if (
             wsRef.current?.readyState === WebSocket.OPEN ||
             wsRef.current?.readyState === WebSocket.CONNECTING
@@ -64,7 +56,7 @@ export function useOpenClawSocket({
         }
 
         shouldReconnectRef.current = true;
-        const wsUrl = getBackendUrl();
+        const wsUrl = getWebSocketUrl();
 
         console.log("[WebSocket] Connecting to backend:", wsUrl);
 
@@ -78,7 +70,6 @@ export function useOpenClawSocket({
                 setError(null);
                 onConnect?.();
 
-                // Request session list
                 ws.send(
                     JSON.stringify({
                         type: "req",
@@ -97,7 +88,6 @@ export function useOpenClawSocket({
                         data.sessions?.length || ""
                     );
 
-                    // Handle initial state
                     if (data.type === "state") {
                         setIsConnected(data.gatewayConnected ?? true);
                         if (data.sessions) {
@@ -105,7 +95,6 @@ export function useOpenClawSocket({
                         }
                     }
 
-                    // Handle connection status
                     if (data.type === "connected") {
                         setIsConnected(data.gatewayConnected ?? true);
                     }
@@ -115,18 +104,15 @@ export function useOpenClawSocket({
                         onDisconnect?.();
                     }
 
-                    // Handle session updates from backend
                     if (data.type === "sessions" && data.sessions) {
                         console.log("[WebSocket] Sessions update:", data.sessions.length);
                         onSessions?.(data.sessions);
                     }
 
-                    // Handle events
                     if (data.type === "event" && data.event) {
                         onMessage?.(data.event, data.payload || {});
                     }
 
-                    // Handle request responses
                     if (data.type === "res" && data.id) {
                         const pending = pendingRequestsRef.current.get(data.id);
                         if (pending) {
@@ -165,48 +151,48 @@ export function useOpenClawSocket({
             console.error("[WebSocket] Failed to create:", error_);
             setError("Failed to create WebSocket");
         }
-    }, [token, onMessage, onConnect, onDisconnect, onSessions]);
+    };
 
-    const disconnect = useCallback(() => {
+    const disconnect = () => {
         shouldReconnectRef.current = false;
         wsRef.current?.close(1000, "Intentional disconnect");
         wsRef.current = null;
         setIsConnected(false);
-    }, []);
+    };
 
-    const request = useCallback(
-        <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
-            return new Promise((resolve, reject) => {
-                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-                    reject(new Error("WebSocket not connected"));
-                    return;
-                }
+    const request = <T = unknown>(
+        method: string,
+        params?: Record<string, unknown>
+    ): Promise<T> => {
+        return new Promise((resolve, reject) => {
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                reject(new Error("WebSocket not connected"));
+                return;
+            }
 
-                const id = String(++requestIdRef.current);
-                pendingRequestsRef.current.set(id, {
-                    resolve: resolve as (value: unknown) => void,
-                    reject,
-                });
-
-                wsRef.current.send(
-                    JSON.stringify({
-                        type: "req",
-                        id,
-                        method,
-                        params,
-                    })
-                );
-
-                setTimeout(() => {
-                    if (pendingRequestsRef.current.has(id)) {
-                        pendingRequestsRef.current.delete(id);
-                        reject(new Error("Request timeout"));
-                    }
-                }, 30_000);
+            const id = String(++requestIdRef.current);
+            pendingRequestsRef.current.set(id, {
+                resolve: resolve as (value: unknown) => void,
+                reject,
             });
-        },
-        []
-    );
+
+            wsRef.current.send(
+                JSON.stringify({
+                    type: "req",
+                    id,
+                    method,
+                    params,
+                })
+            );
+
+            setTimeout(() => {
+                if (pendingRequestsRef.current.has(id)) {
+                    pendingRequestsRef.current.delete(id);
+                    reject(new Error("Request timeout"));
+                }
+            }, 30_000);
+        });
+    };
 
     return {
         isConnected,

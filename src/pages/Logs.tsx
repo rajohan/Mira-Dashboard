@@ -12,8 +12,8 @@ import { Input } from "../components/ui/Input";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles } from "../hooks";
-import { type LogEntry } from "../types/log";
-import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
+import { useLogStream } from "../hooks/useLogStream";
+import { LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
 
 export function Logs() {
     const [autoFollow, setAutoFollow] = useState(true);
@@ -23,20 +23,20 @@ export function Logs() {
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
-    const [isConnected, setIsConnected] = useState(false);
-    const [logs, setLogs] = useState<LogEntry[]>([]);
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const wsRef = useRef<WebSocket | null>(null);
-    const historyBufferRef = useRef<LogEntry[]>([]);
-    const isReceivingHistoryRef = useRef(true);
     const isAutoScrollingRef = useRef(false);
+
+    // Log stream via WebSocket
+    const { isConnected, logs, clearLogs, setLogsFromContent } = useLogStream({
+        lineCount,
+    });
 
     // Queries
     const { data: logFiles = [] } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
         lineCount,
-        false // Don't auto-fetch, we use it manually
+        false
     );
 
     // Auto-select today's file
@@ -49,111 +49,20 @@ export function Logs() {
         }
     }, [logFiles, selectedFile]);
 
-    // Load log content
+    // Load log content when file/lineCount changes
     const loadLogContent = async () => {
         if (!selectedFile) return;
         const result = await refetchContent();
         if (result.data) {
-            const logLines = result.data.split("\n").filter((l) => l.trim());
-            const parsedLogs = logLines
-                .map((line) => parseLogLine(line))
-                .filter((l): l is LogEntry => l !== null);
-            setLogs(parsedLogs);
+            setLogsFromContent(result.data);
         }
     };
 
-    // Load content when file changes
     useEffect(() => {
         if (selectedFile && logFiles.length > 0) {
             loadLogContent();
         }
     }, [selectedFile, lineCount]);
-
-    const handleFileSelect = (file: string) => {
-        setSelectedFile(file);
-    };
-
-    const handleLineSelect = (lines: number) => {
-        setLineCount(lines);
-    };
-
-    const selectedFileRef = useRef<string>(selectedFile);
-    const lineCountRef = useRef<number>(lineCount);
-
-    useEffect(() => {
-        selectedFileRef.current = selectedFile;
-        lineCountRef.current = lineCount;
-    }, [selectedFile, lineCount]);
-
-    // WebSocket for real-time logs
-    useEffect(() => {
-        const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
-
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        isReceivingHistoryRef.current = true;
-        historyBufferRef.current = [];
-
-        ws.addEventListener("open", () => {
-            setIsConnected(true);
-            isReceivingHistoryRef.current = true;
-            historyBufferRef.current = [];
-            ws.send(JSON.stringify({ type: "subscribe", channel: "logs" }));
-        });
-
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-
-                if (data.type === "log_history_complete") {
-                    isReceivingHistoryRef.current = false;
-                    const maxLines = lineCountRef.current;
-                    setLogs(historyBufferRef.current.slice(-maxLines));
-                    historyBufferRef.current = [];
-                    return;
-                }
-
-                if (
-                    (data.type === "log_entry" || data.type === "log") &&
-                    (data.line || data.raw)
-                ) {
-                    const line = (data.raw || data.line || "").trim();
-                    const parsed = parseLogLine(line);
-                    if (parsed) {
-                        if (isReceivingHistoryRef.current) {
-                            historyBufferRef.current.push(parsed);
-                        } else {
-                            setLogs((prev) => {
-                                const maxLines = lineCountRef.current;
-                                const exists = prev.some((l) => l.raw === parsed.raw);
-                                if (exists) return prev;
-                                return [...prev.slice(-(maxLines - 1)), parsed];
-                            });
-                        }
-                    }
-                }
-            } catch {
-                // Ignore parse errors
-            }
-        };
-
-        ws.addEventListener("close", () => {
-            setIsConnected(false);
-            isReceivingHistoryRef.current = true;
-            historyBufferRef.current = [];
-        });
-        ws.onerror = () => {
-            setIsConnected(false);
-            isReceivingHistoryRef.current = true;
-            historyBufferRef.current = [];
-        };
-
-        return () => {
-            ws.send(JSON.stringify({ type: "unsubscribe", channel: "logs" }));
-            ws.close();
-        };
-    }, []);
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
@@ -171,10 +80,6 @@ export function Logs() {
         setLevelFilter(newFilter);
     };
 
-    const handleRefresh = () => {
-        loadLogContent();
-    };
-
     const handleExport = () => {
         const content = filteredLogs.map((l) => l.raw).join("\n");
         const blob = new Blob([content], { type: "text/plain" });
@@ -185,8 +90,6 @@ export function Logs() {
         a.click();
         URL.revokeObjectURL(url);
     };
-
-    const handleClear = () => setLogs([]);
 
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
@@ -208,6 +111,7 @@ export function Logs() {
         }
     };
 
+    // Auto-scroll when new logs arrive
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
             isAutoScrollingRef.current = true;
@@ -230,6 +134,7 @@ export function Logs() {
         }
     }, [filteredLogs.length, autoFollow]);
 
+    // Scroll to bottom on file/lineCount change
     useEffect(() => {
         if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
             isAutoScrollingRef.current = true;
@@ -253,7 +158,6 @@ export function Logs() {
     }, [selectedFile, lineCount]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
-    const isLoading = isLoadingContent;
 
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
@@ -265,7 +169,7 @@ export function Logs() {
             <div className="mb-4 flex flex-wrap items-center gap-3">
                 <Select
                     value={selectedFile}
-                    onChange={handleFileSelect}
+                    onChange={setSelectedFile}
                     options={sortedLogFiles.map((f) => ({
                         value: f.name,
                         label: f.name,
@@ -277,7 +181,7 @@ export function Logs() {
 
                 <Select
                     value={lineCount.toString()}
-                    onChange={(v) => handleLineSelect(Number.parseInt(v, 10))}
+                    onChange={(v) => setLineCount(Number.parseInt(v, 10))}
                     options={LINE_OPTIONS.map((n) => ({
                         value: n.toString(),
                         label: `${n} lines`,
@@ -301,7 +205,7 @@ export function Logs() {
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-slate-400">
-                    {isLoading
+                    {isLoadingContent
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
@@ -317,11 +221,11 @@ export function Logs() {
                         <Button
                             variant="secondary"
                             size="sm"
-                            onClick={handleRefresh}
-                            disabled={isLoading}
+                            onClick={() => loadLogContent()}
+                            disabled={isLoadingContent}
                         >
                             <RefreshCw
-                                className={`mr-1 h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+                                className={`mr-1 h-4 w-4 ${isLoadingContent ? "animate-spin" : ""}`}
                             />
                             Refresh
                         </Button>
@@ -337,7 +241,7 @@ export function Logs() {
                         <Button
                             variant="secondary"
                             size="sm"
-                            onClick={handleClear}
+                            onClick={clearLogs}
                             disabled={logs.length === 0}
                         >
                             Clear

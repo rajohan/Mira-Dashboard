@@ -44,7 +44,7 @@ export function Select({
                 <span className="flex-1 truncate text-left">
                     {selectedOption?.label || placeholder}
                 </span>
-                <ChevronDown className="ui-open:rotate-180 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform" />
+                <ChevronDown className="data-[open]:rotate-180 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform" />
             </MenuButton>
             <MenuItems
                 anchor="bottom start"

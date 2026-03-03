@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 
 import { useOpenClawSocket } from "./useOpenClawSocket";
 
@@ -51,37 +51,31 @@ export function useOpenClaw(token: string | null) {
     const [agents, setAgents] = useState<AgentInfo[]>([]);
     const [logs, setLogs] = useState<LogEntry[]>([]);
 
-    const handleMessage = useCallback(
-        (method: string, params: Record<string, unknown>) => {
-            switch (method) {
-                case "status": {
-                    setStatus(params as unknown as AgentStatus);
-                    break;
-                }
-                case "agents": {
-                    setAgents(params as unknown as AgentInfo[]);
-                    break;
-                }
-                case "agents.list": {
-                    setAgents((params as { agents?: AgentInfo[] }).agents || []);
-                    break;
-                }
-                case "log": {
-                    setLogs((prev) => [
-                        ...prev.slice(-100),
-                        params as unknown as LogEntry,
-                    ]);
-                    break;
-                }
+    const handleMessage = (method: string, params: Record<string, unknown>) => {
+        switch (method) {
+            case "status": {
+                setStatus(params as unknown as AgentStatus);
+                break;
             }
-        },
-        []
-    );
+            case "agents": {
+                setAgents(params as unknown as AgentInfo[]);
+                break;
+            }
+            case "agents.list": {
+                setAgents((params as { agents?: AgentInfo[] }).agents || []);
+                break;
+            }
+            case "log": {
+                setLogs((prev) => [...prev.slice(-100), params as unknown as LogEntry]);
+                break;
+            }
+        }
+    };
 
-    const handleSessions = useCallback((sessionData: Record<string, unknown>[]) => {
+    const handleSessions = (sessionData: Record<string, unknown>[]) => {
         console.log("[useOpenClaw] Setting sessions:", sessionData.length);
         setSessions(sessionData as unknown as Session[]);
-    }, []);
+    };
 
     const { isConnected, error, connect, disconnect, request } = useOpenClawSocket({
         token: token || "",
@@ -89,7 +83,7 @@ export function useOpenClaw(token: string | null) {
         onSessions: handleSessions,
     });
 
-    const fetchStatus = useCallback(async () => {
+    const fetchStatus = async () => {
         if (!isConnected) return;
         try {
             const result = await request("status");
@@ -97,9 +91,9 @@ export function useOpenClaw(token: string | null) {
         } catch (error_) {
             console.error("Failed to fetch status:", error_);
         }
-    }, [isConnected, request]);
+    };
 
-    const fetchSessions = useCallback(async () => {
+    const fetchSessions = async () => {
         if (!isConnected) return;
         try {
             const result = (await request("sessions.list")) as { sessions?: Session[] };
@@ -109,9 +103,9 @@ export function useOpenClaw(token: string | null) {
         } catch (error_) {
             console.error("Failed to fetch sessions:", error_);
         }
-    }, [isConnected, request]);
+    };
 
-    const fetchAgents = useCallback(async () => {
+    const fetchAgents = async () => {
         if (!isConnected) return;
         try {
             const result = (await request("agents.list")) as { agents?: AgentInfo[] };
@@ -119,21 +113,18 @@ export function useOpenClaw(token: string | null) {
         } catch (error_) {
             console.error("Failed to fetch agents:", error_);
         }
-    }, [isConnected, request]);
+    };
 
-    const deleteSession = useCallback(
-        async (sessionKey: string) => {
-            if (!isConnected) throw new Error("Not connected");
-            console.log("[useOpenClaw] Deleting session:", sessionKey);
-            await request("sessions.delete", {
-                key: sessionKey,
-                deleteTranscript: true,
-                emitLifecycleHooks: false,
-            });
-            await fetchSessions();
-        },
-        [isConnected, request, fetchSessions]
-    );
+    const deleteSession = async (sessionKey: string) => {
+        if (!isConnected) throw new Error("Not connected");
+        console.log("[useOpenClaw] Deleting session:", sessionKey);
+        await request("sessions.delete", {
+            key: sessionKey,
+            deleteTranscript: true,
+            emitLifecycleHooks: false,
+        });
+        await fetchSessions();
+    };
 
     return {
         isConnected,

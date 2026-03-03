@@ -1,6 +1,5 @@
 import { useForm } from "@tanstack/react-form";
-import { Clock } from "lucide-react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Clock, Loader2 } from "lucide-react";
 
 import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";

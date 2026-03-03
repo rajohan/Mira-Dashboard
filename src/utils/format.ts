@@ -62,28 +62,4 @@ export function getTokenPercent(current: number, max: number): number {
     return Math.min(Math.round((current / max) * 100), 100);
 }
 
-// Log formatting
-export function getLogLevelColor(level: string): string {
-    switch (level.toLowerCase()) {
-        case "trace":
-        case "debug": {
-            return "text-slate-400";
-        }
-        case "info": {
-            return "text-blue-400";
-        }
-        case "warn":
-        case "warning": {
-            return "text-yellow-400";
-        }
-        case "error": {
-            return "text-orange-400";
-        }
-        case "fatal": {
-            return "text-red-400";
-        }
-        default: {
-            return "text-slate-300";
-        }
-    }
-}
+

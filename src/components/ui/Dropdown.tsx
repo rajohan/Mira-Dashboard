@@ -54,7 +54,7 @@ export function Dropdown({
                 {icon}
                 {label}
                 {label && (
-                    <ChevronDown className="ui-open:rotate-180 h-4 w-4 transition-transform" />
+                    <ChevronDown className="data-[open]:rotate-180 h-4 w-4 transition-transform" />
                 )}
             </MenuButton>
 

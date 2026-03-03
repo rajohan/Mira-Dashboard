@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { File, Folder, RefreshCw, Save, Settings, X } from "lucide-react";
+
 import { useEffect, useState } from "react";
 
 import {
@@ -13,7 +14,7 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/PageHeader";
-import { fileKeys, useFileContent, useFiles, useSaveFile } from "../hooks";
+import { apiFetch, fileKeys, useFileContent, useFiles, useSaveFile } from "../hooks";
 import type { FileNode } from "../types/file";
 import {
     formatSize,
@@ -28,9 +29,6 @@ export function Files() {
     // File tree state
     const [files, setFiles] = useState<FileNode[]>([]);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-    const [configDirExpanded, setConfigDirExpanded] = useState(false);
-    const [cronDirExpanded, setCronDirExpanded] = useState(false);
-    const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
 
     // Editor state
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -103,13 +101,10 @@ export function Files() {
                 try {
                     const data = await queryClient.fetchQuery({
                         queryKey: fileKeys.list(path),
-                        queryFn: async () => {
-                            const res = await fetch(
-                                `/api/files?path=${encodeURIComponent(path)}`
-                            );
-                            if (!res.ok) throw new Error("Failed to fetch directory");
-                            return res.json();
-                        },
+                        queryFn: () =>
+                            apiFetch<{ files: FileNode[] }>(
+                                `/files?path=${encodeURIComponent(path)}`
+                            ),
                         staleTime: 30_000,
                     });
                     const children = data.files || [];
@@ -253,18 +248,6 @@ export function Files() {
                                 <ConfigSection
                                     selectedPath={selectedPath}
                                     onSelect={handleSelect}
-                                    configDirExpanded={configDirExpanded}
-                                    onConfigDirToggle={() =>
-                                        setConfigDirExpanded(!configDirExpanded)
-                                    }
-                                    cronDirExpanded={cronDirExpanded}
-                                    onCronDirToggle={() =>
-                                        setCronDirExpanded(!cronDirExpanded)
-                                    }
-                                    hooksDirExpanded={hooksDirExpanded}
-                                    onHooksDirToggle={() =>
-                                        setHooksDirExpanded(!hooksDirExpanded)
-                                    }
                                 />
                             </div>
                         </div>
@@ -386,9 +369,6 @@ export function Files() {
                                             ? formatDate(fileContent.modified)
                                             : "Unknown"}
                                     </span>
-                                    {fileContent.modified && (
-                                        <span>{formatDate(fileContent.modified)}</span>
-                                    )}
                                 </div>
                             )}
                         </>

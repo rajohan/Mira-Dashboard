@@ -1,23 +1,16 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { formatDistanceToNow } from "date-fns";
-import { enUS } from "date-fns/locale";
 import { GripVertical } from "lucide-react";
 
 import type { Task } from "../../../types/task";
-import { getPriority } from "../../../utils/taskUtils";
+import { formatDuration } from "../../../utils/format";
+import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 
 interface TaskCardProps {
     task: Task;
     isDragging?: boolean;
     onClick: () => void;
 }
-
-const PRIORITY_COLORS: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400 border-red-500/30",
-    medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-    low: "bg-slate-500/20 text-slate-400 border-slate-500/30",
-};
 
 export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
     const { attributes, listeners, setNodeRef, transform } = useSortable({
@@ -73,10 +66,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
 
                 <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-500">
-                        {formatDistanceToNow(new Date(task.updatedAt), {
-                            addSuffix: true,
-                            locale: enUS,
-                        })}
+                        {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                     {assignee && (
                         <div className="flex items-center gap-1">

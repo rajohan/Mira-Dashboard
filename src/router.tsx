@@ -3,11 +3,13 @@ import {
     createRoute,
     createRouter,
     Outlet,
+    redirect,
 } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
 import { Layout } from "./components/layout/Layout";
 import { LoadingState } from "./components/ui/LoadingState";
+import { authStore } from "./stores/authStore";
 
 // Lazy-loaded page components
 const Dashboard = lazy(() =>
@@ -59,6 +61,11 @@ const loginRoute = createRoute({
 const authenticatedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "authenticated",
+    beforeLoad: () => {
+        if (!authStore.state.isAuthenticated) {
+            throw redirect({ to: "/login" });
+        }
+    },
     component: () => (
         <Layout>
             <Outlet />

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { MiraComment, MiraContent, MiraPost, MiraProfile } from "../types/moltbook";
+import { apiFetch } from "./useApi";
 
 // Types
 export interface MoltbookPost {
@@ -85,37 +86,25 @@ function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
 
 // Fetchers
 async function fetchHome(): Promise<MoltbookHome> {
-    const res = await fetch("/api/moltbook/home");
-    if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: "Failed to fetch home" }));
-        throw new Error(error.error || "Failed to fetch home feed");
-    }
-    return res.json();
+    return apiFetch<MoltbookHome>("/moltbook/home");
 }
 
 async function fetchFeed(sort?: "hot" | "new"): Promise<MoltbookPost[]> {
-    const url = sort ? `/api/moltbook/feed?sort=${sort}` : "/api/moltbook/feed";
-    const res = await fetch(url);
-    if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: "Failed to fetch feed" }));
-        throw new Error(error.error || "Failed to fetch feed");
-    }
-    const data = await res.json();
+    const url = sort ? `/moltbook/feed?sort=${sort}` : "/moltbook/feed";
+    const data = await apiFetch<
+        Record<string, unknown>[] | { posts?: Record<string, unknown>[] }
+    >(url);
     const rawPosts = Array.isArray(data) ? data : data.posts || [];
     return rawPosts.map(transformPost);
 }
 
 async function fetchProfile(): Promise<MiraProfile | null> {
-    const res = await fetch("/api/moltbook/profile");
-    if (!res.ok) throw new Error("Failed to fetch profile");
-    const data: ProfileResponse = await res.json();
+    const data = await apiFetch<ProfileResponse>("/moltbook/profile");
     return data.agent || null;
 }
 
 async function fetchMyContent(): Promise<MiraContent | null> {
-    const res = await fetch("/api/moltbook/my-posts");
-    if (!res.ok) throw new Error("Failed to fetch content");
-    const data: MyContentResponse = await res.json();
+    const data = await apiFetch<MyContentResponse>("/moltbook/my-posts");
     return { posts: data.posts || [], comments: data.comments || [] };
 }
 
