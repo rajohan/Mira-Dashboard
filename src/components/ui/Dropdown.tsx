@@ -2,7 +2,7 @@ import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "../../utils/cn";
 
-interface DropdownItem {
+export interface DropdownItem {
     label: string;
     onClick?: () => void;
     icon?: React.ReactNode;

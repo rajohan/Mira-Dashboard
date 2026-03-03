@@ -7,25 +7,15 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import {
-    ChevronDown,
-    Database,
-    MoreVertical,
-    RefreshCw,
-    RotateCcw,
-    Square,
-    Trash2,
-    Wifi,
-    WifiOff,
-} from "lucide-react";
+import { ChevronDown, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useRef, useState, useMemo } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { Dropdown } from "../components/ui/Dropdown";
 import {
     DeleteConfirmDialog,
     SessionDetails,
+    SessionActionsDropdown,
     formatSessionType,
     getTypeSortOrder,
     getTypeBadgeColor,
@@ -204,32 +194,11 @@ export function Sessions() {
             header: "",
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                    <Dropdown
-                        icon={<MoreVertical className="h-4 w-4" />}
-                        variant="ghost"
-                        items={[
-                            {
-                                label: "Stop",
-                                icon: <Square className="h-4 w-4 text-slate-400" />,
-                                onClick: () => handleStop(row.original.key),
-                            },
-                            {
-                                label: "Compact",
-                                icon: <Database className="h-4 w-4 text-slate-400" />,
-                                onClick: () => handleCompact(row.original.key),
-                            },
-                            {
-                                label: "Reset",
-                                icon: <RotateCcw className="h-4 w-4 text-slate-400" />,
-                                onClick: () => handleReset(row.original.key),
-                            },
-                            {
-                                label: "Delete",
-                                icon: <Trash2 className="h-4 w-4" />,
-                                variant: "danger",
-                                onClick: () => setDeleteTarget(row.original),
-                            },
-                        ]}
+                    <SessionActionsDropdown
+                        onStop={() => handleStop(row.original.key)}
+                        onCompact={() => handleCompact(row.original.key)}
+                        onReset={() => handleReset(row.original.key)}
+                        onDelete={() => setDeleteTarget(row.original)}
                     />
                 </div>
             ),

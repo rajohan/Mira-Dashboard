@@ -1,22 +1,9 @@
 import { format } from "date-fns";
 import { enUS } from "date-fns/locale";
-import {
-    Clock,
-    Cpu,
-    Database,
-    Hash,
-    MessageSquare,
-    MoreVertical,
-    RefreshCw,
-    RotateCcw,
-    Square,
-    Trash2,
-    X,
-} from "lucide-react";
+import { Clock, Cpu, Hash, MessageSquare, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../../../components/ui/Button";
-import { Dropdown } from "../../../components/ui/Dropdown";
 import { Modal } from "../../../components/ui/Modal";
 import { useSessionHistory } from "../../../hooks/useSessions";
 import {
@@ -27,6 +14,7 @@ import {
     getTokenBarColor,
 } from "../../../utils/format";
 import { getTypeBadgeColor } from "./sessionUtils";
+import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 import type { Session } from "../../../hooks/useOpenClaw";
 
@@ -87,34 +75,11 @@ export function SessionDetails({
                         </h2>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                        <Dropdown
-                            icon={<MoreVertical className="h-4 w-4" />}
-                            variant="ghost"
-                            items={[
-                                {
-                                    label: "Stop",
-                                    icon: <Square className="h-4 w-4 text-slate-400" />,
-                                    onClick: onStop,
-                                },
-                                {
-                                    label: "Compact",
-                                    icon: <Database className="h-4 w-4 text-slate-400" />,
-                                    onClick: onCompact,
-                                },
-                                {
-                                    label: "Reset",
-                                    icon: (
-                                        <RotateCcw className="h-4 w-4 text-slate-400" />
-                                    ),
-                                    onClick: onReset,
-                                },
-                                {
-                                    label: "Delete",
-                                    icon: <Trash2 className="h-4 w-4" />,
-                                    variant: "danger",
-                                    onClick: onDelete,
-                                },
-                            ]}
+                        <SessionActionsDropdown
+                            onStop={onStop}
+                            onCompact={onCompact}
+                            onReset={onReset}
+                            onDelete={onDelete}
                         />
                         <Button variant="ghost" size="sm" onClick={onClose}>
                             <X className="h-4 w-4" />
