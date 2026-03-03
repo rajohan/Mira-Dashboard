@@ -159,9 +159,7 @@ export function Moltbook() {
                     {/* Posts */}
                     <div className="space-y-3">
                         {posts.length === 0 ? (
-                            <Card className="p-6 text-center text-slate-400">
-                                <p>No posts yet.</p>
-                            </Card>
+                            <EmptyState message="No posts yet." />
                         ) : (
                             posts.map((post) => (
                                 <Card key={post.id} className="p-3">
@@ -233,9 +231,7 @@ export function Moltbook() {
             {activeTab === "posts" && (
                 <div className="space-y-3">
                     {!myContent?.posts || myContent.posts.length === 0 ? (
-                        <Card className="p-6 text-center text-slate-400">
-                            <p>No posts yet.</p>
-                        </Card>
+                        <EmptyState message="No posts yet." />
                     ) : (
                         myContent.posts.map((post) => (
                             <Card key={post.id} className="p-3">
@@ -283,9 +279,7 @@ export function Moltbook() {
             {activeTab === "comments" && (
                 <div className="space-y-3">
                     {!myContent?.comments || myContent.comments.length === 0 ? (
-                        <Card className="p-6 text-center text-slate-400">
-                            <p>No comments yet.</p>
-                        </Card>
+                        <EmptyState message="No comments yet." />
                     ) : (
                         myContent.comments.map((comment) => (
                             <Card key={comment.id} className="p-3">
