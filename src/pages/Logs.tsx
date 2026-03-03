@@ -6,9 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
-import { LogLine, FileSelector, LineSelector, LevelFilter } from "../components/features/logs";
+import { Input } from "../components/ui/Input";
+import { LogLine, LevelFilter } from "../components/features/logs";
+import { Select } from "../components/ui/Select";
 import { type LogEntry, type LogFile } from "../types/log";
-import { parseLogLine, LOG_LEVELS } from "../utils/logUtils";
+import { parseLogLine, LOG_LEVELS, LINE_OPTIONS } from "../utils/logUtils";
+import { FileText } from "lucide-react";
 
 export function Logs() {
     const [isConnected, setIsConnected] = useState(false);
@@ -309,26 +312,34 @@ export function Logs() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
-                <FileSelector
-                    logFiles={logFiles}
-                    selectedFile={selectedFile}
-                    onSelect={handleFileSelect}
+                <Select
+                    value={selectedFile}
+                    onChange={handleFileSelect}
+                    options={logFiles.map((f) => ({
+                        value: f.name,
+                        label: f.name,
+                    }))}
+                    placeholder="Select file..."
+                    icon={<FileText className="h-4 w-4" />}
+                    width="min-w-[220px]"
                 />
 
-                <LineSelector
-                    lineCount={lineCount}
-                    onSelect={handleLineSelect}
+                <Select
+                    value={lineCount.toString()}
+                    onChange={(v) => handleLineSelect(parseInt(v, 10))}
+                    options={LINE_OPTIONS.map((n) => ({
+                        value: n.toString(),
+                        label: `${n} lines`,
+                    }))}
+                    width="min-w-[100px]"
                 />
 
-                <div className="relative min-w-[200px] max-w-md flex-1">
-                    <input
-                        type="text"
-                        placeholder="Search logs..."
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
-                    />
-                </div>
+                <Input
+                    placeholder="Search logs..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="min-w-[200px] max-w-md flex-1"
+                />
 
                 <LevelFilter
                     levels={LOG_LEVELS}
