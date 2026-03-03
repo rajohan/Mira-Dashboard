@@ -2,6 +2,7 @@ import { Loader2, Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../../ui/Button";
+import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -44,25 +45,20 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="flex items-center justify-between">
                     <h2 className="text-lg font-semibold text-slate-100">New Task</h2>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="text-slate-400 hover:text-slate-200"
-                    >
+                    <Button variant="ghost" size="sm" type="button" onClick={onClose} className="text-slate-400 hover:text-slate-200">
                         <X className="h-5 w-5" />
-                    </button>
+                    </Button>
                 </div>
 
                 <div>
                     <label className="mb-1.5 block text-sm font-medium text-slate-300">
                         Title
                     </label>
-                    <input
+                    <Input
                         type="text"
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
                         placeholder="Task title..."
-                        className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent-500 focus:outline-none"
                         autoFocus
                     />
                 </div>
@@ -86,19 +82,19 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                     </label>
                     <div className="flex gap-2">
                         {(["low", "medium", "high"] as const).map((p) => (
-                            <button
+                            <Button
                                 key={p}
+                                variant={priority === p ? "primary" : "secondary"}
                                 type="button"
                                 onClick={() => setPriority(p)}
                                 className={
-                                    "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors " +
-                                    (priority === p
+                                    priority === p
                                         ? PRIORITY_COLORS[p] + " border-current"
-                                        : "border-slate-600 bg-slate-700 text-slate-400 hover:bg-slate-600")
+                                        : ""
                                 }
                             >
                                 {p.charAt(0).toUpperCase() + p.slice(1)}
-                            </button>
+                            </Button>
                         ))}
                     </div>
                 </div>

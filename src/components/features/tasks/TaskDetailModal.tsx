@@ -83,12 +83,9 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                             #{task.number}: {task.title}
                         </h2>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="text-slate-400 hover:text-slate-200"
-                    >
+                    <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
                         <X className="h-5 w-5" />
-                    </button>
+                    </Button>
                 </div>
 
                 {/* Metadata */}

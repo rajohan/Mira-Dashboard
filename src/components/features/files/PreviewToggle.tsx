@@ -1,5 +1,7 @@
 import { Code, Eye } from "lucide-react";
 
+import { Button } from "../../../components/ui/Button";
+
 interface PreviewToggleProps {
     preview: boolean;
     onToggle: (preview: boolean) => void;
@@ -15,30 +17,24 @@ export function PreviewToggle({
 }: PreviewToggleProps) {
     return (
         <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
-            <button
-                className={
-                    "rounded px-2 py-1 text-xs " +
-                    (preview
-                        ? "bg-accent-500 text-white"
-                        : "text-slate-300 hover:text-white")
-                }
+            <Button
+                variant={preview ? "primary" : "ghost"}
+                size="sm"
                 onClick={() => onToggle(true)}
+                className="rounded px-2 py-1 text-xs"
             >
                 <Eye size={14} className="mr-1 inline" />
                 {previewLabel}
-            </button>
-            <button
-                className={
-                    "rounded px-2 py-1 text-xs " +
-                    (preview
-                        ? "text-slate-300 hover:text-white"
-                        : "bg-accent-500 text-white")
-                }
+            </Button>
+            <Button
+                variant={preview ? "ghost" : "primary"}
+                size="sm"
                 onClick={() => onToggle(false)}
+                className="rounded px-2 py-1 text-xs"
             >
                 <Code size={14} className="mr-1 inline" />
                 {editLabel}
-            </button>
+            </Button>
         </div>
     );
 }

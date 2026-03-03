@@ -215,9 +215,9 @@ export function Files() {
                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
                     <AlertTriangle size={16} />
                     {error}
-                    <button className="ml-auto text-red-300 hover:text-red-100" onClick={() => setError(null)}>
+                    <Button variant="ghost" size="sm" className="ml-auto text-red-300 hover:text-red-100" onClick={() => setError(null)}>
                         <X size={16} />
-                    </button>
+                    </Button>
                 </div>
             )}
 
