@@ -1,11 +1,7 @@
-import ReactJsonView from "@microlink/react-json-view";
 import { format } from "date-fns";
 import { enUS } from "date-fns/locale";
-import JSON5 from "json5";
 import {
     AlertTriangle,
-    Code,
-    Eye,
     File,
     Folder,
     RefreshCw,
@@ -14,25 +10,17 @@ import {
     X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import SyntaxHighlighter from "react-syntax-highlighter";
-import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
-import remarkFrontmatter from "remark-frontmatter";
-import remarkGfm from "remark-gfm";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
-import { FileTreeItem } from "../components/features/files/FileTreeItem";
-import { ConfigSection } from "../components/features/files/ConfigSection";
-import { MAX_PREVIEW_SIZE } from "../components/features/files/fileConstants";
 import {
-    formatSize,
-    getFileExtension,
-    isMarkdownFile,
-    isJsonFile,
-    isCodeFile,
-    getLanguage,
-} from "../utils/fileUtils";
+    FileTreeItem,
+    ConfigSection,
+    PreviewToggle,
+    FileContentViewer,
+} from "../components/features/files";
+import { MAX_PREVIEW_SIZE } from "../components/features/files/fileConstants";
+import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getSyntaxClass } from "../utils/fileUtils";
 import { useAuthStore } from "../stores/authStore";
 
 import type { FileNode, FileContent } from "../types/file";
@@ -43,28 +31,6 @@ function formatDate(dateStr: string): string {
     } catch {
         return dateStr;
     }
-}
-
-function getSyntaxClass(filename: string): string {
-    const ext = getFileExtension(filename);
-    const syntaxMap: Record<string, string> = {
-        js: "text-yellow-400",
-        jsx: "text-yellow-400",
-        ts: "text-blue-400",
-        tsx: "text-blue-400",
-        json: "text-green-400",
-        json5: "text-green-400",
-        md: "text-slate-300",
-        html: "text-orange-400",
-        css: "text-pink-400",
-        py: "text-blue-300",
-        go: "text-cyan-400",
-        rs: "text-orange-300",
-        sh: "text-green-300",
-        yml: "text-purple-400",
-        yaml: "text-purple-400",
-    };
-    return syntaxMap[ext] || "text-slate-300";
 }
 
 export function Files() {
@@ -93,9 +59,7 @@ export function Files() {
             setIsLoading(true);
             setError(null);
             try {
-                const url = dirPath
-                    ? apiBase + "?path=" + encodeURIComponent(dirPath)
-                    : apiBase;
+                const url = dirPath ? apiBase + "?path=" + encodeURIComponent(dirPath) : apiBase;
                 const res = await fetch(url, {
                     headers: { Authorization: "Bearer " + token },
                 });
@@ -103,9 +67,7 @@ export function Files() {
                 const data = await res.json();
                 return data.files || [];
             } catch (error_) {
-                setError(
-                    error_ instanceof Error ? error_.message : "Failed to load files"
-                );
+                setError(error_ instanceof Error ? error_.message : "Failed to fetch files");
                 return [];
             } finally {
                 setIsLoading(false);
@@ -120,68 +82,41 @@ export function Files() {
     }, [fetchFiles]);
 
     const fetchFileContent = useCallback(
-        async (filePath: string) => {
+        async (path: string) => {
             setIsLoading(true);
             setError(null);
-            setFileContent(null);
-            setEditedContent("");
-            setHasChanges(false);
             setLargeFileWarning(false);
-            setMarkdownPreview(true);
-            setJsonPreview(true);
-            setCodeEditMode(false);
-
             try {
-                const isConfigFile = filePath.startsWith("config:");
-                const apiEndpoint = isConfigFile
-                    ? "/api/config-files/" +
-                      encodeURIComponent(filePath.replace("config:", ""))
-                    : apiBase + "/" + encodeURIComponent(filePath);
+                const isConfig = path.startsWith("config:");
+                const apiUrl = isConfig
+                    ? "/api/config-files/" + encodeURIComponent(path.replace("config:", ""))
+                    : apiBase + "/" + encodeURIComponent(path);
 
-                const res = await fetch(apiEndpoint, {
+                const res = await fetch(apiUrl, {
                     headers: { Authorization: "Bearer " + token },
                 });
+
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.error || "Failed to fetch file");
                 }
-                const data = await res.json();
 
-                if (data.isImage) {
-                    setFileContent({
-                        content: data.content,
-                        path: filePath,
-                        size: data.size,
-                        modified: data.modified,
-                        isBinary: true,
-                        isImage: true,
-                        mimeType: data.mimeType,
-                    });
-                    setEditedContent("");
-                } else if (data.isBinary) {
-                    setFileContent({
-                        content: "[Binary file - cannot display]",
-                        path: filePath,
-                        size: data.size,
-                        modified: data.modified,
-                        isBinary: true,
-                    });
-                    setEditedContent("");
-                } else {
-                    setFileContent({
-                        content: data.content,
-                        path: filePath,
-                        size: data.size,
-                        modified: data.modified,
-                        isBinary: false,
-                    });
-                    setEditedContent(data.content);
-                    if (data.size > MAX_PREVIEW_SIZE) setLargeFileWarning(true);
+                const data = await res.json();
+                setFileContent(data);
+                setEditedContent(data.content || "");
+                setHasChanges(false);
+
+                if (data.size > MAX_PREVIEW_SIZE) {
+                    setLargeFileWarning(true);
                 }
+
+                // Reset preview modes
+                setMarkdownPreview(true);
+                setJsonPreview(true);
+                setCodeEditMode(false);
             } catch (error_) {
-                setError(
-                    error_ instanceof Error ? error_.message : "Failed to load file"
-                );
+                setError(error_ instanceof Error ? error_.message : "Failed to fetch file");
+                setFileContent(null);
             } finally {
                 setIsLoading(false);
             }
@@ -190,15 +125,12 @@ export function Files() {
     );
 
     const saveFile = async () => {
-        if (!selectedPath || !fileContent || fileContent.isBinary) return;
+        if (!selectedPath || !fileContent) return;
         setIsSaving(true);
-        setError(null);
-
         try {
-            const isConfigFile = selectedPath.startsWith("config:");
-            const apiEndpoint = isConfigFile
-                ? "/api/config-files/" +
-                  encodeURIComponent(selectedPath.replace("config:", ""))
+            const isConfig = selectedPath.startsWith("config:");
+            const apiEndpoint = isConfig
+                ? "/api/config-files/" + encodeURIComponent(selectedPath.replace("config:", ""))
                 : apiBase + "/" + encodeURIComponent(selectedPath);
 
             const res = await fetch(apiEndpoint, {
@@ -271,25 +203,15 @@ export function Files() {
         fetchRootFiles();
     }, [fetchRootFiles]);
 
-    const isEditable = fileContent && !fileContent.isBinary && !largeFileWarning;
-    const syntaxClass = fileContent
-        ? getSyntaxClass(fileContent.path.split("/").pop() || "")
-        : "";
+    const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
+    const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
 
     return (
         <div className="flex h-full flex-col p-6">
             <div className="mb-4 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Files</h1>
-                <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => fetchRootFiles()}
-                    disabled={isLoading}
-                >
-                    <RefreshCw
-                        size={16}
-                        className={"mr-1 " + (isLoading ? "animate-spin" : "")}
-                    />
+                <Button variant="secondary" size="sm" onClick={() => fetchRootFiles()} disabled={isLoading}>
+                    <RefreshCw size={16} className={"mr-1 " + (isLoading ? "animate-spin" : "")} />
                     Refresh
                 </Button>
             </div>
@@ -298,10 +220,7 @@ export function Files() {
                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
                     <AlertTriangle size={16} />
                     {error}
-                    <button
-                        className="ml-auto text-red-300 hover:text-red-100"
-                        onClick={() => setError(null)}
-                    >
+                    <button className="ml-auto text-red-300 hover:text-red-100" onClick={() => setError(null)}>
                         <X size={16} />
                     </button>
                 </div>
@@ -310,10 +229,7 @@ export function Files() {
             <div className="flex min-h-0 flex-1 gap-4">
                 {/* Sidebar: Workspace + Config */}
                 <div className="w-72 flex-shrink-0">
-                    <Card
-                        variant="bordered"
-                        className="flex h-full flex-col overflow-hidden p-0"
-                    >
+                    <Card variant="bordered" className="flex h-full flex-col overflow-hidden p-0">
                         {/* Workspace */}
                         <div className="border-b border-slate-700 p-3">
                             <CardTitle className="flex items-center gap-2 text-sm">
@@ -323,18 +239,13 @@ export function Files() {
                         </div>
                         <div className="overflow-auto border-b border-slate-700 p-2">
                             {isLoading && files.length === 0 ? (
-                                <div className="p-2 text-sm text-slate-400">
-                                    Loading...
-                                </div>
+                                <div className="p-2 text-sm text-slate-400">Loading...</div>
                             ) : files.length === 0 ? (
-                                <div className="p-2 text-sm text-slate-400">
-                                    No files found
-                                </div>
+                                <div className="p-2 text-sm text-slate-400">No files found</div>
                             ) : (
                                 files
                                     .sort((a, b) => {
-                                        if (a.type !== b.type)
-                                            return a.type === "directory" ? -1 : 1;
+                                        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
                                         return a.name.localeCompare(b.name);
                                     })
                                     .map((node) => (
@@ -362,17 +273,11 @@ export function Files() {
                                     selectedPath={selectedPath}
                                     onSelect={handleSelect}
                                     configDirExpanded={configDirExpanded}
-                                    onConfigDirToggle={() =>
-                                        setConfigDirExpanded(!configDirExpanded)
-                                    }
+                                    onConfigDirToggle={() => setConfigDirExpanded(!configDirExpanded)}
                                     cronDirExpanded={cronDirExpanded}
-                                    onCronDirToggle={() =>
-                                        setCronDirExpanded(!cronDirExpanded)
-                                    }
+                                    onCronDirToggle={() => setCronDirExpanded(!cronDirExpanded)}
                                     hooksDirExpanded={hooksDirExpanded}
-                                    onHooksDirToggle={() =>
-                                        setHooksDirExpanded(!hooksDirExpanded)
-                                    }
+                                    onHooksDirToggle={() => setHooksDirExpanded(!hooksDirExpanded)}
                                 />
                             </div>
                         </div>
@@ -380,23 +285,14 @@ export function Files() {
                 </div>
 
                 {/* File Content */}
-                <Card
-                    variant="bordered"
-                    className="flex flex-1 flex-col overflow-hidden p-0"
-                >
+                <Card variant="bordered" className="flex flex-1 flex-col overflow-hidden p-0">
                     {selectedPath ? (
                         <>
                             {/* Header */}
                             <div className="flex items-center justify-between gap-4 border-b border-slate-700 p-3">
                                 <div className="flex min-w-0 items-center gap-2">
-                                    <File
-                                        size={16}
-                                        className="flex-shrink-0 text-slate-400"
-                                    />
-                                    <span
-                                        className="truncate font-mono text-sm"
-                                        title={selectedPath}
-                                    >
+                                    <File size={16} className="flex-shrink-0 text-slate-400" />
+                                    <span className="truncate font-mono text-sm" title={selectedPath}>
                                         {selectedPath}
                                     </span>
                                     {fileContent && (
@@ -407,124 +303,27 @@ export function Files() {
                                 </div>
                                 <div className="flex flex-shrink-0 items-center gap-2">
                                     {/* Markdown preview toggle */}
-                                    {fileContent &&
-                                        isMarkdownFile(fileContent.path) &&
-                                        isEditable && (
-                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (markdownPreview
-                                                            ? "bg-accent-500 text-white"
-                                                            : "text-slate-300 hover:text-white")
-                                                    }
-                                                    onClick={() =>
-                                                        setMarkdownPreview(true)
-                                                    }
-                                                >
-                                                    <Eye
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Preview
-                                                </button>
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (markdownPreview
-                                                            ? "text-slate-300 hover:text-white"
-                                                            : "bg-accent-500 text-white")
-                                                    }
-                                                    onClick={() =>
-                                                        setMarkdownPreview(false)
-                                                    }
-                                                >
-                                                    <Code
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Raw
-                                                </button>
-                                            </div>
-                                        )}
+                                    {fileContent && isMarkdownFile(fileContent.path) && isEditable && (
+                                        <PreviewToggle
+                                            preview={markdownPreview}
+                                            onToggle={setMarkdownPreview}
+                                        />
+                                    )}
                                     {/* JSON preview toggle */}
-                                    {fileContent &&
-                                        isJsonFile(fileContent.path) &&
-                                        isEditable && (
-                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (jsonPreview
-                                                            ? "bg-accent-500 text-white"
-                                                            : "text-slate-300 hover:text-white")
-                                                    }
-                                                    onClick={() => setJsonPreview(true)}
-                                                >
-                                                    <Eye
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Preview
-                                                </button>
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (jsonPreview
-                                                            ? "text-slate-300 hover:text-white"
-                                                            : "bg-accent-500 text-white")
-                                                    }
-                                                    onClick={() => setJsonPreview(false)}
-                                                >
-                                                    <Code
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Raw
-                                                </button>
-                                            </div>
-                                        )}
+                                    {fileContent && isJsonFile(fileContent.path) && isEditable && (
+                                        <PreviewToggle preview={jsonPreview} onToggle={setJsonPreview} />
+                                    )}
                                     {/* Code edit toggle */}
-                                    {fileContent &&
-                                        isCodeFile(fileContent.path) &&
-                                        isEditable && (
-                                            <div className="flex items-center gap-1 rounded bg-slate-700 p-0.5">
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (codeEditMode
-                                                            ? "text-slate-300 hover:text-white"
-                                                            : "bg-accent-500 text-white")
-                                                    }
-                                                    onClick={() => setCodeEditMode(false)}
-                                                >
-                                                    <Eye
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Preview
-                                                </button>
-                                                <button
-                                                    className={
-                                                        "rounded px-2 py-1 text-xs " +
-                                                        (codeEditMode
-                                                            ? "bg-accent-500 text-white"
-                                                            : "text-slate-300 hover:text-white")
-                                                    }
-                                                    onClick={() => setCodeEditMode(true)}
-                                                >
-                                                    <Code
-                                                        size={14}
-                                                        className="mr-1 inline"
-                                                    />
-                                                    Edit
-                                                </button>
-                                            </div>
-                                        )}
+                                    {fileContent && isCodeFile(fileContent.path) && isEditable && (
+                                        <PreviewToggle
+                                            preview={!codeEditMode}
+                                            onToggle={(preview) => setCodeEditMode(!preview)}
+                                            previewLabel="Preview"
+                                            editLabel="Edit"
+                                        />
+                                    )}
                                     {hasChanges && (
-                                        <span className="text-xs text-yellow-400">
-                                            Unsaved changes
-                                        </span>
+                                        <span className="text-xs text-yellow-400">Unsaved changes</span>
                                     )}
                                     {isEditable && (
                                         <Button
@@ -547,150 +346,17 @@ export function Files() {
                                         Loading...
                                     </div>
                                 ) : fileContent ? (
-                                    <div className="flex h-full flex-col">
-                                        {largeFileWarning && (
-                                            <div className="flex items-center gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-4 py-2 text-sm text-yellow-400">
-                                                <AlertTriangle size={14} />
-                                                Large file ({formatSize(fileContent.size)}
-                                                ) - preview only, editing disabled
-                                            </div>
-                                        )}
-                                        {fileContent.isBinary && !fileContent.isImage ? (
-                                            <div className="flex h-full items-center justify-center text-slate-400">
-                                                <div className="text-center">
-                                                    <File
-                                                        size={48}
-                                                        className="mx-auto mb-2 opacity-50"
-                                                    />
-                                                    <p>Binary file</p>
-                                                    <p className="mt-1 text-xs">
-                                                        Cannot display binary content
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        ) : fileContent.isImage ? (
-                                            <div className="flex h-full items-center justify-center p-4">
-                                                <img
-                                                    src={
-                                                        "data:" +
-                                                        fileContent.mimeType +
-                                                        ";base64," +
-                                                        fileContent.content
-                                                    }
-                                                    alt={
-                                                        fileContent.path
-                                                            .split("/")
-                                                            .pop() || "Image"
-                                                    }
-                                                    className="max-h-full max-w-full rounded object-contain"
-                                                />
-                                            </div>
-                                        ) : isMarkdownFile(fileContent.path) &&
-                                          markdownPreview ? (
-                                            <div className="prose prose-invert max-w-none p-6 prose-headings:mb-4 prose-headings:mt-6 prose-p:my-4 prose-blockquote:my-4 prose-pre:my-4 prose-ol:my-4 prose-ul:my-4 prose-li:my-1 prose-table:my-4 prose-hr:my-6">
-                                                <ReactMarkdown
-                                                    remarkPlugins={[
-                                                        remarkGfm,
-                                                        remarkFrontmatter,
-                                                    ]}
-                                                >
-                                                    {editedContent}
-                                                </ReactMarkdown>
-                                            </div>
-                                        ) : isJsonFile(fileContent.path) &&
-                                          jsonPreview ? (
-                                            <div className="overflow-auto p-4">
-                                                <ReactJsonView
-                                                    src={(() => {
-                                                        try {
-                                                            return JSON5.parse(
-                                                                editedContent
-                                                            );
-                                                        } catch {
-                                                            try {
-                                                                return JSON.parse(
-                                                                    editedContent
-                                                                );
-                                                            } catch {
-                                                                return {
-                                                                    error: "Failed to parse JSON",
-                                                                    raw: editedContent,
-                                                                };
-                                                            }
-                                                        }
-                                                    })()}
-                                                    theme="monokai"
-                                                    collapsed={false}
-                                                    enableClipboard={false}
-                                                    displayDataTypes={false}
-                                                    displayObjectSize={false}
-                                                    indentWidth={4}
-                                                    style={{ fontSize: "13px" }}
-                                                />
-                                            </div>
-                                        ) : isCodeFile(fileContent.path) ? (
-                                            codeEditMode ? (
-                                                <textarea
-                                                    className={
-                                                        "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
-                                                        syntaxClass
-                                                    }
-                                                    value={editedContent}
-                                                    onChange={(e) =>
-                                                        handleContentChange(
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    spellCheck={false}
-                                                />
-                                            ) : (
-                                                <div className="h-full overflow-auto">
-                                                    <SyntaxHighlighter
-                                                        language={getLanguage(
-                                                            fileContent.path
-                                                        )}
-                                                        style={monokai}
-                                                        customStyle={{
-                                                            margin: 0,
-                                                            padding: "1rem",
-                                                            background: "transparent",
-                                                            fontSize: "13px",
-                                                            height: "100%",
-                                                        }}
-                                                        showLineNumbers={true}
-                                                        lineNumberStyle={{
-                                                            minWidth: "2.5em",
-                                                            paddingRight: "1em",
-                                                            color: "#6b7280",
-                                                        }}
-                                                    >
-                                                        {editedContent}
-                                                    </SyntaxHighlighter>
-                                                </div>
-                                            )
-                                        ) : isEditable ? (
-                                            <textarea
-                                                className={
-                                                    "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
-                                                    syntaxClass
-                                                }
-                                                value={editedContent}
-                                                onChange={(e) =>
-                                                    handleContentChange(e.target.value)
-                                                }
-                                                spellCheck={false}
-                                            />
-                                        ) : (
-                                            <pre
-                                                className={
-                                                    "whitespace-pre-wrap p-4 font-mono text-sm " +
-                                                    syntaxClass
-                                                }
-                                            >
-                                                {editedContent}
-                                            </pre>
-                                        )}
-                                    </div>
+                                    <FileContentViewer
+                                        fileContent={fileContent}
+                                        editedContent={editedContent}
+                                        onContentChange={handleContentChange}
+                                        largeFileWarning={largeFileWarning}
+                                        isEditable={isEditable}
+                                        markdownPreview={markdownPreview}
+                                        jsonPreview={jsonPreview}
+                                        codeEditMode={codeEditMode}
+                                        syntaxClass={syntaxClass}
+                                    />
                                 ) : (
                                     <div className="flex h-full items-center justify-center text-slate-400">
                                         Failed to load file
@@ -700,17 +366,21 @@ export function Files() {
 
                             {/* Footer */}
                             {fileContent && (
-                                <div className="border-t border-slate-700 p-2 text-xs text-slate-400">
-                                    Modified: {formatDate(fileContent.modified)}
+                                <div className="flex items-center justify-between border-t border-slate-700 px-4 py-2 text-xs text-slate-400">
+                                    <span>
+                                        Modified: {fileContent.modified ? formatDate(fileContent.modified) : "Unknown"}
+                                    </span>
+                                    {fileContent.modified && (
+                                        <span>
+                                            {format(new Date(fileContent.modified), "yyyy-MM-dd HH:mm:ss", { locale: enUS })}
+                                        </span>
+                                    )}
                                 </div>
                             )}
                         </>
                     ) : (
                         <div className="flex h-full items-center justify-center text-slate-400">
-                            <div className="text-center">
-                                <Folder size={48} className="mx-auto mb-2 opacity-50" />
-                                <p>Select a file to view</p>
-                            </div>
+                            Select a file to view
                         </div>
                     )}
                 </Card>

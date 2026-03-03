@@ -86,3 +86,25 @@ export function isBinaryFile(filename: string): boolean {
     ];
     return binaryExts.includes(ext);
 }
+
+export function getSyntaxClass(filename: string): string {
+    const ext = getFileExtension(filename);
+    const syntaxMap: Record<string, string> = {
+        js: "text-yellow-400",
+        jsx: "text-yellow-400",
+        ts: "text-blue-400",
+        tsx: "text-blue-400",
+        json: "text-green-400",
+        json5: "text-green-400",
+        md: "text-slate-300",
+        html: "text-orange-400",
+        css: "text-pink-400",
+        py: "text-blue-300",
+        go: "text-cyan-400",
+        rs: "text-orange-300",
+        sh: "text-green-300",
+        yml: "text-purple-400",
+        yaml: "text-purple-400",
+    };
+    return syntaxMap[ext] || "text-slate-300";
+}
