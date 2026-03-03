@@ -9,6 +9,7 @@ import { Plus, RefreshCw, Search } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../components/ui/Button";
+import { LoadingState } from "../components/ui/LoadingState";
 import {
     TaskColumn,
     TaskDetailModal,
@@ -117,11 +118,7 @@ export function Tasks() {
     const activeTask = activeId ? tasks.find((t) => t.number.toString() === activeId) : null;
 
     if (isLoading) {
-        return (
-            <div className="flex h-[calc(100vh-4rem)] items-center justify-center p-6">
-                <RefreshCw className="h-6 w-6 animate-spin text-slate-400" />
-            </div>
-        );
+        return <LoadingState size="lg" />;
     }
 
     if (error) {
