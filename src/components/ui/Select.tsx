@@ -54,23 +54,21 @@ export function Select({
             >
                 {options.map((option) => (
                     <MenuItem key={option.value}>
-                        {({ active }) => (
-                            <button
-                                onClick={() => onChange(option.value)}
-                                className={cn(
-                                    "flex w-full flex-col px-3 py-2 text-left text-sm",
-                                    active && "bg-slate-700",
-                                    value === option.value && "text-indigo-400"
-                                )}
-                            >
-                                <span>{option.label}</span>
-                                {option.description && (
-                                    <span className="text-xs text-slate-500">
-                                        {option.description}
-                                    </span>
-                                )}
-                            </button>
-                        )}
+                        <button
+                            onClick={() => onChange(option.value)}
+                            className={cn(
+                                "flex w-full flex-col px-3 py-2 text-left text-sm",
+                                "data-focus:bg-slate-700",
+                                value === option.value && "text-indigo-400"
+                            )}
+                        >
+                            <span>{option.label}</span>
+                            {option.description && (
+                                <span className="text-xs text-slate-500">
+                                    {option.description}
+                                </span>
+                            )}
+                        </button>
                     </MenuItem>
                 ))}
             </MenuItems>

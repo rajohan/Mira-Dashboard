@@ -43,26 +43,21 @@ export function Dropdown({ trigger, items, align = "right", className }: Dropdow
             >
                 {items.map((item, index) => (
                     <MenuItem key={index} disabled={item.disabled}>
-                        {({ active }) => (
-                            <button
-                                type="button"
-                                onClick={item.onClick}
-                                className={cn(
-                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                                    item.variant === "danger"
-                                        ? active
-                                            ? "bg-red-500/20 text-red-400"
-                                            : "text-red-400"
-                                        : active
-                                          ? "bg-slate-700 text-slate-100"
-                                          : "text-slate-300",
-                                    item.disabled && "cursor-not-allowed opacity-50"
-                                )}
-                            >
-                                {item.icon}
-                                {item.label}
-                            </button>
-                        )}
+                        <button
+                            type="button"
+                            onClick={item.onClick}
+                            className={cn(
+                                "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
+                                "data-focus:bg-slate-700 data-focus:text-slate-100",
+                                "data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                                item.variant === "danger"
+                                    ? "text-red-400 data-focus:bg-red-500/20"
+                                    : "text-slate-300"
+                            )}
+                        >
+                            {item.icon}
+                            {item.label}
+                        </button>
                     </MenuItem>
                 ))}
             </MenuItems>
