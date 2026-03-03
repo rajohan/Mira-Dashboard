@@ -7,7 +7,7 @@ import {
 import { Suspense, lazy } from "react";
 
 import { Layout } from "./components/layout/Layout";
-import { LoadingSpinner } from "./components/ui/LoadingSpinner";
+import { LoadingState } from "./components/ui/LoadingState";
 
 // Lazy-loaded page components
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
@@ -23,7 +23,7 @@ const Tasks = lazy(() => import("./pages/Tasks").then(m => ({ default: m.Tasks }
 // Wrapper for lazy components with Suspense
 function LazyPage({ component: Component }: { component: React.LazyExoticComponent<React.ComponentType> }) {
     return (
-        <Suspense fallback={<LoadingSpinner />}>
+        <Suspense fallback={<LoadingState size="lg" />}>
             <Component />
         </Suspense>
     );
