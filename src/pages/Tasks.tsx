@@ -1,12 +1,14 @@
 import {
     DndContext,
     type DragEndEvent,
+    type DragOverEvent,
     DragOverlay,
     type DragStartEvent,
-    type DragOverEvent,
 } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { format, formatDistanceToNow } from "date-fns";
+import { enUS } from "date-fns/locale";
 import {
     AlertCircle,
     CheckCircle2,
@@ -14,19 +16,24 @@ import {
     ExternalLink,
     GripVertical,
     Loader2,
+    Plus,
     RefreshCw,
+    Search,
+    X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Modal } from "../components/ui/Modal";
 
 interface Task {
     number: number;
     title: string;
+    body?: string;
     state: string;
-    labels: Array<{ name: string }>;
-    assignees: Array<{ login?: string; name?: string }>;
+    labels: Array<{ name: string; color?: string }>;
+    assignees: Array<{ login?: string; name?: string; avatar_url?: string }>;
     createdAt: string;
     updatedAt: string;
     url: string;
@@ -34,13 +41,18 @@ interface Task {
 
 type ColumnId = "todo" | "in-progress" | "blocked" | "done";
 
-const COLUMN_CONFIG: Record<
-    ColumnId,
-    { title: string; icon: React.ReactNode; filter: (t: Task) => boolean }
-> = {
+interface ColumnConfig {
+    title: string;
+    icon: React.ReactNode;
+    dotColor: string;
+    filter: (t: Task) => boolean;
+}
+
+const COLUMN_CONFIG: Record<ColumnId, ColumnConfig> = {
     todo: {
-        title: "To Do",
-        icon: <Circle className="h-4 w-4 text-slate-400" />,
+        title: "New",
+        icon: <Circle className="h-4 w-4" />,
+        dotColor: "bg-orange-500",
         filter: (t) =>
             t.state === "OPEN" &&
             !t.labels.some((l) => l.name === "blocked") &&
@@ -48,23 +60,48 @@ const COLUMN_CONFIG: Record<
     },
     "in-progress": {
         title: "In Progress",
-        icon: <Loader2 className="h-4 w-4 text-blue-400" />,
+        icon: <Loader2 className="h-4 w-4" />,
+        dotColor: "bg-blue-500",
         filter: (t) =>
             t.state === "OPEN" && t.labels.some((l) => l.name === "in-progress"),
     },
     blocked: {
         title: "Blocked",
-        icon: <AlertCircle className="h-4 w-4 text-red-400" />,
+        icon: <AlertCircle className="h-4 w-4" />,
+        dotColor: "bg-red-500",
         filter: (t) => t.state === "OPEN" && t.labels.some((l) => l.name === "blocked"),
     },
     done: {
         title: "Done",
-        icon: <CheckCircle2 className="h-4 w-4 text-green-400" />,
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        dotColor: "bg-green-500",
         filter: (t) => t.state === "CLOSED",
     },
 };
 
-function TaskCard({ task, isDragging }: { task: Task; isDragging?: boolean }) {
+const PRIORITY_COLORS: Record<string, string> = {
+    high: "bg-red-500/20 text-red-400 border-red-500/30",
+    medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+    low: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+};
+
+function getPriority(labels: Array<{ name: string }>): string {
+    if (labels.some((l) => l.name === "priority-high" || l.name === "high"))
+        return "high";
+    if (labels.some((l) => l.name === "priority-medium" || l.name === "medium"))
+        return "medium";
+    return "low";
+}
+
+function TaskCard({
+    task,
+    isDragging,
+    onClick,
+}: {
+    task: Task;
+    isDragging?: boolean;
+    onClick: () => void;
+}) {
     const { attributes, listeners, setNodeRef, transform } = useSortable({
         id: `task-${task.number}`,
     });
@@ -76,109 +113,346 @@ function TaskCard({ task, isDragging }: { task: Task; isDragging?: boolean }) {
           }
         : undefined;
 
+    const priority = getPriority(task.labels);
+    const assignee = task.assignees[0];
+
     return (
         <div
             ref={setNodeRef}
             style={style}
             {...attributes}
             className={
-                "group flex items-center gap-2 border-b border-slate-700/50 px-4 py-3 transition-colors last:border-b-0 hover:bg-slate-800/50 " +
-                (isDragging
-                    ? "cursor-grabbing bg-slate-800 opacity-80"
-                    : "cursor-pointer")
+                "group relative cursor-pointer rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all " +
+                "hover:border-slate-300 hover:shadow-md " +
+                (isDragging ? "cursor-grabbing opacity-90 shadow-lg" : "")
             }
-            onClick={() => window.open(task.url, "_blank")}
+            onClick={onClick}
         >
             <button
                 {...listeners}
-                className="flex-shrink-0 cursor-grab text-slate-500 opacity-0 transition-opacity hover:text-slate-300 group-hover:opacity-100"
+                className="absolute left-2 top-1/2 -translate-y-1/2 cursor-grab text-slate-300 opacity-0 transition-opacity hover:text-slate-500 group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
             </button>
-            <div className="flex-shrink-0">
-                {task.state === "CLOSED" ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                ) : task.labels.some((l) => l.name === "blocked") ? (
-                    <AlertCircle className="h-5 w-5 text-red-400" />
-                ) : task.labels.some((l) => l.name === "in-progress") ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
-                ) : (
-                    <Circle className="h-5 w-5 text-slate-400" />
-                )}
-            </div>
-            <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-100">
-                    #{task.number}: {task.title}
-                </p>
-                <div className="mt-1 flex items-center gap-2">
-                    {task.labels.slice(0, 3).map((label) => (
-                        <span
-                            key={label.name}
-                            className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
-                        >
-                            {label.name}
-                        </span>
-                    ))}
-                    {task.assignees.length > 0 && (
-                        <span className="text-xs text-slate-500">
-                            @{task.assignees[0].login || task.assignees[0].name}
-                        </span>
+
+            <div className="ml-4">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-slate-500">
+                        #{task.number}
+                    </span>
+                    <span
+                        className={
+                            "rounded-full border px-2 py-0.5 text-xs font-medium " +
+                            PRIORITY_COLORS[priority]
+                        }
+                    >
+                        {priority.toUpperCase()}
+                    </span>
+                    {task.labels
+                        .filter(
+                            (l) =>
+                                !l.name.startsWith("priority-") &&
+                                l.name !== "blocked" &&
+                                l.name !== "in-progress"
+                        )
+                        .slice(0, 2)
+                        .map((label) => (
+                            <span
+                                key={label.name}
+                                className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                            >
+                                {label.name}
+                            </span>
+                        ))}
+                </div>
+
+                <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-slate-900">
+                    {task.title}
+                </h3>
+
+                <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">
+                        {formatDistanceToNow(new Date(task.updatedAt), {
+                            addSuffix: true,
+                            locale: enUS,
+                        })}
+                    </span>
+                    {assignee && (
+                        <div className="flex items-center gap-1">
+                            {assignee.avatar_url ? (
+                                <img
+                                    src={assignee.avatar_url}
+                                    alt={assignee.login || "Avatar"}
+                                    className="h-5 w-5 rounded-full"
+                                />
+                            ) : (
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+                                    {(assignee.login ||
+                                        assignee.name ||
+                                        "?")[0].toUpperCase()}
+                                </div>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>
-            <ExternalLink className="h-4 w-4 flex-shrink-0 text-slate-500" />
         </div>
     );
 }
 
 function TaskOverlay({ task }: { task: Task }) {
+    const priority = getPriority(task.labels);
+
     return (
-        <div className="flex items-center gap-2 rounded-lg border border-accent-500/50 bg-slate-800 px-4 py-3 shadow-xl">
-            <GripVertical className="h-4 w-4 flex-shrink-0 text-slate-500" />
-            <div className="flex-shrink-0">
-                {task.state === "CLOSED" ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                ) : task.labels.some((l) => l.name === "blocked") ? (
-                    <AlertCircle className="h-5 w-5 text-red-400" />
-                ) : task.labels.some((l) => l.name === "in-progress") ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
-                ) : (
-                    <Circle className="h-5 w-5 text-slate-400" />
-                )}
+        <div className="w-80 rounded-lg border border-purple-500/50 bg-white p-4 shadow-xl">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">#{task.number}</span>
+                <span
+                    className={
+                        "rounded-full border px-2 py-0.5 text-xs font-medium " +
+                        PRIORITY_COLORS[priority]
+                    }
+                >
+                    {priority.toUpperCase()}
+                </span>
             </div>
-            <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-100">
-                    #{task.number}: {task.title}
-                </p>
-            </div>
+            <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+                {task.title}
+            </h3>
         </div>
     );
 }
 
-function Column({ id, tasks, isOver }: { id: ColumnId; tasks: Task[]; isOver: boolean }) {
+function TaskDetailModal({
+    task,
+    onClose,
+    onMove,
+}: {
+    task: Task;
+    onClose: () => void;
+    onMove: (column: ColumnId) => Promise<void>;
+}) {
+    const [isMoving, setIsMoving] = useState(false);
+
+    const priority = getPriority(task.labels);
+    const assignee = task.assignees[0];
+    const currentColumn: ColumnId = task.labels.some((l) => l.name === "blocked")
+        ? "blocked"
+        : task.labels.some((l) => l.name === "in-progress")
+          ? "in-progress"
+          : task.state === "CLOSED"
+            ? "done"
+            : "todo";
+
+    const handleMove = async (column: ColumnId) => {
+        setIsMoving(true);
+        await onMove(column);
+        setIsMoving(false);
+    };
+
+    return (
+        <Modal isOpen={!!task} onClose={onClose} size="2xl">
+            <div className="space-y-4">
+                {/* Header */}
+                <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <span
+                                className={
+                                    "rounded-full border px-2.5 py-1 text-xs font-semibold " +
+                                    (task.state === "CLOSED"
+                                        ? "border-green-500/30 bg-green-500/20 text-green-600"
+                                        : "border-blue-500/30 bg-blue-500/20 text-blue-600")
+                                }
+                            >
+                                {task.state === "CLOSED"
+                                    ? "DONE"
+                                    : currentColumn.toUpperCase()}
+                            </span>
+                            <span
+                                className={
+                                    "rounded-full border px-2.5 py-1 text-xs font-semibold " +
+                                    PRIORITY_COLORS[priority]
+                                }
+                            >
+                                {priority.toUpperCase()}
+                            </span>
+                            {task.labels
+                                .filter(
+                                    (l) =>
+                                        !l.name.startsWith("priority-") &&
+                                        l.name !== "blocked" &&
+                                        l.name !== "in-progress"
+                                )
+                                .map((label) => (
+                                    <span
+                                        key={label.name}
+                                        className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+                                    >
+                                        {label.name}
+                                    </span>
+                                ))}
+                        </div>
+                        <h2 className="text-lg font-semibold text-slate-900">
+                            #{task.number}: {task.title}
+                        </h2>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-slate-400 hover:text-slate-600"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                </div>
+
+                {/* Metadata */}
+                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                    {assignee && (
+                        <div className="flex items-center gap-2">
+                            {assignee.avatar_url ? (
+                                <img
+                                    src={assignee.avatar_url}
+                                    alt={assignee.login || "Avatar"}
+                                    className="h-5 w-5 rounded-full"
+                                />
+                            ) : (
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+                                    {(assignee.login ||
+                                        assignee.name ||
+                                        "?")[0].toUpperCase()}
+                                </div>
+                            )}
+                            <span>@{assignee.login || assignee.name}</span>
+                        </div>
+                    )}
+                    <span>
+                        Created{" "}
+                        {format(new Date(task.createdAt), "MMM d, yyyy", {
+                            locale: enUS,
+                        })}
+                    </span>
+                    <span>
+                        Updated{" "}
+                        {formatDistanceToNow(new Date(task.updatedAt), {
+                            addSuffix: true,
+                            locale: enUS,
+                        })}
+                    </span>
+                </div>
+
+                {/* Body */}
+                {task.body && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h3 className="mb-2 text-sm font-semibold text-slate-700">
+                            Description
+                        </h3>
+                        <p className="whitespace-pre-wrap text-sm text-slate-600">
+                            {task.body}
+                        </p>
+                    </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2 pt-2">
+                    {currentColumn !== "todo" && (
+                        <Button
+                            variant="secondary"
+                            onClick={() => handleMove("todo")}
+                            disabled={isMoving}
+                        >
+                            Move to New
+                        </Button>
+                    )}
+                    {currentColumn !== "in-progress" && (
+                        <Button
+                            variant="secondary"
+                            onClick={() => handleMove("in-progress")}
+                            disabled={isMoving}
+                        >
+                            Move to In Progress
+                        </Button>
+                    )}
+                    {currentColumn !== "blocked" && (
+                        <Button
+                            variant="secondary"
+                            onClick={() => handleMove("blocked")}
+                            disabled={isMoving}
+                        >
+                            Move to Blocked
+                        </Button>
+                    )}
+                    {currentColumn !== "done" && (
+                        <Button
+                            variant="primary"
+                            onClick={() => handleMove("done")}
+                            disabled={isMoving}
+                        >
+                            Mark Done
+                        </Button>
+                    )}
+                    <Button
+                        variant="secondary"
+                        onClick={() => window.open(task.url, "_blank")}
+                        className="ml-auto"
+                    >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Open in GitHub
+                    </Button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function Column({
+    id,
+    tasks,
+    isOver,
+    onTaskClick,
+}: {
+    id: ColumnId;
+    tasks: Task[];
+    isOver: boolean;
+    onTaskClick: (task: Task) => void;
+}) {
     const config = COLUMN_CONFIG[id];
 
     return (
         <div
             className={
-                "flex flex-col rounded-lg transition-colors " +
-                (isOver ? "bg-accent-500/10" : "")
+                "flex flex-1 flex-col rounded-xl transition-colors " +
+                (isOver ? "bg-purple-500/5" : "")
             }
         >
-            <div className="mb-3 flex items-center gap-2">
-                {config.icon}
-                <h2 className="text-sm font-semibold text-slate-300">{config.title}</h2>
-                <span className="text-xs text-slate-500">({tasks.length})</span>
+            <div className="mb-3 flex items-center gap-2 px-1">
+                <div className={"h-2.5 w-2.5 rounded-full " + config.dotColor} />
+                <h2 className="text-sm font-semibold text-slate-700">{config.title}</h2>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                    {tasks.length}
+                </span>
             </div>
             <div
                 data-column={id}
-                className="flex-1 rounded-lg border border-slate-700/50 bg-slate-800/30"
+                className={
+                    "flex-1 space-y-2 rounded-xl border-2 border-dashed p-2 transition-colors " +
+                    (isOver
+                        ? "border-purple-500/50 bg-purple-500/5"
+                        : "border-transparent")
+                }
             >
                 {tasks.length > 0 ? (
-                    tasks.map((task) => <TaskCard key={task.number} task={task} />)
+                    tasks.map((task) => (
+                        <TaskCard
+                            key={task.number}
+                            task={task}
+                            onClick={() => onTaskClick(task)}
+                        />
+                    ))
                 ) : (
-                    <div className="p-4 text-center text-sm text-slate-500">No tasks</div>
+                    <div className="flex h-24 items-center justify-center text-sm text-slate-400">
+                        No tasks
+                    </div>
                 )}
             </div>
         </div>
@@ -189,9 +463,11 @@ export function Tasks() {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | "mira-2026" | "rajohan">("all");
     const [activeId, setActiveId] = useState<string | null>(null);
     const [overId, setOverId] = useState<ColumnId | null>(null);
+    const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
     const fetchTasks = async () => {
         setLoading(true);
@@ -210,7 +486,7 @@ export function Tasks() {
                         "--limit",
                         "50",
                         "--json",
-                        "number,title,state,labels,assignees,createdAt,updatedAt,url",
+                        "number,title,body,state,labels,assignees,createdAt,updatedAt,url",
                     ],
                 }),
             });
@@ -229,8 +505,14 @@ export function Tasks() {
     }, []);
 
     const filteredTasks = tasks.filter((task) => {
-        if (filter === "all") return true;
-        return task.assignees.some((a) => (a.login || a.name) === filter);
+        const matchesFilter =
+            filter === "all" ||
+            task.assignees.some((a) => (a.login || a.name) === filter);
+        const matchesSearch =
+            search === "" ||
+            task.title.toLowerCase().includes(search.toLowerCase()) ||
+            task.number.toString().includes(search);
+        return matchesFilter && matchesSearch;
     });
 
     const tasksByColumn: Record<ColumnId, Task[]> = {
@@ -268,14 +550,13 @@ export function Tasks() {
         if (!over) return;
 
         const taskId = active.id.toString().replace("task-", "");
-        const targetColumn = over.id as ColumnId;
+        const targetColumn = over.id.toString() as ColumnId;
 
         if (!COLUMN_CONFIG[targetColumn]) return;
 
         const task = tasks.find((t) => t.number.toString() === taskId);
         if (!task) return;
 
-        // Determine current column
         const currentColumn: ColumnId = task.labels.some((l) => l.name === "blocked")
             ? "blocked"
             : task.labels.some((l) => l.name === "in-progress")
@@ -286,10 +567,14 @@ export function Tasks() {
 
         if (currentColumn === targetColumn) return;
 
+        await moveTask(task, targetColumn);
+    };
+
+    const moveTask = async (task: Task, targetColumn: ColumnId) => {
         // Optimistic update
         setTasks((prev) =>
             prev.map((t) => {
-                if (t.number.toString() !== taskId) return t;
+                if (t.number !== task.number) return t;
 
                 const newLabels = t.labels.filter(
                     (l) => l.name !== "blocked" && l.name !== "in-progress"
@@ -309,7 +594,6 @@ export function Tasks() {
             })
         );
 
-        // Call API to update task status
         try {
             const labelToAdd =
                 targetColumn === "in-progress"
@@ -318,6 +602,14 @@ export function Tasks() {
                       ? "blocked"
                       : null;
 
+            const currentColumn: ColumnId = task.labels.some((l) => l.name === "blocked")
+                ? "blocked"
+                : task.labels.some((l) => l.name === "in-progress")
+                  ? "in-progress"
+                  : task.state === "CLOSED"
+                    ? "done"
+                    : "todo";
+
             const labelToRemove =
                 currentColumn === "in-progress"
                     ? "in-progress"
@@ -325,7 +617,6 @@ export function Tasks() {
                       ? "blocked"
                       : null;
 
-            // Remove old label if exists
             if (labelToRemove) {
                 await fetch("/api/exec", {
                     method: "POST",
@@ -345,7 +636,6 @@ export function Tasks() {
                 });
             }
 
-            // Add new label if needed
             if (labelToAdd) {
                 await fetch("/api/exec", {
                     method: "POST",
@@ -365,7 +655,6 @@ export function Tasks() {
                 });
             }
 
-            // Close issue if moved to done
             if (targetColumn === "done") {
                 await fetch("/api/exec", {
                     method: "POST",
@@ -383,7 +672,6 @@ export function Tasks() {
                 });
             }
 
-            // Reopen issue if moved from done
             if (currentColumn === "done" && targetColumn !== "done") {
                 await fetch("/api/exec", {
                     method: "POST",
@@ -402,25 +690,47 @@ export function Tasks() {
             }
         } catch (error_) {
             console.error("Failed to update task:", error_);
-            // Revert on error
             fetchTasks();
         }
     };
 
     return (
-        <div className="space-y-6 p-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-slate-100">Tasks</h1>
+        <div className="flex h-full flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+                <h1 className="text-2xl font-bold text-slate-900">Tasks</h1>
                 <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search tasks..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-64 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                    </div>
                     <select
                         value={filter}
                         onChange={(e) => setFilter(e.target.value as typeof filter)}
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
                     >
                         <option value="all">All Tasks</option>
                         <option value="mira-2026">Assigned to Mira</option>
                         <option value="rajohan">Assigned to Raymond</option>
                     </select>
+                    <Button
+                        variant="primary"
+                        onClick={() =>
+                            window.open(
+                                "https://github.com/rajohan/Mira-Workspace/issues/new",
+                                "_blank"
+                            )
+                        }
+                    >
+                        <Plus className="mr-2 h-4 w-4" />
+                        New Task
+                    </Button>
                     <Button variant="secondary" onClick={fetchTasks} disabled={loading}>
                         <RefreshCw
                             className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"}
@@ -429,32 +739,48 @@ export function Tasks() {
                 </div>
             </div>
 
-            {error && (
-                <Card className="border-red-800 bg-red-900/20 p-4">
-                    <p className="text-red-400">Error: {error}</p>
-                </Card>
+            {/* Content */}
+            <div className="flex-1 overflow-auto bg-slate-100 p-6">
+                {error && (
+                    <Card className="mb-4 border-red-200 bg-red-50 p-4">
+                        <p className="text-red-600">Error: {error}</p>
+                    </Card>
+                )}
+
+                <DndContext
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDragEnd={handleDragEnd}
+                >
+                    <div className="flex gap-4">
+                        {(Object.keys(COLUMN_CONFIG) as ColumnId[]).map((columnId) => (
+                            <Column
+                                key={columnId}
+                                id={columnId}
+                                tasks={tasksByColumn[columnId]}
+                                isOver={overId === columnId}
+                                onTaskClick={setSelectedTask}
+                            />
+                        ))}
+                    </div>
+
+                    <DragOverlay>
+                        {activeTask ? <TaskOverlay task={activeTask} /> : null}
+                    </DragOverlay>
+                </DndContext>
+            </div>
+
+            {/* Task Detail Modal */}
+            {selectedTask && (
+                <TaskDetailModal
+                    task={selectedTask}
+                    onClose={() => setSelectedTask(null)}
+                    onMove={async (column) => {
+                        await moveTask(selectedTask, column);
+                        setSelectedTask(null);
+                    }}
+                />
             )}
-
-            <DndContext
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragEnd={handleDragEnd}
-            >
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    {(Object.keys(COLUMN_CONFIG) as ColumnId[]).map((columnId) => (
-                        <Column
-                            key={columnId}
-                            id={columnId}
-                            tasks={tasksByColumn[columnId]}
-                            isOver={overId === columnId}
-                        />
-                    ))}
-                </div>
-
-                <DragOverlay>
-                    {activeTask ? <TaskOverlay task={activeTask} /> : null}
-                </DragOverlay>
-            </DndContext>
         </div>
     );
 }
