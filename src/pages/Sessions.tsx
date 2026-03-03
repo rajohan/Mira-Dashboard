@@ -40,18 +40,20 @@ import {
 } from "../utils/format";
 import { type Session } from "../hooks/useOpenClaw";
 import { useOpenClaw } from "../hooks/useOpenClaw";
+import { useSessionAction, useDeleteSession } from "../hooks/useSessions";
 import { useAuthStore } from "../stores/authStore";
 
 const columnHelper = createColumnHelper<Session>();
 
 export function Sessions() {
     const { token } = useAuthStore();
-    const { isConnected, error, connect, sessions, fetchSessions, deleteSession } =
+    const { isConnected, error, connect, sessions, fetchSessions } =
         useOpenClaw(token);
+    const sessionAction = useSessionAction();
+    const deleteSessionMutation = useDeleteSession();
     const hasConnected = useRef(false);
     const [isLoading, setIsLoading] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
-    const [isDeleting, setIsDeleting] = useState(false);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [sorting, setSorting] = useState<SortingState>([]);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
@@ -84,51 +86,24 @@ export function Sessions() {
 
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key) return;
-        setIsDeleting(true);
         try {
-            await deleteSession(deleteTarget.key);
+            await deleteSessionMutation.mutateAsync(deleteTarget.key);
             setDeleteTarget(null);
         } catch (error_) {
             console.error("Failed to delete session:", error_);
-        } finally {
-            setIsDeleting(false);
         }
     };
 
-    const handleStop = async (sessionKey: string) => {
-        try {
-            await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "stop" }),
-            });
-        } catch (error_) {
-            console.error("Failed to stop session:", error_);
-        }
+    const handleStop = (sessionKey: string) => {
+        sessionAction.mutate({ key: sessionKey, action: "stop" });
     };
 
-    const handleCompact = async (sessionKey: string) => {
-        try {
-            await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "compact" }),
-            });
-        } catch (error_) {
-            console.error("Failed to compact session:", error_);
-        }
+    const handleCompact = (sessionKey: string) => {
+        sessionAction.mutate({ key: sessionKey, action: "compact" });
     };
 
-    const handleReset = async (sessionKey: string) => {
-        try {
-            await fetch("/api/sessions/" + encodeURIComponent(sessionKey) + "/action", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "reset" }),
-            });
-        } catch (error_) {
-            console.error("Failed to reset session:", error_);
-        }
+    const handleReset = (sessionKey: string) => {
+        sessionAction.mutate({ key: sessionKey, action: "reset" });
     };
 
     const sortedSessions = useMemo(
@@ -409,7 +384,7 @@ export function Sessions() {
                 session={deleteTarget}
                 onConfirm={handleDeleteConfirm}
                 onCancel={() => setDeleteTarget(null)}
-                isLoading={isDeleting}
+                isLoading={deleteSessionMutation.isPending}
             />
 
             <SessionDetails
