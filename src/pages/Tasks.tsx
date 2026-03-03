@@ -122,15 +122,15 @@ function TaskCard({
             style={style}
             {...attributes}
             className={
-                "group relative cursor-pointer rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all " +
-                "hover:border-slate-300 hover:shadow-md " +
-                (isDragging ? "cursor-grabbing opacity-90 shadow-lg" : "")
+                "group relative cursor-pointer rounded-lg border border-slate-700 bg-slate-800 p-4 transition-all " +
+                "hover:border-slate-600 " +
+                (isDragging ? "cursor-grabbing border-accent-500 opacity-90" : "")
             }
             onClick={onClick}
         >
             <button
                 {...listeners}
-                className="absolute left-2 top-1/2 -translate-y-1/2 cursor-grab text-slate-300 opacity-0 transition-opacity hover:text-slate-500 group-hover:opacity-100"
+                className="absolute left-2 top-1/2 -translate-y-1/2 cursor-grab text-slate-600 opacity-0 transition-opacity hover:text-slate-400 group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
@@ -138,7 +138,7 @@ function TaskCard({
 
             <div className="ml-4">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-slate-500">
+                    <span className="text-xs font-medium text-slate-400">
                         #{task.number}
                     </span>
                     <span
@@ -160,14 +160,14 @@ function TaskCard({
                         .map((label) => (
                             <span
                                 key={label.name}
-                                className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                                className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
                             >
                                 {label.name}
                             </span>
                         ))}
                 </div>
 
-                <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-slate-900">
+                <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-slate-100">
                     {task.title}
                 </h3>
 
@@ -187,7 +187,7 @@ function TaskCard({
                                     className="h-5 w-5 rounded-full"
                                 />
                             ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-xs text-slate-300">
                                     {(assignee.login ||
                                         assignee.name ||
                                         "?")[0].toUpperCase()}
@@ -205,9 +205,9 @@ function TaskOverlay({ task }: { task: Task }) {
     const priority = getPriority(task.labels);
 
     return (
-        <div className="w-80 rounded-lg border border-purple-500/50 bg-white p-4 shadow-xl">
+        <div className="w-80 rounded-lg border border-accent-500/50 bg-slate-800 p-4 shadow-xl">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">#{task.number}</span>
+                <span className="text-xs font-medium text-slate-400">#{task.number}</span>
                 <span
                     className={
                         "rounded-full border px-2 py-0.5 text-xs font-medium " +
@@ -217,7 +217,7 @@ function TaskOverlay({ task }: { task: Task }) {
                     {priority.toUpperCase()}
                 </span>
             </div>
-            <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+            <h3 className="line-clamp-2 text-sm font-semibold text-slate-100">
                 {task.title}
             </h3>
         </div>
@@ -262,8 +262,8 @@ function TaskDetailModal({
                                 className={
                                     "rounded-full border px-2.5 py-1 text-xs font-semibold " +
                                     (task.state === "CLOSED"
-                                        ? "border-green-500/30 bg-green-500/20 text-green-600"
-                                        : "border-blue-500/30 bg-blue-500/20 text-blue-600")
+                                        ? "border-green-500/30 bg-green-500/20 text-green-400"
+                                        : "border-blue-500/30 bg-blue-500/20 text-blue-400")
                                 }
                             >
                                 {task.state === "CLOSED"
@@ -288,26 +288,26 @@ function TaskDetailModal({
                                 .map((label) => (
                                     <span
                                         key={label.name}
-                                        className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+                                        className="rounded-full bg-slate-700 px-2.5 py-1 text-xs text-slate-300"
                                     >
                                         {label.name}
                                     </span>
                                 ))}
                         </div>
-                        <h2 className="text-lg font-semibold text-slate-900">
+                        <h2 className="text-lg font-semibold text-slate-100">
                             #{task.number}: {task.title}
                         </h2>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-slate-400 hover:text-slate-600"
+                        className="text-slate-400 hover:text-slate-200"
                     >
                         <X className="h-5 w-5" />
                     </button>
                 </div>
 
                 {/* Metadata */}
-                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
                     {assignee && (
                         <div className="flex items-center gap-2">
                             {assignee.avatar_url ? (
@@ -317,7 +317,7 @@ function TaskDetailModal({
                                     className="h-5 w-5 rounded-full"
                                 />
                             ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-xs text-slate-300">
                                     {(assignee.login ||
                                         assignee.name ||
                                         "?")[0].toUpperCase()}
@@ -343,11 +343,11 @@ function TaskDetailModal({
 
                 {/* Body */}
                 {task.body && (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        <h3 className="mb-2 text-sm font-semibold text-slate-700">
+                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                        <h3 className="mb-2 text-sm font-semibold text-slate-300">
                             Description
                         </h3>
-                        <p className="whitespace-pre-wrap text-sm text-slate-600">
+                        <p className="whitespace-pre-wrap text-sm text-slate-400">
                             {task.body}
                         </p>
                     </div>
@@ -422,13 +422,13 @@ function Column({
         <div
             className={
                 "flex flex-1 flex-col rounded-xl transition-colors " +
-                (isOver ? "bg-purple-500/5" : "")
+                (isOver ? "bg-accent-500/5" : "")
             }
         >
             <div className="mb-3 flex items-center gap-2 px-1">
                 <div className={"h-2.5 w-2.5 rounded-full " + config.dotColor} />
-                <h2 className="text-sm font-semibold text-slate-700">{config.title}</h2>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                <h2 className="text-sm font-semibold text-slate-300">{config.title}</h2>
+                <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-xs font-medium text-slate-400">
                     {tasks.length}
                 </span>
             </div>
@@ -437,7 +437,7 @@ function Column({
                 className={
                     "flex-1 space-y-2 rounded-xl border-2 border-dashed p-2 transition-colors " +
                     (isOver
-                        ? "border-purple-500/50 bg-purple-500/5"
+                        ? "border-accent-500/50 bg-accent-500/5"
                         : "border-transparent")
                 }
             >
@@ -450,7 +450,7 @@ function Column({
                         />
                     ))
                 ) : (
-                    <div className="flex h-24 items-center justify-center text-sm text-slate-400">
+                    <div className="flex h-24 items-center justify-center text-sm text-slate-500">
                         No tasks
                     </div>
                 )}
@@ -697,8 +697,8 @@ export function Tasks() {
     return (
         <div className="flex h-full flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-                <h1 className="text-2xl font-bold text-slate-900">Tasks</h1>
+            <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-6 py-4">
+                <h1 className="text-2xl font-bold text-slate-100">Tasks</h1>
                 <div className="flex items-center gap-3">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -707,13 +707,13 @@ export function Tasks() {
                             placeholder="Search tasks..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="w-64 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                            className="w-64 rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
                         />
                     </div>
                     <select
                         value={filter}
                         onChange={(e) => setFilter(e.target.value as typeof filter)}
-                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
                     >
                         <option value="all">All Tasks</option>
                         <option value="mira-2026">Assigned to Mira</option>
@@ -740,10 +740,10 @@ export function Tasks() {
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-auto bg-slate-100 p-6">
+            <div className="flex-1 overflow-auto bg-slate-900 p-6">
                 {error && (
-                    <Card className="mb-4 border-red-200 bg-red-50 p-4">
-                        <p className="text-red-600">Error: {error}</p>
+                    <Card className="mb-4 border-red-500/50 bg-red-500/10 p-4">
+                        <p className="text-red-400">Error: {error}</p>
                     </Card>
                 )}
 
