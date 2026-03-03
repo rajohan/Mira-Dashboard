@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Checkbox } from "../components/ui/Checkbox";
 import { LogLine, FileSelector, LineSelector, LevelFilter } from "../components/features/logs";
 import { type LogEntry, type LogFile } from "../types/log";
 import { parseLogLine, LOG_LEVELS } from "../utils/logUtils";
@@ -16,8 +17,6 @@ export function Logs() {
     const [logFiles, setLogFiles] = useState<LogFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<string>("");
     const [lineCount, setLineCount] = useState<number>(100);
-    const [showFileDropdown, setShowFileDropdown] = useState(false);
-    const [showLineDropdown, setShowLineDropdown] = useState(false);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
@@ -80,13 +79,11 @@ export function Logs() {
 
     const handleFileSelect = (file: string) => {
         setSelectedFile(file);
-        setShowFileDropdown(false);
         loadLogContent(file, lineCount);
     };
 
     const handleLineSelect = (lines: number) => {
         setLineCount(lines);
-        setShowLineDropdown(false);
         if (selectedFile) {
             loadLogContent(selectedFile, lines);
         }
@@ -316,15 +313,11 @@ export function Logs() {
                     logFiles={logFiles}
                     selectedFile={selectedFile}
                     onSelect={handleFileSelect}
-                    isOpen={showFileDropdown}
-                    onToggle={() => setShowFileDropdown(!showFileDropdown)}
                 />
 
                 <LineSelector
                     lineCount={lineCount}
                     onSelect={handleLineSelect}
-                    isOpen={showLineDropdown}
-                    onToggle={() => setShowLineDropdown(!showLineDropdown)}
                 />
 
                 <div className="relative min-w-[200px] max-w-md flex-1">
@@ -352,15 +345,11 @@ export function Logs() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
-                        <input
-                            type="checkbox"
-                            checked={autoFollow}
-                            onChange={(e) => setAutoFollow(e.target.checked)}
-                            className="rounded"
-                        />
-                        Auto-follow
-                    </label>
+                    <Checkbox
+                        checked={autoFollow}
+                        onChange={setAutoFollow}
+                        label="Auto-follow"
+                    />
 
                     <div className="flex items-center gap-2">
                         <Button
