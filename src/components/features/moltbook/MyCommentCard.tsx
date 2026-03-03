@@ -1,6 +1,6 @@
-import { Card } from "../../ui/Card";
-import { truncate, formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 import { type MiraComment } from "../../../types/moltbook";
+import { formatTime, getMoltbookUrl, truncate } from "../../../utils/moltbookUtils";
+import { Card } from "../../ui/Card";
 
 interface MyCommentCardProps {
     comment: MiraComment;
@@ -23,7 +23,9 @@ export function MyCommentCard({ comment }: MyCommentCardProps) {
                 {formatTime(comment.created_at)}
             </div>
             <a
-                href={getMoltbookUrl("/post/" + comment.post.id + "#comment-" + comment.id)}
+                href={getMoltbookUrl(
+                    "/post/" + comment.post.id + "#comment-" + comment.id
+                )}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group block"

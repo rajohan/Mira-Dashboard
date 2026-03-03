@@ -22,8 +22,7 @@ export function parseLogLine(line: string): LogEntry | null {
     try {
         const parsed = JSON.parse(jsonStr);
 
-        const level =
-            parsed._meta?.logLevelName || parsed.level || parsed.lvl || "INFO";
+        const level = parsed._meta?.logLevelName || parsed.level || parsed.lvl || "INFO";
         const ts = parsed._meta?.date || parsed.time || parsed.timestamp;
 
         let subsystem = "";
@@ -88,12 +87,6 @@ export function formatLogTime(ts?: string): string {
     } catch {
         return ts;
     }
-}
-
-export function formatFileSize(bytes: number): string {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 export function getLevelColor(level?: string): string {

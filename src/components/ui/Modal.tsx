@@ -2,8 +2,8 @@ import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/re
 import { X } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { Button } from "./Button";
 import { cn } from "../../utils/cn";
+import { Button } from "./Button";
 
 interface ModalProps {
     isOpen: boolean;
@@ -22,17 +22,11 @@ const SIZE_CLASSES = {
     "3xl": "max-w-3xl",
 };
 
-export function Modal({
-    isOpen,
-    onClose,
-    title,
-    children,
-    size = "md",
-}: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
     return (
         <Dialog open={isOpen} onClose={onClose} className="relative z-50">
             <DialogBackdrop
-                className="fixed inset-0 bg-black/50 data-closed:opacity-0 data-enter:opacity-100 transition-opacity"
+                className="data-closed:opacity-0 data-enter:opacity-100 fixed inset-0 bg-black/50 transition-opacity"
                 transition
             />
             <div className="fixed inset-0 flex items-center justify-center p-4">
@@ -52,7 +46,12 @@ export function Modal({
                             <DialogTitle className="text-lg font-semibold text-slate-100">
                                 {title}
                             </DialogTitle>
-                            <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={onClose}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
                                 <X size={20} />
                             </Button>
                         </div>

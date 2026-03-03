@@ -7,10 +7,7 @@ function getToken(): string | null {
     return new URLSearchParams(window.location.search).get("token");
 }
 
-export async function apiFetch<T>(
-    endpoint: string,
-    options?: RequestInit
-): Promise<T> {
+export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const token = getToken();
     const headers: HeadersInit = {
         "Content-Type": "application/json",

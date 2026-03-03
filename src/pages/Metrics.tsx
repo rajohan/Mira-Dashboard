@@ -5,77 +5,33 @@ import {
     Cpu,
     HardDrive,
     MemoryStick,
+    RefreshCw,
     Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 
+import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { LoadingState } from "../components/ui/LoadingState";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ProgressBar } from "../components/ui/ProgressBar";
-import {
-    formatUptime,
-    formatSize,
-    formatTokenCount as formatTokens,
-} from "../utils/format";
-
-interface AgentToken {
-    type: string;
-    label: string;
-    model: string;
-    tokens: number;
-}
-
-interface MetricsData {
-    cpu: { loadPercent: number; count: number; model: string };
-    memory: { total: number; used: number; free: number; percent: number };
-    disk: { total: number; used: number; percent: number };
-    system: { uptime: number; platform: string; hostname: string };
-    tokens?: {
-        total: number;
-        byModel: Record<string, number>;
-        sessionsByModel: Record<string, number>;
-        byAgent: AgentToken[];
-    };
-}
+import { useMetrics } from "../hooks";
+import { formatSize, formatTokenCount, formatUptime } from "../utils/format";
 
 export function Metrics() {
-    const [metrics, setMetrics] = useState<MetricsData | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const { data: metrics, isLoading, error, refetch } = useMetrics();
 
-    useEffect(() => {
-        const fetchMetrics = async () => {
-            try {
-                const res = await fetch("/api/metrics");
-                if (!res.ok) throw new Error("Failed to fetch metrics");
-                const data = await res.json();
-                setMetrics(data);
-                setError(null);
-            } catch (error_) {
-                setError(error_ instanceof Error ? error_.message : "Unknown error");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchMetrics();
-        const interval = setInterval(fetchMetrics, 5000);
-        return () => clearInterval(interval);
-    }, []);
-
-    if (loading) {
-        return (
-            <div className="p-6">
-                <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
-                <p className="mt-4 text-slate-400">Loading...</p>
-            </div>
-        );
+    if (isLoading) {
+        return <LoadingState size="lg" />;
     }
 
     if (error) {
         return (
-            <div className="p-6">
-                <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
-                <p className="mt-4 text-red-400">Error: {error}</p>
+            <div className="flex h-64 flex-col items-center justify-center gap-4 p-6">
+                <p className="text-red-400">{error.message}</p>
+                <Button variant="secondary" onClick={() => refetch()}>
+                    <RefreshCw className="h-4 w-4" />
+                    Retry
+                </Button>
             </div>
         );
     }
@@ -88,7 +44,14 @@ export function Metrics() {
 
     return (
         <div className="space-y-6 p-6">
-            <h1 className="text-2xl font-bold text-slate-100">Metrics</h1>
+            <PageHeader
+                title="Metrics"
+                actions={
+                    <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                        <RefreshCw className="h-4 w-4" />
+                    </Button>
+                }
+            />
 
             {/* System Stats */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -168,7 +131,7 @@ export function Metrics() {
                             Token Usage
                         </h2>
                         <span className="ml-auto text-2xl font-bold text-slate-100">
-                            {formatTokens(totalTokens)}
+                            {formatTokenCount(totalTokens)}
                         </span>
                     </div>
 
@@ -189,7 +152,7 @@ export function Metrics() {
                                                     {model}
                                                 </span>
                                                 <span className="text-slate-400">
-                                                    {formatTokens(count)}
+                                                    {formatTokenCount(count)}
                                                 </span>
                                             </div>
                                             <ProgressBar percent={percent} color="blue" />
@@ -222,9 +185,14 @@ export function Metrics() {
                                                 {agent.label}
                                             </span>
                                             <span className="w-16 text-right text-sm text-slate-400">
-                                                {formatTokens(agent.tokens)}
+                                                {formatTokenCount(agent.tokens)}
                                             </span>
-                                            <ProgressBar percent={percent} color="purple" size="sm" className="w-20" />
+                                            <ProgressBar
+                                                percent={percent}
+                                                color="purple"
+                                                size="sm"
+                                                className="w-20"
+                                            />
                                         </div>
                                     );
                                 })}

@@ -4,9 +4,8 @@ import { formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
 import { GripVertical } from "lucide-react";
 
-import { getPriority } from "../../../utils/taskUtils";
-
 import type { Task } from "../../../types/task";
+import { getPriority } from "../../../utils/taskUtils";
 
 interface TaskCardProps {
     task: Task;

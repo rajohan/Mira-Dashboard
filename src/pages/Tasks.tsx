@@ -8,19 +8,26 @@ import {
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useState } from "react";
 
-import { Button } from "../components/ui/Button";
-import { LoadingState } from "../components/ui/LoadingState";
 import {
+    COLUMN_CONFIG,
+    getColumnId,
+    NewTaskModal,
     TaskColumn,
     TaskDetailModal,
     TaskOverlay,
-    NewTaskModal,
-    COLUMN_CONFIG,
-    getColumnId,
 } from "../components/features/tasks";
-import { useTasks, useMoveTask, useCreateTask } from "../hooks";
+import { Button } from "../components/ui/Button";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
+import { LoadingState } from "../components/ui/LoadingState";
+import { PageHeader } from "../components/ui/PageHeader";
+import { useCreateTask, useMoveTask, useTasks } from "../hooks";
+import type { ColumnId, Task } from "../types/task";
 
-import type { Task, ColumnId } from "../types/task";
+const ASSIGNMENT_FILTERS = [
+    { value: "all", label: "All" },
+    { value: "mira-2026", label: "Mira" },
+    { value: "rajohan", label: "Raymond" },
+] as const;
 
 export function Tasks() {
     const { data: tasks = [], isLoading, error, refetch } = useTasks();
@@ -55,7 +62,10 @@ export function Tasks() {
     for (const col of COLUMN_CONFIG) {
         tasksByColumn[col.id] = filteredTasks
             .filter((task) => col.filter(task))
-            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+            .sort(
+                (a, b) =>
+                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            );
     }
 
     const handleDragStart = (event: DragStartEvent) => {
@@ -92,8 +102,8 @@ export function Tasks() {
                             number: Number.parseInt(taskId),
                             columnLabel: column.label,
                         });
-                    } catch (err) {
-                        console.error("Failed to move task:", err);
+                    } catch (error_) {
+                        console.error("Failed to move task:", error_);
                     }
                 }
             }
@@ -115,7 +125,9 @@ export function Tasks() {
         }
     };
 
-    const activeTask = activeId ? tasks.find((t) => t.number.toString() === activeId) : null;
+    const activeTask = activeId
+        ? tasks.find((t) => t.number.toString() === activeId)
+        : null;
 
     if (isLoading) {
         return <LoadingState size="lg" />;
@@ -134,23 +146,41 @@ export function Tasks() {
     }
 
     return (
-        <DndContext onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+        <DndContext
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+        >
             <div className="flex h-full flex-col p-6">
-                <div className="mb-4 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold">Tasks</h1>
-                    <div className="flex items-center gap-2">
-                        <Button variant="primary" size="sm" onClick={() => setIsNewTaskOpen(true)}>
-                            <Plus className="h-4 w-4" />
-                            New Task
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                            <RefreshCw className={"h-4 w-4 " + (isLoading ? "animate-spin" : "")} />
-                        </Button>
-                    </div>
-                </div>
+                <PageHeader
+                    title="Tasks"
+                    actions={
+                        <>
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => setIsNewTaskOpen(true)}
+                            >
+                                <Plus className="h-4 w-4" />
+                                New Task
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => refetch()}
+                            >
+                                <RefreshCw
+                                    className={
+                                        "h-4 w-4 " + (isLoading ? "animate-spin" : "")
+                                    }
+                                />
+                            </Button>
+                        </>
+                    }
+                />
 
                 <div className="mb-4 flex items-center gap-4">
-                    <div className="relative flex-1 max-w-md">
+                    <div className="relative max-w-md flex-1">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <input
                             type="text"
@@ -160,29 +190,11 @@ export function Tasks() {
                             className="w-full rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-sm text-slate-100 focus:border-accent-500 focus:outline-none"
                         />
                     </div>
-                    <div className="flex gap-2">
-                        <Button
-                            variant={filter === "all" ? "primary" : "secondary"}
-                            size="sm"
-                            onClick={() => setFilter("all")}
-                        >
-                            All
-                        </Button>
-                        <Button
-                            variant={filter === "mira-2026" ? "primary" : "secondary"}
-                            size="sm"
-                            onClick={() => setFilter("mira-2026")}
-                        >
-                            Mira
-                        </Button>
-                        <Button
-                            variant={filter === "rajohan" ? "primary" : "secondary"}
-                            size="sm"
-                            onClick={() => setFilter("rajohan")}
-                        >
-                            Raymond
-                        </Button>
-                    </div>
+                    <FilterButtonGroup
+                        options={ASSIGNMENT_FILTERS}
+                        value={filter}
+                        onChange={setFilter}
+                    />
                 </div>
 
                 <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
@@ -212,7 +224,11 @@ export function Tasks() {
                         onSubmit={async (title, body, priority) => {
                             const labels = [];
                             if (priority) labels.push(`priority-${priority}`);
-                            await createTask.mutateAsync({ title, body: body || "", labels });
+                            await createTask.mutateAsync({
+                                title,
+                                body: body || "",
+                                labels,
+                            });
                             setIsNewTaskOpen(false);
                         }}
                     />

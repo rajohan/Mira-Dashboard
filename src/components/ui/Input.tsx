@@ -1,6 +1,6 @@
 import { Description, Field, Input as HeadlessInput, Label } from "@headlessui/react";
-import { forwardRef } from "react";
 import type { InputHTMLAttributes } from "react";
+import { forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 

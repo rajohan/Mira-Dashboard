@@ -7,9 +7,15 @@ import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 
-import { Textarea } from "../../ui/Textarea";
 import { type FileContent } from "../../../types/file";
-import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getLanguage } from "../../../utils/fileUtils";
+import {
+    formatSize,
+    getLanguage,
+    isCodeFile,
+    isJsonFile,
+    isMarkdownFile,
+} from "../../../utils/fileUtils";
+import { Textarea } from "../../ui/Textarea";
 
 interface FileContentViewerProps {
     fileContent: FileContent;
@@ -39,7 +45,8 @@ export function FileContentViewer({
             {largeFileWarning && (
                 <div className="flex items-center gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-4 py-2 text-sm text-yellow-400">
                     <AlertTriangle size={14} />
-                    Large file ({formatSize(fileContent.size)}) - preview only, editing disabled
+                    Large file ({formatSize(fileContent.size)}) - preview only, editing
+                    disabled
                 </div>
             )}
 
@@ -54,7 +61,12 @@ export function FileContentViewer({
             ) : fileContent.isImage ? (
                 <div className="flex h-full items-center justify-center p-4">
                     <img
-                        src={"data:" + fileContent.mimeType + ";base64," + fileContent.content}
+                        src={
+                            "data:" +
+                            fileContent.mimeType +
+                            ";base64," +
+                            fileContent.content
+                        }
                         alt={fileContent.path.split("/").pop() || "Image"}
                         className="max-h-full max-w-full rounded object-contain"
                     />
@@ -75,7 +87,10 @@ export function FileContentViewer({
                                 try {
                                     return JSON.parse(editedContent);
                                 } catch {
-                                    return { error: "Failed to parse JSON", raw: editedContent };
+                                    return {
+                                        error: "Failed to parse JSON",
+                                        raw: editedContent,
+                                    };
                                 }
                             }
                         })()}
@@ -129,7 +144,9 @@ export function FileContentViewer({
                     spellCheck={false}
                 />
             ) : (
-                <pre className={"whitespace-pre-wrap p-4 font-mono text-sm " + syntaxClass}>
+                <pre
+                    className={"whitespace-pre-wrap p-4 font-mono text-sm " + syntaxClass}
+                >
                     {editedContent}
                 </pre>
             )}

@@ -31,36 +31,56 @@ export interface Session {
     channel: string;
 }
 
+export interface AgentInfo {
+    id: string;
+    name: string;
+    model?: string;
+    status?: string;
+}
+
+export interface LogEntry {
+    level: string;
+    message: string;
+    timestamp: number;
+    [key: string]: unknown;
+}
+
 export function useOpenClaw(token: string | null) {
     const [status, setStatus] = useState<AgentStatus | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
-    const [agents, setAgents] = useState<any[]>([]);
-    const [logs, setLogs] = useState<any[]>([]);
+    const [agents, setAgents] = useState<AgentInfo[]>([]);
+    const [logs, setLogs] = useState<LogEntry[]>([]);
 
-    const handleMessage = useCallback((method: string, params: any) => {
-        switch (method) {
-            case "status": {
-                setStatus(params);
-                break;
+    const handleMessage = useCallback(
+        (method: string, params: Record<string, unknown>) => {
+            switch (method) {
+                case "status": {
+                    setStatus(params as unknown as AgentStatus);
+                    break;
+                }
+                case "agents": {
+                    setAgents(params as unknown as AgentInfo[]);
+                    break;
+                }
+                case "agents.list": {
+                    setAgents((params as { agents?: AgentInfo[] }).agents || []);
+                    break;
+                }
+                case "log": {
+                    setLogs((prev) => [
+                        ...prev.slice(-100),
+                        params as unknown as LogEntry,
+                    ]);
+                    break;
+                }
             }
-            case "agents": {
-                setAgents(params);
-                break;
-            }
-            case "agents.list": {
-                setAgents(params?.agents || []);
-                break;
-            }
-            case "log": {
-                setLogs((prev) => [...prev.slice(-100), params]);
-                break;
-            }
-        }
-    }, []);
+        },
+        []
+    );
 
-    const handleSessions = useCallback((sessionData: any[]) => {
+    const handleSessions = useCallback((sessionData: Record<string, unknown>[]) => {
         console.log("[useOpenClaw] Setting sessions:", sessionData.length);
-        setSessions(sessionData);
+        setSessions(sessionData as unknown as Session[]);
     }, []);
 
     const { isConnected, error, connect, disconnect, request } = useOpenClawSocket({
@@ -73,7 +93,7 @@ export function useOpenClaw(token: string | null) {
         if (!isConnected) return;
         try {
             const result = await request("status");
-            setStatus(result);
+            setStatus(result as AgentStatus);
         } catch (error_) {
             console.error("Failed to fetch status:", error_);
         }
@@ -82,7 +102,7 @@ export function useOpenClaw(token: string | null) {
     const fetchSessions = useCallback(async () => {
         if (!isConnected) return;
         try {
-            const result = await request("sessions.list");
+            const result = (await request("sessions.list")) as { sessions?: Session[] };
             if (result?.sessions) {
                 setSessions(result.sessions);
             }
@@ -94,7 +114,7 @@ export function useOpenClaw(token: string | null) {
     const fetchAgents = useCallback(async () => {
         if (!isConnected) return;
         try {
-            const result = await request("agents.list");
+            const result = (await request("agents.list")) as { agents?: AgentInfo[] };
             setAgents(result?.agents || []);
         } catch (error_) {
             console.error("Failed to fetch agents:", error_);

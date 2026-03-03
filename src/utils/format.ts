@@ -1,19 +1,31 @@
 import { format, formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
 
-export function formatDate(dateStr: string): string {
+const defaultLocale = enUS;
+
+// Date formatting
+export function formatDate(date: Date | string | number): string {
     try {
-        return format(new Date(dateStr), "dd.MM.yyyy, HH:mm", { locale: enUS });
+        const d = date instanceof Date ? date : new Date(date);
+        return format(d, "dd.MM.yyyy, HH:mm", { locale: defaultLocale });
     } catch {
-        return dateStr;
+        return String(date);
     }
 }
 
 export function formatDuration(updatedAt: number | null | undefined): string {
-    if (!updatedAt) return "Unknown";
-    return formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: enUS });
+    if (updatedAt === null || updatedAt === undefined) return "Unknown";
+    try {
+        return formatDistanceToNow(new Date(updatedAt), {
+            addSuffix: true,
+            locale: defaultLocale,
+        });
+    } catch {
+        return "Unknown";
+    }
 }
 
+// System formatting
 export function formatUptime(seconds: number): string {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3600);
@@ -24,10 +36,17 @@ export function formatUptime(seconds: number): string {
     return mins + "m";
 }
 
+export function formatSize(bytes: number): string {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
 export function formatLoad(load: number[]): string {
     return load.map((l) => l.toFixed(2)).join(", ");
 }
 
+// Token formatting
 export function formatTokens(current: number, max: number): string {
     return (current / 1000).toFixed(1) + "k / " + (max / 1000).toFixed(0) + "k";
 }
@@ -38,16 +57,12 @@ export function formatTokenCount(tokens: number): string {
     return tokens.toString();
 }
 
-export function formatSize(bytes: number): string {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
-
 export function getTokenPercent(current: number, max: number): number {
+    if (max <= 0) return 0;
     return Math.min(Math.round((current / max) * 100), 100);
 }
 
+// Log formatting
 export function getLogLevelColor(level: string): string {
     switch (level.toLowerCase()) {
         case "trace":

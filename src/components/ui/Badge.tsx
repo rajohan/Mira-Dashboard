@@ -3,7 +3,16 @@ import { twMerge } from "tailwind-merge";
 
 interface BadgeProps {
     children: React.ReactNode;
-    variant?: "default" | "success" | "warning" | "error" | "info" | "main" | "hook" | "cron" | "subagent";
+    variant?:
+        | "default"
+        | "success"
+        | "warning"
+        | "error"
+        | "info"
+        | "main"
+        | "hook"
+        | "cron"
+        | "subagent";
     className?: string;
 }
 
@@ -30,7 +39,9 @@ export function Badge({ children, variant = "default", className }: BadgeProps) 
     return <span className={combined}>{children}</span>;
 }
 
-export function getSessionTypeVariant(type: string | null | undefined): BadgeProps["variant"] {
+export function getSessionTypeVariant(
+    type: string | null | undefined
+): BadgeProps["variant"] {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
         case "MAIN":

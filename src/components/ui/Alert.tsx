@@ -1,4 +1,5 @@
 import { AlertCircle, CheckCircle, Info, XCircle } from "lucide-react";
+
 import { cn } from "../../utils/cn";
 
 type AlertVariant = "error" | "success" | "warning" | "info";
@@ -10,7 +11,10 @@ interface AlertProps {
     className?: string;
 }
 
-const variants: Record<AlertVariant, { border: string; bg: string; text: string; icon: React.ReactNode }> = {
+const variants: Record<
+    AlertVariant,
+    { border: string; bg: string; text: string; icon: React.ReactNode }
+> = {
     error: {
         border: "border-red-500",
         bg: "bg-red-500/20",
@@ -41,7 +45,15 @@ export function Alert({ variant = "info", title, children, className }: AlertPro
     const { border, bg, text, icon } = variants[variant];
 
     return (
-        <div className={cn("flex items-start gap-3 rounded-lg border p-3", border, bg, text, className)}>
+        <div
+            className={cn(
+                "flex items-start gap-3 rounded-lg border p-3",
+                border,
+                bg,
+                text,
+                className
+            )}
+        >
             <span className="flex-shrink-0">{icon}</span>
             <div className="flex-1">
                 {title && <p className="font-medium">{title}</p>}

@@ -1,8 +1,8 @@
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 
 import {
-    CONFIG_TOP_FILES,
     CONFIG_DIR_FILES,
+    CONFIG_TOP_FILES,
     CRON_DIR_FILES,
     HOOKS_DIR_FILES,
 } from "./fileConstants";
@@ -143,7 +143,10 @@ export function ConfigSection({
                                 style={{ paddingLeft: 44 }}
                                 onClick={() => onSelect(file.path)}
                             >
-                                <File size={14} className="flex-shrink-0 text-slate-400" />
+                                <File
+                                    size={14}
+                                    className="flex-shrink-0 text-slate-400"
+                                />
                                 <span className="truncate font-mono">{file.label}</span>
                             </div>
                         );

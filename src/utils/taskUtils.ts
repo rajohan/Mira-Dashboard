@@ -1,4 +1,4 @@
-import type { Task, ColumnId } from "../types/task";
+import type { ColumnId, Task } from "../types/task";
 
 export interface ColumnConfig {
     id: ColumnId;
@@ -25,14 +25,17 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         dotColor: "bg-blue-500",
         label: "in-progress",
         filter: (t: Task) =>
-            t.state === "OPEN" && t.labels.some((l: { name: string }) => l.name === "in-progress"),
+            t.state === "OPEN" &&
+            t.labels.some((l: { name: string }) => l.name === "in-progress"),
     },
     {
         id: "blocked",
         title: "Blocked",
         dotColor: "bg-red-500",
         label: "blocked",
-        filter: (t: Task) => t.state === "OPEN" && t.labels.some((l: { name: string }) => l.name === "blocked"),
+        filter: (t: Task) =>
+            t.state === "OPEN" &&
+            t.labels.some((l: { name: string }) => l.name === "blocked"),
     },
     {
         id: "done",
@@ -44,24 +47,34 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
 ];
 
 export function getPriority(labels: Array<{ name: string }>): "high" | "medium" | "low" {
-    if (labels.some((l: { name: string }) => l.name === "priority-high" || l.name === "high"))
+    if (
+        labels.some(
+            (l: { name: string }) => l.name === "priority-high" || l.name === "high"
+        )
+    )
         return "high";
-    if (labels.some((l: { name: string }) => l.name === "priority-medium" || l.name === "medium"))
+    if (
+        labels.some(
+            (l: { name: string }) => l.name === "priority-medium" || l.name === "medium"
+        )
+    )
         return "medium";
     return "low";
 }
 
 export function getColumnId(taskOrId: Task | string): ColumnId {
     // If it's a string, it might be a droppable id (column id)
-    if (typeof taskOrId === "string") {
-        if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {
-            return taskOrId as ColumnId;
-        }
+    if (
+        typeof taskOrId === "string" &&
+        ["todo", "in-progress", "blocked", "done"].includes(taskOrId)
+    ) {
+        return taskOrId as ColumnId;
     }
     // Otherwise it's a Task object
     const task = taskOrId as Task;
     if (task.state === "CLOSED") return "done";
     if (task.labels.some((l: { name: string }) => l.name === "blocked")) return "blocked";
-    if (task.labels.some((l: { name: string }) => l.name === "in-progress")) return "in-progress";
+    if (task.labels.some((l: { name: string }) => l.name === "in-progress"))
+        return "in-progress";
     return "todo";
 }

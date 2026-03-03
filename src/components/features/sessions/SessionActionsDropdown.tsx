@@ -44,5 +44,11 @@ export function SessionActionsDropdown({
         });
     }
 
-    return <Dropdown icon={<MoreVertical className="h-4 w-4" />} variant="ghost" items={items} />;
+    return (
+        <Dropdown
+            icon={<MoreVertical className="h-4 w-4" />}
+            variant="ghost"
+            items={items}
+        />
+    );
 }

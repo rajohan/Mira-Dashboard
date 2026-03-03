@@ -9,14 +9,23 @@ interface ToolSectionProps {
     execMode: string;
 }
 
-export function ToolSection({ webSearchEnabled, webSearchProvider, execEnabled, execMode }: ToolSectionProps) {
+export function ToolSection({
+    webSearchEnabled,
+    webSearchProvider,
+    execEnabled,
+    execMode,
+}: ToolSectionProps) {
     return (
         <ExpandableCard title="Tools" icon={Wrench}>
             <div className="space-y-2">
                 <div className="flex items-center justify-between py-2">
                     <span className="text-sm text-slate-400">Web Search</span>
-                    <span className={webSearchEnabled ? "text-green-400" : "text-slate-500"}>
-                        {webSearchEnabled ? "Enabled (" + webSearchProvider + ")" : "Disabled"}
+                    <span
+                        className={webSearchEnabled ? "text-green-400" : "text-slate-500"}
+                    >
+                        {webSearchEnabled
+                            ? "Enabled (" + webSearchProvider + ")"
+                            : "Disabled"}
                     </span>
                 </div>
                 <div className="flex items-center justify-between py-2">

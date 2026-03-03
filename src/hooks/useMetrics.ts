@@ -27,6 +27,17 @@ export interface Metrics {
         platform: string;
         hostname: string;
     };
+    tokens: {
+        total: number;
+        byModel: Record<string, number>;
+        sessionsByModel: Record<string, number>;
+        byAgent: Array<{
+            label: string;
+            model: string;
+            tokens: number;
+            type: string;
+        }>;
+    };
     timestamp: number;
 }
 

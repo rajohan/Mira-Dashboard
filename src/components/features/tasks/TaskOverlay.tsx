@@ -1,6 +1,5 @@
-import { getPriority } from "../../../utils/taskUtils";
-
 import type { Task } from "../../../types/task";
+import { getPriority } from "../../../utils/taskUtils";
 
 const PRIORITY_COLORS: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",

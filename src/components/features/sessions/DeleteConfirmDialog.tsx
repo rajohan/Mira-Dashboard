@@ -2,7 +2,6 @@ import { AlertTriangle } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
-
 import type { Session } from "../../../hooks/useOpenClaw";
 
 interface DeleteConfirmDialogProps {
@@ -23,12 +22,7 @@ export function DeleteConfirmDialog({
     const isMain = (session?.type || "").toUpperCase() === "MAIN";
 
     return (
-        <Modal
-            isOpen={!!session}
-            onClose={onCancel}
-            title="Delete Session?"
-            size="md"
-        >
+        <Modal isOpen={!!session} onClose={onCancel} title="Delete Session?" size="md">
             <div className="flex items-start gap-3">
                 <div className="rounded-lg bg-red-500/20 p-2">
                     <AlertTriangle className="h-6 w-6 text-red-400" />

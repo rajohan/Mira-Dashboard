@@ -1,10 +1,10 @@
-import { Clock } from "lucide-react";
 import { useForm } from "@tanstack/react-form";
+import { Clock } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
+import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
-import { Button } from "../../ui/Button";
-import { Loader2, Check } from "lucide-react";
 
 interface SessionSectionProps {
     idleMinutes: number;
@@ -38,7 +38,9 @@ export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionPr
                             <Input
                                 type="number"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(Number(e.target.value))}
+                                onChange={(e) =>
+                                    field.handleChange(Number(e.target.value))
+                                }
                                 min={0}
                                 max={1440}
                                 className="w-32"

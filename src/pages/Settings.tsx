@@ -1,25 +1,27 @@
 import { Download, Loader2, RefreshCw, Server } from "lucide-react";
 import { useState } from "react";
 
-import { Alert } from "../components/ui/Alert";
-import { Button } from "../components/ui/Button";
-import { Modal } from "../components/ui/Modal";
 import {
-    ModelSection,
     ChannelSection,
-    ToolSection,
+    HeartbeatSection,
+    ModelSection,
     SecuritySection,
     SessionSection,
-    HeartbeatSection,
     SkillsSection,
+    ToolSection,
 } from "../components/features/settings";
+import { Alert } from "../components/ui/Alert";
+import { Button } from "../components/ui/Button";
+import { LoadingState } from "../components/ui/LoadingState";
+import { Modal } from "../components/ui/Modal";
+import { PageHeader } from "../components/ui/PageHeader";
 import {
     useConfig,
-    useSkills,
-    useUpdateConfig,
-    useToggleSkill,
-    useRestartGateway,
     useCreateBackup,
+    useRestartGateway,
+    useSkills,
+    useToggleSkill,
+    useUpdateConfig,
 } from "../hooks";
 import type { OpenClawConfig, Skill } from "../hooks/useConfig";
 
@@ -53,8 +55,9 @@ export function Settings() {
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
-            // Create download link
-            const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+            const blob = new Blob([JSON.stringify(result, null, 2)], {
+                type: "application/json",
+            });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -101,11 +104,7 @@ export function Settings() {
     }
 
     if (loading) {
-        return (
-            <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-accent-400" />
-            </div>
-        );
+        return <LoadingState size="lg" />;
     }
 
     const modelInfo = {
@@ -145,33 +144,47 @@ export function Settings() {
 
     return (
         <div className="p-6">
-            <div className="mb-6 flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Settings</h1>
-                <div className="flex gap-2">
-                    <Button variant="secondary" onClick={handleBackup} disabled={createBackup.isPending}>
-                        {createBackup.isPending ? (
-                            <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Backing up...
-                            </>
-                        ) : (
-                            <>
-                                <Download className="h-4 w-4" />
-                                Backup
-                            </>
-                        )}
-                    </Button>
-                    <Button variant="danger" onClick={() => setShowRestartModal(true)}>
-                        <RefreshCw className="h-4 w-4" />
-                        Restart
-                    </Button>
-                </div>
-            </div>
+            <PageHeader
+                title="Settings"
+                actions={
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            onClick={handleBackup}
+                            disabled={createBackup.isPending}
+                        >
+                            {createBackup.isPending ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Backing up...
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="h-4 w-4" />
+                                    Backup
+                                </>
+                            )}
+                        </Button>
+                        <Button
+                            variant="danger"
+                            onClick={() => setShowRestartModal(true)}
+                        >
+                            <RefreshCw className="h-4 w-4" />
+                            Restart
+                        </Button>
+                    </div>
+                }
+            />
 
             {error && (
                 <Alert variant="error">
                     {error}
-                    <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setError(null)}>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto"
+                        onClick={() => setError(null)}
+                    >
                         ×
                     </Button>
                 </Alert>
@@ -218,26 +231,27 @@ export function Settings() {
                 saving={updateConfig.isPending}
             />
 
-            <SkillsSection
-                skills={skills as Skill[]}
-                onToggle={handleSkillToggle}
-            />
+            <SkillsSection skills={skills as Skill[]} onToggle={handleSkillToggle} />
 
             {/* Server Info */}
             <div className="mb-4 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="mb-2 flex items-center gap-2">
                     <Server className="h-4 w-4 text-accent-400" />
                     <h3 className="text-sm font-medium text-slate-200">Server</h3>
                 </div>
                 <div className="space-y-2">
                     <div className="flex items-center justify-between py-1">
                         <span className="text-sm text-slate-400">Version</span>
-                        <span className="font-mono text-sm text-primary-100">2026.2.23</span>
+                        <span className="font-mono text-sm text-primary-100">
+                            2026.2.23
+                        </span>
                     </div>
                     <div className="flex items-center justify-between py-1">
                         <span className="text-sm text-slate-400">Platform</span>
                         <span className="font-mono text-sm text-primary-100">
-                            {typeof window !== "undefined" ? window.navigator.platform : "Unknown"}
+                            {typeof window === "undefined"
+                                ? "Unknown"
+                                : window.navigator.platform}
                         </span>
                     </div>
                 </div>

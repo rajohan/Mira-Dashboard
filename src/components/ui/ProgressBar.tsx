@@ -22,20 +22,38 @@ const sizeStyles = {
     md: "h-2",
 };
 
-export function ProgressBar({ percent, color, size = "md", className }: ProgressBarProps) {
+export function ProgressBar({
+    percent,
+    color,
+    size = "md",
+    className,
+}: ProgressBarProps) {
     const effectiveColor = color || getProgressColor(percent);
 
     return (
-        <div className={twMerge(clsx("overflow-hidden rounded-full bg-slate-700", sizeStyles[size], className))}>
+        <div
+            className={twMerge(
+                clsx(
+                    "overflow-hidden rounded-full bg-slate-700",
+                    sizeStyles[size],
+                    className
+                )
+            )}
+        >
             <div
-                className={twMerge("h-full transition-all duration-500", colorStyles[effectiveColor])}
+                className={twMerge(
+                    "h-full transition-all duration-500",
+                    colorStyles[effectiveColor]
+                )}
                 style={{ width: Math.min(percent, 100) + "%" }}
             />
         </div>
     );
 }
 
-export function getProgressColor(percent: number): "green" | "blue" | "yellow" | "orange" | "red" {
+export function getProgressColor(
+    percent: number
+): "green" | "blue" | "yellow" | "orange" | "red" {
     if (percent < 50) return "green";
     if (percent < 75) return "blue";
     if (percent < 90) return "orange";

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { MiraProfile, MiraContent, MiraPost, MiraComment } from "../types/moltbook";
+import type { MiraComment, MiraContent, MiraPost, MiraProfile } from "../types/moltbook";
 
 // Types
 export interface MoltbookPost {
@@ -47,7 +47,11 @@ interface MyContentResponse {
 // Query keys
 export const moltbookKeys = {
     home: (): ["moltbook", "home"] => ["moltbook", "home"],
-    feed: (sort: "hot" | "new"): ["moltbook", "feed", string] => ["moltbook", "feed", sort],
+    feed: (sort: "hot" | "new"): ["moltbook", "feed", string] => [
+        "moltbook",
+        "feed",
+        sort,
+    ],
     profile: (): ["moltbook", "profile"] => ["moltbook", "profile"],
     myContent: (): ["moltbook", "myContent"] => ["moltbook", "myContent"],
 };
@@ -155,7 +159,8 @@ export function useMoltbookData(sort: "hot" | "new" = "hot") {
     const profile = useMoltbookProfile();
     const myContent = useMoltbookMyContent();
 
-    const isLoading = home.isLoading || feed.isLoading || profile.isLoading || myContent.isLoading;
+    const isLoading =
+        home.isLoading || feed.isLoading || profile.isLoading || myContent.isLoading;
     const error = home.error || feed.error || profile.error || myContent.error;
 
     return {

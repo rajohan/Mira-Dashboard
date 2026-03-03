@@ -1,18 +1,32 @@
-import { Clock, ExternalLink, Flame, MessageCircle, MessageSquare, RefreshCw, Star, User } from "lucide-react";
+import { ExternalLink, MessageSquare, RefreshCw, Star, User } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
+import { PageHeader } from "../components/ui/PageHeader";
 import { useMoltbookData } from "../hooks";
 import { formatTime, getMoltbookUrl } from "../utils/moltbookUtils";
+
+const TAB_OPTIONS = [
+    { value: "feed", label: "Feed" },
+    { value: "posts", label: "Posts" },
+    { value: "comments", label: "Comments" },
+] as const;
+
+const SORT_OPTIONS = [
+    { value: "hot", label: "Hot" },
+    { value: "new", label: "New" },
+] as const;
 
 export function Moltbook() {
     const [sort, setSort] = useState<"hot" | "new">("hot");
     const [activeTab, setActiveTab] = useState<"feed" | "posts" | "comments">("feed");
 
-    const { home, posts, profile, myContent, isLoading, error, refetch } = useMoltbookData(sort);
+    const { home, posts, profile, myContent, isLoading, error, refetch } =
+        useMoltbookData(sort);
 
     const unreadCount = home?.your_account?.unread_notification_count
         ? Number.parseInt(home.your_account.unread_notification_count)
@@ -36,24 +50,25 @@ export function Moltbook() {
 
     return (
         <div className="space-y-6 p-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Moltbook</h1>
-                <div className="flex items-center gap-3">
-                    <a
-                        href={getMoltbookUrl("/u/mira_2026")}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300"
-                    >
-                        View Profile
-                        <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                        <RefreshCw className="h-4 w-4" />
-                    </Button>
-                </div>
-            </div>
+            <PageHeader
+                title="Moltbook"
+                actions={
+                    <>
+                        <a
+                            href={getMoltbookUrl("/u/mira_2026")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300"
+                        >
+                            View Profile
+                            <ExternalLink className="h-3 w-3" />
+                        </a>
+                        <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                            <RefreshCw className="h-4 w-4" />
+                        </Button>
+                    </>
+                }
+            />
 
             {/* Profile Stats Card */}
             {profile && (
@@ -66,7 +81,11 @@ export function Moltbook() {
                             className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 hover:ring-2 hover:ring-indigo-400"
                         >
                             {profile.avatar_url ? (
-                                <img src={profile.avatar_url} alt={profile.name} className="h-full w-full object-cover" />
+                                <img
+                                    src={profile.avatar_url}
+                                    alt={profile.name}
+                                    className="h-full w-full object-cover"
+                                />
                             ) : (
                                 <User className="h-7 w-7 text-indigo-400" />
                             )}
@@ -87,7 +106,9 @@ export function Moltbook() {
                                     </span>
                                 )}
                             </div>
-                            <p className="mt-0.5 line-clamp-2 text-sm text-slate-400">{profile.description}</p>
+                            <p className="mt-0.5 line-clamp-2 text-sm text-slate-400">
+                                {profile.description}
+                            </p>
                             <div className="mt-2 flex items-center gap-4 text-sm">
                                 <span className="flex items-center gap-1 text-slate-300">
                                     <Star className="h-3.5 w-3.5 text-yellow-400" />
@@ -95,10 +116,16 @@ export function Moltbook() {
                                     <span className="text-slate-500">karma</span>
                                 </span>
                                 <span className="text-slate-400">
-                                    <span className="font-medium text-slate-300">{profile.follower_count}</span> followers
+                                    <span className="font-medium text-slate-300">
+                                        {profile.follower_count}
+                                    </span>{" "}
+                                    followers
                                 </span>
                                 <span className="text-slate-400">
-                                    <span className="font-medium text-slate-300">{profile.following_count}</span> following
+                                    <span className="font-medium text-slate-300">
+                                        {profile.following_count}
+                                    </span>{" "}
+                                    following
                                 </span>
                             </div>
                         </div>
@@ -107,54 +134,21 @@ export function Moltbook() {
             )}
 
             {/* Tabs */}
-            <div className="flex gap-2">
-                <Button
-                    variant={activeTab === "feed" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setActiveTab("feed")}
-                >
-                    Feed
-                </Button>
-                <Button
-                    variant={activeTab === "posts" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setActiveTab("posts")}
-                >
-                    <MessageSquare className="mr-1 h-4 w-4" />
-                    My Posts ({profile?.posts_count || 0})
-                </Button>
-                <Button
-                    variant={activeTab === "comments" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setActiveTab("comments")}
-                >
-                    <MessageCircle className="mr-1 h-4 w-4" />
-                    My Comments ({profile?.comments_count || 0})
-                </Button>
-            </div>
+            <FilterButtonGroup
+                options={TAB_OPTIONS}
+                value={activeTab}
+                onChange={(v) => setActiveTab(v)}
+            />
 
             {/* Feed Tab */}
             {activeTab === "feed" && (
                 <>
                     {/* Sort Tabs */}
-                    <div className="flex gap-2">
-                        <Button
-                            variant={sort === "hot" ? "primary" : "secondary"}
-                            size="sm"
-                            onClick={() => setSort("hot")}
-                        >
-                            <Flame className="mr-1 h-4 w-4" />
-                            Hot
-                        </Button>
-                        <Button
-                            variant={sort === "new" ? "primary" : "secondary"}
-                            size="sm"
-                            onClick={() => setSort("new")}
-                        >
-                            <Clock className="mr-1 h-4 w-4" />
-                            New
-                        </Button>
-                    </div>
+                    <FilterButtonGroup
+                        options={SORT_OPTIONS}
+                        value={sort}
+                        onChange={(v) => setSort(v)}
+                    />
 
                     {/* Posts */}
                     <div className="space-y-3">
@@ -175,7 +169,9 @@ export function Moltbook() {
                                         <div className="min-w-0 flex-1">
                                             <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
                                                 <a
-                                                    href={getMoltbookUrl("/m/" + post.submolt_name)}
+                                                    href={getMoltbookUrl(
+                                                        "/m/" + post.submolt_name
+                                                    )}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="font-medium text-indigo-400 hover:text-indigo-300"
@@ -184,12 +180,15 @@ export function Moltbook() {
                                                 </a>
                                                 <span>•</span>
                                                 <a
-                                                    href={getMoltbookUrl("/u/" + post.author.name)}
+                                                    href={getMoltbookUrl(
+                                                        "/u/" + post.author.name
+                                                    )}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="text-slate-400 hover:text-slate-300"
                                                 >
-                                                    {post.author.display_name || post.author.name}
+                                                    {post.author.display_name ||
+                                                        post.author.name}
                                                 </a>
                                                 <span>•</span>
                                                 <span>{formatTime(post.created_at)}</span>
@@ -209,7 +208,9 @@ export function Moltbook() {
                                             </a>
                                             <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
                                                 <a
-                                                    href={getMoltbookUrl("/post/" + post.id)}
+                                                    href={getMoltbookUrl(
+                                                        "/post/" + post.id
+                                                    )}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="flex items-center gap-1 transition hover:text-slate-200"
@@ -253,12 +254,20 @@ export function Moltbook() {
                                     rel="noopener noreferrer"
                                     className="group block"
                                 >
-                                    <h3 className="text-base font-medium text-slate-100 transition group-hover:text-indigo-300">{post.title}</h3>
-                                    <p className="mt-1 line-clamp-2 text-sm text-slate-400 transition group-hover:text-slate-300">{post.content_preview}</p>
+                                    <h3 className="text-base font-medium text-slate-100 transition group-hover:text-indigo-300">
+                                        {post.title}
+                                    </h3>
+                                    <p className="mt-1 line-clamp-2 text-sm text-slate-400 transition group-hover:text-slate-300">
+                                        {post.content_preview}
+                                    </p>
                                 </a>
                                 <div className="mt-2 flex items-center gap-4 text-sm">
-                                    <span className="text-orange-400">↑ {post.upvotes}</span>
-                                    <span className="text-slate-500">↓ {post.downvotes}</span>
+                                    <span className="text-orange-400">
+                                        ↑ {post.upvotes}
+                                    </span>
+                                    <span className="text-slate-500">
+                                        ↓ {post.downvotes}
+                                    </span>
                                     <a
                                         href={getMoltbookUrl("/post/" + post.id)}
                                         target="_blank"
@@ -297,15 +306,25 @@ export function Moltbook() {
                                     {formatTime(comment.created_at)}
                                 </div>
                                 <a
-                                    href={getMoltbookUrl("/post/" + comment.post.id + "#comment-" + comment.id)}
+                                    href={getMoltbookUrl(
+                                        "/post/" +
+                                            comment.post.id +
+                                            "#comment-" +
+                                            comment.id
+                                    )}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="group block"
                                 >
-                                    <p className="text-sm text-slate-300 transition group-hover:text-white">{comment.content.slice(0, 300)}{comment.content.length > 300 ? "..." : ""}</p>
+                                    <p className="text-sm text-slate-300 transition group-hover:text-white">
+                                        {comment.content.slice(0, 300)}
+                                        {comment.content.length > 300 ? "..." : ""}
+                                    </p>
                                 </a>
                                 <div className="mt-2 flex items-center gap-4 text-sm text-slate-500">
-                                    <span className="text-orange-400">↑ {comment.upvotes}</span>
+                                    <span className="text-orange-400">
+                                        ↑ {comment.upvotes}
+                                    </span>
                                     <span>↓ {comment.downvotes}</span>
                                 </div>
                             </Card>

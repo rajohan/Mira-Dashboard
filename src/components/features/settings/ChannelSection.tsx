@@ -13,7 +13,9 @@ export function ChannelSection({ discordEnabled, discordBotId }: ChannelSectionP
             <div className="space-y-2">
                 <div className="flex items-center justify-between py-2">
                     <span className="text-sm text-slate-400">Discord</span>
-                    <span className={discordEnabled ? "text-green-400" : "text-slate-500"}>
+                    <span
+                        className={discordEnabled ? "text-green-400" : "text-slate-500"}
+                    >
                         {discordEnabled ? "Enabled" : "Disabled"}
                     </span>
                 </div>

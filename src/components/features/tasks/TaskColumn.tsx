@@ -1,7 +1,6 @@
-import { TaskCard } from "./TaskCard";
+import type { ColumnId, Task } from "../../../types/task";
 import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
-
-import type { Task, ColumnId } from "../../../types/task";
+import { TaskCard } from "./TaskCard";
 
 interface TaskColumnProps {
     id: ColumnId;

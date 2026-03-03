@@ -7,38 +7,36 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, RefreshCw, Wifi, WifiOff } from "lucide-react";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { ChevronDown, RefreshCw, WifiOff } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+    DeleteConfirmDialog,
+    formatSessionType,
+    getTypeSortOrder,
+    SESSION_TYPES,
+    SessionActionsDropdown,
+    SessionDetails,
+} from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
 import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { ConnectionStatus } from "../components/ui/ConnectionStatus";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ProgressBar } from "../components/ui/ProgressBar";
-import {
-    DeleteConfirmDialog,
-    SessionDetails,
-    SessionActionsDropdown,
-    formatSessionType,
-    getTypeSortOrder,
-    SESSION_TYPES,
-} from "../components/features/sessions";
-import {
-    formatDuration,
-    formatTokens,
-    getTokenPercent,
-} from "../utils/format";
 import { type Session } from "../hooks/useOpenClaw";
 import { useOpenClaw } from "../hooks/useOpenClaw";
-import { useSessionAction, useDeleteSession } from "../hooks/useSessions";
+import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import { useAuthStore } from "../stores/authStore";
+import { formatDuration, formatTokens, getTokenPercent } from "../utils/format";
 
 const columnHelper = createColumnHelper<Session>();
 
 export function Sessions() {
     const { token } = useAuthStore();
-    const { isConnected, error, connect, sessions, fetchSessions } =
-        useOpenClaw(token);
+    const { isConnected, error, connect, sessions, fetchSessions } = useOpenClaw(token);
     const sessionAction = useSessionAction();
     const deleteSessionMutation = useDeleteSession();
     const hasConnected = useRef(false);
@@ -53,17 +51,13 @@ export function Sessions() {
             hasConnected.current = true;
             connect();
         }
-        // connect is intentionally excluded to prevent reconnection loops
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token]);
+    }, [token, connect]);
 
     useEffect(() => {
         if (isConnected) {
             fetchSessions().catch(console.error);
         }
-        // fetchSessions is stable from useOpenClaw hook
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isConnected]);
+    }, [isConnected, fetchSessions]);
 
     const handleRefresh = async () => {
         setIsLoading(true);
@@ -98,14 +92,14 @@ export function Sessions() {
 
     const sortedSessions = useMemo(
         () =>
-            !sessions
-                ? []
-                : [...sessions].sort((a, b) => {
+            sessions
+                ? [...sessions].sort((a, b) => {
                       const typeOrder =
                           getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
                       if (typeOrder !== 0) return typeOrder;
                       return (b.updatedAt || 0) - (a.updatedAt || 0);
-                  }),
+                  })
+                : [],
         [sessions]
     );
 
@@ -203,11 +197,16 @@ export function Sessions() {
         getFilteredRowModel: getFilteredRowModel(),
     });
 
+    const filterOptions = SESSION_TYPES.map((type) => ({
+        value: type,
+        label: type,
+    }));
+
     return (
         <div className="p-6">
-            <div className="mb-6 flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Sessions</h1>
-                <div className="flex items-center gap-4">
+            <PageHeader
+                title="Sessions"
+                actions={
                     <Button
                         variant="secondary"
                         size="sm"
@@ -221,32 +220,17 @@ export function Sessions() {
                         />
                         Refresh
                     </Button>
-                    <div className="flex items-center gap-2">
-                        {isConnected ? (
-                            <span className="flex items-center gap-1 text-sm text-green-400">
-                                <Wifi size={16} /> Connected
-                            </span>
-                        ) : (
-                            <span className="flex items-center gap-1 text-sm text-red-400">
-                                <WifiOff size={16} /> Disconnected
-                            </span>
-                        )}
-                    </div>
-                </div>
-            </div>
+                }
+                status={<ConnectionStatus isConnected={isConnected} />}
+            />
 
             {/* Type filter buttons */}
-            <div className="mb-4 flex gap-2">
-                {SESSION_TYPES.map((type) => (
-                    <Button
-                        key={type}
-                        variant={typeFilter === type ? "primary" : "secondary"}
-                        size="sm"
-                        onClick={() => setTypeFilter(type)}
-                    >
-                        {type}
-                    </Button>
-                ))}
+            <div className="mb-4">
+                <FilterButtonGroup
+                    options={filterOptions}
+                    value={typeFilter}
+                    onChange={setTypeFilter}
+                />
             </div>
 
             {error && <Alert variant="error">{error}</Alert>}

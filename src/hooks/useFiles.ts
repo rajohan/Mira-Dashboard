@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { FileContent, FileNode } from "../types/file";
 import { apiFetch, apiPut } from "./useApi";
-
-import type { FileNode, FileContent } from "../types/file";
 
 // Types
 interface FilesResponse {
@@ -12,7 +11,11 @@ interface FilesResponse {
 // Query keys
 export const fileKeys = {
     all: ["files"] as const,
-    list: (path?: string): ["files", "list", string | undefined] => ["files", "list", path],
+    list: (path?: string): ["files", "list", string | undefined] => [
+        "files",
+        "list",
+        path,
+    ],
     content: (path: string): ["files", "content", string] => ["files", "content", path],
 };
 

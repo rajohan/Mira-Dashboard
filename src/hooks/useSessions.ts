@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
-
 import type { Session } from "./useOpenClaw";
 
 // Types
@@ -18,7 +17,11 @@ interface SessionHistoryResponse {
 export const sessionKeys = {
     all: ["sessions"] as const,
     list: (): ["sessions", "list"] => ["sessions", "list"],
-    history: (key: string): ["sessions", "history", string] => ["sessions", "history", key],
+    history: (key: string): ["sessions", "history", string] => [
+        "sessions",
+        "history",
+        key,
+    ],
 };
 
 // Fetchers
@@ -28,10 +31,15 @@ async function fetchSessions(): Promise<Session[]> {
 }
 
 async function fetchSessionHistory(key: string): Promise<SessionHistoryResponse> {
-    return apiFetch<SessionHistoryResponse>(`/sessions/${encodeURIComponent(key)}/history`);
+    return apiFetch<SessionHistoryResponse>(
+        `/sessions/${encodeURIComponent(key)}/history`
+    );
 }
 
-async function sessionAction(key: string, action: "stop" | "compact" | "reset"): Promise<void> {
+async function sessionAction(
+    key: string,
+    action: "stop" | "compact" | "reset"
+): Promise<void> {
     await apiPost(`/sessions/${encodeURIComponent(key)}/action`, { action });
 }
 
@@ -65,8 +73,13 @@ export function useSessionAction() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ key, action }: { key: string; action: "stop" | "compact" | "reset" }) =>
-            sessionAction(key, action),
+        mutationFn: ({
+            key,
+            action,
+        }: {
+            key: string;
+            action: "stop" | "compact" | "reset";
+        }) => sessionAction(key, action),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: sessionKeys.list() });
         },

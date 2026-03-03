@@ -1,8 +1,8 @@
 import { Users } from "lucide-react";
 
+import { type Skill } from "../../../types/settings";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Switch } from "../../ui/Switch";
-import { type Skill } from "../../../types/settings";
 
 interface SkillsSectionProps {
     skills: Skill[];
@@ -17,11 +17,18 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                     <p className="text-sm text-slate-400">No skills configured</p>
                 ) : (
                     skills.map((skill) => (
-                        <div key={skill.name} className="flex items-center justify-between py-2">
+                        <div
+                            key={skill.name}
+                            className="flex items-center justify-between py-2"
+                        >
                             <div>
-                                <p className="text-sm font-medium text-slate-200">{skill.name}</p>
+                                <p className="text-sm font-medium text-slate-200">
+                                    {skill.name}
+                                </p>
                                 {skill.description && (
-                                    <p className="text-xs text-slate-400">{skill.description}</p>
+                                    <p className="text-xs text-slate-400">
+                                        {skill.description}
+                                    </p>
                                 )}
                             </div>
                             <Switch

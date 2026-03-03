@@ -1,5 +1,11 @@
-import { Description, Field, Label, Checkbox as HeadlessCheckbox } from "@headlessui/react";
+import {
+    Checkbox as HeadlessCheckbox,
+    Description,
+    Field,
+    Label,
+} from "@headlessui/react";
 import { Check } from "lucide-react";
+
 import { cn } from "../../utils/cn";
 
 interface CheckboxProps {
@@ -37,9 +43,7 @@ export function Checkbox({
             </HeadlessCheckbox>
             {(label || description) && (
                 <div className="flex flex-col">
-                    {label && (
-                        <Label className="text-sm text-slate-300">{label}</Label>
-                    )}
+                    {label && <Label className="text-sm text-slate-300">{label}</Label>}
                     {description && (
                         <Description className="text-xs text-slate-400">
                             {description}

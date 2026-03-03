@@ -14,21 +14,26 @@ interface OpenClawMessage {
     type: "req" | "res" | "event" | "state" | "connected" | "disconnected" | "sessions";
     id?: string;
     method?: string;
-    params?: any;
+    params?: Record<string, unknown>;
     event?: string;
-    payload?: any;
+    payload?: Record<string, unknown>;
     ok?: boolean;
-    error?: any;
-    sessions?: any[];
+    error?: string;
+    sessions?: Record<string, unknown>[];
     gatewayConnected?: boolean;
 }
 
 interface UseOpenClawSocketOptions {
     token: string;
-    onMessage?: (method: string, params: any) => void;
+    onMessage?: (method: string, params: Record<string, unknown>) => void;
     onConnect?: () => void;
     onDisconnect?: () => void;
-    onSessions?: (sessions: any[]) => void;
+    onSessions?: (sessions: Record<string, unknown>[]) => void;
+}
+
+interface PendingRequest {
+    resolve: (value: unknown) => void;
+    reject: (reason: unknown) => void;
 }
 
 export function useOpenClawSocket({
@@ -42,9 +47,7 @@ export function useOpenClawSocket({
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const requestIdRef = useRef(0);
-    const pendingRequestsRef = useRef<
-        Map<string, { resolve: Function; reject: Function }>
-    >(new Map());
+    const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
     const shouldReconnectRef = useRef(true);
 
     const connect = useCallback(() => {
@@ -120,7 +123,7 @@ export function useOpenClawSocket({
 
                     // Handle events
                     if (data.type === "event" && data.event) {
-                        onMessage?.(data.event, data.payload);
+                        onMessage?.(data.event, data.payload || {});
                     }
 
                     // Handle request responses
@@ -171,33 +174,39 @@ export function useOpenClawSocket({
         setIsConnected(false);
     }, []);
 
-    const request = useCallback(<T = any>(method: string, params?: any): Promise<T> => {
-        return new Promise((resolve, reject) => {
-            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-                reject(new Error("WebSocket not connected"));
-                return;
-            }
-
-            const id = String(++requestIdRef.current);
-            pendingRequestsRef.current.set(id, { resolve, reject });
-
-            wsRef.current.send(
-                JSON.stringify({
-                    type: "req",
-                    id,
-                    method,
-                    params,
-                })
-            );
-
-            setTimeout(() => {
-                if (pendingRequestsRef.current.has(id)) {
-                    pendingRequestsRef.current.delete(id);
-                    reject(new Error("Request timeout"));
+    const request = useCallback(
+        <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
+            return new Promise((resolve, reject) => {
+                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                    reject(new Error("WebSocket not connected"));
+                    return;
                 }
-            }, 30_000);
-        });
-    }, []);
+
+                const id = String(++requestIdRef.current);
+                pendingRequestsRef.current.set(id, {
+                    resolve: resolve as (value: unknown) => void,
+                    reject,
+                });
+
+                wsRef.current.send(
+                    JSON.stringify({
+                        type: "req",
+                        id,
+                        method,
+                        params,
+                    })
+                );
+
+                setTimeout(() => {
+                    if (pendingRequestsRef.current.has(id)) {
+                        pendingRequestsRef.current.delete(id);
+                        reject(new Error("Request timeout"));
+                    }
+                }, 30_000);
+            });
+        },
+        []
+    );
 
     return {
         isConnected,

@@ -1,4 +1,5 @@
 import { Description, Field, Label, Switch as HeadlessSwitch } from "@headlessui/react";
+
 import { cn } from "../../utils/cn";
 
 interface SwitchProps {
@@ -19,7 +20,10 @@ export function Switch({
     className,
 }: SwitchProps) {
     return (
-        <Field className={cn("flex items-center justify-between", className)} disabled={disabled}>
+        <Field
+            className={cn("flex items-center justify-between", className)}
+            disabled={disabled}
+        >
             {(label || description) && (
                 <div className="flex flex-col">
                     {label && (
@@ -39,13 +43,13 @@ export function Switch({
                 onChange={onChange}
                 className={cn(
                     "group inline-flex h-6 w-11 items-center rounded-full transition",
-                    "focus:outline-none data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-800",
+                    "data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-800 focus:outline-none",
                     "data-checked:bg-accent-500 data-unchecked:bg-primary-600",
                     "data-disabled:cursor-not-allowed data-disabled:opacity-50"
                 )}
             >
                 <span className="sr-only">{label}</span>
-                <span className="size-4 translate-x-1 rounded-full bg-white transition group-data-checked:translate-x-6" />
+                <span className="group-data-checked:translate-x-6 size-4 translate-x-1 rounded-full bg-white transition" />
             </HeadlessSwitch>
         </Field>
     );

@@ -1,8 +1,8 @@
 import { MessageSquare } from "lucide-react";
 
 import { type MiraPost } from "../../../types/moltbook";
-import { Card } from "../../ui/Card";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
+import { Card } from "../../ui/Card";
 
 interface MyPostCardProps {
     post: MiraPost;

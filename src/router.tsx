@@ -4,24 +4,38 @@ import {
     createRouter,
     Outlet,
 } from "@tanstack/react-router";
-import { Suspense, lazy } from "react";
+import { lazy, Suspense } from "react";
 
 import { Layout } from "./components/layout/Layout";
 import { LoadingState } from "./components/ui/LoadingState";
 
 // Lazy-loaded page components
-const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
-const Files = lazy(() => import("./pages/Files").then(m => ({ default: m.Files })));
-const Login = lazy(() => import("./pages/Login").then(m => ({ default: m.Login })));
-const Logs = lazy(() => import("./pages/Logs").then(m => ({ default: m.Logs })));
-const Metrics = lazy(() => import("./pages/Metrics").then(m => ({ default: m.Metrics })));
-const Moltbook = lazy(() => import("./pages/Moltbook").then(m => ({ default: m.Moltbook })));
-const Sessions = lazy(() => import("./pages/Sessions").then(m => ({ default: m.Sessions })));
-const Settings = lazy(() => import("./pages/Settings").then(m => ({ default: m.Settings })));
-const Tasks = lazy(() => import("./pages/Tasks").then(m => ({ default: m.Tasks })));
+const Dashboard = lazy(() =>
+    import("./pages/Dashboard").then((m) => ({ default: m.Dashboard }))
+);
+const Files = lazy(() => import("./pages/Files").then((m) => ({ default: m.Files })));
+const Login = lazy(() => import("./pages/Login").then((m) => ({ default: m.Login })));
+const Logs = lazy(() => import("./pages/Logs").then((m) => ({ default: m.Logs })));
+const Metrics = lazy(() =>
+    import("./pages/Metrics").then((m) => ({ default: m.Metrics }))
+);
+const Moltbook = lazy(() =>
+    import("./pages/Moltbook").then((m) => ({ default: m.Moltbook }))
+);
+const Sessions = lazy(() =>
+    import("./pages/Sessions").then((m) => ({ default: m.Sessions }))
+);
+const Settings = lazy(() =>
+    import("./pages/Settings").then((m) => ({ default: m.Settings }))
+);
+const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 
 // Wrapper for lazy components with Suspense
-function LazyPage({ component: Component }: { component: React.LazyExoticComponent<React.ComponentType> }) {
+function LazyPage({
+    component: Component,
+}: {
+    component: React.LazyExoticComponent<React.ComponentType>;
+}) {
     return (
         <Suspense fallback={<LoadingState size="lg" />}>
             <Component />

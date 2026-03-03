@@ -1,7 +1,7 @@
-export { ModelSection } from "./ModelSection";
 export { ChannelSection } from "./ChannelSection";
-export { ToolSection } from "./ToolSection";
+export { HeartbeatSection } from "./HeartbeatSection";
+export { ModelSection } from "./ModelSection";
 export { SecuritySection } from "./SecuritySection";
 export { SessionSection } from "./SessionSection";
-export { HeartbeatSection } from "./HeartbeatSection";
 export { SkillsSection } from "./SkillsSection";
+export { ToolSection } from "./ToolSection";

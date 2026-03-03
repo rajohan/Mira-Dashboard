@@ -1,5 +1,5 @@
-import { Loader2, Plus, X } from "lucide-react";
 import { useForm } from "@tanstack/react-form";
+import { Loader2, Plus, X } from "lucide-react";
 
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -15,7 +15,11 @@ const PRIORITY_COLORS: Record<string, string> = {
 interface NewTaskModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSubmit: (title: string, body?: string, priority?: "high" | "medium" | "low") => Promise<void>;
+    onSubmit: (
+        title: string,
+        body?: string,
+        priority?: "high" | "medium" | "low"
+    ) => Promise<void>;
 }
 
 export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
@@ -45,7 +49,13 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
             >
                 <div className="flex items-center justify-between">
                     <h2 className="text-lg font-semibold text-slate-100">New Task</h2>
-                    <Button variant="ghost" size="sm" type="button" onClick={onClose} className="text-slate-400 hover:text-slate-200">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={onClose}
+                        className="text-slate-400 hover:text-slate-200"
+                    >
                         <X className="h-5 w-5" />
                     </Button>
                 </div>
@@ -86,7 +96,11 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                 {(["low", "medium", "high"] as const).map((p) => (
                                     <Button
                                         key={p}
-                                        variant={field.state.value === p ? "primary" : "secondary"}
+                                        variant={
+                                            field.state.value === p
+                                                ? "primary"
+                                                : "secondary"
+                                        }
                                         type="button"
                                         onClick={() => field.handleChange(p)}
                                         className={
@@ -115,7 +129,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                     <Button
                         type="submit"
                         variant="primary"
-                        disabled={!form.state.values.title.trim() || form.state.isSubmitting}
+                        disabled={
+                            !form.state.values.title.trim() || form.state.isSubmitting
+                        }
                     >
                         {form.state.isSubmitting ? (
                             <>

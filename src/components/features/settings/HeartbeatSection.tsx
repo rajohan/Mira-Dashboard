@@ -1,10 +1,10 @@
-import { Heart } from "lucide-react";
 import { useForm } from "@tanstack/react-form";
+import { Heart } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
+import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
-import { Button } from "../../ui/Button";
-import { Loader2, Check } from "lucide-react";
 
 interface HeartbeatSectionProps {
     every: number;
@@ -13,7 +13,12 @@ interface HeartbeatSectionProps {
     saving: boolean;
 }
 
-export function HeartbeatSection({ every, target, onSave, saving }: HeartbeatSectionProps) {
+export function HeartbeatSection({
+    every,
+    target,
+    onSave,
+    saving,
+}: HeartbeatSectionProps) {
     const form = useForm({
         defaultValues: { every, target },
         onSubmit: async ({ value }) => {
@@ -39,7 +44,9 @@ export function HeartbeatSection({ every, target, onSave, saving }: HeartbeatSec
                             <Input
                                 type="number"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(Number(e.target.value))}
+                                onChange={(e) =>
+                                    field.handleChange(Number(e.target.value))
+                                }
                                 min={60}
                                 max={3600}
                                 className="w-32"

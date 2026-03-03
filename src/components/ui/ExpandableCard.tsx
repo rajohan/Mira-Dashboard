@@ -24,7 +24,7 @@ export function ExpandableCard({
                         <Icon size={18} className="text-accent-400" />
                         <CardTitle>{title}</CardTitle>
                     </div>
-                    <ChevronDown className="h-[18px] w-[18px] ui-open:rotate-180 transition-transform" />
+                    <ChevronDown className="ui-open:rotate-180 h-[18px] w-[18px] transition-transform" />
                 </DisclosureButton>
                 <DisclosurePanel className="mt-4 border-t border-primary-700 pt-4">
                     {children}

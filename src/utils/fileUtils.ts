@@ -22,9 +22,32 @@ export function isJsonFile(filename: string): boolean {
 export function isCodeFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const codeExts = [
-        "js", "jsx", "ts", "tsx", "py", "sh", "bash", "zsh", "fish",
-        "go", "rs", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
-        "swift", "kt", "scala", "lua", "sql", "graphql", "proto",
+        "js",
+        "jsx",
+        "ts",
+        "tsx",
+        "py",
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "go",
+        "rs",
+        "java",
+        "c",
+        "cpp",
+        "h",
+        "hpp",
+        "cs",
+        "rb",
+        "php",
+        "swift",
+        "kt",
+        "scala",
+        "lua",
+        "sql",
+        "graphql",
+        "proto",
     ];
     return codeExts.includes(ext);
 }
@@ -79,10 +102,28 @@ export function isImageFile(filename: string): boolean {
 export function isBinaryFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const binaryExts = [
-        "png", "jpg", "jpeg", "gif", "webp", "svg", "ico",
-        "pdf", "zip", "tar", "gz", "rar", "7z",
-        "exe", "dll", "so", "dylib",
-        "mp3", "mp4", "wav", "avi", "mov",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+        "svg",
+        "ico",
+        "pdf",
+        "zip",
+        "tar",
+        "gz",
+        "rar",
+        "7z",
+        "exe",
+        "dll",
+        "so",
+        "dylib",
+        "mp3",
+        "mp4",
+        "wav",
+        "avi",
+        "mov",
     ];
     return binaryExts.includes(ext);
 }

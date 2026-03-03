@@ -1,31 +1,28 @@
-import { format } from "date-fns";
-import { enUS } from "date-fns/locale";
+import { useQueryClient } from "@tanstack/react-query";
 import { File, Folder, RefreshCw, Save, Settings, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import {
+    ConfigSection,
+    FileContentViewer,
+    FileTreeItem,
+    MAX_PREVIEW_SIZE,
+    PreviewToggle,
+} from "../components/features/files";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
-import {
-    FileTreeItem,
-    ConfigSection,
-    PreviewToggle,
-    FileContentViewer,
-    MAX_PREVIEW_SIZE,
-} from "../components/features/files";
-import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getSyntaxClass } from "../utils/fileUtils";
-import { useQueryClient } from "@tanstack/react-query";
-import { useFiles, useFileContent, useSaveFile, fileKeys } from "../hooks";
-
+import { PageHeader } from "../components/ui/PageHeader";
+import { fileKeys, useFileContent, useFiles, useSaveFile } from "../hooks";
 import type { FileNode } from "../types/file";
-
-function formatDate(dateStr: string): string {
-    try {
-        return format(new Date(dateStr), "dd.MM.yyyy, HH:mm", { locale: enUS });
-    } catch {
-        return dateStr;
-    }
-}
+import {
+    formatSize,
+    getSyntaxClass,
+    isCodeFile,
+    isJsonFile,
+    isMarkdownFile,
+} from "../utils/fileUtils";
+import { formatDate } from "../utils/format";
 
 export function Files() {
     // File tree state
@@ -34,7 +31,7 @@ export function Files() {
     const [configDirExpanded, setConfigDirExpanded] = useState(false);
     const [cronDirExpanded, setCronDirExpanded] = useState(false);
     const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
-    
+
     // Editor state
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [editedContent, setEditedContent] = useState<string>("");
@@ -47,8 +44,16 @@ export function Files() {
 
     // Queries
     const queryClient = useQueryClient();
-    const { data: rootFiles = [], isLoading: rootLoading, refetch: refetchRoot } = useFiles();
-    const { data: fileContent, isLoading: contentLoading, refetch: refetchContent } = useFileContent(selectedPath);
+    const {
+        data: rootFiles = [],
+        isLoading: rootLoading,
+        refetch: refetchRoot,
+    } = useFiles();
+    const {
+        data: fileContent,
+        isLoading: contentLoading,
+        refetch: refetchContent,
+    } = useFileContent(selectedPath);
     const saveMutation = useSaveFile();
 
     // Sync root files
@@ -99,7 +104,9 @@ export function Files() {
                     const data = await queryClient.fetchQuery({
                         queryKey: fileKeys.list(path),
                         queryFn: async () => {
-                            const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+                            const res = await fetch(
+                                `/api/files?path=${encodeURIComponent(path)}`
+                            );
                             if (!res.ok) throw new Error("Failed to fetch directory");
                             return res.json();
                         },
@@ -109,13 +116,14 @@ export function Files() {
                     const updateNode = (nodes: FileNode[]): FileNode[] => {
                         return nodes.map((n) => {
                             if (n.path === path) return { ...n, children, loaded: true };
-                            if (n.children) return { ...n, children: updateNode(n.children) };
+                            if (n.children)
+                                return { ...n, children: updateNode(n.children) };
                             return n;
                         });
                     };
                     setFiles((prev) => updateNode(prev));
-                } catch (err) {
-                    console.error("Failed to load directory:", err);
+                } catch (error_) {
+                    console.error("Failed to load directory:", error_);
                 }
             }
         }
@@ -135,11 +143,14 @@ export function Files() {
     const handleSave = async () => {
         if (!selectedPath || !fileContent) return;
         try {
-            await saveMutation.mutateAsync({ path: selectedPath, content: editedContent });
+            await saveMutation.mutateAsync({
+                path: selectedPath,
+                content: editedContent,
+            });
             setHasChanges(false);
             refetchContent();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to save");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
     };
 
@@ -150,22 +161,39 @@ export function Files() {
 
     const isLoading = rootLoading || contentLoading;
     const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
-    const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
+    const syntaxClass = fileContent
+        ? getSyntaxClass(fileContent.path.split("/").pop() || "")
+        : "";
 
     return (
         <div className="flex h-full flex-col p-6">
-            <div className="mb-4 flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Files</h1>
-                <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
-                    <RefreshCw size={16} className={"mr-1 " + (isLoading ? "animate-spin" : "")} />
-                    Refresh
-                </Button>
-            </div>
+            <PageHeader
+                title="Files"
+                actions={
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleRefresh}
+                        disabled={isLoading}
+                    >
+                        <RefreshCw
+                            size={16}
+                            className={"mr-1 " + (isLoading ? "animate-spin" : "")}
+                        />
+                        Refresh
+                    </Button>
+                }
+            />
 
             {error && (
                 <Alert variant="error">
                     {error}
-                    <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setError(null)}>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto"
+                        onClick={() => setError(null)}
+                    >
                         <X size={16} />
                     </Button>
                 </Alert>
@@ -174,7 +202,10 @@ export function Files() {
             <div className="flex min-h-0 flex-1 gap-4">
                 {/* Sidebar: Workspace + Config */}
                 <div className="w-72 flex-shrink-0">
-                    <Card variant="bordered" className="flex h-full flex-col overflow-hidden p-0">
+                    <Card
+                        variant="bordered"
+                        className="flex h-full flex-col overflow-hidden p-0"
+                    >
                         {/* Workspace */}
                         <div className="border-b border-slate-700 p-3">
                             <CardTitle className="flex items-center gap-2 text-sm">
@@ -184,13 +215,18 @@ export function Files() {
                         </div>
                         <div className="overflow-auto border-b border-slate-700 p-2">
                             {rootLoading && files.length === 0 ? (
-                                <div className="p-2 text-sm text-slate-400">Loading...</div>
+                                <div className="p-2 text-sm text-slate-400">
+                                    Loading...
+                                </div>
                             ) : files.length === 0 ? (
-                                <div className="p-2 text-sm text-slate-400">No files found</div>
+                                <div className="p-2 text-sm text-slate-400">
+                                    No files found
+                                </div>
                             ) : (
                                 files
                                     .sort((a, b) => {
-                                        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+                                        if (a.type !== b.type)
+                                            return a.type === "directory" ? -1 : 1;
                                         return a.name.localeCompare(b.name);
                                     })
                                     .map((node) => (
@@ -218,11 +254,17 @@ export function Files() {
                                     selectedPath={selectedPath}
                                     onSelect={handleSelect}
                                     configDirExpanded={configDirExpanded}
-                                    onConfigDirToggle={() => setConfigDirExpanded(!configDirExpanded)}
+                                    onConfigDirToggle={() =>
+                                        setConfigDirExpanded(!configDirExpanded)
+                                    }
                                     cronDirExpanded={cronDirExpanded}
-                                    onCronDirToggle={() => setCronDirExpanded(!cronDirExpanded)}
+                                    onCronDirToggle={() =>
+                                        setCronDirExpanded(!cronDirExpanded)
+                                    }
                                     hooksDirExpanded={hooksDirExpanded}
-                                    onHooksDirToggle={() => setHooksDirExpanded(!hooksDirExpanded)}
+                                    onHooksDirToggle={() =>
+                                        setHooksDirExpanded(!hooksDirExpanded)
+                                    }
                                 />
                             </div>
                         </div>
@@ -230,14 +272,23 @@ export function Files() {
                 </div>
 
                 {/* File Content */}
-                <Card variant="bordered" className="flex flex-1 flex-col overflow-hidden p-0">
+                <Card
+                    variant="bordered"
+                    className="flex flex-1 flex-col overflow-hidden p-0"
+                >
                     {selectedPath ? (
                         <>
                             {/* Header */}
                             <div className="flex items-center justify-between gap-4 border-b border-slate-700 p-3">
                                 <div className="flex min-w-0 items-center gap-2">
-                                    <File size={16} className="flex-shrink-0 text-slate-400" />
-                                    <span className="truncate font-mono text-sm" title={selectedPath}>
+                                    <File
+                                        size={16}
+                                        className="flex-shrink-0 text-slate-400"
+                                    />
+                                    <span
+                                        className="truncate font-mono text-sm"
+                                        title={selectedPath}
+                                    >
                                         {selectedPath}
                                     </span>
                                     {fileContent && (
@@ -248,37 +299,54 @@ export function Files() {
                                 </div>
                                 <div className="flex flex-shrink-0 items-center gap-2">
                                     {/* Markdown preview toggle */}
-                                    {fileContent && isMarkdownFile(fileContent.path) && isEditable && (
-                                        <PreviewToggle
-                                            preview={markdownPreview}
-                                            onToggle={setMarkdownPreview}
-                                        />
-                                    )}
+                                    {fileContent &&
+                                        isMarkdownFile(fileContent.path) &&
+                                        isEditable && (
+                                            <PreviewToggle
+                                                preview={markdownPreview}
+                                                onToggle={setMarkdownPreview}
+                                            />
+                                        )}
                                     {/* JSON preview toggle */}
-                                    {fileContent && isJsonFile(fileContent.path) && isEditable && (
-                                        <PreviewToggle preview={jsonPreview} onToggle={setJsonPreview} />
-                                    )}
+                                    {fileContent &&
+                                        isJsonFile(fileContent.path) &&
+                                        isEditable && (
+                                            <PreviewToggle
+                                                preview={jsonPreview}
+                                                onToggle={setJsonPreview}
+                                            />
+                                        )}
                                     {/* Code edit toggle */}
-                                    {fileContent && isCodeFile(fileContent.path) && isEditable && (
-                                        <PreviewToggle
-                                            preview={!codeEditMode}
-                                            onToggle={(preview) => setCodeEditMode(!preview)}
-                                            previewLabel="Preview"
-                                            editLabel="Edit"
-                                        />
-                                    )}
+                                    {fileContent &&
+                                        isCodeFile(fileContent.path) &&
+                                        isEditable && (
+                                            <PreviewToggle
+                                                preview={!codeEditMode}
+                                                onToggle={(preview) =>
+                                                    setCodeEditMode(!preview)
+                                                }
+                                                previewLabel="Preview"
+                                                editLabel="Edit"
+                                            />
+                                        )}
                                     {hasChanges && (
-                                        <span className="text-xs text-yellow-400">Unsaved changes</span>
+                                        <span className="text-xs text-yellow-400">
+                                            Unsaved changes
+                                        </span>
                                     )}
                                     {isEditable && (
                                         <Button
                                             variant="primary"
                                             size="sm"
                                             onClick={handleSave}
-                                            disabled={saveMutation.isPending || !hasChanges}
+                                            disabled={
+                                                saveMutation.isPending || !hasChanges
+                                            }
                                         >
                                             <Save size={14} className="mr-1" />
-                                            {saveMutation.isPending ? "Saving..." : "Save"}
+                                            {saveMutation.isPending
+                                                ? "Saving..."
+                                                : "Save"}
                                         </Button>
                                     )}
                                 </div>
@@ -313,12 +381,13 @@ export function Files() {
                             {fileContent && (
                                 <div className="flex items-center justify-between border-t border-slate-700 px-4 py-2 text-xs text-slate-400">
                                     <span>
-                                        Modified: {fileContent.modified ? formatDate(fileContent.modified) : "Unknown"}
+                                        Modified:{" "}
+                                        {fileContent.modified
+                                            ? formatDate(fileContent.modified)
+                                            : "Unknown"}
                                     </span>
                                     {fileContent.modified && (
-                                        <span>
-                                            {format(new Date(fileContent.modified), "yyyy-MM-dd HH:mm:ss", { locale: enUS })}
-                                        </span>
+                                        <span>{formatDate(fileContent.modified)}</span>
                                     )}
                                 </div>
                             )}

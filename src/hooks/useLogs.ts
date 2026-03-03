@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { apiFetch } from "./useApi";
-
 import type { LogFile } from "../types/log";
+import { apiFetch } from "./useApi";
 
 // Types
 interface LogFilesResponse {
@@ -16,7 +15,12 @@ interface LogContentResponse {
 // Query keys
 export const logKeys = {
     files: (): ["logs", "files"] => ["logs", "files"],
-    content: (file: string, lines: number): ["logs", "content", string, number] => ["logs", "content", file, lines],
+    content: (file: string, lines: number): ["logs", "content", string, number] => [
+        "logs",
+        "content",
+        file,
+        lines,
+    ],
 };
 
 // Fetchers

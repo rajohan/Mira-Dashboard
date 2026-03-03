@@ -1,17 +1,19 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
-import { RefreshCw, Terminal, Wifi, WifiOff, Download, FileText } from "lucide-react";
+import { Download, FileText, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
+import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { Input } from "../components/ui/Input";
-import { LogLine, LevelFilter } from "../components/features/logs";
+import { PageHeader } from "../components/ui/PageHeader";
 import { Select } from "../components/ui/Select";
-import { useLogFiles, useLogContent } from "../hooks";
+import { useLogContent, useLogFiles } from "../hooks";
 import { type LogEntry } from "../types/log";
-import { parseLogLine, LOG_LEVELS, LINE_OPTIONS } from "../utils/logUtils";
+import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
 export function Logs() {
     const [autoFollow, setAutoFollow] = useState(true);
@@ -212,7 +214,8 @@ export function Logs() {
 
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
@@ -233,7 +236,8 @@ export function Logs() {
 
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
@@ -253,23 +257,10 @@ export function Logs() {
 
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
-            <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Terminal className="h-6 w-6 text-slate-400" />
-                    <h1 className="text-2xl font-bold">Logs</h1>
-                </div>
-                <div className="flex items-center gap-2">
-                    {isConnected ? (
-                        <span className="flex items-center gap-1 text-sm text-green-400">
-                            <Wifi size={16} /> Connected
-                        </span>
-                    ) : (
-                        <span className="flex items-center gap-1 text-sm text-red-400">
-                            <WifiOff size={16} /> Disconnected
-                        </span>
-                    )}
-                </div>
-            </div>
+            <PageHeader
+                title="Logs"
+                status={<ConnectionStatus isConnected={isConnected} />}
+            />
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
                 <Select
@@ -286,7 +277,7 @@ export function Logs() {
 
                 <Select
                     value={lineCount.toString()}
-                    onChange={(v) => handleLineSelect(parseInt(v, 10))}
+                    onChange={(v) => handleLineSelect(Number.parseInt(v, 10))}
                     options={LINE_OPTIONS.map((n) => ({
                         value: n.toString(),
                         label: `${n} lines`,

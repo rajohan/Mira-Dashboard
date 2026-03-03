@@ -9,13 +9,21 @@ interface SecuritySectionProps {
     authType: string;
 }
 
-export function SecuritySection({ gatewayPort, gatewayMode, authEnabled, authType }: SecuritySectionProps) {
+export function SecuritySection({
+    gatewayPort,
+    gatewayMode,
+    authEnabled,
+    authType,
+}: SecuritySectionProps) {
     return (
         <ExpandableCard title="Security" icon={Shield}>
             <div className="space-y-2">
                 <ReadOnlyField label="Gateway Port" value={gatewayPort} />
                 <ReadOnlyField label="Mode" value={gatewayMode} />
-                <ReadOnlyField label="Authentication" value={authEnabled ? authType : "Disabled"} />
+                <ReadOnlyField
+                    label="Authentication"
+                    value={authEnabled ? authType : "Disabled"}
+                />
             </div>
         </ExpandableCard>
     );

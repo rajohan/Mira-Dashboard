@@ -1,5 +1,5 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
+import { useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -49,7 +49,11 @@ export function Login() {
                             />
                         )}
                     </form.Field>
-                    <Button type="submit" className="w-full" disabled={!form.state.values.token.trim()}>
+                    <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={!form.state.values.token.trim()}
+                    >
                         Connect
                     </Button>
                 </form>

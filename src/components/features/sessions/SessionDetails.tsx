@@ -7,15 +7,10 @@ import { Badge, getSessionTypeVariant } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
 import { ProgressBar } from "../../../components/ui/ProgressBar";
-import { useSessionHistory } from "../../../hooks/useSessions";
-import {
-    formatDuration,
-    formatTokens,
-    getTokenPercent,
-} from "../../../utils/format";
-import { SessionActionsDropdown } from "./SessionActionsDropdown";
-
 import type { Session } from "../../../hooks/useOpenClaw";
+import { useSessionHistory } from "../../../hooks/useSessions";
+import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
+import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 function formatSessionType(session: Session): string {
     const type = (session.type || "unknown").toUpperCase();
@@ -104,7 +99,11 @@ export function SessionDetails({
                                 <p className="text-sm font-medium text-slate-200">
                                     {formatTokens(sessionTokens, sessionMaxTokens)}
                                 </p>
-                                <ProgressBar percent={tokenPercent} size="sm" className="max-w-[100px] flex-1" />
+                                <ProgressBar
+                                    percent={tokenPercent}
+                                    size="sm"
+                                    className="max-w-[100px] flex-1"
+                                />
                             </div>
                         </div>
                     </div>

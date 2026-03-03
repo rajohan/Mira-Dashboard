@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiPost } from "./useApi";
-
 import type { Task } from "../types/task";
+import { apiPost } from "./useApi";
 
 // Types
 interface ExecResponse {
@@ -78,7 +77,7 @@ async function updateTask(
             "--remove-label",
             "*", // This doesn't work, need different approach
         ]).catch(() => {}); // Ignore error if no labels to remove
-        
+
         if (updates.labels.length > 0) {
             await execCommand("gh", [
                 "issue",
@@ -119,8 +118,15 @@ export function useCreateTask() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ title, body, labels }: { title: string; body: string; labels: string[] }) =>
-            createTask(title, body, labels),
+        mutationFn: ({
+            title,
+            body,
+            labels,
+        }: {
+            title: string;
+            body: string;
+            labels: string[];
+        }) => createTask(title, body, labels),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },

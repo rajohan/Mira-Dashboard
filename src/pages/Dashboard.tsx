@@ -1,33 +1,20 @@
-import {
-    Activity,
-    Clock,
-    Coins,
-    Cpu,
-    HardDrive,
-    MemoryStick,
-    Users,
-    Wifi,
-    WifiOff,
-} from "lucide-react";
+import { Activity, Clock, Coins, Cpu, HardDrive, MemoryStick, Users } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+import { formatSessionType, getTypeSortOrder } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
 import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { Card, CardTitle } from "../components/ui/Card";
+import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { MetricCard } from "../components/ui/MetricCard";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { useMetrics } from "../hooks/useMetrics";
-import { useOpenClaw } from "../hooks/useOpenClaw";
+import { type Session, useOpenClaw } from "../hooks/useOpenClaw";
 import { useAuthStore } from "../stores/authStore";
-import {
-    formatUptime,
-    formatLoad,
-    formatTokens,
-    getTokenPercent,
-} from "../utils/format";
-import { formatSessionType, getTypeSortOrder } from "../components/features/sessions";
+import { formatLoad, formatTokens, formatUptime, getTokenPercent } from "../utils/format";
 
-function sortSessions(sessions: any[]): any[] {
+function sortSessions(sessions: Session[]): Session[] {
     return [...sessions].sort((a, b) => {
         const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
         if (typeOrder !== 0) return typeOrder;
@@ -52,20 +39,10 @@ export function Dashboard() {
 
     return (
         <div className="p-6">
-            <div className="mb-6 flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Dashboard</h1>
-                <div className="flex items-center gap-2">
-                    {isConnected ? (
-                        <span className="flex items-center gap-1 text-sm text-green-400">
-                            <Wifi size={16} /> Connected
-                        </span>
-                    ) : (
-                        <span className="flex items-center gap-1 text-sm text-red-400">
-                            <WifiOff size={16} /> Disconnected
-                        </span>
-                    )}
-                </div>
-            </div>
+            <PageHeader
+                title="Dashboard"
+                status={<ConnectionStatus isConnected={isConnected} />}
+            />
 
             {error && <Alert variant="error">{error}</Alert>}
 
@@ -212,7 +189,7 @@ export function Dashboard() {
                     <CardTitle className="mb-4">Active Sessions</CardTitle>
                     {sortedSessions.length > 0 ? (
                         <div className="max-h-64 space-y-2 overflow-y-auto pr-2">
-                            {sortedSessions.map((session: any) => {
+                            {sortedSessions.map((session) => {
                                 const tokenPercent = getTokenPercent(
                                     session.tokenCount || 0,
                                     session.maxTokens || 200_000
@@ -223,7 +200,11 @@ export function Dashboard() {
                                         className="flex items-center justify-between border-b border-slate-700/50 py-2 text-sm last:border-0"
                                     >
                                         <div className="flex min-w-0 flex-1 items-center gap-2">
-                                            <Badge variant={getSessionTypeVariant(session.type)}>
+                                            <Badge
+                                                variant={getSessionTypeVariant(
+                                                    session.type
+                                                )}
+                                            >
                                                 {formatSessionType(session)}
                                             </Badge>
                                             <span
@@ -249,7 +230,11 @@ export function Dashboard() {
                                                     session.maxTokens || 200_000
                                                 )}
                                             </span>
-                                            <ProgressBar percent={tokenPercent} size="sm" className="w-12" />
+                                            <ProgressBar
+                                                percent={tokenPercent}
+                                                size="sm"
+                                                className="w-12"
+                                            />
                                         </div>
                                     </div>
                                 );

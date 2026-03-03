@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, RefreshCw, File, Folder } from "lucide-react";
+import { ChevronDown, ChevronRight, File, Folder, RefreshCw } from "lucide-react";
 
 import type { FileNode } from "../../../types/file";
 import { getFileExtension } from "../../../utils/fileUtils";
@@ -102,7 +102,10 @@ export function FileTreeItem({
                                 <ChevronRight size={14} className="text-slate-400" />
                             )
                         ) : isLoading ? (
-                            <RefreshCw size={14} className="animate-spin text-slate-400" />
+                            <RefreshCw
+                                size={14}
+                                className="animate-spin text-slate-400"
+                            />
                         ) : (
                             <span className="w-3.5" />
                         )}

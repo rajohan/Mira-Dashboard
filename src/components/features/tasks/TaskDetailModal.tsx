@@ -3,11 +3,10 @@ import { enUS } from "date-fns/locale";
 import { ExternalLink, X } from "lucide-react";
 import { useState } from "react";
 
+import type { ColumnId, Task } from "../../../types/task";
+import { getColumnId, getPriority } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
 import { Modal } from "../../ui/Modal";
-import { getColumnId, getPriority } from "../../../utils/taskUtils";
-
-import type { Task, ColumnId } from "../../../types/task";
 
 const PRIORITY_COLORS: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -83,7 +82,12 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                             #{task.number}: {task.title}
                         </h2>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onClose}
+                        className="text-slate-400 hover:text-slate-200"
+                    >
                         <X className="h-5 w-5" />
                     </Button>
                 </div>

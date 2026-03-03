@@ -1,5 +1,6 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { ChevronDown } from "lucide-react";
+
 import { cn } from "../../utils/cn";
 
 export interface DropdownItem {
@@ -29,7 +30,8 @@ export function Dropdown({
 }: DropdownProps) {
     const variantStyles = {
         primary: "bg-accent-500 text-white hover:bg-accent-600",
-        secondary: "border border-slate-600 bg-slate-700 text-slate-100 hover:bg-slate-600",
+        secondary:
+            "border border-slate-600 bg-slate-700 text-slate-100 hover:bg-slate-600",
         ghost: "text-slate-300 hover:bg-primary-700",
     };
 
@@ -51,7 +53,9 @@ export function Dropdown({
             >
                 {icon}
                 {label}
-                {label && <ChevronDown className="h-4 w-4 ui-open:rotate-180 transition-transform" />}
+                {label && (
+                    <ChevronDown className="ui-open:rotate-180 h-4 w-4 transition-transform" />
+                )}
             </MenuButton>
 
             <MenuItems
@@ -68,7 +72,7 @@ export function Dropdown({
                                 "data-focus:bg-slate-700 data-focus:text-slate-100",
                                 "data-disabled:cursor-not-allowed data-disabled:opacity-50",
                                 item.variant === "danger"
-                                    ? "text-red-400 data-focus:bg-red-500/20"
+                                    ? "data-focus:bg-red-500/20 text-red-400"
                                     : "text-slate-300"
                             )}
                         >
