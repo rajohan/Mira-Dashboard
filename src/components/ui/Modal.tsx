@@ -27,6 +27,15 @@ const SIZE_CLASSES = {
     "3xl": "max-w-3xl",
 };
 
+const SIZE_MAX_HEIGHT = {
+    sm: "max-h-[80vh]",
+    md: "max-h-[85vh]",
+    lg: "max-h-[85vh]",
+    xl: "max-h-[85vh]",
+    "2xl": "max-h-[90vh]",
+    "3xl": "max-h-[90vh]",
+};
+
 export function Modal({
     isOpen,
     onClose,
@@ -133,30 +142,32 @@ export function Modal({
             <div
                 ref={modalRef}
                 className={cn(
-                    "relative w-full rounded-lg border border-primary-700 bg-primary-800 shadow-xl",
+                    "relative w-full rounded-lg border border-slate-700 bg-slate-800 shadow-xl",
                     "focus:outline-none",
-                    SIZE_CLASSES[size]
+                    "flex flex-col",
+                    SIZE_CLASSES[size],
+                    SIZE_MAX_HEIGHT[size]
                 )}
                 tabIndex={-1}
             >
                 {title && (
-                    <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
+                    <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
                         <h2
                             id="modal-title"
-                            className="text-lg font-semibold text-primary-50"
+                            className="text-lg font-semibold text-slate-100"
                         >
                             {title}
                         </h2>
                         <button
                             onClick={onClose}
-                            className="text-primary-400 transition-colors hover:text-primary-200"
+                            className="text-slate-400 transition-colors hover:text-slate-200"
                             aria-label="Close modal"
                         >
                             <X size={20} />
                         </button>
                     </div>
                 )}
-                <div className="p-4">{children}</div>
+                <div className="flex-1 overflow-y-auto p-4">{children}</div>
             </div>
         </div>,
         modalRoot

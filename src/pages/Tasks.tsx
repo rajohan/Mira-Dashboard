@@ -419,12 +419,7 @@ function Column({
     const config = COLUMN_CONFIG[id];
 
     return (
-        <div
-            className={
-                "flex flex-1 flex-col rounded-xl transition-colors " +
-                (isOver ? "bg-accent-500/5" : "")
-            }
-        >
+        <div className="flex w-72 flex-shrink-0 flex-col">
             <div className="mb-3 flex items-center gap-2 px-1">
                 <div className={"h-2.5 w-2.5 rounded-full " + config.dotColor} />
                 <h2 className="text-sm font-semibold text-slate-300">{config.title}</h2>
@@ -435,10 +430,10 @@ function Column({
             <div
                 data-column={id}
                 className={
-                    "flex-1 space-y-2 rounded-xl border-2 border-dashed p-2 transition-colors " +
+                    "flex-1 space-y-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
-                        : "border-transparent")
+                        : "border-slate-700/50 bg-slate-800/30")
                 }
             >
                 {tasks.length > 0 ? (
@@ -752,7 +747,7 @@ export function Tasks() {
                     onDragOver={handleDragOver}
                     onDragEnd={handleDragEnd}
                 >
-                    <div className="flex gap-4">
+                    <div className="flex gap-4 overflow-x-auto pb-2">
                         {(Object.keys(COLUMN_CONFIG) as ColumnId[]).map((columnId) => (
                             <Column
                                 key={columnId}
