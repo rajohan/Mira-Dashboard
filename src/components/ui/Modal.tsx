@@ -1,5 +1,6 @@
+import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import { X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { useModalRoot } from "../../hooks/useModalRoot";
@@ -11,12 +12,7 @@ interface ModalProps {
     title?: string;
     children: ReactNode;
     size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
-    closeOnOverlayClick?: boolean;
-    closeOnEscape?: boolean;
 }
-
-const FOCUSABLE_SELECTOR =
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 const SIZE_CLASSES = {
     sm: "max-w-sm",
@@ -27,149 +23,54 @@ const SIZE_CLASSES = {
     "3xl": "max-w-3xl",
 };
 
-const SIZE_MAX_HEIGHT = {
-    sm: "max-h-[80vh]",
-    md: "max-h-[85vh]",
-    lg: "max-h-[85vh]",
-    xl: "max-h-[85vh]",
-    "2xl": "max-h-[90vh]",
-    "3xl": "max-h-[90vh]",
-};
-
 export function Modal({
     isOpen,
     onClose,
     title,
     children,
     size = "md",
-    closeOnOverlayClick = true,
-    closeOnEscape = true,
 }: ModalProps) {
-    const modalRef = useRef<HTMLDivElement>(null);
-    const previousActiveElement = useRef<HTMLElement | null>(null);
     const modalRoot = useModalRoot(isOpen);
-
-    // Focus trap
-    const handleTabKey = useCallback((e: KeyboardEvent) => {
-        if (!modalRef.current || e.key !== "Tab") return;
-
-        const focusableElements =
-            modalRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-        const firstFocusable = focusableElements[0];
-        const lastFocusable = focusableElements[focusableElements.length - 1];
-
-        if (e.shiftKey) {
-            // Shift + Tab (backwards)
-            if (document.activeElement === firstFocusable) {
-                e.preventDefault();
-                lastFocusable.focus();
-            }
-        } else {
-            // Tab (forwards)
-            if (document.activeElement === lastFocusable) {
-                e.preventDefault();
-                firstFocusable.focus();
-            }
-        }
-    }, []);
-
-    // Escape key handler
-    const handleEscape = useCallback(
-        (e: KeyboardEvent) => {
-            if (e.key === "Escape" && closeOnEscape) {
-                onClose();
-            }
-        },
-        [closeOnEscape, onClose]
-    );
-
-    // Focus management and scroll lock
-    useEffect(() => {
-        if (isOpen) {
-            // Store previously focused element
-            previousActiveElement.current = document.activeElement as HTMLElement;
-
-            // Lock body scroll
-            document.body.style.overflow = "hidden";
-
-            // Add keyboard listeners
-            document.addEventListener("keydown", handleEscape);
-            document.addEventListener("keydown", handleTabKey);
-
-            // Focus first focusable element
-            requestAnimationFrame(() => {
-                if (modalRef.current) {
-                    const firstFocusable =
-                        modalRef.current.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-                    if (firstFocusable) {
-                        firstFocusable.focus();
-                    } else {
-                        modalRef.current.focus();
-                    }
-                }
-            });
-        }
-
-        return () => {
-            document.removeEventListener("keydown", handleEscape);
-            document.removeEventListener("keydown", handleTabKey);
-            document.body.style.overflow = "";
-
-            // Restore focus
-            if (previousActiveElement.current) {
-                previousActiveElement.current.focus();
-            }
-        };
-    }, [isOpen, handleEscape, handleTabKey]);
 
     if (!isOpen || !modalRoot) return null;
 
     return createPortal(
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={title ? "modal-title" : undefined}
+        <Dialog
+            open={isOpen}
+            onClose={onClose}
+            className="relative z-50"
         >
-            {/* Backdrop - clickable overlay */}
-            <div
-                className="absolute inset-0 bg-black/50"
-                onClick={closeOnOverlayClick ? onClose : undefined}
-                aria-hidden="true"
-            />
+            {/* Backdrop */}
+            <div className="fixed inset-0 bg-black/50" aria-hidden="true" />
 
-            {/* Modal content */}
-            <div
-                ref={modalRef}
-                className={cn(
-                    "relative w-full rounded-lg border border-slate-700 bg-slate-800 shadow-xl",
-                    "focus:outline-none",
-                    "flex flex-col",
-                    SIZE_CLASSES[size],
-                    SIZE_MAX_HEIGHT[size]
-                )}
-                tabIndex={-1}
-            >
-                {title && (
-                    <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-                        <h2
-                            id="modal-title"
-                            className="text-lg font-semibold text-slate-100"
-                        >
-                            {title}
-                        </h2>
-                        <button
-                            onClick={onClose}
-                            className="text-slate-400 transition-colors hover:text-slate-200"
-                            aria-label="Close modal"
-                        >
-                            <X size={20} />
-                        </button>
-                    </div>
-                )}
-                <div className="flex-1 overflow-y-auto p-4">{children}</div>
+            {/* Modal container */}
+            <div className="fixed inset-0 flex items-center justify-center p-4">
+                <DialogPanel
+                    className={cn(
+                        "w-full rounded-lg border border-slate-700 bg-slate-800 shadow-xl",
+                        "flex flex-col",
+                        "max-h-[90vh]",
+                        SIZE_CLASSES[size]
+                    )}
+                >
+                    {title && (
+                        <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
+                            <DialogTitle className="text-lg font-semibold text-slate-100">
+                                {title}
+                            </DialogTitle>
+                            <button
+                                onClick={onClose}
+                                className="text-slate-400 transition-colors hover:text-slate-200"
+                                aria-label="Close modal"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                    )}
+                    <div className="flex-1 overflow-y-auto p-4">{children}</div>
+                </DialogPanel>
             </div>
-        </div>,
+        </Dialog>,
         modalRoot
     );
 }

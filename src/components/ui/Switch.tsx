@@ -1,28 +1,32 @@
-import { forwardRef, type InputHTMLAttributes } from "react";
-
+import { Switch as HeadlessSwitch } from "@headlessui/react";
 import { cn } from "../../utils/cn";
 
-interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
+interface SwitchProps {
+    checked: boolean;
+    onChange: (checked: boolean) => void;
     label?: string;
     description?: string;
+    disabled?: boolean;
+    className?: string;
 }
 
-export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
-    ({ className, label, description, checked, onChange, disabled, ...props }, ref) => {
-        return (
-            <label
-                className={cn(
-                    "flex cursor-pointer items-center justify-between",
-                    disabled && "cursor-not-allowed opacity-50",
-                    className
-                )}
-            >
+export function Switch({
+    checked,
+    onChange,
+    label,
+    description,
+    disabled,
+    className,
+}: SwitchProps) {
+    return (
+        <HeadlessSwitch.Group>
+            <div className={cn("flex items-center justify-between", className)}>
                 {(label || description) && (
                     <div className="flex flex-col">
                         {label && (
-                            <span className="text-sm font-medium text-primary-200">
+                            <HeadlessSwitch.Label className="text-sm font-medium text-primary-200">
                                 {label}
-                            </span>
+                            </HeadlessSwitch.Label>
                         )}
                         {description && (
                             <span className="text-xs text-primary-400">
@@ -31,33 +35,26 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
                         )}
                     </div>
                 )}
-                <div className="relative">
-                    <input
-                        ref={ref}
-                        type="checkbox"
-                        className="peer sr-only"
-                        checked={checked}
-                        onChange={onChange}
-                        disabled={disabled}
-                        {...props}
-                    />
-                    <div
+                <HeadlessSwitch
+                    checked={checked}
+                    onChange={onChange}
+                    disabled={disabled}
+                    className={cn(
+                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                        "focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-primary-800",
+                        disabled && "cursor-not-allowed opacity-50",
+                        checked ? "bg-accent-500" : "bg-primary-600"
+                    )}
+                >
+                    <span className="sr-only">{label}</span>
+                    <span
                         className={cn(
-                            "h-6 w-11 rounded-full transition-colors",
-                            "bg-primary-600 peer-checked:bg-accent-500",
-                            "peer-focus:ring-2 peer-focus:ring-accent-500 peer-focus:ring-offset-2 peer-focus:ring-offset-primary-800"
+                            "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                            checked ? "translate-x-5" : "translate-x-1"
                         )}
                     />
-                    <div
-                        className={cn(
-                            "absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform",
-                            "peer-checked:translate-x-5"
-                        )}
-                    />
-                </div>
-            </label>
-        );
-    }
-);
-
-Switch.displayName = "Switch";
+                </HeadlessSwitch>
+            </div>
+        </HeadlessSwitch.Group>
+    );
+}

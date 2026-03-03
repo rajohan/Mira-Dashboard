@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { Disclosure, DisclosureButton, DisclosurePanel } from "@headlessui/react";
+import { ChevronDown } from "lucide-react";
 
 import { Card, CardTitle } from "../ui/Card";
 
@@ -16,23 +16,20 @@ export function ExpandableCard({
     children,
     defaultExpanded = false,
 }: ExpandableCardProps) {
-    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
     return (
         <Card variant="bordered" className="mb-4">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="flex w-full items-center justify-between py-1"
-            >
-                <div className="flex items-center gap-2">
-                    <Icon size={18} className="text-accent-400" />
-                    <CardTitle>{title}</CardTitle>
-                </div>
-                {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-            </button>
-            {isExpanded && (
-                <div className="mt-4 border-t border-primary-700 pt-4">{children}</div>
-            )}
+            <Disclosure defaultOpen={defaultExpanded}>
+                <DisclosureButton className="flex w-full items-center justify-between py-1">
+                    <div className="flex items-center gap-2">
+                        <Icon size={18} className="text-accent-400" />
+                        <CardTitle>{title}</CardTitle>
+                    </div>
+                    <ChevronDown className="h-[18px] w-[18px] ui-open:rotate-180 transition-transform" />
+                </DisclosureButton>
+                <DisclosurePanel className="mt-4 border-t border-primary-700 pt-4">
+                    {children}
+                </DisclosurePanel>
+            </Disclosure>
         </Card>
     );
 }

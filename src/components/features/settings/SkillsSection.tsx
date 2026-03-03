@@ -26,7 +26,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                             </div>
                             <Switch
                                 checked={skill.enabled}
-                                onChange={(e) => onToggle(skill.name, e.target.checked)}
+                                onChange={(checked) => onToggle(skill.name, checked)}
                             />
                         </div>
                     ))

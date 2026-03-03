@@ -28,7 +28,6 @@ export function DeleteConfirmDialog({
             onClose={onCancel}
             title="Delete Session?"
             size="md"
-            closeOnOverlayClick={false}
         >
             <div className="flex items-start gap-3">
                 <div className="rounded-lg bg-red-500/20 p-2">
