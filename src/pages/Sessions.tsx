@@ -438,7 +438,7 @@ function SessionDetails({
                                                         <span className="text-xs text-slate-500">
                                                             {format(
                                                                 new Date(msg.timestamp),
-                                                                "MM/dd/yyyy HH:mm",
+                                                                "dd.MM.yyyy, HH:mm",
                                                                 { locale: enUS }
                                                             )}
                                                         </span>

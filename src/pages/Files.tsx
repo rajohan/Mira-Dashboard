@@ -91,7 +91,7 @@ function formatSize(bytes: number): string {
 
 function formatDate(dateStr: string): string {
     try {
-        return format(new Date(dateStr), "MM/dd/yyyy HH:mm", { locale: enUS });
+        return format(new Date(dateStr), "dd.MM.yyyy, HH:mm", { locale: enUS });
     } catch {
         return dateStr;
     }
