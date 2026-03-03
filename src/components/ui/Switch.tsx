@@ -1,4 +1,4 @@
-import { Switch as HeadlessSwitch } from "@headlessui/react";
+import { Description, Field, Label, Switch as HeadlessSwitch } from "@headlessui/react";
 import { cn } from "../../utils/cn";
 
 interface SwitchProps {
@@ -19,42 +19,34 @@ export function Switch({
     className,
 }: SwitchProps) {
     return (
-        <HeadlessSwitch.Group>
-            <div className={cn("flex items-center justify-between", className)}>
-                {(label || description) && (
-                    <div className="flex flex-col">
-                        {label && (
-                            <HeadlessSwitch.Label className="text-sm font-medium text-primary-200">
-                                {label}
-                            </HeadlessSwitch.Label>
-                        )}
-                        {description && (
-                            <span className="text-xs text-primary-400">
-                                {description}
-                            </span>
-                        )}
-                    </div>
-                )}
-                <HeadlessSwitch
-                    checked={checked}
-                    onChange={onChange}
-                    disabled={disabled}
-                    className={cn(
-                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                        "focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-primary-800",
-                        disabled && "cursor-not-allowed opacity-50",
-                        checked ? "bg-accent-500" : "bg-primary-600"
+        <Field className={cn("flex items-center justify-between", className)} disabled={disabled}>
+            {(label || description) && (
+                <div className="flex flex-col">
+                    {label && (
+                        <Label className="text-sm font-medium text-primary-200">
+                            {label}
+                        </Label>
                     )}
-                >
-                    <span className="sr-only">{label}</span>
-                    <span
-                        className={cn(
-                            "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                            checked ? "translate-x-5" : "translate-x-1"
-                        )}
-                    />
-                </HeadlessSwitch>
-            </div>
-        </HeadlessSwitch.Group>
+                    {description && (
+                        <Description className="text-xs text-primary-400">
+                            {description}
+                        </Description>
+                    )}
+                </div>
+            )}
+            <HeadlessSwitch
+                checked={checked}
+                onChange={onChange}
+                className={cn(
+                    "group inline-flex h-6 w-11 items-center rounded-full transition",
+                    "focus:outline-none data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-800",
+                    "data-checked:bg-accent-500 data-unchecked:bg-primary-600",
+                    "data-disabled:cursor-not-allowed data-disabled:opacity-50"
+                )}
+            >
+                <span className="sr-only">{label}</span>
+                <span className="size-4 translate-x-1 rounded-full bg-white transition group-data-checked:translate-x-6" />
+            </HeadlessSwitch>
+        </Field>
     );
 }
