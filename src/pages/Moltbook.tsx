@@ -3,6 +3,8 @@ import { useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { EmptyState } from "../components/ui/EmptyState";
+import { LoadingState } from "../components/ui/LoadingState";
 import { useMoltbookData } from "../hooks";
 import { formatTime, getMoltbookUrl } from "../utils/moltbookUtils";
 
@@ -17,11 +19,7 @@ export function Moltbook() {
         : 0;
 
     if (isLoading) {
-        return (
-            <div className="flex h-64 items-center justify-center p-6">
-                <RefreshCw className="h-6 w-6 animate-spin text-slate-400" />
-            </div>
-        );
+        return <LoadingState size="lg" />;
     }
 
     if (error) {
