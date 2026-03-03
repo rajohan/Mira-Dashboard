@@ -1,4 +1,4 @@
-const API_BASE = "/api/v1";
+const API_BASE = "/api";
 
 // Get token from localStorage or URL params
 function getToken(): string | null {

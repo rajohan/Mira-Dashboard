@@ -67,7 +67,8 @@ async function fetchConfig(): Promise<OpenClawConfig> {
 }
 
 async function fetchSkills(): Promise<Skill[]> {
-    return apiFetch<Skill[]>("/skills");
+    const data = await apiFetch<{ skills: Skill[] }>("/skills");
+    return data.skills;
 }
 
 async function updateConfig(config: OpenClawConfig): Promise<void> {
