@@ -9,18 +9,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { format, formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
-import {
-    AlertCircle,
-    CheckCircle2,
-    Circle,
-    ExternalLink,
-    GripVertical,
-    Loader2,
-    Plus,
-    RefreshCw,
-    Search,
-    X,
-} from "lucide-react";
+import { ExternalLink, GripVertical, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
