@@ -7,6 +7,7 @@ import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 
+import { Textarea } from "../../ui/Textarea";
 import { type FileContent } from "../../../types/file";
 import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getLanguage } from "../../../utils/fileUtils";
 
@@ -89,11 +90,9 @@ export function FileContentViewer({
                 </div>
             ) : isCodeFile(fileContent.path) ? (
                 codeEditMode ? (
-                    <textarea
-                        className={
-                            "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
-                            syntaxClass
-                        }
+                    <Textarea
+                        variant="code"
+                        className={syntaxClass}
                         value={editedContent}
                         onChange={(e) => onContentChange(e.target.value)}
                         spellCheck={false}
@@ -122,11 +121,9 @@ export function FileContentViewer({
                     </div>
                 )
             ) : isEditable ? (
-                <textarea
-                    className={
-                        "h-full w-full resize-none bg-transparent p-4 font-mono text-sm focus:outline-none " +
-                        syntaxClass
-                    }
+                <Textarea
+                    variant="code"
+                    className={syntaxClass}
                     value={editedContent}
                     onChange={(e) => onContentChange(e.target.value)}
                     spellCheck={false}
