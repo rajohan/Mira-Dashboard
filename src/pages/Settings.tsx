@@ -6,7 +6,7 @@ import {
     RefreshCw,
     Server,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
@@ -19,164 +19,90 @@ import {
     HeartbeatSection,
     SkillsSection,
 } from "../components/features/settings";
-import { type Config, type Skill } from "../types/settings";
+import {
+    useConfig,
+    useSkills,
+    useUpdateConfig,
+    useToggleSkill,
+    useRestartGateway,
+    useCreateBackup,
+} from "../hooks";
+import type { OpenClawConfig, Skill } from "../hooks/useConfig";
 
 export function Settings() {
-    const [config, setConfig] = useState<Config | null>(null);
-    const [skills, setSkills] = useState<Skill[]>([]);
-    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
-    const [saving, setSaving] = useState(false);
-
     const [showRestartModal, setShowRestartModal] = useState(false);
-    const [restarting, setRestarting] = useState(false);
-    const [backingUp, setBackingUp] = useState(false);
 
-    useEffect(() => {
-        fetchConfig();
-        fetchSkills();
-    }, []);
+    // Queries
+    const { data: config, isLoading: configLoading } = useConfig();
+    const { data: skills = [], isLoading: skillsLoading } = useSkills();
 
-    async function fetchConfig() {
-        try {
-            const res = await fetch("/api/config");
-            if (res.ok) {
-                const data = await res.json();
-                setConfig(data);
-            }
-        } catch (error_) {
-            console.error("Failed to fetch config:", error_);
-        } finally {
-            setLoading(false);
-        }
-    }
+    // Mutations
+    const updateConfig = useUpdateConfig();
+    const toggleSkill = useToggleSkill();
+    const restartGateway = useRestartGateway();
+    const createBackup = useCreateBackup();
 
-    async function fetchSkills() {
-        try {
-            const res = await fetch("/api/skills");
-            if (res.ok) {
-                const data = await res.json();
-                setSkills(data.skills || []);
-            }
-        } catch (error_) {
-            console.error("Failed to fetch skills:", error_);
-        }
-    }
+    const loading = configLoading || skillsLoading;
 
     async function handleRestart() {
-        setRestarting(true);
         try {
-            const res = await fetch("/api/restart", { method: "POST" });
-            if (res.ok) {
-                setShowRestartModal(false);
-                setTimeout(() => window.location.reload(), 2000);
-            } else {
-                setError("Failed to initiate restart");
-            }
-        } catch (error_: unknown) {
-            const errorMessage =
-                error_ instanceof Error ? error_.message : "Failed to restart";
-            setError(errorMessage);
-        } finally {
-            setRestarting(false);
+            await restartGateway.mutateAsync();
+            setShowRestartModal(false);
+            setTimeout(() => window.location.reload(), 2000);
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to restart");
         }
     }
 
     async function handleBackup() {
-        setBackingUp(true);
         try {
-            const res = await fetch("/api/backup", { method: "POST" });
-            if (res.ok) {
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "openclaw-backup-" + new Date().toISOString().split("T")[0] + ".json";
-                a.click();
-                URL.revokeObjectURL(url);
-            } else {
-                setError("Failed to create backup");
-            }
-        } catch (error_: unknown) {
-            const errorMessage =
-                error_ instanceof Error ? error_.message : "Failed to backup";
-            setError(errorMessage);
-        } finally {
-            setBackingUp(false);
+            const result = await createBackup.mutateAsync();
+            // Create download link
+            const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `openclaw-backup-${new Date().toISOString().split("T")[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to backup");
         }
     }
 
     async function handleSkillToggle(skillName: string, enabled: boolean) {
         try {
-            const res = await fetch("/api/skills/" + skillName, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ enabled }),
-            });
-            if (res.ok) {
-                setSkills((prev) =>
-                    prev.map((s) =>
-                        s.name === skillName ? { ...s, enabled } : s
-                    )
-                );
-            } else {
-                setError("Failed to update skill");
-            }
-        } catch (error_: unknown) {
-            const errorMessage =
-                error_ instanceof Error ? error_.message : "Failed to update skill";
-            setError(errorMessage);
+            await toggleSkill.mutateAsync({ name: skillName, enabled });
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to update skill");
         }
     }
 
     async function handleSessionSave(idleMinutes: number) {
-        setSaving(true);
         setError(null);
         try {
-            const res = await fetch("/api/config", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    session: { reset: { idleMinutes } },
-                }),
-            });
-            if (res.ok) {
-                setSuccess("Session settings saved");
-                setTimeout(() => setSuccess(null), 3000);
-            } else {
-                const data = await res.json();
-                setError(data.error || "Failed to save");
-            }
-        } catch (error_: unknown) {
+            await updateConfig.mutateAsync({
+                session: { reset: { idleMinutes } },
+            } as OpenClawConfig);
+            setSuccess("Session settings saved");
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
-        } finally {
-            setSaving(false);
         }
     }
 
     async function handleHeartbeatSave(every: number, target: string) {
-        setSaving(true);
         setError(null);
         try {
-            const res = await fetch("/api/config", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    heartbeat: { every, target: target || undefined },
-                }),
-            });
-            if (res.ok) {
-                setSuccess("Heartbeat settings saved");
-                setTimeout(() => setSuccess(null), 3000);
-            } else {
-                const data = await res.json();
-                setError(data.error || "Failed to save");
-            }
-        } catch (error_: unknown) {
+            await updateConfig.mutateAsync({
+                heartbeat: { every, target: target || undefined },
+            } as OpenClawConfig);
+            setSuccess("Heartbeat settings saved");
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
-        } finally {
-            setSaving(false);
         }
     }
 
@@ -228,8 +154,8 @@ export function Settings() {
             <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Settings</h1>
                 <div className="flex gap-2">
-                    <Button variant="secondary" onClick={handleBackup} disabled={backingUp}>
-                        {backingUp ? (
+                    <Button variant="secondary" onClick={handleBackup} disabled={createBackup.isPending}>
+                        {createBackup.isPending ? (
                             <>
                                 <Loader2 className="h-4 w-4 animate-spin" />
                                 Backing up...
@@ -294,17 +220,20 @@ export function Settings() {
             <SessionSection
                 idleMinutes={sessionInfo.idleMinutes}
                 onSave={handleSessionSave}
-                saving={saving}
+                saving={updateConfig.isPending}
             />
 
             <HeartbeatSection
                 every={heartbeatInfo.every}
                 target={heartbeatInfo.target}
                 onSave={handleHeartbeatSave}
-                saving={saving}
+                saving={updateConfig.isPending}
             />
 
-            <SkillsSection skills={skills} onToggle={handleSkillToggle} />
+            <SkillsSection
+                skills={skills as Skill[]}
+                onToggle={handleSkillToggle}
+            />
 
             {/* Server Info */}
             <div className="mb-4 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
@@ -342,16 +271,16 @@ export function Settings() {
                         <Button
                             variant="secondary"
                             onClick={() => setShowRestartModal(false)}
-                            disabled={restarting}
+                            disabled={restartGateway.isPending}
                         >
                             Cancel
                         </Button>
                         <Button
                             variant="danger"
                             onClick={handleRestart}
-                            disabled={restarting}
+                            disabled={restartGateway.isPending}
                         >
-                            {restarting ? (
+                            {restartGateway.isPending ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     Restarting...

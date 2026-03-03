@@ -21,9 +21,9 @@ import {
     MAX_PREVIEW_SIZE,
 } from "../components/features/files";
 import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getSyntaxClass } from "../utils/fileUtils";
-import { useAuthStore } from "../stores/authStore";
+import { useFiles, useFileContent, useSaveFile, useQueryClient, fileKeys } from "../hooks";
 
-import type { FileNode, FileContent } from "../types/file";
+import type { FileNode } from "../types/file";
 
 function formatDate(dateStr: string): string {
     try {
@@ -34,120 +34,50 @@ function formatDate(dateStr: string): string {
 }
 
 export function Files() {
-    const { token } = useAuthStore();
+    // File tree state
     const [files, setFiles] = useState<FileNode[]>([]);
-    const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [configDirExpanded, setConfigDirExpanded] = useState(false);
     const [cronDirExpanded, setCronDirExpanded] = useState(false);
     const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
-    const [fileContent, setFileContent] = useState<FileContent | null>(null);
+    
+    // Editor state
+    const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [editedContent, setEditedContent] = useState<string>("");
-    const [isLoading, setIsLoading] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [hasChanges, setHasChanges] = useState(false);
     const [largeFileWarning, setLargeFileWarning] = useState(false);
     const [markdownPreview, setMarkdownPreview] = useState(true);
     const [jsonPreview, setJsonPreview] = useState(true);
     const [codeEditMode, setCodeEditMode] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const apiBase = "/api/files";
+    // Queries
+    const queryClient = useQueryClient();
+    const { data: rootFiles = [], isLoading: rootLoading, refetch: refetchRoot } = useFiles();
+    const { data: fileContent, isLoading: contentLoading, refetch: refetchContent } = useFileContent(selectedPath);
+    const saveMutation = useSaveFile();
 
-    async function fetchFiles(dirPath?: string) {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const url = dirPath ? apiBase + "?path=" + encodeURIComponent(dirPath) : apiBase;
-            const res = await fetch(url, {
-                headers: { Authorization: "Bearer " + token },
-            });
-            if (!res.ok) throw new Error("Failed to fetch files");
-            const data = await res.json();
-            return data.files || [];
-        } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to fetch files");
-            return [];
-        } finally {
-            setIsLoading(false);
+    // Sync root files
+    useEffect(() => {
+        if (rootFiles.length > 0) {
+            setFiles(rootFiles);
         }
-    }
+    }, [rootFiles]);
 
-    async function fetchRootFiles() {
-        const rootFiles = await fetchFiles();
-        setFiles(rootFiles);
-    }
-
-    async function fetchFileContent(path: string) {
-        setIsLoading(true);
-        setError(null);
-        setLargeFileWarning(false);
-        try {
-            const isConfig = path.startsWith("config:");
-            const apiUrl = isConfig
-                ? "/api/config-files/" + encodeURIComponent(path.replace("config:", ""))
-                : apiBase + "/" + encodeURIComponent(path);
-
-            const res = await fetch(apiUrl, {
-                headers: { Authorization: "Bearer " + token },
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || "Failed to fetch file");
-            }
-
-            const data = await res.json();
-            setFileContent(data);
-            setEditedContent(data.content || "");
+    // Sync file content
+    useEffect(() => {
+        if (fileContent) {
+            setEditedContent(fileContent.content || "");
             setHasChanges(false);
-
-            if (data.size > MAX_PREVIEW_SIZE) {
-                setLargeFileWarning(true);
-            }
-
-            // Reset preview modes
+            setLargeFileWarning(fileContent.size > MAX_PREVIEW_SIZE);
             setMarkdownPreview(true);
             setJsonPreview(true);
             setCodeEditMode(false);
-        } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to fetch file");
-            setFileContent(null);
-        } finally {
-            setIsLoading(false);
+            setError(null);
         }
-    }
+    }, [fileContent]);
 
-    const saveFile = async () => {
-        if (!selectedPath || !fileContent) return;
-        setIsSaving(true);
-        try {
-            const isConfig = selectedPath.startsWith("config:");
-            const apiEndpoint = isConfig
-                ? "/api/config-files/" + encodeURIComponent(selectedPath.replace("config:", ""))
-                : apiBase + "/" + encodeURIComponent(selectedPath);
-
-            const res = await fetch(apiEndpoint, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: "Bearer " + token,
-                },
-                body: JSON.stringify({ content: editedContent }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || "Failed to save file");
-            }
-            setHasChanges(false);
-            await fetchFileContent(selectedPath);
-        } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save file");
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
+    // Load directory on expand
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
@@ -170,22 +100,37 @@ export function Files() {
             };
             const node = findNode(files);
             if (node && node.type === "directory" && !node.loaded) {
-                const children = await fetchFiles(path);
-                const updateNode = (nodes: FileNode[]): FileNode[] => {
-                    return nodes.map((n) => {
-                        if (n.path === path) return { ...n, children, loaded: true };
-                        if (n.children) return { ...n, children: updateNode(n.children) };
-                        return n;
+                // Fetch children using React Query with caching
+                try {
+                    const data = await queryClient.fetchQuery({
+                        queryKey: fileKeys.list(path),
+                        queryFn: async () => {
+                            const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+                            if (!res.ok) throw new Error("Failed to fetch directory");
+                            return res.json();
+                        },
+                        staleTime: 30_000,
                     });
-                };
-                setFiles((prev) => updateNode(prev));
+                    const children = data.files || [];
+                    const updateNode = (nodes: FileNode[]): FileNode[] => {
+                        return nodes.map((n) => {
+                            if (n.path === path) return { ...n, children, loaded: true };
+                            if (n.children) return { ...n, children: updateNode(n.children) };
+                            return n;
+                        });
+                    };
+                    setFiles((prev) => updateNode(prev));
+                } catch (err) {
+                    console.error("Failed to load directory:", err);
+                }
             }
         }
     };
 
     const handleSelect = (path: string) => {
         setSelectedPath(path);
-        fetchFileContent(path);
+        setHasChanges(false);
+        setError(null);
     };
 
     const handleContentChange = (value: string) => {
@@ -193,11 +138,23 @@ export function Files() {
         setHasChanges(value !== fileContent?.content);
     };
 
-    useEffect(() => {
-        fetchRootFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    const handleSave = async () => {
+        if (!selectedPath || !fileContent) return;
+        try {
+            await saveMutation.mutateAsync({ path: selectedPath, content: editedContent });
+            setHasChanges(false);
+            refetchContent();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to save");
+        }
+    };
 
+    const handleRefresh = () => {
+        refetchRoot();
+        if (selectedPath) refetchContent();
+    };
+
+    const isLoading = rootLoading || contentLoading;
     const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
     const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
 
@@ -205,7 +162,7 @@ export function Files() {
         <div className="flex h-full flex-col p-6">
             <div className="mb-4 flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Files</h1>
-                <Button variant="secondary" size="sm" onClick={() => fetchRootFiles()} disabled={isLoading}>
+                <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
                     <RefreshCw size={16} className={"mr-1 " + (isLoading ? "animate-spin" : "")} />
                     Refresh
                 </Button>
@@ -233,7 +190,7 @@ export function Files() {
                             </CardTitle>
                         </div>
                         <div className="overflow-auto border-b border-slate-700 p-2">
-                            {isLoading && files.length === 0 ? (
+                            {rootLoading && files.length === 0 ? (
                                 <div className="p-2 text-sm text-slate-400">Loading...</div>
                             ) : files.length === 0 ? (
                                 <div className="p-2 text-sm text-slate-400">No files found</div>
@@ -324,11 +281,11 @@ export function Files() {
                                         <Button
                                             variant="primary"
                                             size="sm"
-                                            onClick={saveFile}
-                                            disabled={isSaving || !hasChanges}
+                                            onClick={handleSave}
+                                            disabled={saveMutation.isPending || !hasChanges}
                                         >
                                             <Save size={14} className="mr-1" />
-                                            {isSaving ? "Saving..." : "Save"}
+                                            {saveMutation.isPending ? "Saving..." : "Save"}
                                         </Button>
                                     )}
                                 </div>
@@ -336,7 +293,7 @@ export function Files() {
 
                             {/* Content */}
                             <div className="flex-1 overflow-auto">
-                                {isLoading ? (
+                                {contentLoading ? (
                                     <div className="flex h-full items-center justify-center text-slate-400">
                                         Loading...
                                     </div>
