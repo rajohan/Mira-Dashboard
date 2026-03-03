@@ -1,4 +1,4 @@
-import { getPriority } from "./taskUtils";
+import { getPriority } from "../../../utils/taskUtils";
 
 import type { Task } from "../../../types/task";
 

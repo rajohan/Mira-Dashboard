@@ -1,5 +1,5 @@
 import { TaskCard } from "./TaskCard";
-import { COLUMN_CONFIG, type ColumnConfig } from "./taskUtils";
+import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
 
 import type { Task, ColumnId } from "../../../types/task";
 

@@ -12,78 +12,20 @@ import {
 import { useEffect, useRef } from "react";
 
 import { Alert } from "../components/ui/Alert";
+import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { Card, CardTitle } from "../components/ui/Card";
 import { MetricCard } from "../components/ui/MetricCard";
+import { ProgressBar } from "../components/ui/ProgressBar";
 import { useMetrics } from "../hooks/useMetrics";
 import { useOpenClaw } from "../hooks/useOpenClaw";
 import { useAuthStore } from "../stores/authStore";
-
-function formatUptime(seconds: number): string {
-    const days = Math.floor(seconds / 86_400);
-    const hours = Math.floor((seconds % 86_400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-
-    if (days > 0) return days + "d " + hours + "h";
-    if (hours > 0) return hours + "h " + mins + "m";
-    return mins + "m";
-}
-
-function formatLoad(load: number[]): string {
-    return load.map((l) => l.toFixed(2)).join(", ");
-}
-
-function getTypeBadgeColor(type: string | null | undefined): string {
-    const t = (type || "unknown").toUpperCase();
-    switch (t) {
-        case "MAIN": {
-            return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-        }
-        case "HOOK": {
-            return "bg-green-500/20 text-green-400 border-green-500/30";
-        }
-        case "CRON": {
-            return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-        }
-        case "SUBAGENT": {
-            return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-        }
-        default: {
-            return "bg-slate-500/20 text-slate-400 border-slate-500/30";
-        }
-    }
-}
-
-function formatSessionType(session: {
-    type: string | null | undefined;
-    agentType: string | null | undefined;
-}): string {
-    const type = (session.type || "unknown").toUpperCase();
-    if (type === "SUBAGENT" && session.agentType) {
-        return session.agentType.toUpperCase();
-    }
-    return type;
-}
-
-function getTypeSortOrder(type: string | null | undefined): number {
-    const t = (type || "unknown").toUpperCase();
-    switch (t) {
-        case "MAIN": {
-            return 0;
-        }
-        case "SUBAGENT": {
-            return 1;
-        }
-        case "HOOK": {
-            return 2;
-        }
-        case "CRON": {
-            return 3;
-        }
-        default: {
-            return 4;
-        }
-    }
-}
+import {
+    formatUptime,
+    formatLoad,
+    formatTokens,
+    getTokenPercent,
+} from "../utils/format";
+import { formatSessionType, getTypeSortOrder } from "../components/features/sessions";
 
 function sortSessions(sessions: any[]): any[] {
     return [...sessions].sort((a, b) => {
@@ -91,23 +33,6 @@ function sortSessions(sessions: any[]): any[] {
         if (typeOrder !== 0) return typeOrder;
         return (b.updatedAt || 0) - (a.updatedAt || 0);
     });
-}
-
-function formatTokens(current: number, max: number): string {
-    const currentK = (current / 1000).toFixed(1);
-    const maxK = (max / 1000).toFixed(0);
-    return currentK + "k / " + maxK + "k";
-}
-
-function getTokenPercent(current: number, max: number): number {
-    return Math.min(Math.round((current / max) * 100), 100);
-}
-
-function getTokenBarColor(percent: number): string {
-    if (percent < 50) return "bg-green-500";
-    if (percent < 75) return "bg-yellow-500";
-    if (percent < 90) return "bg-orange-500";
-    return "bg-red-500";
 }
 
 export function Dashboard() {
@@ -298,14 +223,9 @@ export function Dashboard() {
                                         className="flex items-center justify-between border-b border-slate-700/50 py-2 text-sm last:border-0"
                                     >
                                         <div className="flex min-w-0 flex-1 items-center gap-2">
-                                            <span
-                                                className={
-                                                    "flex-shrink-0 rounded border px-2 py-0.5 text-xs font-medium " +
-                                                    getTypeBadgeColor(session.type)
-                                                }
-                                            >
+                                            <Badge variant={getSessionTypeVariant(session.type)}>
                                                 {formatSessionType(session)}
-                                            </span>
+                                            </Badge>
                                             <span
                                                 className="truncate text-slate-300"
                                                 title={
@@ -329,15 +249,7 @@ export function Dashboard() {
                                                     session.maxTokens || 200_000
                                                 )}
                                             </span>
-                                            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-700">
-                                                <div
-                                                    className={
-                                                        "h-full " +
-                                                        getTokenBarColor(tokenPercent)
-                                                    }
-                                                    style={{ width: tokenPercent + "%" }}
-                                                />
-                                            </div>
+                                            <ProgressBar percent={tokenPercent} size="sm" className="w-12" />
                                         </div>
                                     </div>
                                 );

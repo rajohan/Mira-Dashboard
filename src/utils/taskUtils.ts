@@ -1,4 +1,4 @@
-import type { Task, ColumnId } from "../../../types/task";
+import type { Task, ColumnId } from "../types/task";
 
 export interface ColumnConfig {
     id: ColumnId;

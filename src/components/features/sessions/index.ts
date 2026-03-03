@@ -4,6 +4,5 @@ export { SessionActionsDropdown } from "./SessionActionsDropdown";
 export {
     formatSessionType,
     getTypeSortOrder,
-    getTypeBadgeColor,
     SESSION_TYPES,
-} from "./sessionUtils";
+} from "../../../utils/sessionUtils";

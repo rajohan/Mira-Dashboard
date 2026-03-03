@@ -11,23 +11,22 @@ import { ChevronDown, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useRef, useState, useMemo } from "react";
 
 import { Alert } from "../components/ui/Alert";
+import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { ProgressBar } from "../components/ui/ProgressBar";
 import {
     DeleteConfirmDialog,
     SessionDetails,
     SessionActionsDropdown,
     formatSessionType,
     getTypeSortOrder,
-    getTypeBadgeColor,
     SESSION_TYPES,
 } from "../components/features/sessions";
 import {
     formatDuration,
     formatTokens,
     getTokenPercent,
-    getTokenColor,
-    getTokenBarColor,
 } from "../utils/format";
 import { type Session } from "../hooks/useOpenClaw";
 import { useOpenClaw } from "../hooks/useOpenClaw";
@@ -124,14 +123,9 @@ export function Sessions() {
         columnHelper.accessor("type", {
             header: "Type",
             cell: (info) => (
-                <span
-                    className={
-                        "rounded border px-2 py-0.5 text-xs font-medium " +
-                        getTypeBadgeColor(info.getValue())
-                    }
-                >
+                <Badge variant={getSessionTypeVariant(info.getValue())}>
                     {formatSessionType(info.row.original)}
-                </span>
+                </Badge>
             ),
             sortingFn: (a, b) => {
                 const orderA = getTypeSortOrder(a.original.type);
@@ -167,17 +161,10 @@ export function Sessions() {
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
-                        <span className={"text-sm " + getTokenColor(percent)}>
+                        <span className="text-sm text-slate-300">
                             {formatTokens(current, max)}
                         </span>
-                        <div className="h-1 w-16 rounded-full bg-slate-700">
-                            <div
-                                className={
-                                    "h-full rounded-full " + getTokenBarColor(percent)
-                                }
-                                style={{ width: percent + "%" }}
-                            />
-                        </div>
+                        <ProgressBar percent={percent} size="sm" className="w-16" />
                     </div>
                 );
             },

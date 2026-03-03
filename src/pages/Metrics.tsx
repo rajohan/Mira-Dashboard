@@ -10,6 +10,12 @@ import {
 import { useEffect, useState } from "react";
 
 import { Card } from "../components/ui/Card";
+import { ProgressBar } from "../components/ui/ProgressBar";
+import {
+    formatUptime,
+    formatSize,
+    formatTokenCount as formatTokens,
+} from "../utils/format";
 
 interface AgentToken {
     type: string;
@@ -56,24 +62,6 @@ export function Metrics() {
         return () => clearInterval(interval);
     }, []);
 
-    const formatBytes = (bytes: number) => {
-        const gb = bytes / (1024 * 1024 * 1024);
-        return gb.toFixed(1) + " GB";
-    };
-
-    const formatUptime = (seconds: number) => {
-        const days = Math.floor(seconds / 86_400);
-        const hours = Math.floor((seconds % 86_400) / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        return days + "d " + hours + "h " + mins + "m";
-    };
-
-    const formatTokens = (tokens: number) => {
-        if (tokens >= 1_000_000) return (tokens / 1_000_000).toFixed(2) + "M";
-        if (tokens >= 1000) return (tokens / 1000).toFixed(1) + "K";
-        return tokens.toString();
-    };
-
     if (loading) {
         return (
             <div className="p-6">
@@ -114,12 +102,7 @@ export function Metrics() {
                             </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
-                        <div
-                            className="h-full bg-blue-500 transition-all"
-                            style={{ width: (metrics?.cpu.loadPercent || 0) + "%" }}
-                        />
-                    </div>
+                    <ProgressBar percent={metrics?.cpu.loadPercent || 0} color="blue" />
                     <p className="mt-2 text-xs text-slate-500">
                         {metrics?.cpu.count}x{" "}
                         {metrics?.cpu.model?.split(" ")[0] || "Unknown"}
@@ -136,15 +119,10 @@ export function Metrics() {
                             </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
-                        <div
-                            className="h-full bg-green-500 transition-all"
-                            style={{ width: (metrics?.memory.percent || 0) + "%" }}
-                        />
-                    </div>
+                    <ProgressBar percent={metrics?.memory.percent || 0} color="green" />
                     <p className="mt-2 text-xs text-slate-500">
-                        {formatBytes(metrics?.memory.used || 0)} /{" "}
-                        {formatBytes(metrics?.memory.total || 0)}
+                        {formatSize(metrics?.memory.used || 0)} /{" "}
+                        {formatSize(metrics?.memory.total || 0)}
                     </p>
                 </Card>
 
@@ -158,15 +136,10 @@ export function Metrics() {
                             </p>
                         </div>
                     </div>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
-                        <div
-                            className="h-full bg-orange-500 transition-all"
-                            style={{ width: (metrics?.disk.percent || 0) + "%" }}
-                        />
-                    </div>
+                    <ProgressBar percent={metrics?.disk.percent || 0} color="orange" />
                     <p className="mt-2 text-xs text-slate-500">
-                        {formatBytes(metrics?.disk.used || 0)} /{" "}
-                        {formatBytes(metrics?.disk.total || 0)}
+                        {formatSize(metrics?.disk.used || 0)} /{" "}
+                        {formatSize(metrics?.disk.total || 0)}
                     </p>
                 </Card>
 
@@ -219,12 +192,7 @@ export function Metrics() {
                                                     {formatTokens(count)}
                                                 </span>
                                             </div>
-                                            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
-                                                <div
-                                                    className="h-full rounded-full bg-blue-500"
-                                                    style={{ width: percent + "%" }}
-                                                />
-                                            </div>
+                                            <ProgressBar percent={percent} color="blue" />
                                         </div>
                                     );
                                 })}
@@ -256,12 +224,7 @@ export function Metrics() {
                                             <span className="w-16 text-right text-sm text-slate-400">
                                                 {formatTokens(agent.tokens)}
                                             </span>
-                                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-700">
-                                                <div
-                                                    className="h-full rounded-full bg-purple-500"
-                                                    style={{ width: percent + "%" }}
-                                                />
-                                            </div>
+                                            <ProgressBar percent={percent} color="purple" size="sm" className="w-20" />
                                         </div>
                                     );
                                 })}

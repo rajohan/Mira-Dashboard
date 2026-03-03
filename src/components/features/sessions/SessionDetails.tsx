@@ -3,17 +3,16 @@ import { enUS } from "date-fns/locale";
 import { Clock, Cpu, Hash, MessageSquare, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 
+import { Badge, getSessionTypeVariant } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
+import { ProgressBar } from "../../../components/ui/ProgressBar";
 import { useSessionHistory } from "../../../hooks/useSessions";
 import {
     formatDuration,
     formatTokens,
     getTokenPercent,
-    getTokenColor,
-    getTokenBarColor,
 } from "../../../utils/format";
-import { getTypeBadgeColor } from "./sessionUtils";
 import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 import type { Session } from "../../../hooks/useOpenClaw";
@@ -62,14 +61,9 @@ export function SessionDetails({
                 {/* Header */}
                 <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 pb-4">
                     <div className="flex min-w-0 items-center gap-3">
-                        <span
-                            className={
-                                "flex-shrink-0 rounded border px-2 py-0.5 text-xs font-medium " +
-                                getTypeBadgeColor(session.type)
-                            }
-                        >
+                        <Badge variant={getSessionTypeVariant(session.type)}>
                             {formatSessionType(session)}
-                        </span>
+                        </Badge>
                         <h2 className="truncate text-lg font-semibold text-slate-100">
                             {displayName}
                         </h2>
@@ -107,23 +101,10 @@ export function SessionDetails({
                         <div className="min-w-0 flex-1">
                             <span className="block text-xs text-slate-400">Tokens</span>
                             <div className="flex items-center gap-2">
-                                <p
-                                    className={
-                                        "text-sm font-medium " +
-                                        getTokenColor(tokenPercent)
-                                    }
-                                >
+                                <p className="text-sm font-medium text-slate-200">
                                     {formatTokens(sessionTokens, sessionMaxTokens)}
                                 </p>
-                                <div className="h-1.5 max-w-[100px] flex-1 rounded-full bg-slate-700">
-                                    <div
-                                        className={
-                                            "h-full rounded-full transition-all " +
-                                            getTokenBarColor(tokenPercent)
-                                        }
-                                        style={{ width: tokenPercent + "%" }}
-                                    />
-                                </div>
+                                <ProgressBar percent={tokenPercent} size="sm" className="max-w-[100px] flex-1" />
                             </div>
                         </div>
                     </div>

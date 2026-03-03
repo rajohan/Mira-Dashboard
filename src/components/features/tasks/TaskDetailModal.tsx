@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { Button } from "../../ui/Button";
 import { Modal } from "../../ui/Modal";
-import { getColumnId, getPriority } from "./taskUtils";
+import { getColumnId, getPriority } from "../../../utils/taskUtils";
 
 import type { Task, ColumnId } from "../../../types/task";
 

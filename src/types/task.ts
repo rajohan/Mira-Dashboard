@@ -11,9 +11,3 @@ export interface Task {
 }
 
 export type ColumnId = "todo" | "in-progress" | "blocked" | "done";
-
-export interface ColumnConfig {
-    title: string;
-    dotColor: string;
-    filter: (t: Task) => boolean;
-}

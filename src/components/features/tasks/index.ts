@@ -3,4 +3,4 @@ export { TaskColumn } from "./TaskColumn";
 export { TaskDetailModal } from "./TaskDetailModal";
 export { TaskOverlay } from "./TaskOverlay";
 export { NewTaskModal } from "./NewTaskModal";
-export { COLUMN_CONFIG, getPriority, getColumnId } from "./taskUtils";
+export { COLUMN_CONFIG, getPriority, getColumnId } from "../../../utils/taskUtils";
