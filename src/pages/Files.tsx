@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkFrontmatter from "remark-frontmatter";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
@@ -1083,7 +1085,12 @@ export function Files() {
                                         ) : isMarkdownFile(fileContent.path) &&
                                           markdownPreview ? (
                                             <div className="prose prose-invert max-w-none p-6 prose-headings:mb-4 prose-headings:mt-6 prose-p:my-4 prose-blockquote:my-4 prose-pre:my-4 prose-ol:my-4 prose-ul:my-4 prose-li:my-1 prose-table:my-4 prose-hr:my-6">
-                                                <ReactMarkdown>
+                                                <ReactMarkdown
+                                                    remarkPlugins={[
+                                                        remarkGfm,
+                                                        remarkFrontmatter,
+                                                    ]}
+                                                >
                                                     {editedContent}
                                                 </ReactMarkdown>
                                             </div>
