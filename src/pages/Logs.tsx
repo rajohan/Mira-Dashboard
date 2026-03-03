@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
 import { RefreshCw, Terminal, Wifi, WifiOff, Download } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -55,31 +55,28 @@ export function Logs() {
         fetchLogFiles();
     }, []);
 
-    const loadLogContent = useCallback(
-        async (file: string, lines: number) => {
-            setIsLoading(true);
-            try {
-                const response = await fetch(
-                    `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
-                );
-                const data = await response.json();
-                if (data.content) {
-                    const logLines = data.content
-                        .split("\n")
-                        .filter((l: string) => l.trim());
-                    const parsedLogs = logLines
-                        .map((line: string) => parseLogLine(line))
-                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                    setLogs(parsedLogs);
-                }
-            } catch (error) {
-                console.error("Failed to load log content:", error);
-            } finally {
-                setIsLoading(false);
+    const loadLogContent = async (file: string, lines: number) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(
+                `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
+            );
+            const data = await response.json();
+            if (data.content) {
+                const logLines = data.content
+                    .split("\n")
+                    .filter((l: string) => l.trim());
+                const parsedLogs = logLines
+                    .map((line: string) => parseLogLine(line))
+                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                setLogs(parsedLogs);
             }
-        },
-        []
-    );
+        } catch (error) {
+            console.error("Failed to load log content:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleFileSelect = (file: string) => {
         setSelectedFile(file);
@@ -107,7 +104,7 @@ export function Logs() {
         if (selectedFile && logFiles.length > 0) {
             loadLogContent(selectedFile, lineCount);
         }
-    }, [selectedFile]);
+    }, [selectedFile, logFiles.length]);
 
     useEffect(() => {
         const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
@@ -178,14 +175,12 @@ export function Logs() {
         };
     }, []);
 
-    const filteredLogs = useMemo(() => {
-        return logs.filter((log) => {
-            if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
-            if (search && !log.raw.toLowerCase().includes(search.toLowerCase()))
-                return false;
-            return true;
-        });
-    }, [logs, levelFilter, search]);
+    const filteredLogs = logs.filter((log) => {
+        if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
+        if (search && !log.raw.toLowerCase().includes(search.toLowerCase()))
+            return false;
+        return true;
+    });
 
     const toggleLevel = (level: string) => {
         const newFilter = new Set(levelFilter);
@@ -239,7 +234,7 @@ export function Logs() {
         overscan: 15,
     });
 
-    const handleScroll = useCallback(() => {
+    const handleScroll = () => {
         if (!logContainerRef.current || isAutoScrollingRef.current) return;
 
         const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
@@ -250,7 +245,7 @@ export function Logs() {
         } else if (!isAtBottom && autoFollow) {
             setAutoFollow(false);
         }
-    }, [autoFollow]);
+    };
 
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
@@ -272,7 +267,7 @@ export function Logs() {
                 }, 150);
             });
         }
-    }, [filteredLogs.length, autoFollow, rowVirtualizer]);
+    }, [filteredLogs.length, autoFollow]);
 
     useEffect(() => {
         if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {

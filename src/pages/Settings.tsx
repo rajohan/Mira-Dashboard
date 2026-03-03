@@ -6,7 +6,7 @@ import {
     RefreshCw,
     Server,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
@@ -64,7 +64,7 @@ export function Settings() {
         }
     }
 
-    const handleRestart = useCallback(async () => {
+    async function handleRestart() {
         setRestarting(true);
         try {
             const res = await fetch("/api/restart", { method: "POST" });
@@ -81,9 +81,9 @@ export function Settings() {
         } finally {
             setRestarting(false);
         }
-    }, []);
+    }
 
-    const handleBackup = useCallback(async () => {
+    async function handleBackup() {
         setBackingUp(true);
         try {
             const res = await fetch("/api/backup", { method: "POST" });
@@ -105,35 +105,32 @@ export function Settings() {
         } finally {
             setBackingUp(false);
         }
-    }, []);
+    }
 
-    const handleSkillToggle = useCallback(
-        async (skillName: string, enabled: boolean) => {
-            try {
-                const res = await fetch("/api/skills/" + skillName, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ enabled }),
-                });
-                if (res.ok) {
-                    setSkills((prev) =>
-                        prev.map((s) =>
-                            s.name === skillName ? { ...s, enabled } : s
-                        )
-                    );
-                } else {
-                    setError("Failed to update skill");
-                }
-            } catch (error_: unknown) {
-                const errorMessage =
-                    error_ instanceof Error ? error_.message : "Failed to update skill";
-                setError(errorMessage);
+    async function handleSkillToggle(skillName: string, enabled: boolean) {
+        try {
+            const res = await fetch("/api/skills/" + skillName, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled }),
+            });
+            if (res.ok) {
+                setSkills((prev) =>
+                    prev.map((s) =>
+                        s.name === skillName ? { ...s, enabled } : s
+                    )
+                );
+            } else {
+                setError("Failed to update skill");
             }
-        },
-        []
-    );
+        } catch (error_: unknown) {
+            const errorMessage =
+                error_ instanceof Error ? error_.message : "Failed to update skill";
+            setError(errorMessage);
+        }
+    }
 
-    const handleSessionSave = useCallback(async (idleMinutes: number) => {
+    async function handleSessionSave(idleMinutes: number) {
         setSaving(true);
         setError(null);
         try {
@@ -156,9 +153,9 @@ export function Settings() {
         } finally {
             setSaving(false);
         }
-    }, []);
+    }
 
-    const handleHeartbeatSave = useCallback(async (every: number, target: string) => {
+    async function handleHeartbeatSave(every: number, target: string) {
         setSaving(true);
         setError(null);
         try {
@@ -181,7 +178,7 @@ export function Settings() {
         } finally {
             setSaving(false);
         }
-    }, []);
+    }
 
     if (loading) {
         return (

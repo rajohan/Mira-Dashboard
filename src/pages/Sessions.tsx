@@ -19,7 +19,7 @@ import {
     Wifi,
     WifiOff,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -125,181 +125,174 @@ export function Sessions() {
         }
     };
 
-    const sortedSessions = useMemo(() => {
-        if (!sessions) return [];
-        return [...sessions].sort((a, b) => {
-            const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
-            if (typeOrder !== 0) return typeOrder;
-            return (b.updatedAt || 0) - (a.updatedAt || 0);
-        });
-    }, [sessions]);
+    const sortedSessions = !sessions ? [] : [...sessions].sort((a, b) => {
+        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
+        if (typeOrder !== 0) return typeOrder;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
 
-    const filteredSessions = useMemo(() => {
-        if (typeFilter === "ALL") return sortedSessions;
-        return sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
-    }, [sortedSessions, typeFilter]);
+    const filteredSessions = typeFilter === "ALL"
+        ? sortedSessions
+        : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
 
-    const columns = useMemo(
-        () => [
-            columnHelper.accessor("type", {
-                header: "Type",
-                cell: (info) => (
-                    <span
-                        className={
-                            "rounded border px-2 py-0.5 text-xs font-medium " +
-                            getTypeBadgeColor(info.getValue())
-                        }
-                    >
-                        {formatSessionType(info.row.original)}
-                    </span>
-                ),
-                sortingFn: (a, b) => {
-                    const orderA = getTypeSortOrder(a.original.type);
-                    const orderB = getTypeSortOrder(b.original.type);
-                    return orderA - orderB;
-                },
-            }),
-            columnHelper.accessor(
-                (row) => row.displayLabel || row.label || row.displayName || row.id,
-                {
-                    id: "name",
-                    header: "Name",
-                    cell: (info) => (
-                        <span className="block max-w-xs truncate text-sm text-slate-200">
-                            {info.getValue()?.slice(0, 40) || "unknown"}
-                        </span>
-                    ),
-                }
+    const columns = [
+        columnHelper.accessor("type", {
+            header: "Type",
+            cell: (info) => (
+                <span
+                    className={
+                        "rounded border px-2 py-0.5 text-xs font-medium " +
+                        getTypeBadgeColor(info.getValue())
+                    }
+                >
+                    {formatSessionType(info.row.original)}
+                </span>
             ),
-            columnHelper.accessor("model", {
-                header: "Model",
+            sortingFn: (a, b) => {
+                const orderA = getTypeSortOrder(a.original.type);
+                const orderB = getTypeSortOrder(b.original.type);
+                return orderA - orderB;
+            },
+        }),
+        columnHelper.accessor(
+            (row) => row.displayLabel || row.label || row.displayName || row.id,
+            {
+                id: "name",
+                header: "Name",
                 cell: (info) => (
-                    <span className="text-sm text-slate-300">
-                        {info.getValue() || "Unknown"}
+                    <span className="block max-w-xs truncate text-sm text-slate-200">
+                        {info.getValue()?.slice(0, 40) || "unknown"}
                     </span>
                 ),
-            }),
-            columnHelper.accessor("tokenCount", {
-                header: "Tokens",
-                cell: (info) => {
-                    const current = info.getValue() || 0;
-                    const max = info.row.original.maxTokens || 200_000;
-                    const percent = getTokenPercent(current, max);
-                    return (
-                        <div className="flex items-center gap-2">
-                            <span className={"text-sm " + getTokenColor(percent)}>
-                                {formatTokens(current, max)}
-                            </span>
-                            <div className="h-1 w-16 rounded-full bg-slate-700">
-                                <div
-                                    className={
-                                        "h-full rounded-full " + getTokenBarColor(percent)
-                                    }
-                                    style={{ width: percent + "%" }}
-                                />
-                            </div>
+            }
+        ),
+        columnHelper.accessor("model", {
+            header: "Model",
+            cell: (info) => (
+                <span className="text-sm text-slate-300">
+                    {info.getValue() || "Unknown"}
+                </span>
+            ),
+        }),
+        columnHelper.accessor("tokenCount", {
+            header: "Tokens",
+            cell: (info) => {
+                const current = info.getValue() || 0;
+                const max = info.row.original.maxTokens || 200_000;
+                const percent = getTokenPercent(current, max);
+                return (
+                    <div className="flex items-center gap-2">
+                        <span className={"text-sm " + getTokenColor(percent)}>
+                            {formatTokens(current, max)}
+                        </span>
+                        <div className="h-1 w-16 rounded-full bg-slate-700">
+                            <div
+                                className={
+                                    "h-full rounded-full " + getTokenBarColor(percent)
+                                }
+                                style={{ width: percent + "%" }}
+                            />
                         </div>
-                    );
-                },
-            }),
-            columnHelper.accessor("updatedAt", {
-                header: "Last Active",
-                cell: (info) => (
-                    <span className="text-sm text-slate-400">
-                        {formatDuration(info.getValue())}
-                    </span>
-                ),
-            }),
-            columnHelper.display({
-                id: "actions",
-                header: "",
-                cell: ({ row }) => (
-                    <div
-                        className="flex justify-end"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <Menu>
-                            {({ open }) => (
-                                <>
-                                    <MenuButton
-                                        as={Button}
-                                        variant="ghost"
-                                        size="sm"
-                                        className={
-                                            "flex items-center gap-1 border-0 text-slate-300 outline-none " +
-                                            (open ? "bg-slate-700" : "")
-                                        }
-                                    >
-                                        <MoreVertical className="h-4 w-4" />
-                                        <ChevronDown
-                                            className={
-                                                "h-3 w-3 transition-transform " +
-                                                (open ? "rotate-180" : "")
-                                            }
-                                        />
-                                    </MenuButton>
-                                    <MenuItems
-                                        anchor="bottom end"
-                                        className="z-50 mt-1 min-w-[120px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
-                                    >
-                                        <MenuItem>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleStop(row.original.key);
-                                                }}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Square className="h-4 w-4 text-slate-400" />{" "}
-                                                Stop
-                                            </button>
-                                        </MenuItem>
-                                        <MenuItem>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCompact(row.original.key);
-                                                }}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Database className="h-4 w-4 text-slate-400" />{" "}
-                                                Compact
-                                            </button>
-                                        </MenuItem>
-                                        <MenuItem>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleReset(row.original.key);
-                                                }}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
-                                                Reset
-                                            </button>
-                                        </MenuItem>
-                                        <div className="border-t border-slate-700" />
-                                        <MenuItem>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setDeleteTarget(row.original);
-                                                }}
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
-                                            >
-                                                <Trash2 className="h-4 w-4" /> Delete
-                                            </button>
-                                        </MenuItem>
-                                    </MenuItems>
-                                </>
-                            )}
-                        </Menu>
                     </div>
-                ),
-            }),
-        ],
-        []
-    );
+                );
+            },
+        }),
+        columnHelper.accessor("updatedAt", {
+            header: "Last Active",
+            cell: (info) => (
+                <span className="text-sm text-slate-400">
+                    {formatDuration(info.getValue())}
+                </span>
+            ),
+        }),
+        columnHelper.display({
+            id: "actions",
+            header: "",
+            cell: ({ row }) => (
+                <div
+                    className="flex justify-end"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <Menu>
+                        {({ open }) => (
+                            <>
+                                <MenuButton
+                                    as={Button}
+                                    variant="ghost"
+                                    size="sm"
+                                    className={
+                                        "flex items-center gap-1 border-0 text-slate-300 outline-none " +
+                                        (open ? "bg-slate-700" : "")
+                                    }
+                                >
+                                    <MoreVertical className="h-4 w-4" />
+                                    <ChevronDown
+                                        className={
+                                            "h-3 w-3 transition-transform " +
+                                            (open ? "rotate-180" : "")
+                                        }
+                                    />
+                                </MenuButton>
+                                <MenuItems
+                                    anchor="bottom end"
+                                    className="z-50 mt-1 min-w-[120px] rounded border border-slate-700 bg-slate-800 shadow-lg outline-none focus:outline-none"
+                                >
+                                    <MenuItem>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleStop(row.original.key);
+                                            }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                        >
+                                            <Square className="h-4 w-4 text-slate-400" />{" "}
+                                            Stop
+                                        </button>
+                                    </MenuItem>
+                                    <MenuItem>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleCompact(row.original.key);
+                                            }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                        >
+                                            <Database className="h-4 w-4 text-slate-400" />{" "}
+                                            Compact
+                                        </button>
+                                    </MenuItem>
+                                    <MenuItem>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleReset(row.original.key);
+                                            }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 focus:outline-none"
+                                        >
+                                            <RotateCcw className="h-4 w-4 text-slate-400" />{" "}
+                                            Reset
+                                        </button>
+                                    </MenuItem>
+                                    <div className="border-t border-slate-700" />
+                                    <MenuItem>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDeleteTarget(row.original);
+                                            }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700 focus:outline-none"
+                                        >
+                                            <Trash2 className="h-4 w-4" /> Delete
+                                        </button>
+                                    </MenuItem>
+                                </MenuItems>
+                            </>
+                        )}
+                    </Menu>
+                </div>
+            ),
+        }),
+    ];
 
     const table = useReactTable({
         data: filteredSessions,

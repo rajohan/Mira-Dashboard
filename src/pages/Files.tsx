@@ -9,7 +9,7 @@ import {
     Settings,
     X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -54,75 +54,69 @@ export function Files() {
 
     const apiBase = "/api/files";
 
-    const fetchFiles = useCallback(
-        async (dirPath?: string) => {
-            setIsLoading(true);
-            setError(null);
-            try {
-                const url = dirPath ? apiBase + "?path=" + encodeURIComponent(dirPath) : apiBase;
-                const res = await fetch(url, {
-                    headers: { Authorization: "Bearer " + token },
-                });
-                if (!res.ok) throw new Error("Failed to fetch files");
-                const data = await res.json();
-                return data.files || [];
-            } catch (error_) {
-                setError(error_ instanceof Error ? error_.message : "Failed to fetch files");
-                return [];
-            } finally {
-                setIsLoading(false);
-            }
-        },
-        [token]
-    );
+    async function fetchFiles(dirPath?: string) {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const url = dirPath ? apiBase + "?path=" + encodeURIComponent(dirPath) : apiBase;
+            const res = await fetch(url, {
+                headers: { Authorization: "Bearer " + token },
+            });
+            if (!res.ok) throw new Error("Failed to fetch files");
+            const data = await res.json();
+            return data.files || [];
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to fetch files");
+            return [];
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
-    const fetchRootFiles = useCallback(async () => {
+    async function fetchRootFiles() {
         const rootFiles = await fetchFiles();
         setFiles(rootFiles);
-    }, [fetchFiles]);
+    }
 
-    const fetchFileContent = useCallback(
-        async (path: string) => {
-            setIsLoading(true);
-            setError(null);
-            setLargeFileWarning(false);
-            try {
-                const isConfig = path.startsWith("config:");
-                const apiUrl = isConfig
-                    ? "/api/config-files/" + encodeURIComponent(path.replace("config:", ""))
-                    : apiBase + "/" + encodeURIComponent(path);
+    async function fetchFileContent(path: string) {
+        setIsLoading(true);
+        setError(null);
+        setLargeFileWarning(false);
+        try {
+            const isConfig = path.startsWith("config:");
+            const apiUrl = isConfig
+                ? "/api/config-files/" + encodeURIComponent(path.replace("config:", ""))
+                : apiBase + "/" + encodeURIComponent(path);
 
-                const res = await fetch(apiUrl, {
-                    headers: { Authorization: "Bearer " + token },
-                });
+            const res = await fetch(apiUrl, {
+                headers: { Authorization: "Bearer " + token },
+            });
 
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error || "Failed to fetch file");
-                }
-
-                const data = await res.json();
-                setFileContent(data);
-                setEditedContent(data.content || "");
-                setHasChanges(false);
-
-                if (data.size > MAX_PREVIEW_SIZE) {
-                    setLargeFileWarning(true);
-                }
-
-                // Reset preview modes
-                setMarkdownPreview(true);
-                setJsonPreview(true);
-                setCodeEditMode(false);
-            } catch (error_) {
-                setError(error_ instanceof Error ? error_.message : "Failed to fetch file");
-                setFileContent(null);
-            } finally {
-                setIsLoading(false);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || "Failed to fetch file");
             }
-        },
-        [token]
-    );
+
+            const data = await res.json();
+            setFileContent(data);
+            setEditedContent(data.content || "");
+            setHasChanges(false);
+
+            if (data.size > MAX_PREVIEW_SIZE) {
+                setLargeFileWarning(true);
+            }
+
+            // Reset preview modes
+            setMarkdownPreview(true);
+            setJsonPreview(true);
+            setCodeEditMode(false);
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to fetch file");
+            setFileContent(null);
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
     const saveFile = async () => {
         if (!selectedPath || !fileContent) return;
@@ -201,7 +195,8 @@ export function Files() {
 
     useEffect(() => {
         fetchRootFiles();
-    }, [fetchRootFiles]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
     const syntaxClass = fileContent ? getSyntaxClass(fileContent.path.split("/").pop() || "") : "";
