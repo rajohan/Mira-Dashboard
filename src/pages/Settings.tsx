@@ -1,13 +1,7 @@
-import {
-    AlertCircle,
-    Check,
-    Download,
-    Loader2,
-    RefreshCw,
-    Server,
-} from "lucide-react";
+import { Download, Loader2, RefreshCw, Server } from "lucide-react";
 import { useState } from "react";
 
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import {
@@ -175,21 +169,15 @@ export function Settings() {
             </div>
 
             {error && (
-                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
-                    <AlertCircle size={16} />
+                <Alert variant="error">
                     {error}
-                    <Button variant="ghost" size="sm" className="ml-auto text-red-300 hover:text-red-100" onClick={() => setError(null)}>
+                    <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setError(null)}>
                         ×
                     </Button>
-                </div>
+                </Alert>
             )}
 
-            {success && (
-                <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-500 bg-green-500/20 p-3 text-green-400">
-                    <Check size={16} />
-                    {success}
-                </div>
-            )}
+            {success && <Alert variant="success">{success}</Alert>}
 
             <ModelSection
                 defaultModel={modelInfo.defaultModel}

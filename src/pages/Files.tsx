@@ -1,16 +1,9 @@
 import { format } from "date-fns";
 import { enUS } from "date-fns/locale";
-import {
-    AlertTriangle,
-    File,
-    Folder,
-    RefreshCw,
-    Save,
-    Settings,
-    X,
-} from "lucide-react";
+import { File, Folder, RefreshCw, Save, Settings, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import {
@@ -170,13 +163,12 @@ export function Files() {
             </div>
 
             {error && (
-                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
-                    <AlertTriangle size={16} />
+                <Alert variant="error">
                     {error}
-                    <Button variant="ghost" size="sm" className="ml-auto text-red-300 hover:text-red-100" onClick={() => setError(null)}>
+                    <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setError(null)}>
                         <X size={16} />
                     </Button>
-                </div>
+                </Alert>
             )}
 
             <div className="flex min-h-0 flex-1 gap-4">

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+import { Alert } from "../components/ui/Alert";
 import { Card, CardTitle } from "../components/ui/Card";
 import { MetricCard } from "../components/ui/MetricCard";
 import { useMetrics } from "../hooks/useMetrics";
@@ -141,11 +142,7 @@ export function Dashboard() {
                 </div>
             </div>
 
-            {error && (
-                <div className="mb-4 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
-                    {error}
-                </div>
-            )}
+            {error && <Alert variant="error">{error}</Alert>}
 
             {/* Status cards */}
             <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">

@@ -10,6 +10,7 @@ import {
 import { ChevronDown, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useRef, useState, useMemo } from "react";
 
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import {
@@ -261,11 +262,7 @@ export function Sessions() {
                 ))}
             </div>
 
-            {error && (
-                <div className="mb-4 rounded-lg border border-red-500 bg-red-500/20 p-3 text-red-400">
-                    {error}
-                </div>
-            )}
+            {error && <Alert variant="error">{error}</Alert>}
 
             {!isConnected && !error && (
                 <Card className="py-8 text-center">
