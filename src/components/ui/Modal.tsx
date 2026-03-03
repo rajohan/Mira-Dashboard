@@ -1,9 +1,8 @@
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import { X } from "lucide-react";
 import { type ReactNode } from "react";
-import { createPortal } from "react-dom";
 
-import { useModalRoot } from "../../hooks/useModalRoot";
+import { Button } from "./Button";
 import { cn } from "../../utils/cn";
 
 interface ModalProps {
@@ -30,16 +29,8 @@ export function Modal({
     children,
     size = "md",
 }: ModalProps) {
-    const modalRoot = useModalRoot(isOpen);
-
-    if (!isOpen || !modalRoot) return null;
-
-    return createPortal(
-        <Dialog
-            open={isOpen}
-            onClose={onClose}
-            className="relative z-50"
-        >
+    return (
+        <Dialog open={isOpen} onClose={onClose} className="relative z-50">
             {/* Backdrop */}
             <div className="fixed inset-0 bg-black/50" aria-hidden="true" />
 
@@ -58,19 +49,14 @@ export function Modal({
                             <DialogTitle className="text-lg font-semibold text-slate-100">
                                 {title}
                             </DialogTitle>
-                            <button
-                                onClick={onClose}
-                                className="text-slate-400 transition-colors hover:text-slate-200"
-                                aria-label="Close modal"
-                            >
+                            <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
                                 <X size={20} />
-                            </button>
+                            </Button>
                         </div>
                     )}
                     <div className="flex-1 overflow-y-auto p-4">{children}</div>
                 </DialogPanel>
             </div>
-        </Dialog>,
-        modalRoot
+        </Dialog>
     );
 }
