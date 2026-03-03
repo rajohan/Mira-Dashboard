@@ -12,8 +12,4 @@ export interface LogFile {
     modified: string;
 }
 
-export const LINE_OPTIONS = [100, 500, 1000, 2000, 5000] as const;
-
-export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
-
-export type LogLevel = typeof LOG_LEVELS[number];
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";

@@ -12,8 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { parseLogLine, formatLogTime, formatFileSize, getLevelColor, getSubsystemColor } from "../utils/logUtils";
-import { type LogEntry, type LogFile, LINE_OPTIONS, LOG_LEVELS } from "../types/log";
+import { parseLogLine, formatLogTime, formatFileSize, getLevelColor, getSubsystemColor, LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
+import { type LogEntry, type LogFile } from "../types/log";
 import { useAuthStore } from "../stores/authStore";
 
 export function Logs() {
