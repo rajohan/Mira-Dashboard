@@ -1,26 +1,53 @@
-// Files API routes
-const fs = require("fs");
-const path = require("path");
+import express, { type RequestHandler } from "express";
+import fs from "fs";
+import path from "path";
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
-function isBinaryFile(content) {
+interface FileItem {
+    name: string;
+    type: "file" | "directory";
+    path: string;
+    size?: number;
+    modified?: string;
+    error?: boolean;
+}
+
+interface FileResponse {
+    path: string;
+    content: string;
+    size: number;
+    modified: string;
+    isBinary: boolean;
+    isImage?: boolean;
+    mimeType?: string;
+    truncated?: boolean;
+}
+
+interface WriteResponse {
+    success: boolean;
+    path: string;
+    size: number;
+    modified: string;
+}
+
+function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
-        if (content.charCodeAt(i) === 0) return true;
+        if (content.codePointAt(i) === 0) return true;
     }
     return false;
 }
 
-function isImageFile(filename) {
+function isImageFile(filename: string): boolean {
     const ext = filename.split(".").pop()?.toLowerCase();
     const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
     return imageExts.includes(ext || "");
 }
 
-function getImageMimeType(filename) {
+function getImageMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
-    const mimeTypes = {
+    const mimeTypes: Record<string, string> = {
         png: "image/png",
         jpg: "image/jpeg",
         jpeg: "image/jpeg",
@@ -33,12 +60,12 @@ function getImageMimeType(filename) {
     return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
-function shouldHideFile(name) {
+function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-function listDirectory(dirPath) {
-    const items = [];
+function listDirectory(dirPath: string): FileItem[] {
+    const items: FileItem[] = [];
     const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
 
     try {
@@ -74,8 +101,8 @@ function listDirectory(dirPath) {
                 }
             }
         }
-    } catch (e) {
-        console.error("[Files] Error listing directory:", e.message);
+    } catch (error) {
+        console.error("[Files] Error listing directory:", (error as Error).message);
     }
 
     return items.sort((a, b) => {
@@ -84,40 +111,44 @@ function listDirectory(dirPath) {
     });
 }
 
-module.exports = function (app, express) {
+export default function filesRoutes(
+    app: express.Application,
+    _express: typeof express
+): void {
     // List files
-    app.get("/api/files", (req, res) => {
+    app.get("/api/files", (async (req, res) => {
         try {
-            const dirPath = req.query.path || "";
+            const dirPath = (req.query.path as string) || "";
             const files = listDirectory(dirPath);
             res.json({ files, root: WORKSPACE_ROOT });
-        } catch (e) {
-            console.error("[Backend] Files list error:", e.message);
-            res.status(500).json({ error: e.message });
+        } catch (error) {
+            console.error("[Backend] Files list error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
+    }) as RequestHandler);
 
     // Read file content
-    app.get("/api/files/*", (req, res) => {
+    app.get("/api/files/*", (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
 
         try {
             const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
 
             if (!fullPath.startsWith(WORKSPACE_ROOT)) {
-                return res
-                    .status(403)
-                    .json({ error: "Access denied: path outside workspace" });
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
             }
 
             if (!fs.existsSync(fullPath)) {
-                return res.status(404).json({ error: "File not found" });
+                res.status(404).json({ error: "File not found" });
+                return;
             }
 
             const stat = fs.statSync(fullPath);
 
             if (stat.isDirectory()) {
-                return res.status(400).json({ error: "Path is a directory, not a file" });
+                res.status(400).json({ error: "Path is a directory, not a file" });
+                return;
             }
 
             const filename = path.basename(filePath);
@@ -128,7 +159,7 @@ module.exports = function (app, express) {
                 const base64 = buffer.toString("base64");
                 const mimeType = getImageMimeType(filename);
 
-                return res.json({
+                res.json({
                     path: filePath,
                     content: base64,
                     mimeType: mimeType,
@@ -136,7 +167,8 @@ module.exports = function (app, express) {
                     modified: stat.mtime.toISOString(),
                     isImage: true,
                     isBinary: true,
-                });
+                } satisfies FileResponse);
+                return;
             }
 
             if (stat.size > MAX_FILE_SIZE) {
@@ -145,20 +177,21 @@ module.exports = function (app, express) {
                 const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
                 fs.closeSync(fd);
 
-                const content = buffer.toString("utf-8", 0, bytesRead);
+                const content = buffer.toString("utf8", 0, bytesRead);
                 const isBinary = isBinaryFile(content);
 
-                return res.json({
+                res.json({
                     path: filePath,
                     content: isBinary ? "[Binary file]" : content,
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
                     truncated: true,
-                });
+                } satisfies FileResponse);
+                return;
             }
 
-            const content = fs.readFileSync(fullPath, "utf-8");
+            const content = fs.readFileSync(fullPath, "utf8");
             const isBinary = isBinaryFile(content);
 
             res.json({
@@ -167,29 +200,29 @@ module.exports = function (app, express) {
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
                 isBinary: isBinary,
-            });
-        } catch (e) {
-            console.error("[Backend] File read error:", e.message);
-            res.status(500).json({ error: e.message });
+            } satisfies FileResponse);
+        } catch (error) {
+            console.error("[Backend] File read error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
+    }) as RequestHandler);
 
     // Write file
-    app.put("/api/files/*", express.json(), (req, res) => {
+    app.put("/api/files/*", express.json(), (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
-        const { content } = req.body;
+        const { content } = req.body as { content?: string };
 
         if (content === undefined) {
-            return res.status(400).json({ error: "Content required" });
+            res.status(400).json({ error: "Content required" });
+            return;
         }
 
         try {
             const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
 
             if (!fullPath.startsWith(WORKSPACE_ROOT)) {
-                return res
-                    .status(403)
-                    .json({ error: "Access denied: path outside workspace" });
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
             }
 
             if (fs.existsSync(fullPath)) {
@@ -202,7 +235,7 @@ module.exports = function (app, express) {
                 }
             }
 
-            fs.writeFileSync(fullPath, content, "utf-8");
+            fs.writeFileSync(fullPath, content, "utf8");
             const stat = fs.statSync(fullPath);
 
             res.json({
@@ -210,10 +243,10 @@ module.exports = function (app, express) {
                 path: filePath,
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
-            });
-        } catch (e) {
-            console.error("[Backend] File write error:", e.message);
-            res.status(500).json({ error: e.message });
+            } satisfies WriteResponse);
+        } catch (error) {
+            console.error("[Backend] File write error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
-};
+    }) as RequestHandler);
+}

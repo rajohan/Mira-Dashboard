@@ -1,9 +1,9 @@
-// Moltbook API routes
-const https = require("https");
+import express, { type RequestHandler } from "express";
+import https from "https";
 
 const MOLTBOOK_API = "https://www.moltbook.com/api/v1";
 
-function moltbookGet(endpoint, res) {
+function moltbookGet(endpoint: string, res: express.Response): void {
     https
         .get(
             MOLTBOOK_API + endpoint,
@@ -25,20 +25,20 @@ function moltbookGet(endpoint, res) {
         .on("error", (e) => res.status(500).json({ error: e.message }));
 }
 
-module.exports = function (app) {
-    app.get("/api/moltbook/home", async (req, res) => moltbookGet("/home", res));
+export default function moltbookRoutes(app: express.Application): void {
+    app.get("/api/moltbook/home", (async (_req, res) =>
+        moltbookGet("/home", res)) as RequestHandler);
 
-    app.get("/api/moltbook/feed", async (req, res) => {
-        const sort = req.query.sort || "hot";
-        const limit = req.query.limit || 25;
+    app.get("/api/moltbook/feed", (async (req, res) => {
+        const sort = (req.query.sort as string) || "hot";
+        const limit = (req.query.limit as string) || "25";
         moltbookGet("/feed?sort=" + sort + "&limit=" + limit, res);
-    });
+    }) as RequestHandler);
 
-    app.get("/api/moltbook/profile", async (req, res) =>
-        moltbookGet("/agents/profile?name=mira_2026", res)
-    );
+    app.get("/api/moltbook/profile", (async (_req, res) =>
+        moltbookGet("/agents/profile?name=mira_2026", res)) as RequestHandler);
 
-    app.get("/api/moltbook/my-posts", async (req, res) => {
+    app.get("/api/moltbook/my-posts", (async (_req, res) => {
         https
             .get(
                 MOLTBOOK_API + "/agents/profile?name=mira_2026",
@@ -62,5 +62,5 @@ module.exports = function (app) {
                 }
             )
             .on("error", (e) => res.status(500).json({ error: e.message }));
-    });
-};
+    }) as RequestHandler);
+}

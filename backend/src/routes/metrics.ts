@@ -1,9 +1,64 @@
-// Metrics API routes
-const os = require("os");
-const { execSync } = require("child_process");
-const gateway = require("../gateway");
+import { execSync } from "child_process";
+import express, { type RequestHandler } from "express";
+import os from "os";
 
-function getSystemMetrics() {
+import gateway from "../gateway.js";
+
+interface CpuMetrics {
+    count: number;
+    model: string;
+    loadAvg: number[];
+    loadPercent: number;
+}
+
+interface MemoryMetrics {
+    total: number;
+    used: number;
+    free: number;
+    percent: number;
+    totalGB: number;
+    usedGB: number;
+}
+
+interface DiskMetrics {
+    total: number;
+    used: number;
+    percent: number;
+    totalGB: number;
+    usedGB: number;
+}
+
+interface SystemMetrics {
+    uptime: number;
+    platform: string;
+    hostname: string;
+}
+
+interface SystemMetricsResponse {
+    cpu: CpuMetrics;
+    memory: MemoryMetrics;
+    disk: DiskMetrics;
+    system: SystemMetrics;
+    timestamp: number;
+}
+
+interface TokenMetrics {
+    total: number;
+    byModel: Record<string, number>;
+    sessionsByModel: Record<string, number>;
+    byAgent: Array<{
+        label: string;
+        model: string;
+        tokens: number;
+        type: string;
+    }>;
+}
+
+interface MetricsResponse extends SystemMetricsResponse {
+    tokens: TokenMetrics;
+}
+
+function getSystemMetrics(): SystemMetricsResponse {
     // CPU
     const cpus = os.cpus();
     const loadAvg = os.loadavg();
@@ -23,12 +78,12 @@ function getSystemMetrics() {
         const dfOutput = execSync("df -B1 / | tail -1", { encoding: "utf8" });
         const parts = dfOutput.trim().split(/\s+/);
         if (parts.length >= 4) {
-            diskTotal = parseInt(parts[1], 10);
-            diskUsed = parseInt(parts[2], 10);
-            diskPercent = parseInt(parts[4], 10);
+            diskTotal = Number.parseInt(parts[1], 10);
+            diskUsed = Number.parseInt(parts[2], 10);
+            diskPercent = Number.parseInt(parts[4], 10);
         }
-    } catch (e) {
-        console.error("[Metrics] df error:", e.message);
+    } catch (error) {
+        console.error("[Metrics] df error:", (error as Error).message);
     }
 
     // Uptime
@@ -65,12 +120,13 @@ function getSystemMetrics() {
     };
 }
 
-function getTokenMetrics() {
+function getTokenMetrics(): TokenMetrics {
     const sessions = gateway.getSessions();
     let totalTokens = 0;
-    const byModel = {};
-    const sessionsByModel = {};
-    const byAgent = [];
+    const byModel: Record<string, number> = {};
+    const sessionsByModel: Record<string, number> = {};
+    const byAgent: Array<{ label: string; model: string; tokens: number; type: string }> =
+        [];
 
     for (const session of sessions) {
         const model = session.model || "unknown";
@@ -80,7 +136,7 @@ function getTokenMetrics() {
         byModel[model] = (byModel[model] || 0) + tokens;
 
         // Count sessions by model
-        const modelKey = model.split("/").pop(); // Remove provider prefix
+        const modelKey = model.split("/").pop() || model; // Remove provider prefix
         sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
 
         // Agent data
@@ -102,8 +158,8 @@ function getTokenMetrics() {
     };
 }
 
-module.exports = function (app) {
-    app.get("/api/metrics", (req, res) => {
+export default function metricsRoutes(app: express.Application): void {
+    app.get("/api/metrics", (async (_req, res) => {
         try {
             const system = getSystemMetrics();
             const tokens = getTokenMetrics();
@@ -111,9 +167,9 @@ module.exports = function (app) {
             res.json({
                 ...system,
                 tokens,
-            });
-        } catch (e) {
-            res.status(500).json({ error: e.message });
+            } satisfies MetricsResponse);
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
-};
+    }) as RequestHandler);
+}

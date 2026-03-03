@@ -1,8 +1,8 @@
-// Config files API routes - provides access to OpenClaw config files outside workspace
-const fs = require("fs");
-const path = require("path");
+import express, { type RequestHandler } from "express";
+import fs from "fs";
+import path from "path";
 
-const OPENCLAW_ROOT = process.env.HOME + "/.openclaw";
+const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 
 // Allowed config files (whitelist for security)
@@ -15,15 +15,42 @@ const ALLOWED_CONFIG_FILES = [
     "hooks/transforms/agentmail.ts",
 ];
 
-function isBinaryFile(content) {
+interface ConfigFile {
+    name: string;
+    path: string;
+    relPath: string;
+    type: "file";
+    size: number;
+    modified: string;
+}
+
+interface ConfigFileResponse {
+    path: string;
+    relPath: string;
+    content: string;
+    size: number;
+    modified: string;
+    isBinary: boolean;
+    truncated?: boolean;
+}
+
+interface WriteResponse {
+    success: boolean;
+    path: string;
+    relPath: string;
+    size: number;
+    modified: string;
+}
+
+function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
-        if (content.charCodeAt(i) === 0) return true;
+        if (content.codePointAt(i) === 0) return true;
     }
     return false;
 }
 
-function listConfigFiles() {
-    const files = [];
+function listConfigFiles(): ConfigFile[] {
+    const files: ConfigFile[] = [];
 
     for (const relPath of ALLOWED_CONFIG_FILES) {
         const fullPath = path.join(OPENCLAW_ROOT, relPath);
@@ -45,40 +72,44 @@ function listConfigFiles() {
     return files;
 }
 
-module.exports = function (app, express) {
+export default function configFilesRoutes(
+    app: express.Application,
+    _express: typeof express
+): void {
     // List config files
-    app.get("/api/config-files", (req, res) => {
+    app.get("/api/config-files", (async (_req, res) => {
         try {
             const files = listConfigFiles();
             res.json({ files, root: OPENCLAW_ROOT });
-        } catch (e) {
-            console.error("[ConfigFiles] List error:", e.message);
-            res.status(500).json({ error: e.message });
+        } catch (error) {
+            console.error("[ConfigFiles] List error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
+    }) as RequestHandler);
 
     // Read config file content
-    app.get("/api/config-files/*", (req, res) => {
+    app.get("/api/config-files/*", (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
 
         // Check if file is in whitelist
         if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
-            return res
-                .status(403)
-                .json({ error: "Access denied: file not in allowed list" });
+            res.status(403).json({ error: "Access denied: file not in allowed list" });
+            return;
         }
 
         try {
             const fullPath = path.join(OPENCLAW_ROOT, filePath);
 
             if (!fs.existsSync(fullPath)) {
-                return res.status(404).json({ error: "File not found" });
+                res.status(404).json({ error: "File not found" });
+                return;
             }
 
             const stat = fs.statSync(fullPath);
 
             if (stat.isDirectory()) {
-                return res.status(400).json({ error: "Path is a directory, not a file" });
+                res.status(400).json({ error: "Path is a directory, not a file" });
+                return;
             }
 
             if (stat.size > MAX_FILE_SIZE) {
@@ -87,10 +118,10 @@ module.exports = function (app, express) {
                 const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
                 fs.closeSync(fd);
 
-                const content = buffer.toString("utf-8", 0, bytesRead);
+                const content = buffer.toString("utf8", 0, bytesRead);
                 const isBinary = isBinaryFile(content);
 
-                return res.json({
+                res.json({
                     path: "config:" + filePath,
                     relPath: filePath,
                     content: isBinary ? "[Binary file]" : content,
@@ -98,10 +129,11 @@ module.exports = function (app, express) {
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
                     truncated: true,
-                });
+                } satisfies ConfigFileResponse);
+                return;
             }
 
-            const content = fs.readFileSync(fullPath, "utf-8");
+            const content = fs.readFileSync(fullPath, "utf8");
             const isBinary = isBinaryFile(content);
 
             res.json({
@@ -111,27 +143,27 @@ module.exports = function (app, express) {
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
                 isBinary: isBinary,
-            });
-        } catch (e) {
-            console.error("[ConfigFiles] Read error:", e.message);
-            res.status(500).json({ error: e.message });
+            } satisfies ConfigFileResponse);
+        } catch (error) {
+            console.error("[ConfigFiles] Read error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
+    }) as RequestHandler);
 
     // Write config file
-    app.put("/api/config-files/*", express.json(), (req, res) => {
+    app.put("/api/config-files/*", express.json(), (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
-        const { content } = req.body;
+        const { content } = req.body as { content?: string };
 
         if (content === undefined) {
-            return res.status(400).json({ error: "Content required" });
+            res.status(400).json({ error: "Content required" });
+            return;
         }
 
         // Check if file is in whitelist
         if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
-            return res
-                .status(403)
-                .json({ error: "Access denied: file not in allowed list" });
+            res.status(403).json({ error: "Access denied: file not in allowed list" });
+            return;
         }
 
         try {
@@ -148,7 +180,7 @@ module.exports = function (app, express) {
                 }
             }
 
-            fs.writeFileSync(fullPath, content, "utf-8");
+            fs.writeFileSync(fullPath, content, "utf8");
             const stat = fs.statSync(fullPath);
 
             res.json({
@@ -157,10 +189,10 @@ module.exports = function (app, express) {
                 relPath: filePath,
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
-            });
-        } catch (e) {
-            console.error("[ConfigFiles] Write error:", e.message);
-            res.status(500).json({ error: e.message });
+            } satisfies WriteResponse);
+        } catch (error) {
+            console.error("[ConfigFiles] Write error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
-};
+    }) as RequestHandler);
+}

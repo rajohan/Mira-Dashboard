@@ -1,16 +1,63 @@
-// Gateway WebSocket connection
-const WebSocket = require("ws");
+import WebSocket from "ws";
 
-let gatewayWs = null;
-let subscribers = new Set();
-let sessionList = [];
+interface Session {
+    id: string;
+    key: string;
+    type: string;
+    agentType: string;
+    hookName: string;
+    kind?: string;
+    model: string;
+    tokenCount: number;
+    maxTokens: number;
+    createdAt: string | null;
+    updatedAt?: number;
+    displayName: string;
+    label: string;
+    displayLabel: string;
+    channel: string;
+}
+
+interface GatewaySession {
+    sessionId?: string;
+    key?: string;
+    kind?: string;
+    model?: string;
+    totalTokens?: number;
+    contextTokens?: number;
+    updatedAt?: number;
+    displayName?: string;
+    label?: string;
+    channel?: string;
+}
+
+interface PendingRequest {
+    clientWs: WebSocket;
+    clientId: string;
+    method?: string;
+}
+
+interface GatewayMessage {
+    type: string;
+    id: string;
+    method?: string;
+    ok?: boolean;
+    payload?: { sessions?: GatewaySession[] };
+    error?: string;
+    event?: string;
+    params?: Record<string, unknown>;
+}
+
+let gatewayWs: WebSocket | null = null;
+const subscribers = new Set<WebSocket>();
+let sessionList: Session[] = [];
 let isGatewayConnected = false;
-let reconnectTimer = null;
+let reconnectTimer: NodeJS.Timeout | null = null;
 let connectionAttempts = 0;
 let requestId = 1000;
-let pendingRequests = new Map();
+const pendingRequests = new Map<string, PendingRequest>();
 
-function transformSession(session) {
+function transformSession(session: GatewaySession): Session {
     let type = "UNKNOWN";
     let agentType = "";
     const key = session.key || "";
@@ -25,7 +72,7 @@ function transformSession(session) {
         type = "HOOK";
         const hookIndex = keyParts.indexOf("hook");
         if (hookIndex !== -1 && keyParts[hookIndex + 1]) {
-            hookName = keyParts[hookIndex + 1];
+            hookName = keyParts[hookIndex + 1] || "";
         }
     } else if (key.includes(":cron:")) {
         type = "CRON";
@@ -47,7 +94,7 @@ function transformSession(session) {
 
     return {
         id: session.sessionId || session.key || "unknown",
-        key: session.key,
+        key: session.key || "",
         type: type,
         agentType: agentType,
         hookName: hookName,
@@ -64,7 +111,7 @@ function transformSession(session) {
     };
 }
 
-function broadcast(msg) {
+function broadcast(msg: unknown): void {
     const data = JSON.stringify(msg);
     for (const ws of subscribers) {
         try {
@@ -75,7 +122,7 @@ function broadcast(msg) {
     }
 }
 
-function connect(token) {
+function connect(token: string): void {
     if (
         gatewayWs &&
         (gatewayWs.readyState === WebSocket.OPEN ||
@@ -117,9 +164,9 @@ function connect(token) {
             );
         });
 
-        ws.on("message", (data) => {
+        ws.on("message", (data: Buffer) => {
             try {
-                const msg = JSON.parse(data.toString());
+                const msg = JSON.parse(data.toString()) as GatewayMessage;
 
                 if (msg.type === "res" && msg.id === "connect-1") {
                     if (msg.ok) {
@@ -168,7 +215,7 @@ function connect(token) {
                     pendingRequests.delete(msg.id);
 
                     if (
-                        pending.clientWs &&
+                        pending?.clientWs &&
                         pending.clientWs.readyState === WebSocket.OPEN
                     ) {
                         pending.clientWs.send(
@@ -182,7 +229,7 @@ function connect(token) {
                         );
                     }
 
-                    if (pending.method && pending.method.startsWith("sessions.")) {
+                    if (pending?.method && pending.method.startsWith("sessions.")) {
                         ws.send(
                             JSON.stringify({
                                 type: "req",
@@ -198,12 +245,12 @@ function connect(token) {
                 if (msg.type === "event") {
                     broadcast({ type: "event", event: msg.event, payload: msg.payload });
                 }
-            } catch (e) {
-                console.error("[Gateway] Parse error:", e.message);
+            } catch (error) {
+                console.error("[Gateway] Parse error:", (error as Error).message);
             }
         });
 
-        ws.on("close", (code) => {
+        ws.on("close", (code: number) => {
             console.log("[Gateway] Closed:", code);
             gatewayWs = null;
             isGatewayConnected = false;
@@ -211,23 +258,28 @@ function connect(token) {
             scheduleReconnect(token);
         });
 
-        ws.on("error", (err) => {
+        ws.on("error", (err: Error) => {
             console.error("[Gateway] Error:", err.message);
         });
-    } catch (e) {
-        console.error("[Gateway] Connect error:", e.message);
+    } catch (error) {
+        console.error("[Gateway] Connect error:", (error as Error).message);
         scheduleReconnect(token);
     }
 }
 
-function scheduleReconnect(token) {
+function scheduleReconnect(token: string): void {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delay = Math.min(5000 * Math.pow(1.5, connectionAttempts), 60000);
     console.log("[Gateway] Reconnecting in " + delay + "ms...");
     reconnectTimer = setTimeout(() => connect(token), delay);
 }
 
-function sendRequest(method, params, clientWs, clientId) {
+function sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    clientWs?: WebSocket,
+    clientId?: string
+): boolean {
     if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
         return false;
     }
@@ -243,7 +295,7 @@ function sendRequest(method, params, clientWs, clientId) {
     return true;
 }
 
-function handleClient(ws) {
+function handleClient(ws: WebSocket): void {
     subscribers.add(ws);
     ws.send(
         JSON.stringify({
@@ -253,15 +305,15 @@ function handleClient(ws) {
         })
     );
 
-    ws.on("message", (data) => {
+    ws.on("message", (data: Buffer) => {
         try {
             const msg = JSON.parse(data.toString());
 
             if ((msg.type === "request" || msg.type === "req") && msg.method) {
                 sendRequest(msg.method, msg.params || {}, ws, msg.id);
             }
-        } catch (e) {
-            console.error("[Gateway] Client message error:", e.message);
+        } catch (error) {
+            console.error("[Gateway] Client message error:", (error as Error).message);
         }
     });
 
@@ -270,26 +322,26 @@ function handleClient(ws) {
     });
 }
 
-function getStatus() {
+function getStatus(): { gateway: string; sessions: number } {
     return {
         gateway: isGatewayConnected ? "connected" : "disconnected",
         sessions: sessionList.length,
     };
 }
 
-function getSessions() {
+function getSessions(): Session[] {
     return sessionList;
 }
 
-function isConnected() {
+function isConnected(): boolean {
     return isGatewayConnected;
 }
 
-function getGatewayWs() {
+function getGatewayWs(): WebSocket | null {
     return gatewayWs;
 }
 
-module.exports = {
+export default {
     init: connect,
     handleClient,
     getStatus,
@@ -297,3 +349,5 @@ module.exports = {
     isConnected,
     getGatewayWs,
 };
+
+export type { GatewaySession, Session };

@@ -1,19 +1,26 @@
-// Logs API routes
-const fs = require("fs");
-const path = require("path");
+import express, { type RequestHandler } from "express";
+import fs from "fs";
+import path from "path";
+import type WebSocket from "ws";
 
 const LOGS_DIR = "/tmp/openclaw";
-let logWatcher = null;
+let logWatcher: NodeJS.Timeout | null = null;
 let lastLogSize = 0;
 let lastLogFile = "";
-let logSubscribers = new Set();
+const logSubscribers = new Set<WebSocket>();
 
-function getTodayLogFile() {
+interface LogFile {
+    name: string;
+    size: number;
+    modified: Date;
+}
+
+function getTodayLogFile(): string {
     const today = new Date().toISOString().split("T")[0];
     return path.join(LOGS_DIR, "openclaw-" + today + ".log");
 }
 
-function startLogWatcher() {
+function startLogWatcher(): void {
     if (logWatcher) return;
 
     logWatcher = setInterval(() => {
@@ -36,7 +43,7 @@ function startLogWatcher() {
                 fs.closeSync(fd);
 
                 const lines = buffer
-                    .toString("utf-8")
+                    .toString("utf8")
                     .split("\n")
                     .filter((l) => l.trim());
                 lastLogSize = stat.size;
@@ -52,13 +59,13 @@ function startLogWatcher() {
                     }
                 }
             }
-        } catch (e) {
-            console.error("[LogWatcher] Error:", e.message);
+        } catch (error) {
+            console.error("[LogWatcher] Error:", (error as Error).message);
         }
     }, 1000);
 }
 
-function sendLogHistory(ws) {
+function sendLogHistory(ws: WebSocket): void {
     try {
         const logFile = getTodayLogFile();
         const fileName = path.basename(logFile);
@@ -72,8 +79,8 @@ function sendLogHistory(ws) {
             return;
         }
 
-        // Read last 1000 lines
-        const content = fs.readFileSync(logFile, "utf-8");
+        // Read last 100 lines
+        const content = fs.readFileSync(logFile, "utf8");
         const lines = content
             .split("\n")
             .filter((l) => l.trim())
@@ -86,13 +93,13 @@ function sendLogHistory(ws) {
 
         // Send completion
         ws.send(JSON.stringify({ type: "log_history_complete", count: lines.length }));
-    } catch (e) {
-        console.error("[Logs] Error sending history:", e.message);
+    } catch (error) {
+        console.error("[Logs] Error sending history:", (error as Error).message);
         ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
     }
 }
 
-function subscribeToLogs(ws) {
+export function subscribeToLogs(ws: WebSocket): void {
     logSubscribers.add(ws);
 
     // Send log history first
@@ -102,37 +109,40 @@ function subscribeToLogs(ws) {
     startLogWatcher();
 }
 
-function unsubscribeFromLogs(ws) {
+export function unsubscribeFromLogs(ws: WebSocket): void {
     logSubscribers.delete(ws);
 }
 
-module.exports = function (app) {
+export default function logsRoutes(app: express.Application): void {
     // Get log files info
-    app.get("/api/logs/info", (req, res) => {
+    app.get("/api/logs/info", (async (_req, res) => {
         try {
             if (!fs.existsSync(LOGS_DIR)) {
-                return res.json({ logs: [] });
+                res.json({ logs: [] });
+                return;
             }
 
-            const files = fs
+            const files: LogFile[] = fs
                 .readdirSync(LOGS_DIR)
                 .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
                 .map((f) => {
                     const stat = fs.statSync(path.join(LOGS_DIR, f));
                     return { name: f, size: stat.size, modified: stat.mtime };
                 })
-                .sort((a, b) => b.modified - a.modified);
+                .sort((a, b) => b.modified.getTime() - a.modified.getTime());
 
             res.json({ logs: files });
-        } catch (e) {
-            res.status(500).json({ error: e.message });
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
+    }) as RequestHandler);
 
     // Get log file content
-    app.get("/api/logs/content", (req, res) => {
-        let logFile = req.query.file;
-        const lines = req.query.lines ? parseInt(req.query.lines) : null;
+    app.get("/api/logs/content", (async (req, res) => {
+        let logFile = req.query.file as string | undefined;
+        const lines = req.query.lines
+            ? Number.parseInt(req.query.lines as string, 10)
+            : null;
 
         // If no file specified, use today's log
         if (!logFile) {
@@ -144,14 +154,16 @@ module.exports = function (app) {
             const filePath = path.join(LOGS_DIR, logFile);
 
             if (!filePath.startsWith(LOGS_DIR)) {
-                return res.status(403).json({ error: "Access denied" });
+                res.status(403).json({ error: "Access denied" });
+                return;
             }
 
             if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: "Log file not found" });
+                res.status(404).json({ error: "Log file not found" });
+                return;
             }
 
-            let content = fs.readFileSync(filePath, "utf-8");
+            let content = fs.readFileSync(filePath, "utf8");
 
             if (lines) {
                 const allLines = content.split("\n").filter((l) => l.trim());
@@ -159,11 +171,8 @@ module.exports = function (app) {
             }
 
             res.json({ content: content, file: logFile });
-        } catch (e) {
-            res.status(500).json({ error: e.message });
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
         }
-    });
-};
-
-module.exports.subscribeToLogs = subscribeToLogs;
-module.exports.unsubscribeFromLogs = unsubscribeFromLogs;
+    }) as RequestHandler);
+}

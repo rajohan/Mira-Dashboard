@@ -1,32 +1,37 @@
-require("dotenv").config();
-const express = require("express");
-const http = require("http");
-const WebSocket = require("ws");
-const path = require("path");
+import dotenv from "dotenv";
+import express from "express";
+import http from "http";
+import path from "path";
+import { fileURLToPath } from "url";
+import { WebSocket, WebSocketServer } from "ws";
 
-// Route modules
-const filesRoutes = require("./routes/files");
-const configFilesRoutes = require("./routes/config-files");
-const logsRoutes = require("./routes/logs");
-const execRoutes = require("./routes/exec");
-const metricsRoutes = require("./routes/metrics");
-const moltbookRoutes = require("./routes/moltbook");
-const settingsRoutes = require("./routes/settings");
-const gateway = require("./gateway");
-const sessionsRoutes = require("./routes/sessions");
-const staticRoutes = require("./routes/static");
+import gateway from "./gateway.js";
+import configFilesRoutes from "./routes/configFiles.js";
+import execRoutes from "./routes/exec.js";
+import filesRoutes from "./routes/files.js";
+import logsRoutes, { subscribeToLogs, unsubscribeFromLogs } from "./routes/logs.js";
+import metricsRoutes from "./routes/metrics.js";
+import moltbookRoutes from "./routes/moltbook.js";
+import sessionsRoutes from "./routes/sessions.js";
+import settingsRoutes from "./routes/settings.js";
+import staticRoutes from "./routes/static.js";
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server });
 
-const frontendPath = path.join(__dirname, "..", "dist");
+const frontendPath = path.join(__dirname, "..", "..", "dist");
 
 // =====================
 // API Routes
 // =====================
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) => {
     res.json({
         status: "ok",
         gatewayConnected: gateway.isConnected(),
@@ -34,7 +39,7 @@ app.get("/health", (req, res) => {
     });
 });
 
-app.get("/api/sessions", (req, res) => {
+app.get("/api/sessions", (_req, res) => {
     res.json(gateway.getSessions());
 });
 
@@ -54,28 +59,28 @@ staticRoutes(app, frontendPath);
 // =====================
 // WebSocket
 // =====================
-wss.on("connection", (ws) => {
+wss.on("connection", (ws: WebSocket) => {
     console.log("[Frontend] Client connected");
     gateway.handleClient(ws);
 
-    ws.on("message", (data) => {
+    ws.on("message", (data: Buffer) => {
         try {
             const msg = JSON.parse(data.toString());
 
             if (msg.type === "subscribe" && msg.channel === "logs") {
-                logsRoutes.subscribeToLogs(ws);
+                subscribeToLogs(ws);
             }
 
             if (msg.type === "unsubscribe" && msg.channel === "logs") {
-                logsRoutes.unsubscribeFromLogs(ws);
+                unsubscribeFromLogs(ws);
             }
-        } catch (e) {
-            console.error("[Frontend] Message error:", e.message);
+        } catch (error) {
+            console.error("[Frontend] Message error:", (error as Error).message);
         }
     });
 
     ws.on("close", () => {
-        logsRoutes.unsubscribeFromLogs(ws);
+        unsubscribeFromLogs(ws);
     });
 });
 
@@ -91,6 +96,6 @@ server.listen(PORT, () => {
         gateway.init(token);
     } else {
         console.error("[Backend] OPENCLAW_TOKEN required");
-        process.exit(1);
+        throw new Error("OPENCLAW_TOKEN required");
     }
 });
