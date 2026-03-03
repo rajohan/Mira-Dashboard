@@ -1,4 +1,4 @@
-import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
+import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { X } from "lucide-react";
 import { type ReactNode } from "react";
 
@@ -31,16 +31,19 @@ export function Modal({
 }: ModalProps) {
     return (
         <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-            {/* Backdrop */}
-            <div className="fixed inset-0 bg-black/50" aria-hidden="true" />
-
-            {/* Modal container */}
+            <DialogBackdrop
+                className="fixed inset-0 bg-black/50 data-closed:opacity-0 data-enter:opacity-100 transition-opacity"
+                transition
+            />
             <div className="fixed inset-0 flex items-center justify-center p-4">
                 <DialogPanel
+                    transition
                     className={cn(
                         "w-full rounded-lg border border-slate-700 bg-slate-800 shadow-xl",
                         "flex flex-col",
                         "max-h-[90vh]",
+                        "data-closed:opacity-0 data-enter:opacity-100 data-closed:scale-95 data-enter:scale-100",
+                        "transition duration-200 ease-out",
                         SIZE_CLASSES[size]
                     )}
                 >

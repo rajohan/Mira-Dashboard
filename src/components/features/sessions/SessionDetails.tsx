@@ -62,9 +62,11 @@ export function SessionDetails({
 
     const fetchHistory = async () => {
         if (!session) return;
+
         setLoading(true);
         setError(null);
         setVisibleCount(50);
+
         try {
             const res = await fetch(
                 "/api/sessions/" + encodeURIComponent(session.key) + "/history"
@@ -118,11 +120,8 @@ export function SessionDetails({
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
                         <Dropdown
-                            trigger={
-                                <Button variant="ghost" size="sm" className="border-0 text-slate-300">
-                                    <MoreVertical className="h-4 w-4" />
-                                </Button>
-                            }
+                            icon={<MoreVertical className="h-4 w-4" />}
+                            variant="ghost"
                             items={[
                                 {
                                     label: "Stop",
@@ -136,7 +135,9 @@ export function SessionDetails({
                                 },
                                 {
                                     label: "Reset",
-                                    icon: <RotateCcw className="h-4 w-4 text-slate-400" />,
+                                    icon: (
+                                        <RotateCcw className="h-4 w-4 text-slate-400" />
+                                    ),
                                     onClick: onReset,
                                 },
                                 {
@@ -175,7 +176,8 @@ export function SessionDetails({
                             <div className="flex items-center gap-2">
                                 <p
                                     className={
-                                        "text-sm font-medium " + getTokenColor(tokenPercent)
+                                        "text-sm font-medium " +
+                                        getTokenColor(tokenPercent)
                                     }
                                 >
                                     {formatTokens(sessionTokens, sessionMaxTokens)}

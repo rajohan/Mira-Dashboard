@@ -18,7 +18,7 @@ import {
     Wifi,
     WifiOff,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -61,10 +61,16 @@ export function Sessions() {
             hasConnected.current = true;
             connect();
         }
-    }, [token, connect]);
+        // connect is intentionally excluded to prevent reconnection loops
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token]);
 
     useEffect(() => {
-        if (isConnected) handleRefresh();
+        if (isConnected) {
+            fetchSessions().catch(console.error);
+        }
+        // fetchSessions is stable from useOpenClaw hook
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isConnected]);
 
     const handleRefresh = async () => {
@@ -125,15 +131,28 @@ export function Sessions() {
         }
     };
 
-    const sortedSessions = !sessions ? [] : [...sessions].sort((a, b) => {
-        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
-        if (typeOrder !== 0) return typeOrder;
-        return (b.updatedAt || 0) - (a.updatedAt || 0);
-    });
+    const sortedSessions = useMemo(
+        () =>
+            !sessions
+                ? []
+                : [...sessions].sort((a, b) => {
+                      const typeOrder =
+                          getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
+                      if (typeOrder !== 0) return typeOrder;
+                      return (b.updatedAt || 0) - (a.updatedAt || 0);
+                  }),
+        [sessions]
+    );
 
-    const filteredSessions = typeFilter === "ALL"
-        ? sortedSessions
-        : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
+    const filteredSessions = useMemo(
+        () =>
+            typeFilter === "ALL"
+                ? sortedSessions
+                : sortedSessions.filter(
+                      (s) => (s.type || "").toUpperCase() === typeFilter
+                  ),
+        [sortedSessions, typeFilter]
+    );
 
     const columns = [
         columnHelper.accessor("type", {
@@ -209,16 +228,10 @@ export function Sessions() {
             id: "actions",
             header: "",
             cell: ({ row }) => (
-                <div
-                    className="flex justify-end"
-                    onClick={(e) => e.stopPropagation()}
-                >
+                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <Dropdown
-                        trigger={
-                            <Button variant="ghost" size="sm" className="border-0 text-slate-300">
-                                <MoreVertical className="h-4 w-4" />
-                            </Button>
-                        }
+                        icon={<MoreVertical className="h-4 w-4" />}
+                        variant="ghost"
                         items={[
                             {
                                 label: "Stop",
@@ -341,7 +354,8 @@ export function Sessions() {
                                                 >
                                                     <div className="flex items-center gap-1">
                                                         {flexRender(
-                                                            header.column.columnDef.header,
+                                                            header.column.columnDef
+                                                                .header,
                                                             header.getContext()
                                                         )}
                                                         {header.column.getCanSort() && (
@@ -366,7 +380,9 @@ export function Sessions() {
                                         <tr
                                             key={row.id}
                                             className="cursor-pointer border-b border-slate-700/50 hover:bg-slate-700/30"
-                                            onClick={() => setSelectedSession(row.original)}
+                                            onClick={() =>
+                                                setSelectedSession(row.original)
+                                            }
                                         >
                                             {row.getVisibleCells().map((cell) => (
                                                 <td key={cell.id} className="px-4 py-3">

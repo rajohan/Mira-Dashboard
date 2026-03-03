@@ -17,12 +17,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                     "inline-flex items-center justify-center rounded-lg font-medium transition-colors",
                     "outline-none",
                     {
-                        "bg-accent-500 text-white data-hover:bg-accent-600 data-active:bg-accent-700":
+                        "data-hover:bg-accent-600 data-active:bg-accent-700 bg-accent-500 text-white":
                             variant === "primary",
-                        "bg-primary-700 text-primary-100 data-hover:bg-primary-600 data-active:bg-primary-500":
+                        "data-hover:bg-primary-600 data-active:bg-primary-500 bg-primary-700 text-primary-100":
                             variant === "secondary",
-                        "bg-red-500 text-white data-hover:bg-red-600 data-active:bg-red-700": variant === "danger",
-                        "bg-transparent text-primary-300 data-hover:bg-primary-700 data-active:bg-primary-600":
+                        "data-hover:bg-red-600 data-active:bg-red-700 bg-red-500 text-white":
+                            variant === "danger",
+                        "data-hover:bg-primary-700 data-active:bg-primary-600 bg-transparent text-primary-300":
                             variant === "ghost",
                     },
                     {

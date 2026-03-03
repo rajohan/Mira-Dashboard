@@ -11,35 +11,52 @@ interface DropdownItem {
 }
 
 interface DropdownProps {
-    trigger: React.ReactNode;
+    label?: string;
+    icon?: React.ReactNode;
     items: DropdownItem[];
     align?: "left" | "right";
-    className?: string;
+    variant?: "primary" | "secondary" | "ghost";
+    size?: "sm" | "md";
 }
 
-export function Dropdown({ trigger, items, align = "right", className }: DropdownProps) {
+export function Dropdown({
+    label,
+    icon,
+    items,
+    align = "right",
+    variant = "secondary",
+    size = "sm",
+}: DropdownProps) {
+    const variantStyles = {
+        primary: "bg-accent-500 text-white hover:bg-accent-600",
+        secondary: "border border-slate-600 bg-slate-700 text-slate-100 hover:bg-slate-600",
+        ghost: "text-slate-300 hover:bg-primary-700",
+    };
+
+    const sizeStyles = {
+        sm: "px-2 py-1 text-sm",
+        md: "px-4 py-2 text-sm",
+    };
+
     return (
         <Menu>
             <MenuButton
                 className={cn(
-                    "inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-100",
-                    "data-hover:bg-slate-600 data-focus:outline-none data-focus:ring-2 data-focus:ring-accent-500",
-                    className
+                    "inline-flex items-center justify-center gap-1 rounded-lg font-medium",
+                    "focus:outline-none focus:ring-2 focus:ring-accent-500",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    variantStyles[variant],
+                    sizeStyles[size]
                 )}
             >
-                {typeof trigger === "string" ? (
-                    <>
-                        {trigger}
-                        <ChevronDown className="h-4 w-4 ui-open:rotate-180 transition-transform" />
-                    </>
-                ) : (
-                    trigger
-                )}
+                {icon}
+                {label}
+                {label && <ChevronDown className="h-4 w-4 ui-open:rotate-180 transition-transform" />}
             </MenuButton>
 
             <MenuItems
                 anchor={align === "right" ? "bottom end" : "bottom start"}
-                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-slate-600 bg-slate-800 p-1 shadow-lg outline-none focus:outline-none"
+                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-slate-600 bg-slate-800 p-1 shadow-lg focus:outline-none"
             >
                 {items.map((item, index) => (
                     <MenuItem key={index} disabled={item.disabled}>
