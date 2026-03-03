@@ -21,7 +21,8 @@ import {
     MAX_PREVIEW_SIZE,
 } from "../components/features/files";
 import { formatSize, isMarkdownFile, isJsonFile, isCodeFile, getSyntaxClass } from "../utils/fileUtils";
-import { useFiles, useFileContent, useSaveFile, useQueryClient, fileKeys } from "../hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { useFiles, useFileContent, useSaveFile, fileKeys } from "../hooks";
 
 import type { FileNode } from "../types/file";
 

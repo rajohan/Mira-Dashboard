@@ -1,5 +1,5 @@
 import { TaskCard } from "./TaskCard";
-import { COLUMN_CONFIG } from "./taskUtils";
+import { COLUMN_CONFIG, type ColumnConfig } from "./taskUtils";
 
 import type { Task, ColumnId } from "../../../types/task";
 
@@ -11,7 +11,9 @@ interface TaskColumnProps {
 }
 
 export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) {
-    const config = COLUMN_CONFIG[id];
+    const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
+
+    if (!config) return null;
 
     return (
         <div className="flex min-w-[280px] flex-1 flex-col">

@@ -57,6 +57,19 @@ export function useFileContent(path: string | null) {
     });
 }
 
+// Prefetch helper for nested directories
+export function usePrefetchDirectory() {
+    const queryClient = useQueryClient();
+
+    return (path: string) => {
+        queryClient.prefetchQuery({
+            queryKey: fileKeys.list(path),
+            queryFn: () => fetchFiles(path),
+            staleTime: 30_000,
+        });
+    };
+}
+
 export function useSaveFile() {
     const queryClient = useQueryClient();
 

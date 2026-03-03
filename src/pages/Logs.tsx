@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
-import { RefreshCw, Terminal, Wifi, WifiOff, Download } from "lucide-react";
+import { RefreshCw, Terminal, Wifi, WifiOff, Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
@@ -9,85 +9,70 @@ import { Checkbox } from "../components/ui/Checkbox";
 import { Input } from "../components/ui/Input";
 import { LogLine, LevelFilter } from "../components/features/logs";
 import { Select } from "../components/ui/Select";
-import { type LogEntry, type LogFile } from "../types/log";
+import { useLogFiles, useLogContent } from "../hooks";
+import { type LogEntry } from "../types/log";
 import { parseLogLine, LOG_LEVELS, LINE_OPTIONS } from "../utils/logUtils";
-import { FileText } from "lucide-react";
 
 export function Logs() {
-    const [isConnected, setIsConnected] = useState(false);
-    const [logs, setLogs] = useState<LogEntry[]>([]);
     const [autoFollow, setAutoFollow] = useState(true);
-    const [logFiles, setLogFiles] = useState<LogFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<string>("");
     const [lineCount, setLineCount] = useState<number>(100);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
-    const [isLoading, setIsLoading] = useState(false);
+    const [isConnected, setIsConnected] = useState(false);
+    const [logs, setLogs] = useState<LogEntry[]>([]);
     const logContainerRef = useRef<HTMLDivElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const historyBufferRef = useRef<LogEntry[]>([]);
     const isReceivingHistoryRef = useRef(true);
     const isAutoScrollingRef = useRef(false);
 
-    // Fetch log files on mount
-    useEffect(() => {
-        const fetchLogFiles = async () => {
-            try {
-                const response = await fetch("/api/logs/info");
-                const data = await response.json();
-                if (data.logs) {
-                    const sorted = [...data.logs].sort((a, b) =>
-                        b.name.localeCompare(a.name)
-                    );
-                    setLogFiles(sorted);
-                    const today = format(new Date(), "yyyy-MM-dd");
-                    const todayFile = sorted.find((f: LogFile) => f.name.includes(today));
-                    if (todayFile) {
-                        setSelectedFile(todayFile.name);
-                    } else if (sorted.length > 0) {
-                        setSelectedFile(sorted[0].name);
-                    }
-                }
-            } catch (error) {
-                console.error("Failed to fetch log files:", error);
-            }
-        };
-        fetchLogFiles();
-    }, []);
+    // Queries
+    const { data: logFiles = [] } = useLogFiles();
+    const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
+        selectedFile || null,
+        lineCount,
+        false // Don't auto-fetch, we use it manually
+    );
 
-    const loadLogContent = async (file: string, lines: number) => {
-        setIsLoading(true);
-        try {
-            const response = await fetch(
-                `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
-            );
-            const data = await response.json();
-            if (data.content) {
-                const logLines = data.content.split("\n").filter((l: string) => l.trim());
-                const parsedLogs = logLines
-                    .map((line: string) => parseLogLine(line))
-                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                setLogs(parsedLogs);
-            }
-        } catch (error) {
-            console.error("Failed to load log content:", error);
-        } finally {
-            setIsLoading(false);
+    // Auto-select today's file
+    useEffect(() => {
+        if (logFiles.length > 0 && !selectedFile) {
+            const sorted = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
+            const today = format(new Date(), "yyyy-MM-dd");
+            const todayFile = sorted.find((f) => f.name.includes(today));
+            setSelectedFile(todayFile?.name || sorted[0]?.name || "");
+        }
+    }, [logFiles, selectedFile]);
+
+    // Load log content
+    const loadLogContent = async () => {
+        if (!selectedFile) return;
+        const result = await refetchContent();
+        if (result.data) {
+            const logLines = result.data.split("\n").filter((l) => l.trim());
+            const parsedLogs = logLines
+                .map((line) => parseLogLine(line))
+                .filter((l): l is LogEntry => l !== null);
+            setLogs(parsedLogs);
         }
     };
 
+    // Load content when file changes
+    useEffect(() => {
+        if (selectedFile && logFiles.length > 0) {
+            loadLogContent();
+        }
+    }, [selectedFile, lineCount]);
+
     const handleFileSelect = (file: string) => {
         setSelectedFile(file);
-        loadLogContent(file, lineCount);
     };
 
     const handleLineSelect = (lines: number) => {
         setLineCount(lines);
-        if (selectedFile) {
-            loadLogContent(selectedFile, lines);
-        }
     };
 
     const selectedFileRef = useRef<string>(selectedFile);
@@ -98,12 +83,7 @@ export function Logs() {
         lineCountRef.current = lineCount;
     }, [selectedFile, lineCount]);
 
-    useEffect(() => {
-        if (selectedFile && logFiles.length > 0) {
-            loadLogContent(selectedFile, lineCount);
-        }
-    }, [selectedFile, logFiles.length]);
-
+    // WebSocket for real-time logs
     useEffect(() => {
         const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
 
@@ -189,26 +169,8 @@ export function Logs() {
         setLevelFilter(newFilter);
     };
 
-    const handleRefresh = async () => {
-        if (selectedFile) {
-            await loadLogContent(selectedFile, lineCount);
-        } else {
-            try {
-                const response = await fetch(`/api/logs/content?lines=${lineCount}`);
-                const data = await response.json();
-                if (data.content) {
-                    const lines = data.content
-                        .split("\n")
-                        .filter((l: string) => l.trim());
-                    const parsedLogs = lines
-                        .map((line: string) => parseLogLine(line))
-                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                    setLogs(parsedLogs);
-                }
-            } catch (error) {
-                console.error("Failed to refresh logs:", error);
-            }
-        }
+    const handleRefresh = () => {
+        loadLogContent();
     };
 
     const handleExport = () => {
@@ -250,8 +212,7 @@ export function Logs() {
 
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop =
-                        logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
@@ -272,8 +233,7 @@ export function Logs() {
 
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop =
-                        logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
@@ -287,6 +247,9 @@ export function Logs() {
             });
         }
     }, [selectedFile, lineCount]);
+
+    const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
+    const isLoading = isLoadingContent;
 
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
@@ -312,7 +275,7 @@ export function Logs() {
                 <Select
                     value={selectedFile}
                     onChange={handleFileSelect}
-                    options={logFiles.map((f) => ({
+                    options={sortedLogFiles.map((f) => ({
                         value: f.name,
                         label: f.name,
                     }))}
