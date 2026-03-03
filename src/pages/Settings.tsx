@@ -1,26 +1,25 @@
-import { useForm } from "@tanstack/react-form";
 import {
     AlertCircle,
     Check,
-    Clock,
     Download,
-    Heart,
     Loader2,
-    MessageSquare,
     RefreshCw,
     Server,
-    Shield,
-    Users,
-    Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
-import { Switch } from "../components/ui/Switch";
-import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
-import { type Config, type Skill, type SettingsForm } from "../types/settings";
+import {
+    ModelSection,
+    ChannelSection,
+    ToolSection,
+    SecuritySection,
+    SessionSection,
+    HeartbeatSection,
+    SkillsSection,
+} from "../components/features/settings";
+import { type Config, type Skill } from "../types/settings";
 
 export function Settings() {
     const [config, setConfig] = useState<Config | null>(null);
@@ -34,55 +33,6 @@ export function Settings() {
     const [restarting, setRestarting] = useState(false);
     const [backingUp, setBackingUp] = useState(false);
 
-    const form = useForm({
-        defaultValues: {
-            idleMinutes: 30,
-            heartbeatEvery: 60,
-            heartbeatTarget: "",
-        } as SettingsForm,
-        onSubmit: async ({ value }) => {
-            setSaving(true);
-            setError(null);
-            setSuccess(null);
-
-            try {
-                const updates: Partial<Config> = {
-                    session: {
-                        reset: {
-                            idleMinutes: value.idleMinutes,
-                        },
-                    },
-                    heartbeat: {
-                        every: value.heartbeatEvery,
-                        target: value.heartbeatTarget || undefined,
-                    },
-                };
-
-                const res = await fetch("/api/config", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(updates),
-                });
-
-                if (res.ok) {
-                    setSuccess("Configuration saved successfully");
-                    setTimeout(() => setSuccess(null), 3000);
-                } else {
-                    const data = await res.json();
-                    setError(data.error || "Failed to save configuration");
-                }
-            } catch (error_: unknown) {
-                const errorMessage =
-                    error_ instanceof Error
-                        ? error_.message
-                        : "Failed to save configuration";
-                setError(errorMessage);
-            } finally {
-                setSaving(false);
-            }
-        },
-    });
-
     useEffect(() => {
         fetchConfig();
         fetchSkills();
@@ -94,12 +44,6 @@ export function Settings() {
             if (res.ok) {
                 const data = await res.json();
                 setConfig(data);
-                form.setFieldValue(
-                    "idleMinutes",
-                    data?.session?.reset?.idleMinutes || 30
-                );
-                form.setFieldValue("heartbeatEvery", data?.heartbeat?.every || 60);
-                form.setFieldValue("heartbeatTarget", data?.heartbeat?.target || "");
             }
         } catch (error_) {
             console.error("Failed to fetch config:", error_);
@@ -189,6 +133,56 @@ export function Settings() {
         []
     );
 
+    const handleSessionSave = useCallback(async (idleMinutes: number) => {
+        setSaving(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/config", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session: { reset: { idleMinutes } },
+                }),
+            });
+            if (res.ok) {
+                setSuccess("Session settings saved");
+                setTimeout(() => setSuccess(null), 3000);
+            } else {
+                const data = await res.json();
+                setError(data.error || "Failed to save");
+            }
+        } catch (error_: unknown) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        } finally {
+            setSaving(false);
+        }
+    }, []);
+
+    const handleHeartbeatSave = useCallback(async (every: number, target: string) => {
+        setSaving(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/config", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    heartbeat: { every, target: target || undefined },
+                }),
+            });
+            if (res.ok) {
+                setSuccess("Heartbeat settings saved");
+                setTimeout(() => setSuccess(null), 3000);
+            } else {
+                const data = await res.json();
+                setError(data.error || "Failed to save");
+            }
+        } catch (error_: unknown) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        } finally {
+            setSaving(false);
+        }
+    }, []);
+
     if (loading) {
         return (
             <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
@@ -223,6 +217,15 @@ export function Settings() {
         authType: config?.gateway?.auth?.type || "None",
     };
 
+    const sessionInfo = {
+        idleMinutes: config?.session?.reset?.idleMinutes || 30,
+    };
+
+    const heartbeatInfo = {
+        every: config?.heartbeat?.every || 60,
+        target: config?.heartbeat?.target || "",
+    };
+
     return (
         <div className="p-6">
             <div className="mb-6 flex items-center justify-between">
@@ -241,10 +244,7 @@ export function Settings() {
                             </>
                         )}
                     </Button>
-                    <Button
-                        variant="danger"
-                        onClick={() => setShowRestartModal(true)}
-                    >
+                    <Button variant="danger" onClick={() => setShowRestartModal(true)}>
                         <RefreshCw className="h-4 w-4" />
                         Restart
                     </Button>
@@ -271,234 +271,66 @@ export function Settings() {
                 </div>
             )}
 
-            {/* Model Configuration */}
-            <ExpandableCard title="Model Configuration" icon={Wrench} defaultExpanded>
-                <div className="space-y-2">
-                    <ReadOnlyField label="Default Model" value={modelInfo.defaultModel} />
-                    <ReadOnlyField label="Fallback Models" value={modelInfo.fallbacks} />
-                    <ReadOnlyField
-                        label="Context Window"
-                        value={modelInfo.contextWindow.toLocaleString() + " tokens"}
-                    />
-                    <ReadOnlyField label="Temperature" value={modelInfo.temperature} />
-                </div>
-            </ExpandableCard>
+            <ModelSection
+                defaultModel={modelInfo.defaultModel}
+                fallbacks={modelInfo.fallbacks}
+                contextWindow={modelInfo.contextWindow}
+                temperature={modelInfo.temperature}
+            />
 
-            {/* Channel Configuration */}
-            <ExpandableCard title="Channels" icon={MessageSquare}>
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-400">Discord</span>
-                        <span
-                            className={
-                                channelInfo.discordEnabled
-                                    ? "text-green-400"
-                                    : "text-slate-500"
-                            }
-                        >
-                            {channelInfo.discordEnabled ? "Enabled" : "Disabled"}
-                        </span>
-                    </div>
-                    <ReadOnlyField label="Bot ID" value={channelInfo.discordBotId} />
-                </div>
-            </ExpandableCard>
+            <ChannelSection
+                discordEnabled={channelInfo.discordEnabled}
+                discordBotId={channelInfo.discordBotId}
+            />
 
-            {/* Tool Configuration */}
-            <ExpandableCard title="Tools" icon={Wrench}>
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-400">Web Search</span>
-                        <span
-                            className={
-                                toolInfo.webSearchEnabled
-                                    ? "text-green-400"
-                                    : "text-slate-500"
-                            }
-                        >
-                            {toolInfo.webSearchEnabled
-                                ? "Enabled (" + toolInfo.webSearchProvider + ")"
-                                : "Disabled"}
-                        </span>
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-400">Exec</span>
-                        <span
-                            className={
-                                toolInfo.execEnabled ? "text-green-400" : "text-slate-500"
-                            }
-                        >
-                            {toolInfo.execEnabled
-                                ? "Enabled (" + toolInfo.execMode + ")"
-                                : "Disabled"}
-                        </span>
-                    </div>
-                </div>
-            </ExpandableCard>
+            <ToolSection
+                webSearchEnabled={toolInfo.webSearchEnabled}
+                webSearchProvider={toolInfo.webSearchProvider}
+                execEnabled={toolInfo.execEnabled}
+                execMode={toolInfo.execMode}
+            />
 
-            {/* Security Configuration */}
-            <ExpandableCard title="Security" icon={Shield}>
-                <div className="space-y-2">
-                    <ReadOnlyField label="Gateway Port" value={securityInfo.gatewayPort} />
-                    <ReadOnlyField label="Mode" value={securityInfo.gatewayMode} />
-                    <ReadOnlyField
-                        label="Authentication"
-                        value={
-                            securityInfo.authEnabled
-                                ? securityInfo.authType
-                                : "Disabled"
-                        }
-                    />
-                </div>
-            </ExpandableCard>
+            <SecuritySection
+                gatewayPort={securityInfo.gatewayPort}
+                gatewayMode={securityInfo.gatewayMode}
+                authEnabled={securityInfo.authEnabled}
+                authType={securityInfo.authType}
+            />
 
-            {/* Session Configuration */}
-            <ExpandableCard title="Session" icon={Clock}>
-                <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        form.handleSubmit();
-                    }}
-                    className="space-y-4"
-                >
-                    <div>
-                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                            Idle Timeout (minutes)
-                        </label>
-                        <form.Field name="idleMinutes">
-                            {(field) => (
-                                <Input
-                                    type="number"
-                                    value={field.state.value}
-                                    onChange={(e) =>
-                                        field.handleChange(Number(e.target.value))
-                                    }
-                                    min={0}
-                                    max={1440}
-                                    className="w-32"
-                                />
-                            )}
-                        </form.Field>
-                    </div>
-                    <div className="flex justify-end">
-                        <Button type="submit" variant="primary" disabled={saving}>
-                            {saving ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Saving...
-                                </>
-                            ) : (
-                                <>
-                                    <Check className="h-4 w-4" />
-                                    Save
-                                </>
-                            )}
-                        </Button>
-                    </div>
-                </form>
-            </ExpandableCard>
+            <SessionSection
+                idleMinutes={sessionInfo.idleMinutes}
+                onSave={handleSessionSave}
+                saving={saving}
+            />
 
-            {/* Heartbeat Configuration */}
-            <ExpandableCard title="Heartbeat" icon={Heart}>
-                <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        form.handleSubmit();
-                    }}
-                    className="space-y-4"
-                >
-                    <div>
-                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                            Interval (seconds)
-                        </label>
-                        <form.Field name="heartbeatEvery">
-                            {(field) => (
-                                <Input
-                                    type="number"
-                                    value={field.state.value}
-                                    onChange={(e) =>
-                                        field.handleChange(Number(e.target.value))
-                                    }
-                                    min={60}
-                                    max={3600}
-                                    className="w-32"
-                                />
-                            )}
-                        </form.Field>
-                    </div>
-                    <div>
-                        <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                            Target Channel
-                        </label>
-                        <form.Field name="heartbeatTarget">
-                            {(field) => (
-                                <Input
-                                    type="text"
-                                    value={field.state.value}
-                                    onChange={(e) => field.handleChange(e.target.value)}
-                                    placeholder="Channel ID or name"
-                                    className="w-64"
-                                />
-                            )}
-                        </form.Field>
-                    </div>
-                    <div className="flex justify-end">
-                        <Button type="submit" variant="primary" disabled={saving}>
-                            {saving ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Saving...
-                                </>
-                            ) : (
-                                <>
-                                    <Check className="h-4 w-4" />
-                                    Save
-                                </>
-                            )}
-                        </Button>
-                    </div>
-                </form>
-            </ExpandableCard>
+            <HeartbeatSection
+                every={heartbeatInfo.every}
+                target={heartbeatInfo.target}
+                onSave={handleHeartbeatSave}
+                saving={saving}
+            />
 
-            {/* Skills */}
-            <ExpandableCard title="Skills" icon={Users}>
-                <div className="space-y-2">
-                    {skills.length === 0 ? (
-                        <p className="text-sm text-slate-400">No skills configured</p>
-                    ) : (
-                        skills.map((skill) => (
-                            <div
-                                key={skill.name}
-                                className="flex items-center justify-between py-2"
-                            >
-                                <div>
-                                    <p className="text-sm font-medium text-slate-200">
-                                        {skill.name}
-                                    </p>
-                                    {skill.description && (
-                                        <p className="text-xs text-slate-400">
-                                            {skill.description}
-                                        </p>
-                                    )}
-                                </div>
-                                <Switch
-                                    checked={skill.enabled}
-                                    onChange={(e) =>
-                                        handleSkillToggle(skill.name, e.target.checked)
-                                    }
-                                />
-                            </div>
-                        ))
-                    )}
-                </div>
-            </ExpandableCard>
+            <SkillsSection skills={skills} onToggle={handleSkillToggle} />
 
             {/* Server Info */}
-            <ExpandableCard title="Server" icon={Server}>
-                <div className="space-y-2">
-                    <ReadOnlyField label="Version" value="2026.2.23" />
-                    <ReadOnlyField label="Platform" value={typeof window !== 'undefined' ? window.navigator.platform : 'Unknown'} />
+            <div className="mb-4 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                    <Server className="h-4 w-4 text-accent-400" />
+                    <h3 className="text-sm font-medium text-slate-200">Server</h3>
                 </div>
-            </ExpandableCard>
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between py-1">
+                        <span className="text-sm text-slate-400">Version</span>
+                        <span className="font-mono text-sm text-primary-100">2026.2.23</span>
+                    </div>
+                    <div className="flex items-center justify-between py-1">
+                        <span className="text-sm text-slate-400">Platform</span>
+                        <span className="font-mono text-sm text-primary-100">
+                            {typeof window !== "undefined" ? window.navigator.platform : "Unknown"}
+                        </span>
+                    </div>
+                </div>
+            </div>
 
             {/* Restart Modal */}
             <Modal
