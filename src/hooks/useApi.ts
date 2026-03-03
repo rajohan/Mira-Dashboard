@@ -1,13 +1,33 @@
 const API_BASE = "/api";
 
+// Get token from localStorage or URL params
+function getToken(): string | null {
+    const stored = localStorage.getItem("openclaw_token");
+    if (stored) return stored;
+    return new URLSearchParams(window.location.search).get("token");
+}
+
 export async function apiFetch<T>(
     endpoint: string,
     options?: RequestInit
 ): Promise<T> {
+    const token = getToken();
+    const headers: HeadersInit = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+    };
+
     const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { "Content-Type": "application/json" },
         ...options,
+        headers,
     });
+
+    if (response.status === 401) {
+        localStorage.removeItem("openclaw_token");
+        window.location.href = "/login";
+        throw new Error("Unauthorized");
+    }
 
     if (!response.ok) {
         const error = await response.json().catch(() => ({ error: "Unknown error" }));

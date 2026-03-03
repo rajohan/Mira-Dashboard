@@ -1,6 +1,6 @@
 import { MessageSquare } from "lucide-react";
 
-import { type MoltbookPost } from "../../../api/moltbook";
+import { type MoltbookPost } from "../../../hooks/useMoltbook";
 import { Card } from "../../ui/Card";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 

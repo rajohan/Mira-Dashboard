@@ -27,7 +27,6 @@
         "@tanstack/react-table": "^8.21.3",
         "@tanstack/react-virtual": "^3.13.19",
         "@types/react-syntax-highlighter": "^15.5.13",
-        "axios": "^1.13.6",
         "clsx": "^2.1.1",
         "date-fns": "^4.1.0",
         "json5": "^2.2.3",
