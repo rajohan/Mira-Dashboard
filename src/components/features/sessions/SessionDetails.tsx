@@ -13,11 +13,12 @@ import {
     Trash2,
     X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "../../../components/ui/Button";
 import { Dropdown } from "../../../components/ui/Dropdown";
 import { Modal } from "../../../components/ui/Modal";
+import { useSessionHistory } from "../../../hooks/useSessions";
 import {
     formatDuration,
     formatTokens,
@@ -52,44 +53,11 @@ export function SessionDetails({
     onCompact,
     onReset,
 }: SessionDetailsProps) {
-    const [history, setHistory] = useState<
-        Array<{ role: string; content: string; timestamp?: string }>
-    >([]);
-    const [loading, setLoading] = useState(true);
     const [visibleCount, setVisibleCount] = useState(50);
-    const [totalCount, setTotalCount] = useState(0);
-    const [error, setError] = useState<string | null>(null);
+    const { data, isLoading, error, refetch } = useSessionHistory(session?.key || null);
 
-    const fetchHistory = async () => {
-        if (!session) return;
-
-        setLoading(true);
-        setError(null);
-        setVisibleCount(50);
-
-        try {
-            const res = await fetch(
-                "/api/sessions/" + encodeURIComponent(session.key) + "/history"
-            );
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.error || "Failed to fetch history");
-            }
-            const data = await res.json();
-            setHistory(data.messages || []);
-            setTotalCount(data.total || data.messages?.length || 0);
-        } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Unknown error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (session) {
-            fetchHistory();
-        }
-    }, [session]);
+    const history = data?.messages || [];
+    const totalCount = data?.total || 0;
 
     if (!session) return null;
 
@@ -218,16 +186,16 @@ export function SessionDetails({
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={fetchHistory}
-                            disabled={loading}
+                            onClick={() => refetch()}
+                            disabled={isLoading}
                         >
                             <RefreshCw
-                                className={"h-4 w-4 " + (loading ? "animate-spin" : "")}
+                                className={"h-4 w-4 " + (isLoading ? "animate-spin" : "")}
                             />
                         </Button>
                     </div>
                     <div className="flex-1 overflow-auto py-4">
-                        {loading ? (
+                        {isLoading ? (
                             <div className="flex items-center justify-center py-8">
                                 <RefreshCw className="h-5 w-5 animate-spin text-slate-400" />
                                 <span className="ml-2 text-slate-400">
@@ -236,7 +204,7 @@ export function SessionDetails({
                             </div>
                         ) : error ? (
                             <div className="py-8 text-center">
-                                <p className="text-slate-400">{error}</p>
+                                <p className="text-slate-400">{error.message}</p>
                             </div>
                         ) : history.length === 0 ? (
                             <div className="py-8 text-center">
