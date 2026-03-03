@@ -1,6 +1,5 @@
 import { Loader2, Plus, X } from "lucide-react";
-import { useState } from "react";
-import type { SubmitEvent } from "react";
+import { useForm } from "@tanstack/react-form";
 
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -19,31 +18,30 @@ interface NewTaskModalProps {
 }
 
 export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
-    const [title, setTitle] = useState("");
-    const [body, setBody] = useState("");
-    const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        if (!title.trim()) return;
-
-        setIsSubmitting(true);
-        try {
-            const trimmedBody = body.trim();
-            await onSubmit(title.trim(), trimmedBody || undefined, priority);
-            setTitle("");
-            setBody("");
-            setPriority("medium");
+    const form = useForm({
+        defaultValues: {
+            title: "",
+            body: "",
+            priority: "medium" as "high" | "medium" | "low",
+        },
+        onSubmit: async ({ value }) => {
+            if (!value.title.trim()) return;
+            const trimmedBody = value.body.trim();
+            await onSubmit(value.title.trim(), trimmedBody || undefined, value.priority);
+            form.reset();
             onClose();
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+        },
+    });
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg">
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    form.handleSubmit();
+                }}
+                className="space-y-4"
+            >
                 <div className="flex items-center justify-between">
                     <h2 className="text-lg font-semibold text-slate-100">New Task</h2>
                     <Button variant="ghost" size="sm" type="button" onClick={onClose} className="text-slate-400 hover:text-slate-200">
@@ -51,70 +49,82 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                     </Button>
                 </div>
 
-                <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                        Title
-                    </label>
-                    <Input
-                        type="text"
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
-                        placeholder="Task title..."
-                        autoFocus
-                    />
-                </div>
+                <form.Field name="title">
+                    {(field) => (
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                Title
+                            </label>
+                            <Input
+                                type="text"
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="Task title..."
+                                autoFocus
+                            />
+                        </div>
+                    )}
+                </form.Field>
 
-                <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                        Description (optional)
-                    </label>
-                    <textarea
-                        value={body}
-                        onChange={(e) => setBody(e.target.value)}
-                        placeholder="Task description..."
-                        rows={4}
-                        className="w-full resize-none rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent-500 focus:outline-none"
-                    />
-                </div>
+                <form.Field name="body">
+                    {(field) => (
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                Description (optional)
+                            </label>
+                            <textarea
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="Task description..."
+                                rows={4}
+                                className="w-full resize-none rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent-500 focus:outline-none"
+                            />
+                        </div>
+                    )}
+                </form.Field>
 
-                <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                        Priority
-                    </label>
-                    <div className="flex gap-2">
-                        {(["low", "medium", "high"] as const).map((p) => (
-                            <Button
-                                key={p}
-                                variant={priority === p ? "primary" : "secondary"}
-                                type="button"
-                                onClick={() => setPriority(p)}
-                                className={
-                                    priority === p
-                                        ? PRIORITY_COLORS[p] + " border-current"
-                                        : ""
-                                }
-                            >
-                                {p.charAt(0).toUpperCase() + p.slice(1)}
-                            </Button>
-                        ))}
-                    </div>
-                </div>
+                <form.Field name="priority">
+                    {(field) => (
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                Priority
+                            </label>
+                            <div className="flex gap-2">
+                                {(["low", "medium", "high"] as const).map((p) => (
+                                    <Button
+                                        key={p}
+                                        variant={field.state.value === p ? "primary" : "secondary"}
+                                        type="button"
+                                        onClick={() => field.handleChange(p)}
+                                        className={
+                                            field.state.value === p
+                                                ? PRIORITY_COLORS[p] + " border-current"
+                                                : ""
+                                        }
+                                    >
+                                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                                    </Button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </form.Field>
 
                 <div className="flex justify-end gap-2 pt-2">
                     <Button
                         type="button"
                         variant="secondary"
                         onClick={onClose}
-                        disabled={isSubmitting}
+                        disabled={form.state.isSubmitting}
                     >
                         Cancel
                     </Button>
                     <Button
                         type="submit"
                         variant="primary"
-                        disabled={!title.trim() || isSubmitting}
+                        disabled={!form.state.values.title.trim() || form.state.isSubmitting}
                     >
-                        {isSubmitting ? (
+                        {form.state.isSubmitting ? (
                             <>
                                 <Loader2 className="h-4 w-4 animate-spin" />
                                 Creating...

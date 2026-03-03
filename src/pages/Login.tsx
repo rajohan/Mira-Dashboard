@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import type { SubmitEvent } from "react";
+import { useForm } from "@tanstack/react-form";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -8,17 +7,18 @@ import { Input } from "../components/ui/Input";
 import { useAuthStore } from "../stores/authStore";
 
 export function Login() {
-    const [token, setToken] = useState("");
     const navigate = useNavigate();
     const { login } = useAuthStore();
 
-    const handleSubmit = (e: SubmitEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        if (token.trim()) {
-            login(token.trim());
-            navigate({ to: "/" });
-        }
-    };
+    const form = useForm({
+        defaultValues: { token: "" },
+        onSubmit: ({ value }) => {
+            if (value.token.trim()) {
+                login(value.token.trim());
+                navigate({ to: "/" });
+            }
+        },
+    });
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-primary-900 p-4">
@@ -31,15 +31,25 @@ export function Login() {
                     </p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <Input
-                        type="password"
-                        label="OpenClaw Token"
-                        value={token}
-                        onChange={(e) => setToken(e.target.value)}
-                        placeholder="Enter your token..."
-                    />
-                    <Button type="submit" className="w-full" disabled={!token.trim()}>
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        form.handleSubmit();
+                    }}
+                    className="space-y-4"
+                >
+                    <form.Field name="token">
+                        {(field) => (
+                            <Input
+                                type="password"
+                                label="OpenClaw Token"
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="Enter your token..."
+                            />
+                        )}
+                    </form.Field>
+                    <Button type="submit" className="w-full" disabled={!form.state.values.token.trim()}>
                         Connect
                     </Button>
                 </form>
