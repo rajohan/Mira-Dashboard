@@ -14,7 +14,7 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     ({ className, label, description, error, variant = "default", ...props }, ref) => {
         return (
-            <Field className={cn(variant === "code" && "h-full flex-1")}>
+            <Field className={cn(variant === "code" && "h-full")}>
                 {label && (
                     <Label className="mb-1.5 block text-sm font-medium text-slate-300">
                         {label}

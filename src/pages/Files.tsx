@@ -285,7 +285,7 @@ export function Files() {
                             </div>
 
                             {/* Content */}
-                            <div className="flex-1 overflow-auto">
+                            <div className="flex-1 overflow-hidden">
                                 {contentLoading ? (
                                     <div className="flex h-full items-center justify-center text-slate-400">
                                         Loading...
