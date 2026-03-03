@@ -4,17 +4,30 @@ import {
     createRouter,
     Outlet,
 } from "@tanstack/react-router";
+import { Suspense, lazy } from "react";
 
 import { Layout } from "./components/layout/Layout";
-import { Dashboard } from "./pages/Dashboard";
-import { Files } from "./pages/Files";
-import { Login } from "./pages/Login";
-import { Logs } from "./pages/Logs";
-import { Metrics } from "./pages/Metrics";
-import { Moltbook } from "./pages/Moltbook";
-import { Sessions } from "./pages/Sessions";
-import { Settings } from "./pages/Settings";
-import { Tasks } from "./pages/Tasks";
+import { LoadingSpinner } from "./components/ui/LoadingSpinner";
+
+// Lazy-loaded page components
+const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
+const Files = lazy(() => import("./pages/Files").then(m => ({ default: m.Files })));
+const Login = lazy(() => import("./pages/Login").then(m => ({ default: m.Login })));
+const Logs = lazy(() => import("./pages/Logs").then(m => ({ default: m.Logs })));
+const Metrics = lazy(() => import("./pages/Metrics").then(m => ({ default: m.Metrics })));
+const Moltbook = lazy(() => import("./pages/Moltbook").then(m => ({ default: m.Moltbook })));
+const Sessions = lazy(() => import("./pages/Sessions").then(m => ({ default: m.Sessions })));
+const Settings = lazy(() => import("./pages/Settings").then(m => ({ default: m.Settings })));
+const Tasks = lazy(() => import("./pages/Tasks").then(m => ({ default: m.Tasks })));
+
+// Wrapper for lazy components with Suspense
+function LazyPage({ component: Component }: { component: React.LazyExoticComponent<React.ComponentType> }) {
+    return (
+        <Suspense fallback={<LoadingSpinner />}>
+            <Component />
+        </Suspense>
+    );
+}
 
 // Root route (no component, just outlet)
 const rootRoute = createRootRoute({
@@ -25,7 +38,7 @@ const rootRoute = createRootRoute({
 const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
-    component: Login,
+    component: () => <LazyPage component={Login} />,
 });
 
 // Authenticated layout wrapper
@@ -43,56 +56,56 @@ const authenticatedRoute = createRoute({
 const indexRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/",
-    component: Dashboard,
+    component: () => <LazyPage component={Dashboard} />,
 });
 
 // Tasks
 const tasksRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/tasks",
-    component: Tasks,
+    component: () => <LazyPage component={Tasks} />,
 });
 
 // Sessions
 const sessionsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/sessions",
-    component: Sessions,
+    component: () => <LazyPage component={Sessions} />,
 });
 
 // Logs
 const logsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/logs",
-    component: Logs,
+    component: () => <LazyPage component={Logs} />,
 });
 
 // Files
 const filesRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/files",
-    component: Files,
+    component: () => <LazyPage component={Files} />,
 });
 
 // Metrics
 const metricsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/metrics",
-    component: Metrics,
+    component: () => <LazyPage component={Metrics} />,
 });
 
 // Moltbook
 const moltbookRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/moltbook",
-    component: Moltbook,
+    component: () => <LazyPage component={Moltbook} />,
 });
 
 // Settings
 const settingsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/settings",
-    component: Settings,
+    component: () => <LazyPage component={Settings} />,
 });
 
 // Route tree
