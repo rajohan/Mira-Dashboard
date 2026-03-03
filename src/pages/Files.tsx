@@ -217,7 +217,6 @@ export function isTextFile(filename: string): boolean {
         "conf",
         "config",
         "xml",
-        "svg",
         "sql",
         "graphql",
         "proto",
@@ -642,7 +641,19 @@ export function Files() {
                 }
                 const data = await res.json();
 
-                if (data.isBinary) {
+                if (data.isImage) {
+                    // Image file - store base64 content
+                    setFileContent({
+                        content: data.content,
+                        path: filePath,
+                        size: data.size,
+                        modified: data.modified,
+                        isBinary: true,
+                        isImage: true,
+                        mimeType: data.mimeType,
+                    });
+                    setEditedContent("");
+                } else if (data.isBinary) {
                     setFileContent({
                         content: "[Binary file - cannot display]",
                         path: filePath,
