@@ -1,5 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
+import { enUS } from "date-fns/locale";
 import {
     ChevronDown,
     Download,
@@ -7,17 +8,30 @@ import {
     RefreshCw,
     Terminal,
     Wifi,
+    WifiOff,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { parseLogLine, formatLogTime, formatFileSize, getLevelColor, getSubsystemColor, LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
-import { type LogEntry, type LogFile } from "../types/log";
-import { useAuthStore } from "../stores/authStore";
+
+interface LogEntry {
+    ts?: string;
+    level?: string;
+    subsystem?: string;
+    msg: string;
+    raw: string;
+}
+
+interface LogFile {
+    name: string;
+    size: number;
+    modified: string;
+}
+
+const LINE_OPTIONS = [100, 500, 1000, 2000, 5000];
 
 export function Logs() {
-    const { token } = useAuthStore();
     const [isConnected, setIsConnected] = useState(false);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [autoFollow, setAutoFollow] = useState(true);
@@ -35,7 +49,83 @@ export function Logs() {
     const wsRef = useRef<WebSocket | null>(null);
     const historyBufferRef = useRef<LogEntry[]>([]);
     const isReceivingHistoryRef = useRef(true);
-    const isAutoScrollingRef = useRef(false);
+    const isAutoScrollingRef = useRef(false); // Track programmatic scroll
+
+    const levels = ["trace", "debug", "info", "warn", "error", "fatal"];
+
+    const parseLogLine = useCallback((line: string): LogEntry | null => {
+        if (!line || !line.trim()) return null;
+
+        let jsonStr = line;
+
+        if (!line.startsWith("{")) {
+            const braceIdx = line.indexOf("{");
+            if (braceIdx !== -1) {
+                jsonStr = line.slice(braceIdx);
+            }
+        }
+
+        try {
+            const parsed = JSON.parse(jsonStr);
+
+            const level =
+                parsed._meta?.logLevelName || parsed.level || parsed.lvl || "INFO";
+            const ts = parsed._meta?.date || parsed.time || parsed.timestamp;
+
+            let subsystem = "";
+            let msg = "";
+
+            if (parsed[0]) {
+                if (typeof parsed[0] === "string" && parsed[0].startsWith("{")) {
+                    try {
+                        const subParsed = JSON.parse(parsed[0]);
+                        subsystem = subParsed.subsystem || subParsed.module || "";
+                    } catch {
+                        msg = String(parsed[0]);
+                    }
+                } else if (typeof parsed[0] === "string") {
+                    msg = parsed[0];
+                }
+            }
+
+            if (parsed[1] && !msg) {
+                if (typeof parsed[1] === "string") {
+                    msg = parsed[1];
+                } else if (parsed[2] && typeof parsed[2] === "string") {
+                    msg = parsed[2];
+                } else if (typeof parsed[1] === "object") {
+                    msg = JSON.stringify(parsed[1]);
+                }
+            }
+
+            if (!msg) {
+                msg = parsed.msg || parsed.message || line;
+            }
+
+            // Ensure msg is always a string
+            if (typeof msg !== "string") {
+                msg = JSON.stringify(msg);
+            }
+
+            if (!subsystem && msg) {
+                const bracketMatch = msg.match(/^\[(\w+)\]\s*/);
+                if (bracketMatch) {
+                    subsystem = bracketMatch[1];
+                    msg = msg.slice(bracketMatch[0].length);
+                } else {
+                    const colonMatch = msg.match(/^(\w+):\s*/);
+                    if (colonMatch) {
+                        subsystem = colonMatch[1];
+                        msg = msg.slice(colonMatch[0].length);
+                    }
+                }
+            }
+
+            return { ts, level: level.toLowerCase(), subsystem, msg, raw: line };
+        } catch {
+            return { msg: line, raw: line };
+        }
+    }, []);
 
     // Fetch log files on mount
     useEffect(() => {
@@ -44,10 +134,12 @@ export function Logs() {
                 const response = await fetch("/api/logs/info");
                 const data = await response.json();
                 if (data.logs) {
-                    const sorted = [...data.logs].sort((a: LogFile, b: LogFile) =>
+                    // Sort by filename descending (newest first) - filenames are openclaw-YYYY-MM-DD.log
+                    const sorted = [...data.logs].sort((a, b) =>
                         b.name.localeCompare(a.name)
                     );
                     setLogFiles(sorted);
+                    // Select today's file by default
                     const today = format(new Date(), "yyyy-MM-dd");
                     const todayFile = sorted.find((f: LogFile) => f.name.includes(today));
                     if (todayFile) {
@@ -63,100 +155,143 @@ export function Logs() {
         fetchLogFiles();
     }, []);
 
-    // Load log content from file
-    const loadLogContent = useCallback(async (filename: string, lines: number) => {
-        setIsLoading(true);
-        try {
-            const response = await fetch(
-                `/api/logs/content?file=${encodeURIComponent(filename)}&lines=${lines}`
-            );
-            const data = await response.json();
-            if (data.content) {
-                const logLines = data.content.split("\n").filter((l: string) => l.trim());
-                const parsedLogs = logLines
-                    .map((line: string) => parseLogLine(line))
-                    .filter((l: LogEntry | null): l is LogEntry => l !== null);
-                setLogs(parsedLogs);
-                historyBufferRef.current = [];
-                isReceivingHistoryRef.current = true;
+    // Load log content when file or line count changes
+    const loadLogContent = useCallback(
+        async (file: string, lines: number) => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(
+                    `/api/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
+                );
+                const data = await response.json();
+                if (data.content) {
+                    const logLines = data.content
+                        .split("\n")
+                        .filter((l: string) => l.trim());
+                    const parsedLogs = logLines
+                        .map((line: string) => parseLogLine(line))
+                        .filter((l: LogEntry | null): l is LogEntry => l !== null);
+                    setLogs(parsedLogs);
+                }
+            } catch (error) {
+                console.error("Failed to load log content:", error);
+            } finally {
+                setIsLoading(false);
             }
-        } catch (error) {
-            console.error("Failed to load log content:", error);
-        } finally {
-            setIsLoading(false);
+        },
+        [parseLogLine]
+    );
+
+    // Handle file selection
+    const handleFileSelect = (file: string) => {
+        setSelectedFile(file);
+        setShowFileDropdown(false);
+        loadLogContent(file, lineCount);
+    };
+
+    // Handle line count selection
+    const handleLineSelect = (lines: number) => {
+        setLineCount(lines);
+        setShowLineDropdown(false);
+        if (selectedFile) {
+            loadLogContent(selectedFile, lines);
         }
-    }, []);
+    };
 
-    // WebSocket for live logs
+    // Track selected file and line count for WebSocket loading
+    const selectedFileRef = useRef<string>(selectedFile);
+    const lineCountRef = useRef<number>(lineCount);
+
+    // Keep refs in sync
     useEffect(() => {
-        if (!token || selectedFile) return;
+        selectedFileRef.current = selectedFile;
+        lineCountRef.current = lineCount;
+    }, [selectedFile, lineCount]);
 
-        const wsUrl = new URL(window.location.href);
-        wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-        wsUrl.pathname = "/ws";
+    // Load log content when file selection changes
+    useEffect(() => {
+        if (selectedFile && logFiles.length > 0) {
+            loadLogContent(selectedFile, lineCount);
+        }
+        // Intentionally only run when selectedFile changes
+    }, [selectedFile]);
 
-        const ws = new WebSocket(wsUrl.toString());
+    useEffect(() => {
+        const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:${window.location.port || "5173" === window.location.port ? "3100" : window.location.port}/ws`;
+
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
-        ws.onopen = () => {
+        isReceivingHistoryRef.current = true;
+        historyBufferRef.current = [];
+
+        ws.addEventListener("open", () => {
             setIsConnected(true);
-            ws.send(JSON.stringify({ type: "auth", token }));
+            isReceivingHistoryRef.current = true;
+            historyBufferRef.current = [];
             ws.send(JSON.stringify({ type: "subscribe", channel: "logs" }));
-            ws.send(JSON.stringify({ type: "history", channel: "logs" }));
-        };
+        });
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === "history" && Array.isArray(data.messages)) {
-                    historyBufferRef.current = data.messages
-                        .map((m: { content?: string }) => m.content)
-                        .filter((c: unknown): c is string => typeof c === "string")
-                        .map((line: string) => parseLogLine(line))
-                        .filter((l: LogEntry | null): l is LogEntry => l !== null)
-                        .reverse();
-                    setLogs([...historyBufferRef.current]);
+
+                if (data.type === "log_history_complete") {
                     isReceivingHistoryRef.current = false;
-                } else if (data.type === "log") {
-                    const content = data.data?.content || data.content;
-                    if (content) {
-                        const entry = parseLogLine(content);
-                        if (entry) {
+                    // Use lineCount from ref to respect user's selection
+                    const maxLines = lineCountRef.current;
+                    setLogs(historyBufferRef.current.slice(-maxLines));
+                    historyBufferRef.current = [];
+                    return;
+                }
+
+                if (
+                    (data.type === "log_entry" || data.type === "log") &&
+                    (data.line || data.raw)
+                ) {
+                    const line = (data.raw || data.line || "").trim();
+                    const parsed = parseLogLine(line);
+                    if (parsed) {
+                        if (isReceivingHistoryRef.current) {
+                            historyBufferRef.current.push(parsed);
+                        } else {
                             setLogs((prev) => {
-                                if (isReceivingHistoryRef.current) {
-                                    historyBufferRef.current.push(entry);
-                                    return [...historyBufferRef.current];
-                                }
-                                return [...prev, entry];
+                                // Use lineCount from ref for live logs too
+                                const maxLines = lineCountRef.current;
+                                const exists = prev.some((l) => l.raw === parsed.raw);
+                                if (exists) return prev;
+                                return [...prev.slice(-(maxLines - 1)), parsed];
                             });
                         }
                     }
                 }
-            } catch (e) {
-                console.error("Failed to parse WS message:", e);
+            } catch {
+                // Ignore parse errors
             }
         };
 
-        ws.onclose = () => setIsConnected(false);
-        ws.onerror = () => setIsConnected(false);
+        ws.addEventListener("close", () => {
+            setIsConnected(false);
+            isReceivingHistoryRef.current = true;
+            historyBufferRef.current = [];
+        });
+        ws.onerror = () => {
+            setIsConnected(false);
+            isReceivingHistoryRef.current = true;
+            historyBufferRef.current = [];
+        };
 
         return () => {
+            ws.send(JSON.stringify({ type: "unsubscribe", channel: "logs" }));
             ws.close();
         };
-    }, [token, selectedFile]);
+    }, [parseLogLine]);
 
-    // Filter logs
     const filteredLogs = useMemo(() => {
         return logs.filter((log) => {
-            if (!levelFilter.has(log.level || "info")) return false;
-            if (search) {
-                const s = search.toLowerCase();
-                return (
-                    log.msg.toLowerCase().includes(s) ||
-                    (log.subsystem?.toLowerCase().includes(s) ?? false) ||
-                    log.raw.toLowerCase().includes(s)
-                );
-            }
+            if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
+            if (search && !log.raw.toLowerCase().includes(search.toLowerCase()))
+                return false;
             return true;
         });
     }, [logs, levelFilter, search]);
@@ -204,37 +339,123 @@ export function Logs() {
         URL.revokeObjectURL(url);
     };
 
-    // Virtualizer for efficient rendering
+    const handleClear = () => setLogs([]);
+
+    const formatTime = (ts?: string): string => {
+        if (!ts) return "";
+        try {
+            return format(new Date(ts), "HH:mm:ss", { locale: enUS });
+        } catch {
+            return ts;
+        }
+    };
+
+    const formatFileSize = (bytes: number): string => {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    };
+
+    const getLevelColor = (level?: string): string => {
+        const l = (level || "info").toLowerCase();
+        switch (l) {
+            case "fatal": {
+                return "text-red-400 bg-red-500/20";
+            }
+            case "error": {
+                return "text-red-400 bg-red-500/20";
+            }
+            case "warn": {
+                return "text-yellow-400 bg-yellow-500/20";
+            }
+            case "info": {
+                return "text-blue-400 bg-blue-500/20";
+            }
+            case "debug": {
+                return "text-slate-400 bg-slate-500/20";
+            }
+            case "trace": {
+                return "text-slate-500 bg-slate-500/10";
+            }
+            default: {
+                return "text-slate-400 bg-slate-500/20";
+            }
+        }
+    };
+
+    const getSubsystemColor = (subsystem?: string): string => {
+        if (!subsystem) return "";
+        const s = subsystem.toLowerCase();
+        switch (s) {
+            case "exec": {
+                return "text-green-400";
+            }
+            case "tools": {
+                return "text-orange-400";
+            }
+            case "agent": {
+                return "text-purple-400";
+            }
+            case "gateway": {
+                return "text-cyan-400";
+            }
+            case "cron": {
+                return "text-pink-400";
+            }
+            case "session": {
+                return "text-indigo-400";
+            }
+            case "http": {
+                return "text-teal-400";
+            }
+            case "ws": {
+                return "text-amber-400";
+            }
+            case "memory": {
+                return "text-emerald-400";
+            }
+            default: {
+                return "text-purple-400";
+            }
+        }
+    };
+
+    // Virtualizer for efficient rendering with variable row heights
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
         getScrollElement: () => logContainerRef.current,
-        estimateSize: () => 22,
+        estimateSize: () => 22, // Base height
         overscan: 15,
     });
 
-    // Handle scroll
+    // Handle scroll - re-enable autoFollow when user scrolls to bottom
     const handleScroll = useCallback(() => {
         if (!logContainerRef.current || isAutoScrollingRef.current) return;
+
         const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30; // 30px threshold
 
         if (isAtBottom && !autoFollow) {
             setAutoFollow(true);
         } else if (!isAtBottom && autoFollow) {
+            // User scrolled up - disable autoFollow
             setAutoFollow(false);
         }
     }, [autoFollow]);
 
-    // Auto-scroll
+    // Auto-scroll to bottom when logs load or autoFollow is enabled
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
             isAutoScrollingRef.current = true;
+
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
                 }
                 rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
             };
+
             requestAnimationFrame(() => {
                 scrollToBottom();
                 setTimeout(() => {
@@ -245,6 +466,29 @@ export function Logs() {
         }
     }, [filteredLogs.length, autoFollow, rowVirtualizer]);
 
+    // Handle file/line count changes - scroll to bottom after loading new content
+    useEffect(() => {
+        if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
+            isAutoScrollingRef.current = true;
+
+            const scrollToBottom = () => {
+                if (logContainerRef.current) {
+                    logContainerRef.current.scrollTop =
+                        logContainerRef.current.scrollHeight;
+                }
+                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+            };
+
+            requestAnimationFrame(() => {
+                scrollToBottom();
+                setTimeout(() => {
+                    scrollToBottom();
+                    isAutoScrollingRef.current = false;
+                }, 150);
+            });
+        }
+    }, [selectedFile, lineCount]);
+
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
             <div className="mb-4 flex items-center justify-between">
@@ -253,225 +497,236 @@ export function Logs() {
                     <h1 className="text-2xl font-bold">Logs</h1>
                 </div>
                 <div className="flex items-center gap-2">
-                    {isConnected && !selectedFile && (
+                    {isConnected ? (
                         <span className="flex items-center gap-1 text-sm text-green-400">
-                            <Wifi size={14} /> Live
+                            <Wifi size={16} /> Connected
                         </span>
-                    )}
-                    {selectedFile && (
-                        <span className="flex items-center gap-1 text-sm text-blue-400">
-                            <FileText size={14} /> {selectedFile}
+                    ) : (
+                        <span className="flex items-center gap-1 text-sm text-red-400">
+                            <WifiOff size={16} /> Disconnected
                         </span>
                     )}
                 </div>
             </div>
 
-            {/* Controls */}
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-                {/* File dropdown */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+                {/* File selector dropdown */}
                 <div className="relative">
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                            setShowFileDropdown(!showFileDropdown);
-                            setShowLineDropdown(false);
-                        }}
+                    <button
+                        onClick={() => setShowFileDropdown(!showFileDropdown)}
+                        className="flex min-w-[220px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
                     >
-                        <FileText className="mr-1 h-4 w-4" />
-                        {selectedFile || "Live Logs"}
-                        <ChevronDown className="ml-1 h-3 w-3" />
-                    </Button>
+                        <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                        <span className="flex-1 truncate text-left">
+                            {selectedFile || "Select file..."}
+                        </span>
+                        <ChevronDown
+                            className={`h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${showFileDropdown ? "rotate-180" : ""}`}
+                        />
+                    </button>
                     {showFileDropdown && (
-                        <div className="absolute left-0 top-full z-50 mt-1 max-h-60 w-64 overflow-auto rounded-lg border border-slate-600 bg-slate-800 shadow-lg">
-                            <button
-                                className={
-                                    "w-full px-3 py-2 text-left text-sm hover:bg-slate-700 " +
-                                    (!selectedFile ? "bg-accent-500/20 text-accent-400" : "text-slate-200")
-                                }
-                                onClick={() => {
-                                    setSelectedFile("");
-                                    setShowFileDropdown(false);
-                                    setLogs([]);
-                                }}
-                            >
-                                Live Logs (WebSocket)
-                            </button>
-                            <div className="border-t border-slate-600" />
-                            {logFiles.map((file) => (
-                                <button
-                                    key={file.name}
-                                    className={
-                                        "w-full px-3 py-2 text-left text-sm hover:bg-slate-700 " +
-                                        (selectedFile === file.name
-                                            ? "bg-accent-500/20 text-accent-400"
-                                            : "text-slate-200")
-                                    }
-                                    onClick={() => {
-                                        setSelectedFile(file.name);
-                                        setShowFileDropdown(false);
-                                        loadLogContent(file.name, lineCount);
-                                    }}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <span>{file.name}</span>
-                                        <span className="text-xs text-slate-400">
+                        <div className="absolute left-0 top-full z-10 mt-1 max-h-60 min-w-[300px] overflow-y-auto rounded border border-slate-700 bg-slate-800 shadow-lg">
+                            {logFiles.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-slate-400">
+                                    No log files found
+                                </div>
+                            ) : (
+                                logFiles.map((file) => (
+                                    <button
+                                        key={file.name}
+                                        onClick={() => handleFileSelect(file.name)}
+                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-700 ${
+                                            selectedFile === file.name
+                                                ? "bg-slate-700 text-indigo-400"
+                                                : ""
+                                        }`}
+                                    >
+                                        <span className="truncate">{file.name}</span>
+                                        <span className="flex-shrink-0 text-xs text-slate-500">
                                             {formatFileSize(file.size)}
                                         </span>
-                                    </div>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Line count selector dropdown */}
+                <div className="relative">
+                    <button
+                        onClick={() => setShowLineDropdown(!showLineDropdown)}
+                        className="flex min-w-[100px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
+                    >
+                        <span>{lineCount} lines</span>
+                        <ChevronDown
+                            className={`h-4 w-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`}
+                        />
+                    </button>
+                    {showLineDropdown && (
+                        <div className="absolute left-0 top-full z-10 mt-1 rounded border border-slate-700 bg-slate-800 shadow-lg">
+                            {LINE_OPTIONS.map((lines) => (
+                                <button
+                                    key={lines}
+                                    onClick={() => handleLineSelect(lines)}
+                                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-700 ${
+                                        lineCount === lines
+                                            ? "bg-slate-700 text-indigo-400"
+                                            : ""
+                                    }`}
+                                >
+                                    {lines} lines
                                 </button>
                             ))}
                         </div>
                     )}
                 </div>
 
-                {/* Line count dropdown */}
-                <div className="relative">
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                            setShowLineDropdown(!showLineDropdown);
-                            setShowFileDropdown(false);
-                        }}
-                    >
-                        {lineCount} lines
-                        <ChevronDown className="ml-1 h-3 w-3" />
-                    </Button>
-                    {showLineDropdown && (
-                        <div className="absolute left-0 top-full z-50 mt-1 min-w-[100px] rounded-lg border border-slate-600 bg-slate-800 shadow-lg">
-                            {LINE_OPTIONS.map((n) => (
-                                <button
-                                    key={n}
-                                    className={
-                                        "w-full px-3 py-2 text-left text-sm hover:bg-slate-700 " +
-                                        (lineCount === n
-                                            ? "bg-accent-500/20 text-accent-400"
-                                            : "text-slate-200")
-                                    }
-                                    onClick={() => {
-                                        setLineCount(n);
-                                        setShowLineDropdown(false);
-                                        if (selectedFile) {
-                                            loadLogContent(selectedFile, n);
-                                        }
-                                    }}
-                                >
-                                    {n} lines
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                <div className="relative min-w-[200px] max-w-md flex-1">
+                    <input
+                        type="text"
+                        placeholder="Search logs..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
                 </div>
 
                 {/* Level filters */}
-                {LOG_LEVELS.map((level) => (
-                    <Button
-                        key={level}
-                        variant={levelFilter.has(level) ? "primary" : "secondary"}
-                        size="sm"
-                        onClick={() => toggleLevel(level)}
-                        className="text-xs"
-                    >
-                        {level.toUpperCase()}
-                    </Button>
-                ))}
-
-                {/* Search */}
-                <input
-                    type="text"
-                    placeholder="Search..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-slate-100 focus:border-accent-500 focus:outline-none"
-                />
-
-                {/* Actions */}
-                <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleRefresh}
-                    disabled={isLoading}
-                >
-                    <RefreshCw className={"h-4 w-4 " + (isLoading ? "animate-spin" : "")} />
-                </Button>
-                <Button variant="secondary" size="sm" onClick={handleExport}>
-                    <Download className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                    {levels.map((level) => (
+                        <button
+                            key={level}
+                            onClick={() => toggleLevel(level)}
+                            className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                                levelFilter.has(level)
+                                    ? getLevelColor(level)
+                                    : "bg-slate-700 text-slate-500"
+                            }`}
+                        >
+                            {level}
+                        </button>
+                    ))}
+                </div>
             </div>
 
-            {/* Log display */}
-            <Card
-                variant="bordered"
-                className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900 p-0"
-            >
+            {/* Second row: Auto-follow and action buttons */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-400">
+                    {isLoading
+                        ? "Loading..."
+                        : `${filteredLogs.length} of ${logs.length} entries`}
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                            type="checkbox"
+                            checked={autoFollow}
+                            onChange={(e) => setAutoFollow(e.target.checked)}
+                            className="rounded"
+                        />
+                        Auto-follow
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleRefresh}
+                            disabled={isLoading}
+                        >
+                            <RefreshCw
+                                className={`mr-1 h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+                            />
+                            Refresh
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleExport}
+                            disabled={filteredLogs.length === 0}
+                        >
+                            <Download className="mr-1 h-4 w-4" />
+                            Export
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleClear}
+                            disabled={logs.length === 0}
+                        >
+                            Clear
+                        </Button>
+                    </div>
+                </div>
+            </div>
+
+            <Card className="flex-1 overflow-hidden" variant="bordered">
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="flex-1 overflow-auto font-mono text-xs"
+                    className="h-full overflow-y-auto bg-slate-900/50 font-mono text-xs"
                 >
-                    <div
-                        style={{
-                            height: rowVirtualizer.getTotalSize(),
-                            width: "100%",
-                            position: "relative",
-                        }}
-                    >
-                        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                            const log = filteredLogs[virtualRow.index];
-                            return (
-                                <div
-                                    key={virtualRow.key}
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        height: virtualRow.size,
-                                        transform: `translateY(${virtualRow.start}px)`,
-                                    }}
-                                    className="flex items-start gap-2 border-b border-slate-800/50 px-2 py-0.5 hover:bg-slate-800/30"
-                                >
-                                    {log.ts && (
-                                        <span className="flex-shrink-0 text-slate-500">
-                                            {formatLogTime(log.ts)}
+                    {filteredLogs.length === 0 ? (
+                        <div className="py-8 text-center text-slate-400">
+                            {logs.length === 0
+                                ? "Waiting for logs..."
+                                : "No logs match your filter."}
+                        </div>
+                    ) : (
+                        <div
+                            style={{
+                                height: `${rowVirtualizer.getTotalSize()}px`,
+                                width: "100%",
+                                position: "relative",
+                            }}
+                        >
+                            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                const log = filteredLogs[virtualRow.index];
+                                return (
+                                    <div
+                                        key={virtualRow.key}
+                                        data-index={virtualRow.index}
+                                        ref={rowVirtualizer.measureElement}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            transform: `translateY(${virtualRow.start}px)`,
+                                        }}
+                                        className="flex items-start gap-2 px-4 py-0.5 hover:bg-slate-800/50"
+                                    >
+                                        {log.ts && (
+                                            <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
+                                                {formatTime(log.ts)}
+                                            </span>
+                                        )}
+                                        {log.level && (
+                                            <span
+                                                className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(log.level)}`}
+                                            >
+                                                {log.level.toUpperCase().slice(0, 5)}
+                                            </span>
+                                        )}
+                                        {log.subsystem && (
+                                            <span
+                                                className={`flex-shrink-0 whitespace-nowrap ${getSubsystemColor(log.subsystem)}`}
+                                            >
+                                                [{log.subsystem}]
+                                            </span>
+                                        )}
+                                        <span className="flex-1 whitespace-pre-wrap break-all text-slate-200">
+                                            {log.msg}
                                         </span>
-                                    )}
-                                    {log.level && (
-                                        <span
-                                            className={
-                                                "flex-shrink-0 rounded px-1 py-0.5 text-xs font-medium " +
-                                                getLevelColor(log.level)
-                                            }
-                                        >
-                                            {log.level.toUpperCase()}
-                                        </span>
-                                    )}
-                                    {log.subsystem && (
-                                        <span
-                                            className={
-                                                "flex-shrink-0 " +
-                                                getSubsystemColor(log.subsystem)
-                                            }
-                                        >
-                                            [{log.subsystem}]
-                                        </span>
-                                    )}
-                                    <span className="flex-1 break-all text-slate-200">
-                                        {log.msg}
-                                    </span>
-                                </div>
-                            );
-                        })}
-                    </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </Card>
-
-            {/* Status */}
-            <div className="mt-2 text-xs text-slate-400">
-                {filteredLogs.length} logs
-                {autoFollow && " • Auto-follow"}
-            </div>
         </div>
     );
 }
