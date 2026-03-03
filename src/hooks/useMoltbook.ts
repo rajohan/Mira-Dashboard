@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { MiraProfile, MiraContent } from "../types/moltbook";
+import type { MiraProfile, MiraContent, MiraPost, MiraComment } from "../types/moltbook";
 
 // Types
 export interface MoltbookPost {
@@ -40,7 +40,8 @@ interface ProfileResponse {
 }
 
 interface MyContentResponse {
-    posts?: MiraContent;
+    posts: MiraPost[];
+    comments: MiraComment[];
 }
 
 // Query keys
@@ -111,7 +112,7 @@ async function fetchMyContent(): Promise<MiraContent | null> {
     const res = await fetch("/api/moltbook/my-posts");
     if (!res.ok) throw new Error("Failed to fetch content");
     const data: MyContentResponse = await res.json();
-    return data.posts || null;
+    return { posts: data.posts || [], comments: data.comments || [] };
 }
 
 // Hooks
