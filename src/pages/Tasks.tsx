@@ -16,7 +16,6 @@ import {
     ExternalLink,
     GripVertical,
     Loader2,
-    Plus,
     RefreshCw,
     Search,
     X,
@@ -43,7 +42,6 @@ type ColumnId = "todo" | "in-progress" | "blocked" | "done";
 
 interface ColumnConfig {
     title: string;
-    icon: React.ReactNode;
     dotColor: string;
     filter: (t: Task) => boolean;
 }
@@ -51,7 +49,6 @@ interface ColumnConfig {
 const COLUMN_CONFIG: Record<ColumnId, ColumnConfig> = {
     todo: {
         title: "New",
-        icon: <Circle className="h-4 w-4" />,
         dotColor: "bg-orange-500",
         filter: (t) =>
             t.state === "OPEN" &&
@@ -60,20 +57,17 @@ const COLUMN_CONFIG: Record<ColumnId, ColumnConfig> = {
     },
     "in-progress": {
         title: "In Progress",
-        icon: <Loader2 className="h-4 w-4" />,
         dotColor: "bg-blue-500",
         filter: (t) =>
             t.state === "OPEN" && t.labels.some((l) => l.name === "in-progress"),
     },
     blocked: {
         title: "Blocked",
-        icon: <AlertCircle className="h-4 w-4" />,
         dotColor: "bg-red-500",
         filter: (t) => t.state === "OPEN" && t.labels.some((l) => l.name === "blocked"),
     },
     done: {
         title: "Done",
-        icon: <CheckCircle2 className="h-4 w-4" />,
         dotColor: "bg-green-500",
         filter: (t) => t.state === "CLOSED",
     },
@@ -122,7 +116,7 @@ function TaskCard({
             style={style}
             {...attributes}
             className={
-                "group relative cursor-pointer rounded-lg border border-slate-700 bg-slate-800 p-4 transition-all " +
+                "group relative cursor-pointer rounded-lg border border-slate-700 bg-slate-800 p-3 transition-all " +
                 "hover:border-slate-600 " +
                 (isDragging ? "cursor-grabbing border-accent-500 opacity-90" : "")
             }
@@ -130,44 +124,26 @@ function TaskCard({
         >
             <button
                 {...listeners}
-                className="absolute left-2 top-1/2 -translate-y-1/2 cursor-grab text-slate-600 opacity-0 transition-opacity hover:text-slate-400 group-hover:opacity-100"
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 cursor-grab text-slate-600 opacity-0 transition-opacity hover:text-slate-400 group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
             </button>
 
-            <div className="ml-4">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-slate-400">
-                        #{task.number}
-                    </span>
+            <div className="ml-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                    <span className="text-xs text-slate-500">#{task.number}</span>
                     <span
                         className={
-                            "rounded-full border px-2 py-0.5 text-xs font-medium " +
+                            "rounded border px-1.5 py-0.5 text-[10px] font-medium " +
                             PRIORITY_COLORS[priority]
                         }
                     >
                         {priority.toUpperCase()}
                     </span>
-                    {task.labels
-                        .filter(
-                            (l) =>
-                                !l.name.startsWith("priority-") &&
-                                l.name !== "blocked" &&
-                                l.name !== "in-progress"
-                        )
-                        .slice(0, 2)
-                        .map((label) => (
-                            <span
-                                key={label.name}
-                                className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
-                            >
-                                {label.name}
-                            </span>
-                        ))}
                 </div>
 
-                <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-slate-100">
+                <h3 className="mb-1.5 line-clamp-2 text-sm font-medium text-slate-200">
                     {task.title}
                 </h3>
 
@@ -187,7 +163,7 @@ function TaskCard({
                                     className="h-5 w-5 rounded-full"
                                 />
                             ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-xs text-slate-300">
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[10px] text-slate-300">
                                     {(assignee.login ||
                                         assignee.name ||
                                         "?")[0].toUpperCase()}
@@ -205,19 +181,19 @@ function TaskOverlay({ task }: { task: Task }) {
     const priority = getPriority(task.labels);
 
     return (
-        <div className="w-80 rounded-lg border border-accent-500/50 bg-slate-800 p-4 shadow-xl">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-400">#{task.number}</span>
+        <div className="w-72 rounded-lg border border-accent-500/50 bg-slate-800 p-3 shadow-xl">
+            <div className="mb-1.5 flex items-center gap-2">
+                <span className="text-xs text-slate-500">#{task.number}</span>
                 <span
                     className={
-                        "rounded-full border px-2 py-0.5 text-xs font-medium " +
+                        "rounded border px-1.5 py-0.5 text-[10px] font-medium " +
                         PRIORITY_COLORS[priority]
                     }
                 >
                     {priority.toUpperCase()}
                 </span>
             </div>
-            <h3 className="line-clamp-2 text-sm font-semibold text-slate-100">
+            <h3 className="line-clamp-2 text-sm font-medium text-slate-200">
                 {task.title}
             </h3>
         </div>
@@ -260,7 +236,7 @@ function TaskDetailModal({
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                             <span
                                 className={
-                                    "rounded-full border px-2.5 py-1 text-xs font-semibold " +
+                                    "rounded-full border px-2 py-0.5 text-xs font-medium " +
                                     (task.state === "CLOSED"
                                         ? "border-green-500/30 bg-green-500/20 text-green-400"
                                         : "border-blue-500/30 bg-blue-500/20 text-blue-400")
@@ -272,7 +248,7 @@ function TaskDetailModal({
                             </span>
                             <span
                                 className={
-                                    "rounded-full border px-2.5 py-1 text-xs font-semibold " +
+                                    "rounded-full border px-2 py-0.5 text-xs font-medium " +
                                     PRIORITY_COLORS[priority]
                                 }
                             >
@@ -288,7 +264,7 @@ function TaskDetailModal({
                                 .map((label) => (
                                     <span
                                         key={label.name}
-                                        className="rounded-full bg-slate-700 px-2.5 py-1 text-xs text-slate-300"
+                                        className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
                                     >
                                         {label.name}
                                     </span>
@@ -419,18 +395,18 @@ function Column({
     const config = COLUMN_CONFIG[id];
 
     return (
-        <div className="flex w-72 flex-shrink-0 flex-col">
-            <div className="mb-3 flex items-center gap-2 px-1">
-                <div className={"h-2.5 w-2.5 rounded-full " + config.dotColor} />
-                <h2 className="text-sm font-semibold text-slate-300">{config.title}</h2>
-                <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-xs font-medium text-slate-400">
+        <div className="flex min-w-[280px] flex-1 flex-col">
+            <div className="mb-2 flex items-center gap-2">
+                <div className={"h-2 w-2 rounded-full " + config.dotColor} />
+                <h2 className="text-sm font-medium text-slate-300">{config.title}</h2>
+                <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-xs text-slate-400">
                     {tasks.length}
                 </span>
             </div>
             <div
                 data-column={id}
                 className={
-                    "flex-1 space-y-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
+                    "flex min-h-[400px] flex-1 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
                         : "border-slate-700/50 bg-slate-800/30")
@@ -445,7 +421,7 @@ function Column({
                         />
                     ))
                 ) : (
-                    <div className="flex h-24 items-center justify-center text-sm text-slate-500">
+                    <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
                         No tasks
                     </div>
                 )}
@@ -690,42 +666,29 @@ export function Tasks() {
     };
 
     return (
-        <div className="flex h-full flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-6 py-4">
+        <div className="p-6">
+            <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-2xl font-bold text-slate-100">Tasks</h1>
-                <div className="flex items-center gap-3">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Search tasks..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="w-64 rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
-                        />
-                    </div>
+                <div className="flex items-center gap-4">
                     <select
                         value={filter}
                         onChange={(e) => setFilter(e.target.value as typeof filter)}
-                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-100 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-slate-100 focus:border-accent-500 focus:outline-none"
                     >
                         <option value="all">All Tasks</option>
                         <option value="mira-2026">Assigned to Mira</option>
                         <option value="rajohan">Assigned to Raymond</option>
                     </select>
-                    <Button
-                        variant="primary"
-                        onClick={() =>
-                            window.open(
-                                "https://github.com/rajohan/Mira-Workspace/issues/new",
-                                "_blank"
-                            )
-                        }
-                    >
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Task
-                    </Button>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-48 rounded-lg border border-slate-600 bg-slate-700 py-1.5 pl-9 pr-3 text-sm text-slate-100 focus:border-accent-500 focus:outline-none"
+                        />
+                    </div>
                     <Button variant="secondary" onClick={fetchTasks} disabled={loading}>
                         <RefreshCw
                             className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"}
@@ -734,36 +697,33 @@ export function Tasks() {
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-auto bg-slate-900 p-6">
-                {error && (
-                    <Card className="mb-4 border-red-500/50 bg-red-500/10 p-4">
-                        <p className="text-red-400">Error: {error}</p>
-                    </Card>
-                )}
+            {error && (
+                <Card className="mb-4 border-red-500/50 bg-red-500/10 p-4">
+                    <p className="text-red-400">Error: {error}</p>
+                </Card>
+            )}
 
-                <DndContext
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onDragEnd={handleDragEnd}
-                >
-                    <div className="flex gap-4 overflow-x-auto pb-2">
-                        {(Object.keys(COLUMN_CONFIG) as ColumnId[]).map((columnId) => (
-                            <Column
-                                key={columnId}
-                                id={columnId}
-                                tasks={tasksByColumn[columnId]}
-                                isOver={overId === columnId}
-                                onTaskClick={setSelectedTask}
-                            />
-                        ))}
-                    </div>
+            <DndContext
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+            >
+                <div className="flex gap-4 overflow-x-auto">
+                    {(Object.keys(COLUMN_CONFIG) as ColumnId[]).map((columnId) => (
+                        <Column
+                            key={columnId}
+                            id={columnId}
+                            tasks={tasksByColumn[columnId]}
+                            isOver={overId === columnId}
+                            onTaskClick={setSelectedTask}
+                        />
+                    ))}
+                </div>
 
-                    <DragOverlay>
-                        {activeTask ? <TaskOverlay task={activeTask} /> : null}
-                    </DragOverlay>
-                </DndContext>
-            </div>
+                <DragOverlay>
+                    {activeTask ? <TaskOverlay task={activeTask} /> : null}
+                </DragOverlay>
+            </DndContext>
 
             {/* Task Detail Modal */}
             {selectedTask && (
