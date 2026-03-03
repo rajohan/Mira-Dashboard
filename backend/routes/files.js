@@ -12,6 +12,27 @@ function isBinaryFile(content) {
     return false;
 }
 
+function isImageFile(filename) {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
+    return imageExts.includes(ext || "");
+}
+
+function getImageMimeType(filename) {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeTypes = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        svg: "image/svg+xml",
+        webp: "image/webp",
+        ico: "image/x-icon",
+        bmp: "image/bmp",
+    };
+    return mimeTypes[ext || ""] || "application/octet-stream";
+}
+
 function shouldHideFile(name) {
     return name.startsWith(".") && name !== ".env.example";
 }
@@ -97,6 +118,25 @@ module.exports = function (app, express) {
 
             if (stat.isDirectory()) {
                 return res.status(400).json({ error: "Path is a directory, not a file" });
+            }
+
+            const filename = path.basename(filePath);
+
+            // Handle image files
+            if (isImageFile(filename)) {
+                const buffer = fs.readFileSync(fullPath);
+                const base64 = buffer.toString("base64");
+                const mimeType = getImageMimeType(filename);
+
+                return res.json({
+                    path: filePath,
+                    content: base64,
+                    mimeType: mimeType,
+                    size: stat.size,
+                    modified: stat.mtime.toISOString(),
+                    isImage: true,
+                    isBinary: true,
+                });
             }
 
             if (stat.size > MAX_FILE_SIZE) {

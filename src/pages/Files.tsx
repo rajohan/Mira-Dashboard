@@ -38,6 +38,8 @@ interface FileContent {
     size: number;
     modified: string;
     isBinary: boolean;
+    isImage?: boolean;
+    mimeType?: string;
 }
 
 const MAX_PREVIEW_SIZE = 1024 * 1024;
@@ -277,6 +279,12 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         css: { icon: "CSS", color: "text-pink-400" },
         html: { icon: "HTML", color: "text-orange-400" },
         sql: { icon: "SQL", color: "text-purple-400" },
+        png: { icon: "IMG", color: "text-purple-400" },
+        jpg: { icon: "IMG", color: "text-purple-400" },
+        jpeg: { icon: "IMG", color: "text-purple-400" },
+        gif: { icon: "IMG", color: "text-purple-400" },
+        svg: { icon: "IMG", color: "text-purple-400" },
+        webp: { icon: "IMG", color: "text-purple-400" },
     };
 
     const iconInfo = iconMap[ext];
@@ -1031,7 +1039,7 @@ export function Files() {
                                                 ) - preview only, editing disabled
                                             </div>
                                         )}
-                                        {fileContent.isBinary ? (
+                                        {fileContent.isBinary && !fileContent.isImage ? (
                                             <div className="flex h-full items-center justify-center text-slate-400">
                                                 <div className="text-center">
                                                     <File
@@ -1043,6 +1051,23 @@ export function Files() {
                                                         Cannot display binary content
                                                     </p>
                                                 </div>
+                                            </div>
+                                        ) : fileContent.isImage ? (
+                                            <div className="flex h-full items-center justify-center p-4">
+                                                <img
+                                                    src={
+                                                        "data:" +
+                                                        fileContent.mimeType +
+                                                        ";base64," +
+                                                        fileContent.content
+                                                    }
+                                                    alt={
+                                                        fileContent.path
+                                                            .split("/")
+                                                            .pop() || "Image"
+                                                    }
+                                                    className="max-h-full max-w-full rounded object-contain"
+                                                />
                                             </div>
                                         ) : isMarkdownFile(fileContent.path) &&
                                           markdownPreview ? (
