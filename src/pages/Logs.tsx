@@ -1,28 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
-import {
-    ChevronDown,
-    Download,
-    FileText,
-    RefreshCw,
-    Terminal,
-    Wifi,
-    WifiOff,
-} from "lucide-react";
+import { RefreshCw, Terminal, Wifi, WifiOff, Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { LogLine, FileSelector, LineSelector, LevelFilter } from "../components/features/logs";
 import { type LogEntry, type LogFile } from "../types/log";
-import {
-    parseLogLine,
-    formatLogTime,
-    formatFileSize,
-    getLevelColor,
-    getSubsystemColor,
-    LINE_OPTIONS,
-    LOG_LEVELS,
-} from "../utils/logUtils";
+import { parseLogLine, LOG_LEVELS } from "../utils/logUtils";
 
 export function Logs() {
     const [isConnected, setIsConnected] = useState(false);
@@ -42,9 +27,7 @@ export function Logs() {
     const wsRef = useRef<WebSocket | null>(null);
     const historyBufferRef = useRef<LogEntry[]>([]);
     const isReceivingHistoryRef = useRef(true);
-    const isAutoScrollingRef = useRef(false); // Track programmatic scroll
-
-    const levels = LOG_LEVELS;
+    const isAutoScrollingRef = useRef(false);
 
     // Fetch log files on mount
     useEffect(() => {
@@ -53,12 +36,10 @@ export function Logs() {
                 const response = await fetch("/api/logs/info");
                 const data = await response.json();
                 if (data.logs) {
-                    // Sort by filename descending (newest first) - filenames are openclaw-YYYY-MM-DD.log
                     const sorted = [...data.logs].sort((a, b) =>
                         b.name.localeCompare(a.name)
                     );
                     setLogFiles(sorted);
-                    // Select today's file by default
                     const today = format(new Date(), "yyyy-MM-dd");
                     const todayFile = sorted.find((f: LogFile) => f.name.includes(today));
                     if (todayFile) {
@@ -74,7 +55,6 @@ export function Logs() {
         fetchLogFiles();
     }, []);
 
-    // Load log content when file or line count changes
     const loadLogContent = useCallback(
         async (file: string, lines: number) => {
             setIsLoading(true);
@@ -101,14 +81,12 @@ export function Logs() {
         []
     );
 
-    // Handle file selection
     const handleFileSelect = (file: string) => {
         setSelectedFile(file);
         setShowFileDropdown(false);
         loadLogContent(file, lineCount);
     };
 
-    // Handle line count selection
     const handleLineSelect = (lines: number) => {
         setLineCount(lines);
         setShowLineDropdown(false);
@@ -117,22 +95,18 @@ export function Logs() {
         }
     };
 
-    // Track selected file and line count for WebSocket loading
     const selectedFileRef = useRef<string>(selectedFile);
     const lineCountRef = useRef<number>(lineCount);
 
-    // Keep refs in sync
     useEffect(() => {
         selectedFileRef.current = selectedFile;
         lineCountRef.current = lineCount;
     }, [selectedFile, lineCount]);
 
-    // Load log content when file selection changes
     useEffect(() => {
         if (selectedFile && logFiles.length > 0) {
             loadLogContent(selectedFile, lineCount);
         }
-        // Intentionally only run when selectedFile changes
     }, [selectedFile]);
 
     useEffect(() => {
@@ -157,7 +131,6 @@ export function Logs() {
 
                 if (data.type === "log_history_complete") {
                     isReceivingHistoryRef.current = false;
-                    // Use lineCount from ref to respect user's selection
                     const maxLines = lineCountRef.current;
                     setLogs(historyBufferRef.current.slice(-maxLines));
                     historyBufferRef.current = [];
@@ -175,7 +148,6 @@ export function Logs() {
                             historyBufferRef.current.push(parsed);
                         } else {
                             setLogs((prev) => {
-                                // Use lineCount from ref for live logs too
                                 const maxLines = lineCountRef.current;
                                 const exists = prev.some((l) => l.raw === parsed.raw);
                                 if (exists) return prev;
@@ -260,30 +232,26 @@ export function Logs() {
 
     const handleClear = () => setLogs([]);
 
-    // Virtualizer for efficient rendering with variable row heights
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
         getScrollElement: () => logContainerRef.current,
-        estimateSize: () => 22, // Base height
+        estimateSize: () => 22,
         overscan: 15,
     });
 
-    // Handle scroll - re-enable autoFollow when user scrolls to bottom
     const handleScroll = useCallback(() => {
         if (!logContainerRef.current || isAutoScrollingRef.current) return;
 
         const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30; // 30px threshold
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30;
 
         if (isAtBottom && !autoFollow) {
             setAutoFollow(true);
         } else if (!isAtBottom && autoFollow) {
-            // User scrolled up - disable autoFollow
             setAutoFollow(false);
         }
     }, [autoFollow]);
 
-    // Auto-scroll to bottom when logs load or autoFollow is enabled
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
             isAutoScrollingRef.current = true;
@@ -306,7 +274,6 @@ export function Logs() {
         }
     }, [filteredLogs.length, autoFollow, rowVirtualizer]);
 
-    // Handle file/line count changes - scroll to bottom after loading new content
     useEffect(() => {
         if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
             isAutoScrollingRef.current = true;
@@ -350,77 +317,20 @@ export function Logs() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
-                {/* File selector dropdown */}
-                <div className="relative">
-                    <button
-                        onClick={() => setShowFileDropdown(!showFileDropdown)}
-                        className="flex min-w-[220px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
-                    >
-                        <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
-                        <span className="flex-1 truncate text-left">
-                            {selectedFile || "Select file..."}
-                        </span>
-                        <ChevronDown
-                            className={`h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${showFileDropdown ? "rotate-180" : ""}`}
-                        />
-                    </button>
-                    {showFileDropdown && (
-                        <div className="absolute left-0 top-full z-10 mt-1 max-h-60 min-w-[300px] overflow-y-auto rounded border border-slate-700 bg-slate-800 shadow-lg">
-                            {logFiles.length === 0 ? (
-                                <div className="px-3 py-2 text-sm text-slate-400">
-                                    No log files found
-                                </div>
-                            ) : (
-                                logFiles.map((file) => (
-                                    <button
-                                        key={file.name}
-                                        onClick={() => handleFileSelect(file.name)}
-                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-700 ${
-                                            selectedFile === file.name
-                                                ? "bg-slate-700 text-indigo-400"
-                                                : ""
-                                        }`}
-                                    >
-                                        <span className="truncate">{file.name}</span>
-                                        <span className="flex-shrink-0 text-xs text-slate-500">
-                                            {formatFileSize(file.size)}
-                                        </span>
-                                    </button>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </div>
+                <FileSelector
+                    logFiles={logFiles}
+                    selectedFile={selectedFile}
+                    onSelect={handleFileSelect}
+                    isOpen={showFileDropdown}
+                    onToggle={() => setShowFileDropdown(!showFileDropdown)}
+                />
 
-                {/* Line count selector dropdown */}
-                <div className="relative">
-                    <button
-                        onClick={() => setShowLineDropdown(!showLineDropdown)}
-                        className="flex min-w-[100px] items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors hover:border-indigo-500"
-                    >
-                        <span>{lineCount} lines</span>
-                        <ChevronDown
-                            className={`h-4 w-4 text-slate-400 transition-transform ${showLineDropdown ? "rotate-180" : ""}`}
-                        />
-                    </button>
-                    {showLineDropdown && (
-                        <div className="absolute left-0 top-full z-10 mt-1 rounded border border-slate-700 bg-slate-800 shadow-lg">
-                            {LINE_OPTIONS.map((lines) => (
-                                <button
-                                    key={lines}
-                                    onClick={() => handleLineSelect(lines)}
-                                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-700 ${
-                                        lineCount === lines
-                                            ? "bg-slate-700 text-indigo-400"
-                                            : ""
-                                    }`}
-                                >
-                                    {lines} lines
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <LineSelector
+                    lineCount={lineCount}
+                    onSelect={handleLineSelect}
+                    isOpen={showLineDropdown}
+                    onToggle={() => setShowLineDropdown(!showLineDropdown)}
+                />
 
                 <div className="relative min-w-[200px] max-w-md flex-1">
                     <input
@@ -432,25 +342,13 @@ export function Logs() {
                     />
                 </div>
 
-                {/* Level filters */}
-                <div className="flex items-center gap-1">
-                    {levels.map((level) => (
-                        <button
-                            key={level}
-                            onClick={() => toggleLevel(level)}
-                            className={`rounded px-2 py-0.5 text-xs transition-colors ${
-                                levelFilter.has(level)
-                                    ? getLevelColor(level)
-                                    : "bg-slate-700 text-slate-500"
-                            }`}
-                        >
-                            {level}
-                        </button>
-                    ))}
-                </div>
+                <LevelFilter
+                    levels={LOG_LEVELS}
+                    activeLevels={levelFilter}
+                    onToggle={toggleLevel}
+                />
             </div>
 
-            {/* Second row: Auto-follow and action buttons */}
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-slate-400">
                     {isLoading
@@ -536,30 +434,8 @@ export function Logs() {
                                             width: "100%",
                                             transform: `translateY(${virtualRow.start}px)`,
                                         }}
-                                        className="flex items-start gap-2 px-4 py-0.5 hover:bg-slate-800/50"
                                     >
-                                        {log.ts && (
-                                            <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
-                                                {formatLogTime(log.ts)}
-                                            </span>
-                                        )}
-                                        {log.level && (
-                                            <span
-                                                className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(log.level)}`}
-                                            >
-                                                {log.level.toUpperCase().slice(0, 5)}
-                                            </span>
-                                        )}
-                                        {log.subsystem && (
-                                            <span
-                                                className={`flex-shrink-0 whitespace-nowrap ${getSubsystemColor(log.subsystem)}`}
-                                            >
-                                                [{log.subsystem}]
-                                            </span>
-                                        )}
-                                        <span className="flex-1 whitespace-pre-wrap break-all text-slate-200">
-                                            {log.msg}
-                                        </span>
+                                        <LogLine log={log} />
                                     </div>
                                 );
                             })}
