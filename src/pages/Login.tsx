@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import type { FormEvent } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -11,7 +12,7 @@ export function Login() {
     const navigate = useNavigate();
     const { login } = useAuthStore();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (token.trim()) {
             login(token.trim());
