@@ -1,10 +1,10 @@
-import { Clock, ExternalLink, FileText, Flame, MessageCircle, RefreshCw } from "lucide-react";
+import { Clock, ExternalLink, Flame, MessageCircle, MessageSquare, RefreshCw, Star, User } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { ProfileCard, FeedPostCard, MyPostCard, MyCommentCard } from "../components/features/moltbook";
 import { useMoltbookData } from "../hooks";
+import { formatTime, getMoltbookUrl } from "../utils/moltbookUtils";
 
 export function Moltbook() {
     const [sort, setSort] = useState<"hot" | "new">("hot");
@@ -37,27 +37,79 @@ export function Moltbook() {
     }
 
     return (
-        <div className="flex h-full flex-col p-6">
+        <div className="space-y-6 p-6">
             {/* Header */}
-            <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Moltbook</h1>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                    <a
+                        href={getMoltbookUrl("/u/mira_2026")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300"
+                    >
+                        View Profile
+                        <ExternalLink className="h-3 w-3" />
+                    </a>
                     <Button variant="secondary" size="sm" onClick={() => refetch()}>
                         <RefreshCw className="h-4 w-4" />
                     </Button>
-                    <a
-                        href="https://www.moltbook.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-accent-400 hover:text-accent-300"
-                    >
-                        <ExternalLink className="inline h-4 w-4" />
-                    </a>
                 </div>
             </div>
 
+            {/* Profile Stats Card */}
+            {profile && (
+                <Card className="p-4">
+                    <div className="flex items-start gap-4">
+                        <a
+                            href={getMoltbookUrl("/u/mira_2026")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 hover:ring-2 hover:ring-indigo-400"
+                        >
+                            {profile.avatar_url ? (
+                                <img src={profile.avatar_url} alt={profile.name} className="h-full w-full object-cover" />
+                            ) : (
+                                <User className="h-7 w-7 text-indigo-400" />
+                            )}
+                        </a>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                                <a
+                                    href={getMoltbookUrl("/u/mira_2026")}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-lg font-semibold text-slate-100 hover:text-indigo-300"
+                                >
+                                    {profile.display_name || profile.name}
+                                </a>
+                                {unreadCount > 0 && (
+                                    <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-400">
+                                        {unreadCount} new
+                                    </span>
+                                )}
+                            </div>
+                            <p className="mt-0.5 line-clamp-2 text-sm text-slate-400">{profile.description}</p>
+                            <div className="mt-2 flex items-center gap-4 text-sm">
+                                <span className="flex items-center gap-1 text-slate-300">
+                                    <Star className="h-3.5 w-3.5 text-yellow-400" />
+                                    <span className="font-medium">{profile.karma}</span>
+                                    <span className="text-slate-500">karma</span>
+                                </span>
+                                <span className="text-slate-400">
+                                    <span className="font-medium text-slate-300">{profile.follower_count}</span> followers
+                                </span>
+                                <span className="text-slate-400">
+                                    <span className="font-medium text-slate-300">{profile.following_count}</span> following
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
             {/* Tabs */}
-            <div className="mb-4 flex gap-2">
+            <div className="flex gap-2">
                 <Button
                     variant={activeTab === "feed" ? "primary" : "secondary"}
                     size="sm"
@@ -70,139 +122,205 @@ export function Moltbook() {
                     size="sm"
                     onClick={() => setActiveTab("posts")}
                 >
-                    My Posts
+                    <MessageSquare className="mr-1 h-4 w-4" />
+                    My Posts ({profile?.posts_count || 0})
                 </Button>
                 <Button
                     variant={activeTab === "comments" ? "primary" : "secondary"}
                     size="sm"
                     onClick={() => setActiveTab("comments")}
                 >
-                    My Comments
+                    <MessageCircle className="mr-1 h-4 w-4" />
+                    My Comments ({profile?.comments_count || 0})
                 </Button>
             </div>
 
-            {/* Content */}
-            <div className="flex flex-1 gap-4 overflow-hidden">
-                {/* Main Feed */}
-                <div className="flex-1 overflow-auto">
-                    {activeTab === "feed" && (
-                        <>
-                            {/* Sort Controls */}
-                            <div className="mb-4 flex gap-2">
-                                <Button
-                                    variant={sort === "hot" ? "primary" : "secondary"}
-                                    size="sm"
-                                    onClick={() => setSort("hot")}
-                                >
-                                    <Flame className="h-4 w-4" />
-                                    Hot
-                                </Button>
-                                <Button
-                                    variant={sort === "new" ? "primary" : "secondary"}
-                                    size="sm"
-                                    onClick={() => setSort("new")}
-                                >
-                                    <Clock className="h-4 w-4" />
-                                    New
-                                </Button>
-                            </div>
+            {/* Feed Tab */}
+            {activeTab === "feed" && (
+                <>
+                    {/* Sort Tabs */}
+                    <div className="flex gap-2">
+                        <Button
+                            variant={sort === "hot" ? "primary" : "secondary"}
+                            size="sm"
+                            onClick={() => setSort("hot")}
+                        >
+                            <Flame className="mr-1 h-4 w-4" />
+                            Hot
+                        </Button>
+                        <Button
+                            variant={sort === "new" ? "primary" : "secondary"}
+                            size="sm"
+                            onClick={() => setSort("new")}
+                        >
+                            <Clock className="mr-1 h-4 w-4" />
+                            New
+                        </Button>
+                    </div>
 
-                            {/* Posts */}
-                            <div className="space-y-4">
-                                {posts.map((post) => (
-                                    <FeedPostCard key={post.id} post={post} />
-                                ))}
-                                {posts.length === 0 && (
-                                    <p className="text-center text-slate-400">No posts found</p>
-                                )}
-                            </div>
-                        </>
-                    )}
+                    {/* Posts */}
+                    <div className="space-y-3">
+                        {posts.length === 0 ? (
+                            <Card className="p-6 text-center text-slate-400">
+                                <p>No posts yet.</p>
+                            </Card>
+                        ) : (
+                            posts.map((post) => (
+                                <Card key={post.id} className="p-3">
+                                    <div className="flex items-center gap-3">
+                                        {/* Vote count */}
+                                        <div className="flex min-w-[2.5rem] items-center justify-center">
+                                            <span className="text-sm font-medium text-slate-300">
+                                                {post.upvotes - post.downvotes}
+                                            </span>
+                                        </div>
 
-                    {activeTab === "posts" && (
-                        <div className="space-y-4">
-                            {myContent?.posts?.map((post) => (
-                                <MyPostCard key={post.id} post={post} />
-                            ))}
-                            {(!myContent?.posts || myContent.posts.length === 0) && (
-                                <p className="text-center text-slate-400">No posts yet</p>
-                            )}
-                        </div>
-                    )}
-
-                    {activeTab === "comments" && (
-                        <div className="space-y-4">
-                            {myContent?.comments?.map((comment) => (
-                                <MyCommentCard key={comment.id} comment={comment} />
-                            ))}
-                            {(!myContent?.comments || myContent.comments.length === 0) && (
-                                <p className="text-center text-slate-400">No comments yet</p>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* Sidebar */}
-                <div className="w-80 flex-shrink-0 space-y-4">
-                    {/* Profile Card */}
-                    {profile && <ProfileCard profile={profile} unreadCount={unreadCount} />}
-
-                    {/* Activity Summary */}
-                    {home && (
-                        <Card className="p-4">
-                            <h3 className="mb-3 text-sm font-medium text-slate-200">Activity</h3>
-                            <div className="space-y-2 text-sm">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-slate-400">Karma</span>
-                                    <span className="font-medium text-primary-100">{home.your_account?.karma || 0}</span>
-                                </div>
-                                {unreadCount > 0 && (
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-400">Notifications</span>
-                                        <span className="font-medium text-accent-400">{unreadCount}</span>
+                                        {/* Content */}
+                                        <div className="min-w-0 flex-1">
+                                            <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
+                                                <a
+                                                    href={getMoltbookUrl("/m/" + post.submolt_name)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="font-medium text-indigo-400 hover:text-indigo-300"
+                                                >
+                                                    m/{post.submolt_name}
+                                                </a>
+                                                <span>•</span>
+                                                <a
+                                                    href={getMoltbookUrl("/u/" + post.author.name)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-slate-400 hover:text-slate-300"
+                                                >
+                                                    {post.author.display_name || post.author.name}
+                                                </a>
+                                                <span>•</span>
+                                                <span>{formatTime(post.created_at)}</span>
+                                            </div>
+                                            <a
+                                                href={getMoltbookUrl("/post/" + post.id)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="group block"
+                                            >
+                                                <h3 className="line-clamp-2 text-base font-medium text-slate-100 transition group-hover:text-indigo-300">
+                                                    {post.title}
+                                                </h3>
+                                                <p className="mt-1 line-clamp-2 text-sm text-slate-400 transition group-hover:text-slate-300">
+                                                    {post.content_preview || post.content}
+                                                </p>
+                                            </a>
+                                            <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+                                                <a
+                                                    href={getMoltbookUrl("/post/" + post.id)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex items-center gap-1 transition hover:text-slate-200"
+                                                >
+                                                    <MessageSquare className="h-3 w-3" />
+                                                    {post.comment_count} comments
+                                                </a>
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                                <div className="flex items-center justify-between">
-                                    <span className="text-slate-400">Following</span>
-                                    <span className="font-medium text-primary-100">
-                                        {home.posts_from_accounts_you_follow?.total_following || 0}
-                                    </span>
-                                </div>
-                            </div>
-                        </Card>
-                    )}
+                                </Card>
+                            ))
+                        )}
+                    </div>
+                </>
+            )}
 
-                    {/* Quick Links */}
-                    <Card className="p-4">
-                        <h3 className="mb-3 text-sm font-medium text-slate-200">Links</h3>
-                        <div className="space-y-2">
-                            <a
-                                href="https://www.moltbook.com/m/mira_2026"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-sm text-accent-400 hover:text-accent-300"
-                            >
-                                <FileText className="h-4 w-4" />
-                                My Profile
-                            </a>
-                            <a
-                                href="https://www.moltbook.com/notifications"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-sm text-accent-400 hover:text-accent-300"
-                            >
-                                <MessageCircle className="h-4 w-4" />
-                                Notifications
-                                {unreadCount > 0 && (
-                                    <span className="rounded-full bg-accent-500 px-1.5 py-0.5 text-xs text-white">
-                                        {unreadCount}
-                                    </span>
-                                )}
-                            </a>
-                        </div>
-                    </Card>
+            {/* My Posts Tab */}
+            {activeTab === "posts" && (
+                <div className="space-y-3">
+                    {!myContent?.posts || myContent.posts.length === 0 ? (
+                        <Card className="p-6 text-center text-slate-400">
+                            <p>No posts yet.</p>
+                        </Card>
+                    ) : (
+                        myContent.posts.map((post) => (
+                            <Card key={post.id} className="p-3">
+                                <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
+                                    <a
+                                        href={getMoltbookUrl("/m/" + post.submolt.name)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-indigo-400 hover:text-indigo-300"
+                                    >
+                                        m/{post.submolt.name}
+                                    </a>
+                                    <span>•</span>
+                                    <span>{formatTime(post.created_at)}</span>
+                                </div>
+                                <a
+                                    href={getMoltbookUrl("/post/" + post.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="group block"
+                                >
+                                    <h3 className="text-base font-medium text-slate-100 transition group-hover:text-indigo-300">{post.title}</h3>
+                                    <p className="mt-1 line-clamp-2 text-sm text-slate-400 transition group-hover:text-slate-300">{post.content_preview}</p>
+                                </a>
+                                <div className="mt-2 flex items-center gap-4 text-sm">
+                                    <span className="text-orange-400">↑ {post.upvotes}</span>
+                                    <span className="text-slate-500">↓ {post.downvotes}</span>
+                                    <a
+                                        href={getMoltbookUrl("/post/" + post.id)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-1 text-slate-400 hover:text-slate-200"
+                                    >
+                                        <MessageSquare className="h-3 w-3" />
+                                        {post.comment_count}
+                                    </a>
+                                </div>
+                            </Card>
+                        ))
+                    )}
                 </div>
-            </div>
+            )}
+
+            {/* My Comments Tab */}
+            {activeTab === "comments" && (
+                <div className="space-y-3">
+                    {!myContent?.comments || myContent.comments.length === 0 ? (
+                        <Card className="p-6 text-center text-slate-400">
+                            <p>No comments yet.</p>
+                        </Card>
+                    ) : (
+                        myContent.comments.map((comment) => (
+                            <Card key={comment.id} className="p-3">
+                                <div className="mb-1 text-xs text-slate-500">
+                                    Commented on{" "}
+                                    <a
+                                        href={getMoltbookUrl("/post/" + comment.post.id)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-indigo-400 hover:text-indigo-300"
+                                    >
+                                        {comment.post.title}
+                                    </a>
+                                    <span className="mx-2">•</span>
+                                    {formatTime(comment.created_at)}
+                                </div>
+                                <a
+                                    href={getMoltbookUrl("/post/" + comment.post.id + "#comment-" + comment.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="group block"
+                                >
+                                    <p className="text-sm text-slate-300 transition group-hover:text-white">{comment.content.slice(0, 300)}{comment.content.length > 300 ? "..." : ""}</p>
+                                </a>
+                                <div className="mt-2 flex items-center gap-4 text-sm text-slate-500">
+                                    <span className="text-orange-400">↑ {comment.upvotes}</span>
+                                    <span>↓ {comment.downvotes}</span>
+                                </div>
+                            </Card>
+                        ))
+                    )}
+                </div>
+            )}
         </div>
     );
 }
