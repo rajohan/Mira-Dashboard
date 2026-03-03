@@ -1,5 +1,6 @@
 import { Loader2, Plus, X } from "lucide-react";
 import { useState } from "react";
+import type { FormEvent } from "react";
 
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -23,7 +24,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
     const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!title.trim()) return;
 
