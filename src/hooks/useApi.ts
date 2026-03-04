@@ -1,10 +1,27 @@
+import { authActions } from "../stores/authStore";
+
 const API_BASE = "/api";
+
+export class UnauthorizedError extends Error {
+    constructor() {
+        super("Unauthorized");
+        this.name = "UnauthorizedError";
+    }
+}
 
 // Get token from localStorage or URL params
 function getToken(): string | null {
     const stored = localStorage.getItem("openclaw_token");
-    if (stored) return stored;
+    if (stored) {
+        return stored;
+    }
+
     return new URLSearchParams(window.location.search).get("token");
+}
+
+function handleUnauthorized() {
+    authActions.logout();
+    window.dispatchEvent(new CustomEvent("openclaw:unauthorized"));
 }
 
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -21,9 +38,8 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     });
 
     if (response.status === 401) {
-        localStorage.removeItem("openclaw_token");
-        window.location.href = "/login";
-        throw new Error("Unauthorized");
+        handleUnauthorized();
+        throw new UnauthorizedError();
     }
 
     if (!response.ok) {

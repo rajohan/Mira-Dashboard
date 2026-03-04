@@ -1,8 +1,10 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
-import { Download, FileText, RefreshCw } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { logsCollection } from "../collections/logs";
 import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -10,12 +12,11 @@ import { Checkbox } from "../components/ui/Checkbox";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { Input } from "../components/ui/Input";
 import { PageHeader } from "../components/ui/PageHeader";
+import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
-import { logsCollection } from "../collections/logs";
 import { parseLogLine } from "../utils/logUtils";
 import { LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
-import { useLiveQuery } from "@tanstack/react-db";
 
 export function Logs() {
     const [autoFollow, setAutoFollow] = useState(true);
@@ -73,12 +74,12 @@ export function Logs() {
             // Clear and load new logs
             const lines = result.data.split("\n").filter((l) => l.trim());
             logsCollection.utils.writeBatch(() => {
-                lines.forEach((line) => {
+                for (const line of lines) {
                     const parsed = parseLogLine(line);
                     if (parsed) {
                         logsCollection.utils.writeInsert(parsed);
                     }
-                });
+                }
             });
         }
     };
@@ -187,9 +188,9 @@ export function Logs() {
     const clearLogs = () => {
         // Get all current logs and delete them
         logsCollection.utils.writeBatch(() => {
-            logs.forEach((log) => {
+            for (const log of logs) {
                 logsCollection.utils.writeDelete(log.ts || log.raw);
-            });
+            }
         });
     };
 
@@ -252,17 +253,12 @@ export function Logs() {
                     />
 
                     <div className="flex items-center gap-2">
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => loadLogContent()}
-                            disabled={isLoadingContent}
-                        >
-                            <RefreshCw
-                                className={`mr-1 h-4 w-4 ${isLoadingContent ? "animate-spin" : ""}`}
-                            />
-                            Refresh
-                        </Button>
+                        <RefreshButton
+                            onClick={() => {
+                                void loadLogContent();
+                            }}
+                            isLoading={isLoadingContent}
+                        />
                         <Button
                             variant="secondary"
                             size="sm"

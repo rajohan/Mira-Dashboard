@@ -1,6 +1,8 @@
-import { RefreshCw, WifiOff } from "lucide-react";
+import { useLiveQuery } from "@tanstack/react-db";
+import { WifiOff } from "lucide-react";
 import { useState } from "react";
 
+import { sessionsCollection } from "../collections/sessions";
 import {
     DeleteConfirmDialog,
     SESSION_TYPES,
@@ -8,24 +10,14 @@ import {
     SessionsTable,
 } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
-import { Button } from "../components/ui/Button";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
-import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
+import { RefreshButton } from "../components/ui/RefreshButton";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import { sessionsCollection } from "../collections/sessions";
+import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import { type Session } from "../types/session";
-import { getTypeSortOrder } from "../utils/sessionUtils";
-import { useLiveQuery } from "@tanstack/react-db";
-
-const sortSessions = (sessions: Session[]): Session[] => {
-    return [...sessions].sort((a, b) => {
-        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
-        if (typeOrder !== 0) return typeOrder;
-        return (b.updatedAt || 0) - (a.updatedAt || 0);
-    });
-};
+import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 export function Sessions() {
     const { isConnected, error, request } = useOpenClawSocket();
@@ -72,7 +64,7 @@ export function Sessions() {
         sessionAction.mutate({ key: sessionKey, action: "reset" });
     };
 
-    const sortedSessions = sortSessions(sessions || []);
+    const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
     const filteredSessions =
         typeFilter === "ALL"
             ? sortedSessions
@@ -88,19 +80,11 @@ export function Sessions() {
             <PageHeader
                 title="Sessions"
                 actions={
-                    <Button
-                        variant="secondary"
-                        size="sm"
+                    <RefreshButton
                         onClick={handleRefresh}
-                        disabled={!isConnected || isLoading}
-                    >
-                        <RefreshCw
-                            className={
-                                "mr-2 h-4 w-4 " + (isLoading ? "animate-spin" : "")
-                            }
-                        />
-                        Refresh
-                    </Button>
+                        isLoading={isLoading}
+                        disabled={!isConnected}
+                    />
                 }
                 status={<ConnectionStatus isConnected={isConnected} />}
             />

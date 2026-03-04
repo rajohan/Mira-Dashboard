@@ -107,8 +107,7 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                     )}
                     <span>Created {formatDate(task.createdAt)}</span>
                     <span>
-                        Updated{" "}
-                        {formatDuration(new Date(task.updatedAt).getTime())}
+                        Updated {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                 </div>
 

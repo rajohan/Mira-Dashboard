@@ -1,8 +1,9 @@
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { createCollection } from "@tanstack/react-db";
-import { parseLogLine } from "../utils/logUtils";
+
 import { queryClient } from "../lib/queryClient";
 import type { LogEntry } from "../types/log";
+import { parseLogLine } from "../utils/logUtils";
 
 export const logsCollection = createCollection(
     queryCollectionOptions({

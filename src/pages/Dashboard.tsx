@@ -1,29 +1,20 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { Clock, Cpu, HardDrive, MemoryStick } from "lucide-react";
 
+import { sessionsCollection } from "../collections/sessions";
 import {
     ActiveSessionsCard,
     AgentInfoCard,
     StatusCards,
 } from "../components/features/dashboard";
-import { getTypeSortOrder } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { MetricCard } from "../components/ui/MetricCard";
 import { PageHeader } from "../components/ui/PageHeader";
 import { useMetrics } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import { sessionsCollection } from "../collections/sessions";
-import { type Session } from "../types/session";
 import { formatLoad, formatUptime } from "../utils/format";
-import { useLiveQuery } from "@tanstack/react-db";
-
-function sortSessions(sessions: Session[]): Session[] {
-    return [...sessions].sort((a, b) => {
-        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
-        if (typeOrder !== 0) return typeOrder;
-        return (b.updatedAt || 0) - (a.updatedAt || 0);
-    });
-}
+import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 export function Dashboard() {
     const { isConnected, error } = useOpenClawSocket();
@@ -33,7 +24,7 @@ export function Dashboard() {
         q.from({ session: sessionsCollection })
     );
 
-    const sortedSessions = sessions ? sortSessions(sessions) : [];
+    const sortedSessions = sessions ? sortSessionsByTypeAndActivity(sessions) : [];
 
     return (
         <div className="p-6">

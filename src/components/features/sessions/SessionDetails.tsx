@@ -1,7 +1,7 @@
 import { MessageSquare, RefreshCw, X } from "lucide-react";
 
-import type { Session } from "../../../types/session";
 import { useSessionHistory } from "../../../hooks/useSessions";
+import type { Session } from "../../../types/session";
 import { formatSessionType } from "../../../utils/sessionUtils";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 import { Button } from "../../ui/Button";

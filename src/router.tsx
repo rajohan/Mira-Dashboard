@@ -62,7 +62,8 @@ const authenticatedRoute = createRoute({
     id: "authenticated",
     beforeLoad: () => {
         // Check localStorage directly for immediate auth state
-        const token = typeof window !== "undefined" ? localStorage.getItem("openclaw_token") : null;
+        const token =
+            typeof window === "undefined" ? null : localStorage.getItem("openclaw_token");
         if (!token) {
             throw redirect({ to: "/login" });
         }

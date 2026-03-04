@@ -27,4 +27,15 @@ export function getTypeSortOrder(type: string | null | undefined): number {
     }
 }
 
+export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
+    return [...sessions].sort((a, b) => {
+        const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
+        if (typeOrder !== 0) {
+            return typeOrder;
+        }
+
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+}
+
 export const SESSION_TYPES = ["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"] as const;

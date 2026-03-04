@@ -10,12 +10,12 @@ import {
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 
-import { Badge, getSessionTypeVariant } from "../../ui/Badge";
-import { Card } from "../../ui/Card";
-import { ProgressBar } from "../../ui/ProgressBar";
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtils";
+import { Badge, getSessionTypeVariant } from "../../ui/Badge";
+import { Card } from "../../ui/Card";
+import { ProgressBar } from "../../ui/ProgressBar";
 import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 const columnHelper = createColumnHelper<Session>();
@@ -158,8 +158,7 @@ export function SessionsTable({
                                         )}
                                         {header.column.getCanSort() && (
                                             <span className="text-slate-500">
-                                                {header.column.getIsSorted() ===
-                                                "asc" ? (
+                                                {header.column.getIsSorted() === "asc" ? (
                                                     <ChevronDown className="h-3 w-3" />
                                                 ) : header.column.getIsSorted() ===
                                                   "desc" ? (

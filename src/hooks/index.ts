@@ -30,7 +30,6 @@ export {
     useDeleteSession,
     useSessionAction,
     useSessionHistory,
-    useSessions,
 } from "./useSessions";
 export {
     execCommand,

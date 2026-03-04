@@ -1,13 +1,11 @@
-import { RefreshCw } from "lucide-react";
-
 import {
     SessionsByModelCard,
     SystemStatsGrid,
     TokenUsageCard,
 } from "../components/features/metrics";
-import { Button } from "../components/ui/Button";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageHeader } from "../components/ui/PageHeader";
+import { RefreshButton } from "../components/ui/RefreshButton";
 import { useMetrics } from "../hooks";
 
 export function Metrics() {
@@ -21,10 +19,7 @@ export function Metrics() {
         return (
             <div className="flex h-64 flex-col items-center justify-center gap-4 p-6">
                 <p className="text-red-400">{error.message}</p>
-                <Button variant="secondary" onClick={() => refetch()}>
-                    <RefreshCw className="h-4 w-4" />
-                    Retry
-                </Button>
+                <RefreshButton onClick={() => void refetch()} label="Retry" />
             </div>
         );
     }
@@ -41,9 +36,11 @@ export function Metrics() {
             <PageHeader
                 title="Metrics"
                 actions={
-                    <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                        <RefreshCw className="h-4 w-4" />
-                    </Button>
+                    <RefreshButton
+                        onClick={() => void refetch()}
+                        label=""
+                        variant="secondary"
+                    />
                 }
             />
 

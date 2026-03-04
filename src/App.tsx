@@ -1,15 +1,27 @@
-import { QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider } from "@tanstack/react-router";
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { FormDevtoolsPanel } from "@tanstack/react-form-devtools";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
+import { RouterProvider } from "@tanstack/react-router";
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { useEffect } from "react";
 
-import { router } from "./router";
-import { queryClient } from "./lib/queryClient";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
+import { queryClient } from "./lib/queryClient";
+import { router } from "./router";
 
 function App() {
+    useEffect(() => {
+        const onUnauthorized = () => {
+            void router.navigate({ to: "/login" });
+        };
+
+        window.addEventListener("openclaw:unauthorized", onUnauthorized);
+        return () => {
+            window.removeEventListener("openclaw:unauthorized", onUnauthorized);
+        };
+    }, []);
+
     return (
         <QueryClientProvider client={queryClient}>
             <OpenClawSocketProvider>

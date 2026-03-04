@@ -1,46 +1,69 @@
 import {
     createContext,
     createElement,
+    type ReactNode,
     useCallback,
     useContext,
     useEffect,
     useMemo,
     useRef,
     useState,
-    type ReactNode,
 } from "react";
 
 import { writeAgentsFromWebSocket } from "../collections/agents";
 import { writeLogFromWebSocket } from "../collections/logs";
 import { writeSessionsFromWebSocket } from "../collections/sessions";
 import { useAuthToken } from "../stores/authStore";
+import type { AgentInfo, Session } from "../types/session";
 import { getWebSocketUrl } from "../utils/websocket";
 
-interface OpenClawMessage {
-    type:
-        | "req"
-        | "res"
-        | "event"
-        | "state"
-        | "connected"
-        | "disconnected"
-        | "sessions"
-        | "log"
-        | "log_history_complete"
-        | "log_file";
-    id?: string;
-    method?: string;
-    params?: Record<string, unknown>;
-    event?: string;
-    payload?: Record<string, unknown>;
-    ok?: boolean;
-    error?: string;
-    sessions?: Record<string, unknown>[];
+interface WsStateMessage {
+    type: "state";
     gatewayConnected?: boolean;
-    line?: string;
-    file?: string;
-    count?: number;
+    sessions?: Session[];
 }
+
+interface WsConnectedMessage {
+    type: "connected";
+    gatewayConnected?: boolean;
+}
+
+interface WsDisconnectedMessage {
+    type: "disconnected";
+}
+
+interface WsSessionsMessage {
+    type: "sessions";
+    sessions?: Session[];
+}
+
+interface WsEventMessage {
+    type: "event";
+    event?: string;
+    payload?: unknown;
+}
+
+interface WsLogMessage {
+    type: "log";
+    line?: string;
+}
+
+interface WsResponseMessage {
+    type: "res";
+    id?: string;
+    ok?: boolean;
+    payload?: unknown;
+    error?: string;
+}
+
+type OpenClawMessage =
+    | WsStateMessage
+    | WsConnectedMessage
+    | WsDisconnectedMessage
+    | WsSessionsMessage
+    | WsEventMessage
+    | WsLogMessage
+    | WsResponseMessage;
 
 interface PendingRequest {
     resolve: (value: unknown) => void;
@@ -61,11 +84,20 @@ interface OpenClawSocketContextValue {
 
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
 
-export function OpenClawSocketProvider({
-    children,
-}: {
-    children: ReactNode;
-}) {
+function parseOpenClawMessage(rawData: unknown): OpenClawMessage | null {
+    if (typeof rawData !== "string") {
+        return null;
+    }
+
+    const parsed = JSON.parse(rawData) as { type?: string } & Record<string, unknown>;
+    if (!parsed.type) {
+        return null;
+    }
+
+    return parsed as OpenClawMessage;
+}
+
+export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const token = useAuthToken();
     const wsRef = useRef<WebSocket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
@@ -100,99 +132,80 @@ export function OpenClawSocketProvider({
                 setError(null);
                 setConnectionId((previous) => previous + 1);
 
-                const req = JSON.stringify({
-                    type: "req",
-                    method: "sessions.list",
-                    id: Date.now().toString(),
-                });
-
-                ws.send(req);
+                ws.send(
+                    JSON.stringify({
+                        type: "req",
+                        method: "sessions.list",
+                        id: Date.now().toString(),
+                    })
+                );
             });
 
             ws.onmessage = (event) => {
                 try {
-                    const data: OpenClawMessage = JSON.parse(event.data);
+                    const data = parseOpenClawMessage(event.data);
+                    if (!data) {
+                        return;
+                    }
 
-                    if (data.type === "state") {
-                        setIsConnected(data.gatewayConnected ?? true);
-                        if (data.sessions) {
-                            writeSessionsFromWebSocket(
-                                data.sessions as unknown as Array<{
-                                    key: string;
-                                    id: string;
-                                    type: string;
-                                    agentType: string;
-                                    hookName: string;
-                                    kind: string;
-                                    model: string;
-                                    tokenCount: number;
-                                    maxTokens: number;
-                                    createdAt: string | null;
-                                    updatedAt: number | null;
-                                    displayName: string;
-                                    label: string;
-                                    displayLabel: string;
-                                    channel: string;
-                                }>
-                            );
+                    switch (data.type) {
+                        case "state": {
+                            setIsConnected(data.gatewayConnected ?? true);
+                            if (data.sessions) {
+                                writeSessionsFromWebSocket(data.sessions);
+                            }
+                            break;
                         }
-                    }
-
-                    if (data.type === "connected") {
-                        setIsConnected(data.gatewayConnected ?? true);
-                    }
-
-                    if (data.type === "disconnected") {
-                        setIsConnected(false);
-                    }
-
-                    if (data.type === "sessions" && data.sessions) {
-                        writeSessionsFromWebSocket(
-                            data.sessions as unknown as Array<{
-                                key: string;
-                                id: string;
-                                type: string;
-                                agentType: string;
-                                hookName: string;
-                                kind: string;
-                                model: string;
-                                tokenCount: number;
-                                maxTokens: number;
-                                createdAt: string | null;
-                                updatedAt: number | null;
-                                displayName: string;
-                                label: string;
-                                displayLabel: string;
-                                channel: string;
-                            }>
-                        );
-                    }
-
-                    if (data.type === "event" && data.event) {
-                        if (data.event === "agents" || data.event === "agents.list") {
-                            const agents = data.payload as unknown as Array<{
-                                id: string;
-                                name: string;
-                                model?: string;
-                                status?: string;
-                            }>;
-                            writeAgentsFromWebSocket(agents);
+                        case "connected": {
+                            setIsConnected(data.gatewayConnected ?? true);
+                            break;
                         }
-                    }
+                        case "disconnected": {
+                            setIsConnected(false);
+                            break;
+                        }
+                        case "sessions": {
+                            if (data.sessions) {
+                                writeSessionsFromWebSocket(data.sessions);
+                            }
+                            break;
+                        }
+                        case "event": {
+                            if (
+                                (data.event === "agents" ||
+                                    data.event === "agents.list") &&
+                                Array.isArray(data.payload)
+                            ) {
+                                writeAgentsFromWebSocket(data.payload as AgentInfo[]);
+                            }
+                            break;
+                        }
+                        case "log": {
+                            if (data.line) {
+                                writeLogFromWebSocket(data.line);
+                            }
+                            break;
+                        }
+                        case "res": {
+                            if (!data.id) {
+                                break;
+                            }
 
-                    if (data.type === "log" && data.line) {
-                        writeLogFromWebSocket(data.line as string);
-                    }
+                            const pending = pendingRequestsRef.current.get(data.id);
+                            if (!pending) {
+                                break;
+                            }
 
-                    if (data.type === "res" && data.id) {
-                        const pending = pendingRequestsRef.current.get(data.id);
-                        if (pending) {
                             pendingRequestsRef.current.delete(data.id);
                             if (data.ok) {
                                 pending.resolve(data.payload);
                             } else {
                                 pending.reject(data.error);
                             }
+                            break;
+                        }
+                        default: {
+                            break;
                         }
                     }
                 } catch (error_) {
@@ -215,7 +228,7 @@ export function OpenClawSocketProvider({
             ws.onerror = () => {
                 setError("WebSocket connection failed");
             };
-        } catch (error_) {
+        } catch {
             setError("Failed to create WebSocket");
         }
     }, [token]);
@@ -226,9 +239,9 @@ export function OpenClawSocketProvider({
         wsRef.current = null;
         setIsConnected(false);
 
-        pendingRequestsRef.current.forEach((pending) => {
+        for (const pending of pendingRequestsRef.current.values()) {
             pending.reject(new Error("WebSocket disconnected"));
-        });
+        }
         pendingRequestsRef.current.clear();
     }, []);
 
@@ -275,11 +288,7 @@ export function OpenClawSocketProvider({
         }
     }, [token, connect, disconnect]);
 
-    useEffect(() => {
-        return () => {
-            disconnect();
-        };
-    }, [disconnect]);
+    useEffect(() => disconnect, [disconnect]);
 
     const value = useMemo(
         () => ({
@@ -297,7 +306,6 @@ export function OpenClawSocketProvider({
 }
 
 interface UseOpenClawSocketOptions {
-    token?: string | null;
     onConnect?: () => void;
     onDisconnect?: () => void;
 }

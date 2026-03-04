@@ -1,5 +1,6 @@
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { createCollection } from "@tanstack/react-db";
+
 import { queryClient } from "../lib/queryClient";
 import type { AgentInfo } from "../types/session";
 
@@ -18,8 +19,8 @@ export function writeAgentFromWebSocket(agent: AgentInfo) {
 
 export function writeAgentsFromWebSocket(agents: AgentInfo[]) {
     agentsCollection.utils.writeBatch(() => {
-        agents.forEach((agent) => {
+        for (const agent of agents) {
             agentsCollection.utils.writeUpsert(agent);
-        });
+        }
     });
 }
