@@ -1,5 +1,5 @@
 import { MessageSquare, RefreshCw, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Session } from "../../../hooks/useOpenClaw";
 import { useSessionHistory } from "../../../hooks/useSessions";
@@ -28,11 +28,47 @@ export function SessionDetails({
     onCompact,
     onReset,
 }: SessionDetailsProps) {
-    const [visibleCount, setVisibleCount] = useState(50);
-    const { data, isLoading, error, refetch } = useSessionHistory(session?.key || null);
+    const [offset, setOffset] = useState(0);
+    const [allMessages, setAllMessages] = useState<
+        Array<{ role: string; content: string; timestamp?: string }>
+    >([]);
+    const limit = 50;
+    const { data, isLoading, error, refetch } = useSessionHistory(
+        session?.key || null,
+        offset,
+        limit
+    );
 
-    const history = data?.messages || [];
-    const totalCount = data?.total || 0;
+    // Accumulate messages when new data arrives
+    useEffect(() => {
+        if (data?.messages) {
+            if (offset === 0) {
+                setAllMessages(data.messages);
+            } else {
+                setAllMessages((prev) => {
+                    const existingIds = new Set(prev.map((m) => m.timestamp + m.role));
+                    const newMsgs = data.messages.filter(
+                        (m) => !existingIds.has(m.timestamp + m.role)
+                    );
+                    if (newMsgs.length === 0) {
+                        return prev;
+                    }
+                    // Append older messages at the end
+                    return [...prev, ...newMsgs];
+                });
+            }
+        }
+    }, [data, offset]);
+
+    // Reset when session changes
+    useEffect(() => {
+        if (session) {
+            setOffset(0);
+            setAllMessages([]);
+        }
+    }, [session?.key]);
+
+    const hasMore = data?.hasMore ?? false;
 
     if (!session) return null;
 
@@ -85,9 +121,7 @@ export function SessionDetails({
                             disabled={isLoading}
                         >
                             <RefreshCw
-                                className={
-                                    "h-4 w-4 " + (isLoading ? "animate-spin" : "")
-                                }
+                                className={"h-4 w-4 " + (isLoading ? "animate-spin" : "")}
                             />
                         </Button>
                     </div>
@@ -103,7 +137,7 @@ export function SessionDetails({
                             <div className="py-8 text-center">
                                 <p className="text-slate-400">{error.message}</p>
                             </div>
-                        ) : history.length === 0 ? (
+                        ) : allMessages.length === 0 ? (
                             <div className="py-8 text-center">
                                 <MessageSquare className="mx-auto mb-2 h-8 w-8 text-slate-500" />
                                 <p className="text-slate-400">
@@ -112,36 +146,24 @@ export function SessionDetails({
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {[...history]
-                                    .reverse()
-                                    .slice(0, visibleCount)
-                                    .map((msg, i) => (
-                                        <MessageBubble
-                                            key={i}
-                                            role={msg.role}
-                                            content={msg.content}
-                                            timestamp={msg.timestamp}
-                                        />
-                                    ))}
-                                {history.length > visibleCount && (
+                                {allMessages.map((msg, i) => (
+                                    <MessageBubble
+                                        key={`${msg.timestamp}-${i}`}
+                                        role={msg.role}
+                                        content={msg.content}
+                                        timestamp={msg.timestamp}
+                                    />
+                                ))}
+                                {hasMore && (
                                     <div className="text-center">
                                         <Button
                                             variant="secondary"
                                             size="sm"
-                                            onClick={() =>
-                                                setVisibleCount((c) => c + 50)
-                                            }
+                                            onClick={() => setOffset((c) => c + limit)}
                                         >
-                                            Load more ({visibleCount} of{" "}
-                                            {history.length} messages)
+                                            Load more
                                         </Button>
                                     </div>
-                                )}
-                                {totalCount > history.length && (
-                                    <p className="mt-2 text-center text-xs text-slate-500">
-                                        {totalCount - history.length} older messages on
-                                        server
-                                    </p>
                                 )}
                             </div>
                         )}

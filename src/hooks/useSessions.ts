@@ -11,6 +11,7 @@ interface SessionsResponse {
 interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
     total?: number;
+    hasMore?: boolean;
 }
 
 // Query keys
@@ -30,9 +31,9 @@ async function fetchSessions(): Promise<Session[]> {
     return data.sessions || [];
 }
 
-async function fetchSessionHistory(key: string): Promise<SessionHistoryResponse> {
+async function fetchSessionHistory(key: string, offset: number = 0, limit: number = 50): Promise<SessionHistoryResponse> {
     return apiFetch<SessionHistoryResponse>(
-        `/sessions/${encodeURIComponent(key)}/history`
+        `/sessions/${encodeURIComponent(key)}/history?offset=${offset}&limit=${limit}`
     );
 }
 
@@ -60,10 +61,10 @@ export function useSessions() {
     });
 }
 
-export function useSessionHistory(key: string | null) {
+export function useSessionHistory(key: string | null, offset: number = 0, limit: number = 50) {
     return useQuery({
-        queryKey: sessionKeys.history(key || ""),
-        queryFn: () => fetchSessionHistory(key!),
+        queryKey: ["sessions", "history", key, offset, limit],
+        queryFn: () => fetchSessionHistory(key!, offset, limit),
         enabled: !!key,
         staleTime: 30_000, // 30 seconds
     });

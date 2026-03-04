@@ -73,8 +73,20 @@ export function useOpenClaw(token: string | null) {
     };
 
     const handleSessions = (sessionData: Record<string, unknown>[]) => {
-        console.log("[useOpenClaw] Setting sessions:", sessionData.length);
-        setSessions(sessionData as unknown as Session[]);
+        const newSessions = sessionData as unknown as Session[];
+
+        setSessions((prev) => {
+            if (prev.length !== newSessions.length) {
+                return newSessions;
+            }
+
+            const hasChanged = prev.some((s, i) => {
+                const n = newSessions[i];
+                return s.key !== n.key || s.type !== n.type || s.updatedAt !== n.updatedAt;
+            });
+
+            return hasChanged ? newSessions : prev;
+        });
     };
 
     const { isConnected, error, connect, disconnect, request } = useOpenClawSocket({

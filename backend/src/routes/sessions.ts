@@ -45,15 +45,15 @@ export default function sessionsRoutes(app: express.Application): void {
 
     // Get session history
     app.get("/api/sessions/:id/history", (async (req, res) => {
-        const sessionId = req.params.id;
+        const sessionKey = req.params.id;
         const limit = Number.parseInt((req.query.limit as string) || "50", 10);
         const offset = Number.parseInt((req.query.offset as string) || "0", 10);
 
         try {
-            // Find the session
+            // Find the session first
             const sessions = gateway.getSessions();
             const session = sessions.find(
-                (s: Session) => s.id === sessionId || s.key === sessionId
+                (s: Session) => s.id === sessionKey || s.key === sessionKey
             );
 
             if (!session) {
@@ -61,15 +61,42 @@ export default function sessionsRoutes(app: express.Application): void {
                 return;
             }
 
-            // For now, return empty history - this would need gateway integration
-            // to fetch actual message history. Parameters limit/offset would be used here.
-            console.log(
-                `History request for ${sessionId}: limit=${limit}, offset=${offset}`
-            );
+            // Get history from gateway
+            const history = await gateway.getSessionHistory(session.key, limit, offset);
+            
+            // Transform messages to match frontend expectations
+            const messages = history.messages.map((msg: { role?: string; content?: string | Array<{ type?: string; text?: string }>; timestamp?: string | number }, idx: number) => {
+                // Handle content as array of blocks
+                let content = "";
+                if (Array.isArray(msg.content)) {
+                    content = msg.content
+                        .map((block: { type?: string; text?: string }) => block.text || "")
+                        .join("");
+                } else {
+                    content = String(msg.content || "");
+                }
+
+                // Handle timestamp
+                const timestamp = msg.timestamp
+                    ? typeof msg.timestamp === "number"
+                        ? new Date(msg.timestamp).toISOString()
+                        : msg.timestamp
+                    : undefined;
+
+                return {
+                    id: `${offset + idx}`,
+                    role: msg.role || "unknown",
+                    content,
+                    timestamp,
+                };
+            });
+
+            const hasMore = history.total > offset + messages.length;
+
             res.json({
-                messages: [],
-                total: 0,
-                hasMore: false,
+                messages,
+                total: history.total,
+                hasMore,
             } as HistoryResponse);
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });

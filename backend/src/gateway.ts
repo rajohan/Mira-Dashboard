@@ -35,6 +35,8 @@ interface PendingRequest {
     clientWs: WebSocket;
     clientId: string;
     method?: string;
+    resolve?: (value: unknown) => void;
+    reject?: (reason: unknown) => void;
 }
 
 interface GatewayMessage {
@@ -214,6 +216,16 @@ function connect(token: string): void {
                     const pending = pendingRequests.get(msg.id);
                     pendingRequests.delete(msg.id);
 
+                    // Handle async requests with resolve/reject
+                    if (pending?.resolve || pending?.reject) {
+                        if (msg.ok) {
+                            pending.resolve?.(msg.payload);
+                        } else {
+                            pending.reject?.(msg.error || "Request failed");
+                        }
+                        return;
+                    }
+
                     if (
                         pending?.clientWs &&
                         pending.clientWs.readyState === WebSocket.OPEN
@@ -341,6 +353,80 @@ function getGatewayWs(): WebSocket | null {
     return gatewayWs;
 }
 
+function sendRequestAsync(
+    method: string,
+    params: Record<string, unknown>
+): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+        if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+            reject(new Error("Gateway not connected"));
+            return;
+        }
+
+        const id = String(++requestId);
+        const req = { type: "req", id, method, params };
+
+        const timeout = setTimeout(() => {
+            pendingRequests.delete(id);
+            reject(new Error("Request timeout"));
+        }, 30000);
+
+        pendingRequests.set(id, {
+            clientWs: {} as WebSocket,
+            clientId: "",
+            method: "",
+            resolve: (value) => {
+                clearTimeout(timeout);
+                resolve(value);
+            },
+            reject: (reason) => {
+                clearTimeout(timeout);
+                reject(reason);
+            },
+        });
+
+        gatewayWs!.send(JSON.stringify(req));
+    });
+}
+
+async function getSessionHistory(
+    sessionKey: string,
+    limit: number = 50,
+    offset: number = 0
+): Promise<{ messages: Array<{ role: string; content: string; timestamp?: string }>; total: number }> {
+    try {
+        const fetchLimit = 500;
+        const result = await sendRequestAsync("chat.history", {
+            sessionKey,
+            limit: fetchLimit,
+        }) as { messages?: Array<{ role?: string; content?: string; timestamp?: string }>; sessionKey?: string; sessionId?: string };
+
+        const allMessages = (result.messages || [])
+            .map((msg) => ({
+                role: msg.role || "unknown",
+                content: msg.content || "",
+                timestamp: msg.timestamp,
+            }))
+            .sort((a, b) => {
+                // Sort descending by timestamp (newest first)
+                const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                return timeB - timeA;
+            });
+
+        const total = allMessages.length;
+        const messages = allMessages.slice(offset, offset + limit);
+
+        return {
+            messages,
+            total,
+        };
+    } catch (error) {
+        console.error("[Gateway] Failed to get session history:", error);
+        return { messages: [], total: 0 };
+    }
+}
+
 export default {
     init: connect,
     handleClient,
@@ -348,6 +434,7 @@ export default {
     getSessions,
     isConnected,
     getGatewayWs,
+    getSessionHistory,
 };
 
 export type { GatewaySession, Session };

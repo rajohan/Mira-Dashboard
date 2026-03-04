@@ -17,13 +17,13 @@ import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import { useAuthStore } from "../stores/authStore";
 import { getTypeSortOrder } from "../utils/sessionUtils";
 
-function sortSessions(sessions: Session[]): Session[] {
+const sortSessions = (sessions: Session[]): Session[] => {
     return [...sessions].sort((a, b) => {
         const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
         if (typeOrder !== 0) return typeOrder;
         return (b.updatedAt || 0) - (a.updatedAt || 0);
     });
-}
+};
 
 export function Sessions() {
     const { token } = useAuthStore();
@@ -43,11 +43,8 @@ export function Sessions() {
         }
     }, [token, connect]);
 
-    useEffect(() => {
-        if (isConnected) {
-            fetchSessions().catch(console.error);
-        }
-    }, [isConnected, fetchSessions]);
+    // Note: fetchSessions is handled via WebSocket events in useOpenClaw
+    // No need to call it here as well
 
     const handleRefresh = async () => {
         setIsLoading(true);
