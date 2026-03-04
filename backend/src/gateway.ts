@@ -426,6 +426,13 @@ function sendRequestAsync(
     });
 }
 
+async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
+    await sendRequestAsync("sessions_send", {
+        sessionKey,
+        message,
+    });
+}
+
 async function getSessionHistory(
     sessionKey: string,
     limit: number = 50,
@@ -479,6 +486,7 @@ export default {
     isConnected,
     getGatewayWs,
     getSessionHistory,
+    sendSessionMessage,
 };
 
 export type { GatewaySession, Session };

@@ -77,13 +77,15 @@ export function TaskDetailModal({
                                 {priority.toUpperCase()}
                             </span>
                             {task.labels
-                                .filter(
-                                    (l: { name: string }) =>
-                                        !l.name.startsWith("priority-") &&
+                                .filter((l: { name: string }) => {
+                                    const normalized = l.name.toLowerCase();
+                                    return (
+                                        !normalized.startsWith("priority-") &&
                                         !["todo", "in-progress", "blocked", "done"].includes(
-                                            l.name
+                                            normalized
                                         )
-                                )
+                                    );
+                                })
                                 .map((label: { name: string; color?: string }) => (
                                     <span
                                         key={label.name}

@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
@@ -78,26 +77,14 @@ function toFrontendTask(task: DbTask) {
     };
 }
 
-function notifyMira(eventType: string, task: { id: number; title: string }) {
-    const ws = gateway.getGatewayWs();
-    if (!ws || ws.readyState !== 1) {
-        return;
-    }
-
-    const id = `tasks-notify-${crypto.randomUUID()}`;
+async function notifyMira(eventType: string, task: { id: number; title: string }) {
     const message = `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task that may need pickup.`;
 
-    ws.send(
-        JSON.stringify({
-            type: "req",
-            id,
-            method: "sessions.send",
-            params: {
-                sessionKey: "agent:main:main",
-                message,
-            },
-        })
-    );
+    try {
+        await gateway.sendSessionMessage("agent:main:main", message);
+    } catch (error) {
+        console.error("[Tasks] Failed to notify Mira:", error);
+    }
 }
 
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
@@ -165,7 +152,7 @@ export default function tasksRoutes(
 
         const id = Number(result.lastInsertRowid);
         recordEvent(id, "created", { title: title.trim(), status, priority });
-        notifyMira("created", { id, title: title.trim() });
+        void notifyMira("created", { id, title: title.trim() });
 
         const row = db
             .prepare(
@@ -225,7 +212,7 @@ export default function tasksRoutes(
         ).run(title, body, nextStatus, nextPriority, JSON.stringify(labels), updatedAt, id);
 
         recordEvent(id, "updated", { title, status: nextStatus, priority: nextPriority });
-        notifyMira("updated", { id, title });
+        void notifyMira("updated", { id, title });
 
         const row = db
             .prepare(
@@ -266,7 +253,7 @@ export default function tasksRoutes(
         );
 
         recordEvent(id, "assigned", { assignee: assignee || null });
-        notifyMira("assigned", { id, title: existing.title });
+        void notifyMira("assigned", { id, title: existing.title });
 
         const row = db
             .prepare(
@@ -296,7 +283,7 @@ export default function tasksRoutes(
 
         db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-        notifyMira("deleted", existing);
+        void notifyMira("deleted", existing);
         res.json({ ok: true });
     });
 
