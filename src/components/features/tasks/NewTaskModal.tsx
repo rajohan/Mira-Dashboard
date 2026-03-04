@@ -1,6 +1,10 @@
 import { useForm } from "@tanstack/react-form";
 import { Loader2, Plus, X } from "lucide-react";
 
+import {
+    TASK_ASSIGNEES,
+    type TaskAssigneeId,
+} from "../../../constants/taskActors";
 import { PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -14,7 +18,7 @@ interface NewTaskModalProps {
         title: string,
         body?: string,
         priority?: "high" | "medium" | "low",
-        assignee?: "mira-2026" | "rajohan"
+        assignee?: TaskAssigneeId
     ) => Promise<void>;
 }
 
@@ -24,7 +28,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
             title: "",
             body: "",
             priority: "medium" as "high" | "medium" | "low",
-            assignee: "mira-2026" as "mira-2026" | "rajohan",
+            assignee: TASK_ASSIGNEES.mira.id as TaskAssigneeId,
         },
         onSubmit: async ({ value }) => {
             if (!value.title.trim()) return;
@@ -129,22 +133,22 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                 <Button
                                     type="button"
                                     variant={
-                                        field.state.value === "mira-2026"
+                                        field.state.value === TASK_ASSIGNEES.mira.id
                                             ? "primary"
                                             : "secondary"
                                     }
-                                    onClick={() => field.handleChange("mira-2026")}
+                                    onClick={() => field.handleChange(TASK_ASSIGNEES.mira.id)}
                                 >
                                     Mira
                                 </Button>
                                 <Button
                                     type="button"
                                     variant={
-                                        field.state.value === "rajohan"
+                                        field.state.value === TASK_ASSIGNEES.raymond.id
                                             ? "primary"
                                             : "secondary"
                                     }
-                                    onClick={() => field.handleChange("rajohan")}
+                                    onClick={() => field.handleChange(TASK_ASSIGNEES.raymond.id)}
                                 >
                                     Raymond
                                 </Button>

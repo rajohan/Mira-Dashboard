@@ -1,7 +1,10 @@
 import { Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { useEffect, useMemo, useState } from "react";
+import remarkGfm from "remark-gfm";
 
-import type { ColumnId, Task } from "../../../types/task";
+import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
+import type { ColumnId, Task, TaskUpdate } from "../../../types/task";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
@@ -13,13 +16,15 @@ interface TaskDetailModalProps {
     task: Task | null;
     onClose: () => void;
     onMove: (column: ColumnId) => Promise<void>;
-    onAssign: (assignee: "mira-2026" | "rajohan") => Promise<void>;
+    onAssign: (assignee: TaskAssigneeId) => Promise<void>;
     onDelete: () => Promise<void>;
     onUpdate: (updates: {
         title?: string;
         body?: string;
         labels?: string[];
     }) => Promise<Task>;
+    updates: TaskUpdate[];
+    onAddUpdate: (messageMd: string) => Promise<void>;
 }
 
 export function TaskDetailModal({
@@ -29,6 +34,8 @@ export function TaskDetailModal({
     onAssign,
     onDelete,
     onUpdate,
+    updates,
+    onAddUpdate,
 }: TaskDetailModalProps) {
     const [isMoving, setIsMoving] = useState(false);
     const [isAssigning, setIsAssigning] = useState(false);
@@ -39,12 +46,13 @@ export function TaskDetailModal({
     const [editPriority, setEditPriority] = useState<"low" | "medium" | "high">(
         getPriority(task?.labels || [])
     );
+    const [progressMessage, setProgressMessage] = useState("");
 
     if (!task) return null;
 
     const priority = getPriority(task.labels);
-    const assignee = task.assignees[0];
     const currentColumn = getColumnId(task) || "todo";
+    const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
 
     useEffect(() => {
         setEditTitle(task.title);
@@ -52,13 +60,20 @@ export function TaskDetailModal({
         setEditPriority(getPriority(task.labels || []));
     }, [task]);
 
+    const assigneeProfileUrl = useMemo(() => {
+        if (assigneeLogin === TASK_ASSIGNEES.mira.id) return TASK_ASSIGNEES.mira.githubUrl;
+        if (assigneeLogin === TASK_ASSIGNEES.raymond.id)
+            return TASK_ASSIGNEES.raymond.githubUrl;
+        return null;
+    }, [assigneeLogin]);
+
     const handleMove = async (column: ColumnId) => {
         setIsMoving(true);
         await onMove(column);
         setIsMoving(false);
     };
 
-    const handleAssign = async (nextAssignee: "mira-2026" | "rajohan") => {
+    const handleAssign = async (nextAssignee: TaskAssigneeId) => {
         setIsAssigning(true);
         await onAssign(nextAssignee);
         setIsAssigning(false);
@@ -90,6 +105,15 @@ export function TaskDetailModal({
         setIsEditing(false);
     };
 
+    const handleAddUpdate = async () => {
+        if (!progressMessage.trim()) {
+            return;
+        }
+
+        await onAddUpdate(progressMessage.trim());
+        setProgressMessage("");
+    };
+
     return (
         <Modal isOpen={!!task} onClose={onClose} size="2xl">
             <div className="space-y-4">
@@ -104,9 +128,7 @@ export function TaskDetailModal({
                                         : "border-blue-500/30 bg-blue-500/20 text-blue-400")
                                 }
                             >
-                                {task.state === "CLOSED"
-                                    ? "DONE"
-                                    : currentColumn.toUpperCase()}
+                                {task.state === "CLOSED" ? "DONE" : currentColumn.toUpperCase()}
                             </span>
                             <span
                                 className={
@@ -117,7 +139,7 @@ export function TaskDetailModal({
                                 {priority.toUpperCase()}
                             </span>
                             {task.labels
-                                .filter((l: { name: string }) => {
+                                .filter((l) => {
                                     const normalized = l.name.toLowerCase();
                                     return (
                                         !normalized.startsWith("priority-") &&
@@ -126,7 +148,7 @@ export function TaskDetailModal({
                                         )
                                     );
                                 })
-                                .map((label: { name: string; color?: string }) => (
+                                .map((label) => (
                                     <span
                                         key={label.name}
                                         className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
@@ -156,11 +178,7 @@ export function TaskDetailModal({
                                         {(["low", "medium", "high"] as const).map((p) => (
                                             <Button
                                                 key={p}
-                                                variant={
-                                                    editPriority === p
-                                                        ? "primary"
-                                                        : "secondary"
-                                                }
+                                                variant={editPriority === p ? "primary" : "secondary"}
                                                 type="button"
                                                 onClick={() => setEditPriority(p)}
                                             >
@@ -187,30 +205,77 @@ export function TaskDetailModal({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
-                    {assignee && <span>Assigned: @{assignee.login || assignee.name}</span>}
+                    {assigneeLogin && (
+                        <span>
+                            Assigned:{" "}
+                            {assigneeProfileUrl ? (
+                                <a
+                                    href={assigneeProfileUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-accent-300 hover:text-accent-200"
+                                >
+                                    @{assigneeLogin}
+                                </a>
+                            ) : (
+                                `@${assigneeLogin}`
+                            )}
+                        </span>
+                    )}
                     <span>Created {formatDate(task.createdAt)}</span>
                     <span>Updated {formatDuration(new Date(task.updatedAt).getTime())}</span>
                 </div>
 
                 {task.body && !isEditing && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                        <h3 className="mb-2 text-sm font-semibold text-slate-300">
-                            Description
-                        </h3>
-                        <p className="whitespace-pre-wrap text-sm text-slate-400">
-                            {task.body}
-                        </p>
+                        <h3 className="mb-2 text-sm font-semibold text-slate-300">Description</h3>
+                        <div className="prose prose-invert max-w-none text-sm prose-p:my-2">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.body}</ReactMarkdown>
+                        </div>
                     </div>
                 )}
+
+                <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-slate-300">Progress updates</h3>
+                    <div className="mb-3 space-y-2">
+                        {updates.length === 0 ? (
+                            <p className="text-sm text-slate-500">No updates yet.</p>
+                        ) : (
+                            updates.map((update) => (
+                                <div
+                                    key={update.id}
+                                    className="rounded border border-slate-700 bg-slate-900/40 p-2"
+                                >
+                                    <div className="mb-1 text-xs text-slate-500">
+                                        {update.author} · {formatDate(update.createdAt)}
+                                    </div>
+                                    <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            {update.messageMd}
+                                        </ReactMarkdown>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="space-y-2">
+                        <Textarea
+                            label="Add progress update"
+                            value={progressMessage}
+                            onChange={(event) => setProgressMessage(event.target.value)}
+                            rows={3}
+                            placeholder="What changed? (Markdown supported)"
+                        />
+                        <Button variant="secondary" onClick={handleAddUpdate}>
+                            Add Update
+                        </Button>
+                    </div>
+                </div>
 
                 <div className="space-y-3 pt-2">
                     <div className="flex flex-wrap gap-2">
                         {currentColumn !== "todo" && (
-                            <Button
-                                variant="secondary"
-                                onClick={() => handleMove("todo")}
-                                disabled={isMoving}
-                            >
+                            <Button variant="secondary" onClick={() => handleMove("todo")} disabled={isMoving}>
                                 Move to New
                             </Button>
                         )}
@@ -233,11 +298,7 @@ export function TaskDetailModal({
                             </Button>
                         )}
                         {currentColumn !== "done" && (
-                            <Button
-                                variant="primary"
-                                onClick={() => handleMove("done")}
-                                disabled={isMoving}
-                            >
+                            <Button variant="primary" onClick={() => handleMove("done")} disabled={isMoving}>
                                 Mark Done
                             </Button>
                         )}
@@ -265,20 +326,26 @@ export function TaskDetailModal({
                                 Edit
                             </Button>
                         )}
-                        <Button
-                            variant="secondary"
-                            onClick={() => handleAssign("mira-2026")}
-                            disabled={isAssigning}
-                        >
-                            Assign to Mira
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => handleAssign("rajohan")}
-                            disabled={isAssigning}
-                        >
-                            Assign to Raymond
-                        </Button>
+
+                        {assigneeLogin !== TASK_ASSIGNEES.mira.id && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleAssign(TASK_ASSIGNEES.mira.id)}
+                                disabled={isAssigning}
+                            >
+                                Assign to Mira
+                            </Button>
+                        )}
+                        {assigneeLogin !== TASK_ASSIGNEES.raymond.id && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleAssign(TASK_ASSIGNEES.raymond.id)}
+                                disabled={isAssigning}
+                            >
+                                Assign to Raymond
+                            </Button>
+                        )}
+
                         <Button
                             variant="danger"
                             onClick={handleDelete}

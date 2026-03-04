@@ -1,10 +1,19 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
+import { TASK_ASSIGNEE_IDS, TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors.js";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 
-type Assignee = "mira-2026" | "rajohan";
+type Assignee = TaskAssigneeId;
+
+interface DbTaskUpdate {
+    id: number;
+    task_id: number;
+    author: Assignee;
+    message_md: string;
+    created_at: string;
+}
 
 interface DbTask {
     id: number;
@@ -19,7 +28,7 @@ interface DbTask {
 }
 
 function isValidAssignee(value: unknown): value is Assignee {
-    return value === "mira-2026" || value === "rajohan";
+    return typeof value === "string" && TASK_ASSIGNEE_IDS.includes(value as Assignee);
 }
 
 function normalizeStatus(columnLabel?: string): Status {
@@ -91,6 +100,16 @@ async function notifyMira(eventType: string, task: { id: number; title: string }
     console.info("[Tasks] Notify pending integration:", message);
 }
 
+function toFrontendTaskUpdate(update: DbTaskUpdate) {
+    return {
+        id: update.id,
+        taskId: update.task_id,
+        author: update.author,
+        messageMd: update.message_md,
+        createdAt: update.created_at,
+    };
+}
+
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
     db.prepare(
         `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
@@ -128,7 +147,7 @@ export default function tasksRoutes(
         }
 
         if (!isValidAssignee(assignee)) {
-            res.status(400).json({ error: "Assignee must be mira-2026 or rajohan" });
+            res.status(400).json({ error: "Assignee must be Mira or Raymond" });
             return;
         }
 
@@ -169,7 +188,7 @@ export default function tasksRoutes(
             priority,
             assignee: safeAssignee,
         });
-        if (safeAssignee === "mira-2026") {
+        if (safeAssignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("created", { id, title: title.trim() });
         }
 
@@ -236,7 +255,7 @@ export default function tasksRoutes(
             priority: nextPriority,
             assignee: existing.assignee,
         });
-        if (existing.assignee === "mira-2026") {
+        if (existing.assignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("updated", { id, title });
         }
 
@@ -260,7 +279,7 @@ export default function tasksRoutes(
         }
 
         if (!isValidAssignee(assignee)) {
-            res.status(400).json({ error: "Assignee must be mira-2026 or rajohan" });
+            res.status(400).json({ error: "Assignee must be Mira or Raymond" });
             return;
         }
 
@@ -285,7 +304,7 @@ export default function tasksRoutes(
         );
 
         recordEvent(id, "assigned", { assignee: safeAssignee });
-        if (safeAssignee === "mira-2026") {
+        if (safeAssignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("assigned", { id, title: existing.title });
         }
 
@@ -317,10 +336,76 @@ export default function tasksRoutes(
 
         db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-        if (existing.assignee === "mira-2026") {
+        if (existing.assignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("deleted", existing);
         }
         res.json({ ok: true });
+    });
+
+    app.get("/api/tasks/:id/updates", (req, res) => {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) {
+            res.status(400).json({ error: "Invalid id" });
+            return;
+        }
+
+        const rows = db
+            .prepare(
+                `SELECT id, task_id, author, message_md, created_at
+                 FROM task_updates
+                 WHERE task_id = ?
+                 ORDER BY datetime(created_at) DESC, id DESC`
+            )
+            .all(id) as unknown as DbTaskUpdate[];
+
+        res.json(rows.map(toFrontendTaskUpdate));
+    });
+
+    app.post("/api/tasks/:id/updates", express.json(), (req, res) => {
+        const id = Number(req.params.id);
+        const { author, messageMd } = req.body as {
+            author?: Assignee;
+            messageMd?: string;
+        };
+
+        if (!Number.isInteger(id) || !isValidAssignee(author) || !messageMd?.trim()) {
+            res.status(400).json({ error: "Invalid update payload" });
+            return;
+        }
+
+        const existing = db.prepare("SELECT id FROM tasks WHERE id = ?").get(id);
+        if (!existing) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        const createdAt = new Date().toISOString();
+        const result = db
+            .prepare(
+                `INSERT INTO task_updates (task_id, author, message_md, created_at)
+                 VALUES (?, ?, ?, ?)`
+            )
+            .run(id, author, messageMd.trim(), createdAt);
+
+        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(createdAt, id);
+
+        const row = db
+            .prepare(
+                `SELECT id, task_id, author, message_md, created_at
+                 FROM task_updates
+                 WHERE id = ?`
+            )
+            .get(Number(result.lastInsertRowid)) as unknown as DbTaskUpdate;
+
+        const taskRow = db
+            .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
+            .get(id) as unknown as { title: string; assignee: Assignee | null };
+
+        if (taskRow.assignee === TASK_ASSIGNEES.mira.id) {
+            void notifyMira("progress", { id, title: taskRow.title });
+        }
+
+        res.status(201).json(toFrontendTaskUpdate(row));
     });
 
     app.post("/api/tasks/:id/move", express.json(), (async (req, res) => {

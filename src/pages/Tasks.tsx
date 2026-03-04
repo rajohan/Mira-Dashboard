@@ -16,6 +16,7 @@ import {
     TaskDetailModal,
     TaskOverlay,
 } from "../components/features/tasks";
+import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors";
 import { Button } from "../components/ui/Button";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
@@ -26,9 +27,11 @@ import { SearchInput } from "../components/ui/SearchInput";
 import {
     useAssignTask,
     useCreateTask,
+    useCreateTaskUpdate,
     useDeleteTask,
     useMoveTask,
     useTasks,
+    useTaskUpdates,
     useUpdateTask,
 } from "../hooks";
 import type { ColumnId, Task } from "../types/task";
@@ -36,8 +39,8 @@ import { getPriority } from "../utils/taskUtils";
 
 const ASSIGNMENT_FILTERS = [
     { value: "all", label: "All" },
-    { value: "mira-2026", label: "Mira" },
-    { value: "rajohan", label: "Raymond" },
+    { value: TASK_ASSIGNEES.mira.id, label: TASK_ASSIGNEES.mira.label },
+    { value: TASK_ASSIGNEES.raymond.id, label: TASK_ASSIGNEES.raymond.label },
 ] as const;
 
 export function Tasks() {
@@ -47,13 +50,16 @@ export function Tasks() {
     const assignTask = useAssignTask();
     const deleteTask = useDeleteTask();
     const updateTask = useUpdateTask();
+    const createTaskUpdate = useCreateTaskUpdate();
 
     const [search, setSearch] = useState("");
-    const [filter, setFilter] = useState<"all" | "mira-2026" | "rajohan">("all");
+    const [filter, setFilter] = useState<"all" | TaskAssigneeId>("all");
     const [activeId, setActiveId] = useState<string | null>(null);
     const [overId, setOverId] = useState<ColumnId | null>(null);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
+
+    const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
 
     const filteredTasks = tasks.filter((task) => {
         const matchesFilter =
@@ -162,7 +168,7 @@ export function Tasks() {
         }
     };
 
-    const handleAssignTask = async (assignee: "mira-2026" | "rajohan") => {
+    const handleAssignTask = async (assignee: TaskAssigneeId) => {
         if (!selectedTask) return;
         const updated = await assignTask.mutateAsync({
             number: selectedTask.number,
@@ -192,6 +198,20 @@ export function Tasks() {
         });
         setSelectedTask(updated);
         return updated;
+    };
+
+    const handleAddTaskUpdate = async (messageMd: string) => {
+        if (!selectedTask) return;
+
+        const assignee = (selectedTask.assignees[0]?.login ||
+            selectedTask.assignees[0]?.name ||
+            TASK_ASSIGNEES.mira.id) as TaskAssigneeId;
+
+        await createTaskUpdate.mutateAsync({
+            taskId: selectedTask.number,
+            author: assignee,
+            messageMd,
+        });
     };
 
     const activeTask = activeId
@@ -271,6 +291,8 @@ export function Tasks() {
                             onAssign={handleAssignTask}
                             onDelete={handleDeleteTask}
                             onUpdate={handleUpdateTask}
+                            updates={taskUpdates}
+                            onAddUpdate={handleAddTaskUpdate}
                         />
                     )}
 
@@ -285,7 +307,7 @@ export function Tasks() {
                                     title,
                                     body: body || "",
                                     labels,
-                                    assignee: assignee || "mira-2026",
+                                    assignee: assignee || TASK_ASSIGNEES.mira.id,
                                 });
                                 setIsNewTaskOpen(false);
                             }}

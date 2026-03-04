@@ -35,9 +35,11 @@ export {
     taskKeys,
     useAssignTask,
     useCreateTask,
+    useCreateTaskUpdate,
     useDeleteTask,
     useMoveTask,
     useTasks,
+    useTaskUpdates,
     useUpdateTask,
 } from "./useTasks";
 

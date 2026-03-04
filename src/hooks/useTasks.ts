@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { Task } from "../types/task";
+import type { Task, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 export const taskKeys = {
     all: ["tasks"] as const,
     list: () => [...taskKeys.all, "list"] as const,
+    updates: (taskId: number) => [...taskKeys.all, "updates", taskId] as const,
 };
 
 async function fetchTasks(): Promise<Task[]> {
@@ -44,6 +45,18 @@ async function assignTask(
 
 async function deleteTask(number: number): Promise<void> {
     await apiDelete(`/tasks/${number}`);
+}
+
+async function fetchTaskUpdates(taskId: number): Promise<TaskUpdate[]> {
+    return apiFetch<TaskUpdate[]>(`/tasks/${taskId}/updates`);
+}
+
+async function createTaskUpdate(
+    taskId: number,
+    author: "mira-2026" | "rajohan",
+    messageMd: string
+): Promise<TaskUpdate> {
+    return apiPost<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
 }
 
 export function useTasks() {
@@ -128,6 +141,38 @@ export function useDeleteTask() {
     return useMutation({
         mutationFn: ({ number }: { number: number }) => deleteTask(number),
         onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
+        },
+    });
+}
+
+export function useTaskUpdates(taskId: number | null) {
+    return useQuery({
+        queryKey: taskId ? taskKeys.updates(taskId) : taskKeys.all,
+        queryFn: () => fetchTaskUpdates(taskId!),
+        enabled: !!taskId,
+        staleTime: 5_000,
+        refetchInterval: 10_000,
+    });
+}
+
+export function useCreateTaskUpdate() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            taskId,
+            author,
+            messageMd,
+        }: {
+            taskId: number;
+            author: "mira-2026" | "rajohan";
+            messageMd: string;
+        }) => createTaskUpdate(taskId, author, messageMd),
+        onSuccess: (_result, variables) => {
+            void queryClient.invalidateQueries({
+                queryKey: taskKeys.updates(variables.taskId),
+            });
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },
     });

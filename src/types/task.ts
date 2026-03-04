@@ -10,4 +10,12 @@ export interface Task {
     url: string;
 }
 
+export interface TaskUpdate {
+    id: number;
+    taskId: number;
+    author: "mira-2026" | "rajohan";
+    messageMd: string;
+    createdAt: string;
+}
+
 export type ColumnId = "todo" | "in-progress" | "blocked" | "done";
