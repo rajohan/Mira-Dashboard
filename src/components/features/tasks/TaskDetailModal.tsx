@@ -1,4 +1,4 @@
-import { ExternalLink, X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import type { ColumnId, Task } from "../../../types/task";
@@ -11,10 +11,20 @@ interface TaskDetailModalProps {
     task: Task | null;
     onClose: () => void;
     onMove: (column: ColumnId) => Promise<void>;
+    onAssign: (assignee: string | null) => Promise<void>;
+    onDelete: () => Promise<void>;
 }
 
-export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps) {
+export function TaskDetailModal({
+    task,
+    onClose,
+    onMove,
+    onAssign,
+    onDelete,
+}: TaskDetailModalProps) {
     const [isMoving, setIsMoving] = useState(false);
+    const [isAssigning, setIsAssigning] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     if (!task) return null;
 
@@ -28,10 +38,21 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
         setIsMoving(false);
     };
 
+    const handleAssign = async (nextAssignee: string | null) => {
+        setIsAssigning(true);
+        await onAssign(nextAssignee);
+        setIsAssigning(false);
+    };
+
+    const handleDelete = async () => {
+        setIsDeleting(true);
+        await onDelete();
+        setIsDeleting(false);
+    };
+
     return (
         <Modal isOpen={!!task} onClose={onClose} size="2xl">
             <div className="space-y-4">
-                {/* Header */}
                 <div className="flex items-start justify-between">
                     <div className="flex-1">
                         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -59,8 +80,9 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                                 .filter(
                                     (l: { name: string }) =>
                                         !l.name.startsWith("priority-") &&
-                                        l.name !== "blocked" &&
-                                        l.name !== "in-progress"
+                                        !["todo", "in-progress", "blocked", "done"].includes(
+                                            l.name
+                                        )
                                 )
                                 .map((label: { name: string; color?: string }) => (
                                     <span
@@ -85,33 +107,12 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                     </Button>
                 </div>
 
-                {/* Metadata */}
                 <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
-                    {assignee && (
-                        <div className="flex items-center gap-2">
-                            {assignee.avatar_url ? (
-                                <img
-                                    src={assignee.avatar_url}
-                                    alt={assignee.login || "Avatar"}
-                                    className="h-5 w-5 rounded-full"
-                                />
-                            ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-xs text-slate-300">
-                                    {(assignee.login ||
-                                        assignee.name ||
-                                        "?")[0].toUpperCase()}
-                                </div>
-                            )}
-                            <span>@{assignee.login || assignee.name}</span>
-                        </div>
-                    )}
+                    {assignee && <span>Assigned: @{assignee.login || assignee.name}</span>}
                     <span>Created {formatDate(task.createdAt)}</span>
-                    <span>
-                        Updated {formatDuration(new Date(task.updatedAt).getTime())}
-                    </span>
+                    <span>Updated {formatDuration(new Date(task.updatedAt).getTime())}</span>
                 </div>
 
-                {/* Body */}
                 {task.body && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
                         <h3 className="mb-2 text-sm font-semibold text-slate-300">
@@ -123,52 +124,78 @@ export function TaskDetailModal({ task, onClose, onMove }: TaskDetailModalProps)
                     </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2 pt-2">
-                    {currentColumn !== "todo" && (
+                <div className="space-y-3 pt-2">
+                    <div className="flex flex-wrap gap-2">
+                        {currentColumn !== "todo" && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("todo")}
+                                disabled={isMoving}
+                            >
+                                Move to New
+                            </Button>
+                        )}
+                        {currentColumn !== "in-progress" && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("in-progress")}
+                                disabled={isMoving}
+                            >
+                                Move to In Progress
+                            </Button>
+                        )}
+                        {currentColumn !== "blocked" && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("blocked")}
+                                disabled={isMoving}
+                            >
+                                Move to Blocked
+                            </Button>
+                        )}
+                        {currentColumn !== "done" && (
+                            <Button
+                                variant="primary"
+                                onClick={() => handleMove("done")}
+                                disabled={isMoving}
+                            >
+                                Mark Done
+                            </Button>
+                        )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 border-t border-slate-700 pt-3">
                         <Button
                             variant="secondary"
-                            onClick={() => handleMove("todo")}
-                            disabled={isMoving}
+                            onClick={() => handleAssign("mira-2026")}
+                            disabled={isAssigning}
                         >
-                            Move to New
+                            Assign to Mira
                         </Button>
-                    )}
-                    {currentColumn !== "in-progress" && (
                         <Button
                             variant="secondary"
-                            onClick={() => handleMove("in-progress")}
-                            disabled={isMoving}
+                            onClick={() => handleAssign("rajohan")}
+                            disabled={isAssigning}
                         >
-                            Move to In Progress
+                            Assign to Raymond
                         </Button>
-                    )}
-                    {currentColumn !== "blocked" && (
                         <Button
-                            variant="secondary"
-                            onClick={() => handleMove("blocked")}
-                            disabled={isMoving}
+                            variant="ghost"
+                            onClick={() => handleAssign(null)}
+                            disabled={isAssigning}
                         >
-                            Move to Blocked
+                            Unassign
                         </Button>
-                    )}
-                    {currentColumn !== "done" && (
                         <Button
-                            variant="primary"
-                            onClick={() => handleMove("done")}
-                            disabled={isMoving}
+                            variant="danger"
+                            onClick={handleDelete}
+                            disabled={isDeleting}
+                            className="ml-auto"
                         >
-                            Mark Done
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
                         </Button>
-                    )}
-                    <Button
-                        variant="secondary"
-                        onClick={() => window.open(task.url, "_blank")}
-                        className="ml-auto"
-                    >
-                        <ExternalLink className="mr-2 h-4 w-4" />
-                        Open in GitHub
-                    </Button>
+                    </div>
                 </div>
             </div>
         </Modal>

@@ -23,7 +23,13 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { SearchInput } from "../components/ui/SearchInput";
-import { useCreateTask, useMoveTask, useTasks } from "../hooks";
+import {
+    useAssignTask,
+    useCreateTask,
+    useDeleteTask,
+    useMoveTask,
+    useTasks,
+} from "../hooks";
 import type { ColumnId, Task } from "../types/task";
 
 const ASSIGNMENT_FILTERS = [
@@ -36,6 +42,8 @@ export function Tasks() {
     const { data: tasks = [], isLoading, error, refetch } = useTasks();
     const moveTask = useMoveTask();
     const createTask = useCreateTask();
+    const assignTask = useAssignTask();
+    const deleteTask = useDeleteTask();
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | "mira-2026" | "rajohan">("all");
@@ -128,6 +136,17 @@ export function Tasks() {
         }
     };
 
+    const handleAssignTask = async (assignee: string | null) => {
+        if (!selectedTask) return;
+        await assignTask.mutateAsync({ number: selectedTask.number, assignee });
+    };
+
+    const handleDeleteTask = async () => {
+        if (!selectedTask) return;
+        await deleteTask.mutateAsync({ number: selectedTask.number });
+        setSelectedTask(null);
+    };
+
     const activeTask = activeId
         ? tasks.find((t) => t.number.toString() === activeId)
         : null;
@@ -202,6 +221,8 @@ export function Tasks() {
                             task={selectedTask}
                             onClose={() => setSelectedTask(null)}
                             onMove={handleMoveTask}
+                            onAssign={handleAssignTask}
+                            onDelete={handleDeleteTask}
                         />
                     )}
 

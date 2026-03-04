@@ -124,9 +124,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                     <Button
                         type="submit"
                         variant="primary"
-                        disabled={
-                            !form.state.values.title.trim() || form.state.isSubmitting
-                        }
+                        disabled={form.state.isSubmitting}
                     >
                         {form.state.isSubmitting ? (
                             <>

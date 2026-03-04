@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { Task } from "../types/task";
-import { apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 export const taskKeys = {
     all: ["tasks"] as const,
@@ -28,6 +28,14 @@ async function updateTask(
 
 async function moveTask(number: number, columnLabel: string): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/move`, { columnLabel });
+}
+
+async function assignTask(number: number, assignee: string | null): Promise<Task> {
+    return apiPost<Task>(`/tasks/${number}/assign`, { assignee });
+}
+
+async function deleteTask(number: number): Promise<void> {
+    await apiDelete(`/tasks/${number}`);
 }
 
 export function useTasks() {
@@ -81,6 +89,29 @@ export function useMoveTask() {
     return useMutation({
         mutationFn: ({ number, columnLabel }: { number: number; columnLabel: string }) =>
             moveTask(number, columnLabel),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
+        },
+    });
+}
+
+export function useAssignTask() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number, assignee }: { number: number; assignee: string | null }) =>
+            assignTask(number, assignee),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
+        },
+    });
+}
+
+export function useDeleteTask() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number }: { number: number }) => deleteTask(number),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },

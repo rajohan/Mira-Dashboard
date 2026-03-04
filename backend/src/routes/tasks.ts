@@ -237,6 +237,69 @@ export default function tasksRoutes(
         res.json(toFrontendTask(row));
     }) as RequestHandler);
 
+    app.post("/api/tasks/:id/assign", express.json(), (async (req, res) => {
+        const id = Number(req.params.id);
+        const { assignee } = req.body as { assignee?: string | null };
+
+        if (!Number.isInteger(id)) {
+            res.status(400).json({ error: "Invalid request" });
+            return;
+        }
+
+        const existing = db
+            .prepare(
+                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                 FROM tasks WHERE id = ?`
+            )
+            .get(id) as unknown as DbTask | undefined;
+
+        if (!existing) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        const updatedAt = new Date().toISOString();
+        db.prepare(`UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?`).run(
+            assignee || null,
+            updatedAt,
+            id
+        );
+
+        recordEvent(id, "assigned", { assignee: assignee || null });
+        notifyMira("assigned", { id, title: existing.title });
+
+        const row = db
+            .prepare(
+                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                 FROM tasks WHERE id = ?`
+            )
+            .get(id) as unknown as DbTask;
+
+        res.json(toFrontendTask(row));
+    }) as RequestHandler);
+
+    app.delete("/api/tasks/:id", (req, res) => {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) {
+            res.status(400).json({ error: "Invalid id" });
+            return;
+        }
+
+        const existing = db
+            .prepare("SELECT id, title FROM tasks WHERE id = ?")
+            .get(id) as unknown as { id: number; title: string } | undefined;
+
+        if (!existing) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+        db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+        notifyMira("deleted", existing);
+        res.json({ ok: true });
+    });
+
     app.post("/api/tasks/:id/move", express.json(), (async (req, res) => {
         const id = Number(req.params.id);
         const { columnLabel } = req.body as { columnLabel?: string };
