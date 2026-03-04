@@ -20,6 +20,7 @@ import { Button } from "../components/ui/Button";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageHeader } from "../components/ui/PageHeader";
+import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { SearchInput } from "../components/ui/SearchInput";
 import { useCreateTask, useMoveTask, useTasks } from "../hooks";
@@ -131,102 +132,101 @@ export function Tasks() {
         ? tasks.find((t) => t.number.toString() === activeId)
         : null;
 
-    if (isLoading) {
-        return <LoadingState size="lg" />;
-    }
-
-    if (error) {
-        return (
-            <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-4 p-6">
-                <p className="text-red-400">{error.message}</p>
-                <RefreshButton onClick={() => void refetch()} label="Retry" />
-            </div>
-        );
-    }
-
     return (
-        <DndContext
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
+        <PageState
+            isLoading={isLoading}
+            loading={<LoadingState size="lg" />}
+            error={error?.message ?? null}
+            errorView={
+                <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-4 p-6">
+                    <p className="text-red-400">{error?.message}</p>
+                    <RefreshButton onClick={() => void refetch()} label="Retry" />
+                </div>
+            }
         >
-            <div className="flex h-full flex-col p-6">
-                <PageHeader
-                    title="Tasks"
-                    actions={
-                        <>
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => setIsNewTaskOpen(true)}
-                            >
-                                <Plus className="h-4 w-4" />
-                                New Task
-                            </Button>
-                            <RefreshButton
-                                onClick={() => void refetch()}
-                                isLoading={isLoading}
-                                label=""
-                                variant="secondary"
-                            />
-                        </>
-                    }
-                />
-
-                <div className="mb-4 flex items-center gap-4">
-                    <SearchInput
-                        value={search}
-                        onChange={setSearch}
-                        placeholder="Search tasks..."
+            <DndContext
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+            >
+                <div className="flex h-full flex-col p-6">
+                    <PageHeader
+                        title="Tasks"
+                        actions={
+                            <>
+                                <Button
+                                    variant="primary"
+                                    size="sm"
+                                    onClick={() => setIsNewTaskOpen(true)}
+                                >
+                                    <Plus className="h-4 w-4" />
+                                    New Task
+                                </Button>
+                                <RefreshButton
+                                    onClick={() => void refetch()}
+                                    isLoading={isLoading}
+                                    label=""
+                                    variant="secondary"
+                                />
+                            </>
+                        }
                     />
-                    <FilterButtonGroup
-                        options={ASSIGNMENT_FILTERS}
-                        value={filter}
-                        onChange={setFilter}
-                    />
-                </div>
 
-                <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
-                    {COLUMN_CONFIG.map((column) => (
-                        <TaskColumn
-                            key={column.id}
-                            id={column.id}
-                            tasks={tasksByColumn[column.id] || []}
-                            isOver={overId === column.id}
-                            onTaskClick={handleTaskClick}
+                    <div className="mb-4 flex items-center gap-4">
+                        <SearchInput
+                            value={search}
+                            onChange={setSearch}
+                            placeholder="Search tasks..."
                         />
-                    ))}
+                        <FilterButtonGroup
+                            options={ASSIGNMENT_FILTERS}
+                            value={filter}
+                            onChange={setFilter}
+                        />
+                    </div>
+
+                    <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
+                        {COLUMN_CONFIG.map((column) => (
+                            <TaskColumn
+                                key={column.id}
+                                id={column.id}
+                                tasks={tasksByColumn[column.id] || []}
+                                isOver={overId === column.id}
+                                onTaskClick={handleTaskClick}
+                            />
+                        ))}
+                    </div>
+
+                    {selectedTask && (
+                        <TaskDetailModal
+                            task={selectedTask}
+                            onClose={() => setSelectedTask(null)}
+                            onMove={handleMoveTask}
+                        />
+                    )}
+
+                    {isNewTaskOpen && (
+                        <NewTaskModal
+                            isOpen={isNewTaskOpen}
+                            onClose={() => setIsNewTaskOpen(false)}
+                            onSubmit={async (title, body, priority) => {
+                                const labels = [];
+                                if (priority) labels.push(`priority-${priority}`);
+                                await createTask.mutateAsync({
+                                    title,
+                                    body: body || "",
+                                    labels,
+                                });
+                                setIsNewTaskOpen(false);
+                            }}
+                        />
+                    )}
+
+                    <DragOverlay>
+                        {activeTask && <TaskOverlay task={activeTask} />}
+                    </DragOverlay>
                 </div>
-
-                {selectedTask && (
-                    <TaskDetailModal
-                        task={selectedTask}
-                        onClose={() => setSelectedTask(null)}
-                        onMove={handleMoveTask}
-                    />
-                )}
-
-                {isNewTaskOpen && (
-                    <NewTaskModal
-                        isOpen={isNewTaskOpen}
-                        onClose={() => setIsNewTaskOpen(false)}
-                        onSubmit={async (title, body, priority) => {
-                            const labels = [];
-                            if (priority) labels.push(`priority-${priority}`);
-                            await createTask.mutateAsync({
-                                title,
-                                body: body || "",
-                                labels,
-                            });
-                            setIsNewTaskOpen(false);
-                        }}
-                    />
-                )}
-
-                <DragOverlay>
-                    {activeTask && <TaskOverlay task={activeTask} />}
-                </DragOverlay>
-            </div>
-        </DndContext>
+            </DndContext>
+        </PageState>
     );
 }
