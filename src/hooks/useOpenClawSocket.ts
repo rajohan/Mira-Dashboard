@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { writeAgentsFromWebSocket } from "../collections/agents";
 import { writeLogFromWebSocket } from "../collections/logs";
-import { writeSessionsFromWebSocket } from "../collections/sessions";
+import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import { useAuthToken } from "../stores/authStore";
 import type { AgentInfo, Session } from "../types/session";
 import { getWebSocketUrl } from "../utils/websocket";
@@ -185,7 +185,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     case "state": {
                         setIsConnected(data.gatewayConnected ?? true);
                         if (data.sessions) {
-                            writeSessionsFromWebSocket(data.sessions);
+                            replaceSessionsFromWebSocket(data.sessions);
                         }
                         break;
                     }
@@ -199,7 +199,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     }
                     case "sessions": {
                         if (data.sessions) {
-                            writeSessionsFromWebSocket(data.sessions);
+                            replaceSessionsFromWebSocket(data.sessions);
                         }
                         break;
                     }
@@ -221,7 +221,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     case "res": {
                         const sessions = extractSessionsFromPayload(data.payload);
                         if (sessions.length > 0) {
-                            writeSessionsFromWebSocket(sessions);
+                            replaceSessionsFromWebSocket(sessions);
                         }
 
                         if (!data.id) {
@@ -321,6 +321,32 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             setError(null);
         }
     }, [token]);
+
+    useEffect(() => {
+        if (
+            !isConnected ||
+            !wsRef.current ||
+            wsRef.current.readyState !== WebSocket.OPEN
+        ) {
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            wsRef.current.send(
+                JSON.stringify({
+                    type: "req",
+                    method: "sessions.list",
+                    id: Date.now().toString(),
+                })
+            );
+        }, 10_000);
+
+        return () => clearInterval(interval);
+    }, [isConnected, connectionId]);
 
     useEffect(() => disconnect, []);
 

@@ -15,13 +15,17 @@ export const agentsCollection = createCollection(
 );
 
 export function writeAgentFromWebSocket(agent: AgentInfo) {
-    agentsCollection.utils.writeUpsert(agent);
+    agentsCollection.utils.writeUpsert(
+        agent as unknown as Partial<Record<string, unknown>>
+    );
 }
 
 export function writeAgentsFromWebSocket(agents: AgentInfo[]) {
     agentsCollection.utils.writeBatch(() => {
         for (const agent of agents) {
-            agentsCollection.utils.writeUpsert(agent);
+            agentsCollection.utils.writeUpsert(
+                agent as unknown as Partial<Record<string, unknown>>
+            );
         }
     });
 }
