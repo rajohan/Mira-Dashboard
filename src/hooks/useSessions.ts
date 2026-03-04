@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    useInfiniteQuery,
+    useMutation,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
 import type { Session } from "./useOpenClaw";
@@ -12,6 +17,7 @@ interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
     total?: number;
     hasMore?: boolean;
+    nextOffset?: number;
 }
 
 // Query keys
@@ -61,10 +67,14 @@ export function useSessions() {
     });
 }
 
-export function useSessionHistory(key: string | null, offset: number = 0, limit: number = 50) {
-    return useQuery({
-        queryKey: ["sessions", "history", key, offset, limit],
-        queryFn: () => fetchSessionHistory(key!, offset, limit),
+export function useSessionHistory(key: string | null, limit: number = 50) {
+    return useInfiniteQuery({
+        queryKey: ["sessions", "history", key],
+        queryFn: ({ pageParam = 0 }) =>
+            fetchSessionHistory(key!, pageParam, limit),
+        initialPageParam: 0,
+        getNextPageParam: (lastPage) =>
+            lastPage.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
         enabled: !!key,
         staleTime: 30_000, // 30 seconds
     });

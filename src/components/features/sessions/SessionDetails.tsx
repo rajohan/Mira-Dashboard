@@ -1,5 +1,4 @@
 import { MessageSquare, RefreshCw, X } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import type { Session } from "../../../hooks/useOpenClaw";
 import { useSessionHistory } from "../../../hooks/useSessions";
@@ -28,47 +27,18 @@ export function SessionDetails({
     onCompact,
     onReset,
 }: SessionDetailsProps) {
-    const [offset, setOffset] = useState(0);
-    const [allMessages, setAllMessages] = useState<
-        Array<{ role: string; content: string; timestamp?: string }>
-    >([]);
-    const limit = 50;
-    const { data, isLoading, error, refetch } = useSessionHistory(
-        session?.key || null,
-        offset,
-        limit
-    );
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+    } = useSessionHistory(session?.key || null);
 
-    // Accumulate messages when new data arrives
-    useEffect(() => {
-        if (data?.messages) {
-            if (offset === 0) {
-                setAllMessages(data.messages);
-            } else {
-                setAllMessages((prev) => {
-                    const existingIds = new Set(prev.map((m) => m.timestamp + m.role));
-                    const newMsgs = data.messages.filter(
-                        (m) => !existingIds.has(m.timestamp + m.role)
-                    );
-                    if (newMsgs.length === 0) {
-                        return prev;
-                    }
-                    // Append older messages at the end
-                    return [...prev, ...newMsgs];
-                });
-            }
-        }
-    }, [data, offset]);
-
-    // Reset when session changes
-    useEffect(() => {
-        if (session) {
-            setOffset(0);
-            setAllMessages([]);
-        }
-    }, [session?.key]);
-
-    const hasMore = data?.hasMore ?? false;
+    // Flatten all pages into single array
+    const allMessages = data?.pages.flatMap((page) => page.messages) ?? [];
 
     if (!session) return null;
 
@@ -146,6 +116,22 @@ export function SessionDetails({
                             </div>
                         ) : (
                             <div className="space-y-3">
+                                {hasNextPage && (
+                                    <div className="text-center">
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => fetchNextPage()}
+                                            disabled={isFetchingNextPage}
+                                        >
+                                            {isFetchingNextPage ? (
+                                                <RefreshCw className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                "Load more"
+                                            )}
+                                        </Button>
+                                    </div>
+                                )}
                                 {allMessages.map((msg, i) => (
                                     <MessageBubble
                                         key={`${msg.timestamp}-${i}`}
@@ -154,17 +140,6 @@ export function SessionDetails({
                                         timestamp={msg.timestamp}
                                     />
                                 ))}
-                                {hasMore && (
-                                    <div className="text-center">
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => setOffset((c) => c + limit)}
-                                        >
-                                            Load more
-                                        </Button>
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>

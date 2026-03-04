@@ -92,11 +92,13 @@ export default function sessionsRoutes(app: express.Application): void {
             });
 
             const hasMore = history.total > offset + messages.length;
+            const nextOffset = hasMore ? offset + messages.length : undefined;
 
             res.json({
                 messages,
                 total: history.total,
                 hasMore,
+                nextOffset,
             } as HistoryResponse);
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });
