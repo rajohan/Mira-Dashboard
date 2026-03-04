@@ -1,5 +1,5 @@
 import { RefreshCw, WifiOff } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import {
     DeleteConfirmDialog,
@@ -16,7 +16,6 @@ import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { sessionsCollection } from "../collections/sessions";
 import { type Session } from "../types/session";
-import { useAuthStore } from "../stores/authStore";
 import { getTypeSortOrder } from "../utils/sessionUtils";
 import { useLiveQuery } from "@tanstack/react-db";
 
@@ -29,22 +28,13 @@ const sortSessions = (sessions: Session[]): Session[] => {
 };
 
 export function Sessions() {
-    const { token } = useAuthStore();
-    const { isConnected, error, connect, request } = useOpenClawSocket({ token });
+    const { isConnected, error, request } = useOpenClawSocket();
     const sessionAction = useSessionAction();
     const deleteSessionMutation = useDeleteSession();
-    const hasConnected = useRef(false);
     const [isLoading, setIsLoading] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
-
-    useEffect(() => {
-        if (token && !hasConnected.current) {
-            hasConnected.current = true;
-            connect();
-        }
-    }, [token, connect]);
 
     // Sessions from collection using live query
     const { data: sessions = [] } = useLiveQuery((q) =>

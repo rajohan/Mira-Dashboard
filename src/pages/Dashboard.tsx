@@ -1,5 +1,4 @@
 import { Clock, Cpu, HardDrive, MemoryStick } from "lucide-react";
-import { useEffect, useRef } from "react";
 
 import {
     ActiveSessionsCard,
@@ -15,7 +14,6 @@ import { useMetrics } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { sessionsCollection } from "../collections/sessions";
 import { type Session } from "../types/session";
-import { useAuthStore } from "../stores/authStore";
 import { formatLoad, formatUptime } from "../utils/format";
 import { useLiveQuery } from "@tanstack/react-db";
 
@@ -28,21 +26,12 @@ function sortSessions(sessions: Session[]): Session[] {
 }
 
 export function Dashboard() {
-    const { token } = useAuthStore();
-    const { isConnected, connect, error } = useOpenClawSocket({ token });
+    const { isConnected, error } = useOpenClawSocket();
     const { data: metrics } = useMetrics();
-    const hasConnected = useRef(false);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
     );
-
-    useEffect(() => {
-        if (token && !hasConnected.current) {
-            hasConnected.current = true;
-            connect();
-        }
-    }, [token, connect]);
 
     const sortedSessions = sessions ? sortSessions(sessions) : [];
 

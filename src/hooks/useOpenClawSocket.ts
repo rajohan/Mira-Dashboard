@@ -1,9 +1,20 @@
-import { useRef, useState } from "react";
+import {
+    createContext,
+    createElement,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+} from "react";
 
-import { getWebSocketUrl } from "../utils/websocket";
+import { writeAgentsFromWebSocket } from "../collections/agents";
 import { writeLogFromWebSocket } from "../collections/logs";
 import { writeSessionsFromWebSocket } from "../collections/sessions";
-import { writeAgentsFromWebSocket } from "../collections/agents";
+import { useAuthToken } from "../stores/authStore";
+import { getWebSocketUrl } from "../utils/websocket";
 
 interface OpenClawMessage {
     type:
@@ -31,30 +42,40 @@ interface OpenClawMessage {
     count?: number;
 }
 
-interface UseOpenClawSocketOptions {
-    token: string | null;
-    onConnect?: () => void;
-    onDisconnect?: () => void;
-}
-
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
 }
 
-export function useOpenClawSocket({
-    token,
-    onConnect,
-    onDisconnect,
-}: UseOpenClawSocketOptions) {
+interface OpenClawSocketContextValue {
+    isConnected: boolean;
+    error: string | null;
+    connectionId: number;
+    connect: () => void;
+    disconnect: () => void;
+    request: <T = unknown>(
+        method: string,
+        params?: Record<string, unknown>
+    ) => Promise<T>;
+}
+
+const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
+
+export function OpenClawSocketProvider({
+    children,
+}: {
+    children: ReactNode;
+}) {
+    const token = useAuthToken();
     const wsRef = useRef<WebSocket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [connectionId, setConnectionId] = useState(0);
     const requestIdRef = useRef(0);
     const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
     const shouldReconnectRef = useRef(true);
 
-    const connect = () => {
+    const connect = useCallback(() => {
         if (
             wsRef.current?.readyState === WebSocket.OPEN ||
             wsRef.current?.readyState === WebSocket.CONNECTING
@@ -77,7 +98,7 @@ export function useOpenClawSocket({
             ws.addEventListener("open", () => {
                 setIsConnected(true);
                 setError(null);
-                onConnect?.();
+                setConnectionId((previous) => previous + 1);
 
                 const req = JSON.stringify({
                     type: "req",
@@ -123,7 +144,6 @@ export function useOpenClawSocket({
 
                     if (data.type === "disconnected") {
                         setIsConnected(false);
-                        onDisconnect?.();
                     }
 
                     if (data.type === "sessions" && data.sessions) {
@@ -182,7 +202,6 @@ export function useOpenClawSocket({
 
             ws.addEventListener("close", () => {
                 setIsConnected(false);
-                onDisconnect?.();
 
                 if (shouldReconnectRef.current) {
                     setTimeout(() => {
@@ -199,54 +218,110 @@ export function useOpenClawSocket({
         } catch (error_) {
             setError("Failed to create WebSocket");
         }
-    };
+    }, [token]);
 
-    const disconnect = () => {
+    const disconnect = useCallback(() => {
         shouldReconnectRef.current = false;
         wsRef.current?.close(1000, "Intentional disconnect");
         wsRef.current = null;
         setIsConnected(false);
-    };
 
-    const request = <T = unknown>(
-        method: string,
-        params?: Record<string, unknown>
-    ): Promise<T> => {
-        return new Promise((resolve, reject) => {
-            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-                reject(new Error("WebSocket not connected"));
-                return;
-            }
-
-            const id = String(++requestIdRef.current);
-            pendingRequestsRef.current.set(id, {
-                resolve: resolve as (value: unknown) => void,
-                reject,
-            });
-
-            wsRef.current.send(
-                JSON.stringify({
-                    type: "req",
-                    id,
-                    method,
-                    params,
-                })
-            );
-
-            setTimeout(() => {
-                if (pendingRequestsRef.current.has(id)) {
-                    pendingRequestsRef.current.delete(id);
-                    reject(new Error("Request timeout"));
-                }
-            }, 30_000);
+        pendingRequestsRef.current.forEach((pending) => {
+            pending.reject(new Error("WebSocket disconnected"));
         });
-    };
+        pendingRequestsRef.current.clear();
+    }, []);
 
-    return {
-        isConnected,
-        error,
-        connect,
-        disconnect,
-        request,
-    };
+    const request = useCallback(
+        <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
+            return new Promise((resolve, reject) => {
+                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                    reject(new Error("WebSocket not connected"));
+                    return;
+                }
+
+                const id = String(++requestIdRef.current);
+                pendingRequestsRef.current.set(id, {
+                    resolve: resolve as (value: unknown) => void,
+                    reject,
+                });
+
+                wsRef.current.send(
+                    JSON.stringify({
+                        type: "req",
+                        id,
+                        method,
+                        params,
+                    })
+                );
+
+                setTimeout(() => {
+                    if (pendingRequestsRef.current.has(id)) {
+                        pendingRequestsRef.current.delete(id);
+                        reject(new Error("Request timeout"));
+                    }
+                }, 30_000);
+            });
+        },
+        []
+    );
+
+    useEffect(() => {
+        if (token) {
+            connect();
+        } else {
+            disconnect();
+            setError(null);
+        }
+    }, [token, connect, disconnect]);
+
+    useEffect(() => {
+        return () => {
+            disconnect();
+        };
+    }, [disconnect]);
+
+    const value = useMemo(
+        () => ({
+            isConnected,
+            error,
+            connectionId,
+            connect,
+            disconnect,
+            request,
+        }),
+        [isConnected, error, connectionId, connect, disconnect, request]
+    );
+
+    return createElement(OpenClawSocketContext.Provider, { value }, children);
+}
+
+interface UseOpenClawSocketOptions {
+    token?: string | null;
+    onConnect?: () => void;
+    onDisconnect?: () => void;
+}
+
+export function useOpenClawSocket(options?: UseOpenClawSocketOptions) {
+    const context = useContext(OpenClawSocketContext);
+
+    if (!context) {
+        throw new Error("useOpenClawSocket must be used within OpenClawSocketProvider");
+    }
+
+    const { onConnect, onDisconnect } = options || {};
+
+    useEffect(() => {
+        if (context.isConnected) {
+            onConnect?.();
+        }
+    }, [context.isConnected, onConnect]);
+
+    useEffect(() => {
+        if (!context.isConnected) {
+            onDisconnect?.();
+        }
+    }, [context.isConnected, onDisconnect]);
+
+    return context;
 }

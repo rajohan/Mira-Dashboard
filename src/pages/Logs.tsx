@@ -13,7 +13,6 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
 import { logsCollection } from "../collections/logs";
-import { useAuthStore } from "../stores/authStore";
 import { parseLogLine } from "../utils/logUtils";
 import { LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -26,14 +25,12 @@ export function Logs() {
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
-    const hasConnected = useRef(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
     const isAutoScrollingRef = useRef(false);
-
-    const { token } = useAuthStore();
+    const subscribedConnectionIdRef = useRef<number | null>(null);
 
     // OpenClaw connection (shared WebSocket)
-    const { isConnected, request, connect } = useOpenClawSocket({ token });
+    const { isConnected, connectionId, request } = useOpenClawSocket();
 
     // Logs from collection using live query
     const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
@@ -56,19 +53,17 @@ export function Logs() {
         }
     }, [logFiles, selectedFile]);
 
+    // Subscribe to log stream once per connection
     useEffect(() => {
-        if (token && !hasConnected.current) {
-            hasConnected.current = true;
-            connect();
-        }
-    }, [token, connect]);
+        if (!isConnected) return;
+        if (subscribedConnectionIdRef.current === connectionId) return;
 
-    // Subscribe to log stream on connect
-    useEffect(() => {
-        if (isConnected) {
-            request("subscribe", { channel: "logs" });
-        }
-    }, [isConnected, request]);
+        subscribedConnectionIdRef.current = connectionId;
+        request("subscribe", { channel: "logs" }).catch((error_) => {
+            console.error("Failed to subscribe to logs:", error_);
+            subscribedConnectionIdRef.current = null;
+        });
+    }, [isConnected, connectionId, request]);
 
     // Load log content when file/lineCount changes
     const loadLogContent = async () => {
