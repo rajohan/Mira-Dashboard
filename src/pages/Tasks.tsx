@@ -18,6 +18,7 @@ import {
 } from "../components/features/tasks";
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors";
 import { Button } from "../components/ui/Button";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -62,6 +63,8 @@ export function Tasks() {
     const [overId, setOverId] = useState<ColumnId | null>(null);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
+    const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null);
+    const [pendingDeleteUpdateId, setPendingDeleteUpdateId] = useState<number | null>(null);
 
     const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
 
@@ -183,9 +186,13 @@ export function Tasks() {
 
     const handleDeleteTask = async () => {
         if (!selectedTask) return;
-        const ok = window.confirm(`Delete task #${selectedTask.number}?`);
-        if (!ok) return;
-        await deleteTask.mutateAsync({ number: selectedTask.number });
+        setPendingDeleteTaskId(selectedTask.number);
+    };
+
+    const confirmDeleteTask = async () => {
+        if (!pendingDeleteTaskId) return;
+        await deleteTask.mutateAsync({ number: pendingDeleteTaskId });
+        setPendingDeleteTaskId(null);
         setSelectedTask(null);
     };
 
@@ -206,43 +213,41 @@ export function Tasks() {
         return updated;
     };
 
-    const handleAddTaskUpdate = async (author: TaskAssigneeId, messageMd: string) => {
+    const handleAddTaskUpdate = async (messageMd: string) => {
         if (!selectedTask) return;
 
         await createTaskUpdate.mutateAsync({
             taskId: selectedTask.number,
-            author,
+            author: TASK_ASSIGNEES.raymond.id,
             messageMd,
         });
     };
 
 
 
-    const handleEditTaskUpdate = async (
-        updateId: number,
-        author: TaskAssigneeId,
-        messageMd: string
-    ) => {
+    const handleEditTaskUpdate = async (updateId: number, messageMd: string) => {
         if (!selectedTask) return;
 
         await updateTaskUpdate.mutateAsync({
             taskId: selectedTask.number,
             updateId,
-            author,
+            author: TASK_ASSIGNEES.raymond.id,
             messageMd,
         });
     };
 
     const handleDeleteTaskUpdate = async (updateId: number) => {
-        if (!selectedTask) return;
+        setPendingDeleteUpdateId(updateId);
+    };
 
-        const ok = window.confirm("Delete this progress update?");
-        if (!ok) return;
+    const confirmDeleteTaskUpdate = async () => {
+        if (!selectedTask || !pendingDeleteUpdateId) return;
 
         await deleteTaskUpdate.mutateAsync({
             taskId: selectedTask.number,
-            updateId,
+            updateId: pendingDeleteUpdateId,
         });
+        setPendingDeleteUpdateId(null);
     };
 
     const activeTask = activeId
@@ -350,6 +355,30 @@ export function Tasks() {
                     <DragOverlay>
                         {activeTask && <TaskOverlay task={activeTask} />}
                     </DragOverlay>
+
+                    <ConfirmModal
+                        isOpen={pendingDeleteTaskId !== null}
+                        title="Delete task"
+                        message={`Are you sure you want to delete task #${pendingDeleteTaskId ?? ""}?`}
+                        confirmLabel="Delete"
+                        danger
+                        onCancel={() => setPendingDeleteTaskId(null)}
+                        onConfirm={() => {
+                            void confirmDeleteTask();
+                        }}
+                    />
+
+                    <ConfirmModal
+                        isOpen={pendingDeleteUpdateId !== null}
+                        title="Delete progress update"
+                        message="Are you sure you want to delete this progress update?"
+                        confirmLabel="Delete"
+                        danger
+                        onCancel={() => setPendingDeleteUpdateId(null)}
+                        onConfirm={() => {
+                            void confirmDeleteTaskUpdate();
+                        }}
+                    />
                 </div>
             </DndContext>
         </PageState>

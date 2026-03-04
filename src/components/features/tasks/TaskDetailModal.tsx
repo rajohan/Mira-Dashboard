@@ -24,12 +24,8 @@ interface TaskDetailModalProps {
         labels?: string[];
     }) => Promise<Task>;
     updates: TaskUpdate[];
-    onAddUpdate: (author: TaskAssigneeId, messageMd: string) => Promise<void>;
-    onEditUpdate: (
-        updateId: number,
-        author: TaskAssigneeId,
-        messageMd: string
-    ) => Promise<void>;
+    onAddUpdate: (messageMd: string) => Promise<void>;
+    onEditUpdate: (updateId: number, messageMd: string) => Promise<void>;
     onDeleteUpdate: (updateId: number) => Promise<void>;
 }
 
@@ -55,15 +51,9 @@ export function TaskDetailModal({
         getPriority(task?.labels || [])
     );
 
-    const [progressAuthor, setProgressAuthor] = useState<TaskAssigneeId>(
-        TASK_ASSIGNEES.mira.id
-    );
     const [progressMessage, setProgressMessage] = useState("");
 
     const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
-    const [editingUpdateAuthor, setEditingUpdateAuthor] = useState<TaskAssigneeId>(
-        TASK_ASSIGNEES.mira.id
-    );
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
 
     if (!task) {
@@ -79,11 +69,6 @@ export function TaskDetailModal({
         setEditBody(task.body || "");
         setEditPriority(getPriority(task.labels || []));
 
-        const preferredAuthor =
-            assigneeLogin === TASK_ASSIGNEES.raymond.id
-                ? TASK_ASSIGNEES.raymond.id
-                : TASK_ASSIGNEES.mira.id;
-        setProgressAuthor(preferredAuthor);
     }, [task, assigneeLogin]);
 
     const assigneeProfileUrl = useMemo(() => {
@@ -139,13 +124,12 @@ export function TaskDetailModal({
             return;
         }
 
-        await onAddUpdate(progressAuthor, progressMessage.trim());
+        await onAddUpdate(progressMessage.trim());
         setProgressMessage("");
     };
 
     const startEditUpdate = (update: TaskUpdate) => {
         setEditingUpdateId(update.id);
-        setEditingUpdateAuthor(update.author);
         setEditingUpdateMessage(update.messageMd);
     };
 
@@ -154,11 +138,7 @@ export function TaskDetailModal({
             return;
         }
 
-        await onEditUpdate(
-            editingUpdateId,
-            editingUpdateAuthor,
-            editingUpdateMessage.trim()
-        );
+        await onEditUpdate(editingUpdateId, editingUpdateMessage.trim());
 
         setEditingUpdateId(null);
         setEditingUpdateMessage("");
@@ -315,37 +295,6 @@ export function TaskDetailModal({
                                                     rows={3}
                                                 />
                                                 <div className="flex gap-2">
-                                                    <Button
-                                                        size="sm"
-                                                        variant={
-                                                            editingUpdateAuthor === TASK_ASSIGNEES.mira.id
-                                                                ? "primary"
-                                                                : "secondary"
-                                                        }
-                                                        onClick={() =>
-                                                            setEditingUpdateAuthor(
-                                                                TASK_ASSIGNEES.mira.id
-                                                            )
-                                                        }
-                                                    >
-                                                        Mira
-                                                    </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        variant={
-                                                            editingUpdateAuthor ===
-                                                            TASK_ASSIGNEES.raymond.id
-                                                                ? "primary"
-                                                                : "secondary"
-                                                        }
-                                                        onClick={() =>
-                                                            setEditingUpdateAuthor(
-                                                                TASK_ASSIGNEES.raymond.id
-                                                            )
-                                                        }
-                                                    >
-                                                        Raymond
-                                                    </Button>
                                                     <Button size="sm" variant="primary" onClick={saveUpdateEdit}>
                                                         Save
                                                     </Button>
@@ -379,30 +328,6 @@ export function TaskDetailModal({
                             rows={3}
                             placeholder="Markdown supported"
                         />
-                        <div className="flex gap-2">
-                            <Button
-                                size="sm"
-                                variant={
-                                    progressAuthor === TASK_ASSIGNEES.mira.id
-                                        ? "primary"
-                                        : "secondary"
-                                }
-                                onClick={() => setProgressAuthor(TASK_ASSIGNEES.mira.id)}
-                            >
-                                Post as Mira
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant={
-                                    progressAuthor === TASK_ASSIGNEES.raymond.id
-                                        ? "primary"
-                                        : "secondary"
-                                }
-                                onClick={() => setProgressAuthor(TASK_ASSIGNEES.raymond.id)}
-                            >
-                                Post as Raymond
-                            </Button>
-                        </div>
                         <Button variant="secondary" onClick={handleAddUpdate}>
                             Add Update
                         </Button>
