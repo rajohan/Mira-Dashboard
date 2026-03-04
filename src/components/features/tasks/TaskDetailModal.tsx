@@ -13,6 +13,11 @@ interface TaskDetailModalProps {
     onMove: (column: ColumnId) => Promise<void>;
     onAssign: (assignee: string | null) => Promise<void>;
     onDelete: () => Promise<void>;
+    onUpdate: (updates: {
+        title?: string;
+        body?: string;
+        labels?: string[];
+    }) => Promise<void>;
 }
 
 export function TaskDetailModal({
@@ -21,16 +26,20 @@ export function TaskDetailModal({
     onMove,
     onAssign,
     onDelete,
+    onUpdate,
 }: TaskDetailModalProps) {
     const [isMoving, setIsMoving] = useState(false);
     const [isAssigning, setIsAssigning] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editTitle, setEditTitle] = useState(task?.title || "");
+    const [editBody, setEditBody] = useState(task?.body || "");
 
     if (!task) return null;
 
     const priority = getPriority(task.labels);
     const assignee = task.assignees[0];
-    const currentColumn = getColumnId(task);
+    const currentColumn = getColumnId(task) || "todo";
 
     const handleMove = async (column: ColumnId) => {
         setIsMoving(true);
@@ -48,6 +57,14 @@ export function TaskDetailModal({
         setIsDeleting(true);
         await onDelete();
         setIsDeleting(false);
+    };
+
+    const handleSaveEdit = async () => {
+        await onUpdate({
+            title: editTitle.trim(),
+            body: editBody,
+        });
+        setIsEditing(false);
     };
 
     return (
@@ -95,9 +112,25 @@ export function TaskDetailModal({
                                     </span>
                                 ))}
                         </div>
-                        <h2 className="text-lg font-semibold text-slate-100">
-                            #{task.number}: {task.title}
-                        </h2>
+                        {isEditing ? (
+                            <div className="space-y-2">
+                                <input
+                                    value={editTitle}
+                                    onChange={(event) => setEditTitle(event.target.value)}
+                                    className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-100"
+                                />
+                                <textarea
+                                    value={editBody}
+                                    onChange={(event) => setEditBody(event.target.value)}
+                                    rows={4}
+                                    className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-300"
+                                />
+                            </div>
+                        ) : (
+                            <h2 className="text-lg font-semibold text-slate-100">
+                                #{task.number}: {task.title}
+                            </h2>
+                        )}
                     </div>
                     <Button
                         variant="ghost"
@@ -115,7 +148,7 @@ export function TaskDetailModal({
                     <span>Updated {formatDuration(new Date(task.updatedAt).getTime())}</span>
                 </div>
 
-                {task.body && (
+                {task.body && !isEditing && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
                         <h3 className="mb-2 text-sm font-semibold text-slate-300">
                             Description
@@ -167,6 +200,27 @@ export function TaskDetailModal({
                     </div>
 
                     <div className="flex flex-wrap gap-2 border-t border-slate-700 pt-3">
+                        {isEditing ? (
+                            <>
+                                <Button variant="primary" onClick={handleSaveEdit}>
+                                    Save Changes
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setEditTitle(task.title);
+                                        setEditBody(task.body || "");
+                                        setIsEditing(false);
+                                    }}
+                                >
+                                    Cancel Edit
+                                </Button>
+                            </>
+                        ) : (
+                            <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                                Edit
+                            </Button>
+                        )}
                         <Button
                             variant="secondary"
                             onClick={() => handleAssign("mira-2026")}

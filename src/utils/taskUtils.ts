@@ -68,19 +68,19 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
     return "low";
 }
 
-export function getColumnId(taskOrId: Task | string): ColumnId {
-    // If it's a string, it might be a droppable id (column id)
-    if (
-        typeof taskOrId === "string" &&
-        ["todo", "in-progress", "blocked", "done"].includes(taskOrId)
-    ) {
-        return taskOrId as ColumnId;
+export function getColumnId(taskOrId: Task | string): ColumnId | null {
+    if (typeof taskOrId === "string") {
+        if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {
+            return taskOrId as ColumnId;
+        }
+        return null;
     }
-    // Otherwise it's a Task object
+
     const task = taskOrId as Task;
     if (task.state === "CLOSED") return "done";
-    if (task.labels.some((l: { name: string }) => l.name === "blocked")) return "blocked";
-    if (task.labels.some((l: { name: string }) => l.name === "in-progress"))
+    if (task.labels?.some((l: { name: string }) => l.name === "blocked")) return "blocked";
+    if (task.labels?.some((l: { name: string }) => l.name === "in-progress")) {
         return "in-progress";
+    }
     return "todo";
 }

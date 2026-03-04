@@ -1,7 +1,6 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
-import gateway from "../gateway.js";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 
@@ -80,11 +79,10 @@ function toFrontendTask(task: DbTask) {
 async function notifyMira(eventType: string, task: { id: number; title: string }) {
     const message = `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task that may need pickup.`;
 
-    try {
-        await gateway.sendSessionMessage("agent:main:main", message);
-    } catch (error) {
-        console.error("[Tasks] Failed to notify Mira:", error);
-    }
+    // NOTE: OpenClaw gateway WS does not currently expose a stable session-send RPC
+    // method in this backend path. Keep event logged and use app-side polling until
+    // we wire a dedicated notifier endpoint.
+    console.info("[Tasks] Notify pending integration:", message);
 }
 
 function recordEvent(taskId: number, eventType: string, payload: unknown) {

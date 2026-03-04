@@ -29,6 +29,7 @@ import {
     useDeleteTask,
     useMoveTask,
     useTasks,
+    useUpdateTask,
 } from "../hooks";
 import type { ColumnId, Task } from "../types/task";
 
@@ -44,6 +45,7 @@ export function Tasks() {
     const createTask = useCreateTask();
     const assignTask = useAssignTask();
     const deleteTask = useDeleteTask();
+    const updateTask = useUpdateTask();
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | "mira-2026" | "rajohan">("all");
@@ -147,6 +149,15 @@ export function Tasks() {
         setSelectedTask(null);
     };
 
+    const handleUpdateTask = async (updates: {
+        title?: string;
+        body?: string;
+        labels?: string[];
+    }) => {
+        if (!selectedTask) return;
+        await updateTask.mutateAsync({ number: selectedTask.number, updates });
+    };
+
     const activeTask = activeId
         ? tasks.find((t) => t.number.toString() === activeId)
         : null;
@@ -223,6 +234,7 @@ export function Tasks() {
                             onMove={handleMoveTask}
                             onAssign={handleAssignTask}
                             onDelete={handleDeleteTask}
+                            onUpdate={handleUpdateTask}
                         />
                     )}
 
