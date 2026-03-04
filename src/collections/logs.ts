@@ -10,6 +10,7 @@ export const logsCollection = createCollection(
         queryKey: ["logs"],
         queryFn: async () => [],
         queryClient,
+        staleTime: Number.POSITIVE_INFINITY,
         getKey: (item: LogEntry) => item.ts || item.raw,
     })
 );

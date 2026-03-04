@@ -9,6 +9,7 @@ export const agentsCollection = createCollection(
         queryKey: ["agents"],
         queryFn: async () => [],
         queryClient,
+        staleTime: Number.POSITIVE_INFINITY,
         getKey: (item: AgentInfo) => item.id,
     })
 );

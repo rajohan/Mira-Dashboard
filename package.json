@@ -19,7 +19,6 @@
         "@headlessui/react": "^2.2.9",
         "@microlink/react-json-view": "^1.27.1",
         "@tailwindcss/typography": "^0.5.19",
-        "@tanstack/db": "^0.5.30",
         "@tanstack/query-db-collection": "^1.0.27",
         "@tanstack/react-db": "^0.1.74",
         "@tanstack/react-devtools": "^0.9.6",
@@ -38,12 +37,14 @@
         "lucide-react": "^0.575.0",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
+        "react-error-boundary": "^6.1.1",
         "react-markdown": "^10.1.0",
         "react-syntax-highlighter": "^16.1.1",
         "recharts": "^3.7.0",
         "remark-frontmatter": "^5.0.0",
         "remark-gfm": "^4.0.1",
-        "tailwind-merge": "^3.5.0"
+        "tailwind-merge": "^3.5.0",
+        "zod": "^4.3.6"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.1",

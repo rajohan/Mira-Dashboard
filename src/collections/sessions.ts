@@ -9,6 +9,7 @@ export const sessionsCollection = createCollection(
         queryKey: ["sessions"],
         queryFn: async () => [],
         queryClient,
+        staleTime: Number.POSITIVE_INFINITY,
         getKey: (item: Session) => item.key || item.id,
     })
 );

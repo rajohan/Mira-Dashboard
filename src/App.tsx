@@ -5,7 +5,9 @@ import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { useEffect } from "react";
+import { ErrorBoundary } from "react-error-boundary";
 
+import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
@@ -23,27 +25,29 @@ function App() {
     }, []);
 
     return (
-        <QueryClientProvider client={queryClient}>
-            <OpenClawSocketProvider>
-                <RouterProvider router={router} />
-                <TanStackDevtools
-                    plugins={[
-                        {
-                            name: "TanStack Query",
-                            render: <ReactQueryDevtoolsPanel />,
-                        },
-                        {
-                            name: "TanStack Router",
-                            render: <TanStackRouterDevtoolsPanel />,
-                        },
-                        {
-                            name: "TanStack Form",
-                            render: <FormDevtoolsPanel />,
-                        },
-                    ]}
-                />
-            </OpenClawSocketProvider>
-        </QueryClientProvider>
+        <ErrorBoundary FallbackComponent={AppErrorFallback}>
+            <QueryClientProvider client={queryClient}>
+                <OpenClawSocketProvider>
+                    <RouterProvider router={router} />
+                    <TanStackDevtools
+                        plugins={[
+                            {
+                                name: "TanStack Query",
+                                render: <ReactQueryDevtoolsPanel />,
+                            },
+                            {
+                                name: "TanStack Router",
+                                render: <TanStackRouterDevtoolsPanel />,
+                            },
+                            {
+                                name: "TanStack Form",
+                                render: <FormDevtoolsPanel />,
+                            },
+                        ]}
+                    />
+                </OpenClawSocketProvider>
+            </QueryClientProvider>
+        </ErrorBoundary>
     );
 }
 

@@ -1,12 +1,13 @@
 import {
     createContext,
     createElement,
+    type ReactNode,
     useContext,
     useEffect,
     useRef,
     useState,
-    type ReactNode,
 } from "react";
+import { z } from "zod";
 
 import { writeAgentsFromWebSocket } from "../collections/agents";
 import { writeLogFromWebSocket } from "../collections/logs";
@@ -63,6 +64,14 @@ type OpenClawMessage =
     | WsLogMessage
     | WsResponseMessage;
 
+const baseMessageSchema = z.object({
+    type: z.string(),
+});
+
+const responsePayloadWithSessionsSchema = z.object({
+    sessions: z.array(z.unknown()),
+});
+
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
@@ -87,8 +96,9 @@ function parseOpenClawMessage(rawData: unknown): OpenClawMessage | null {
         return null;
     }
 
-    const parsed = JSON.parse(rawData) as { type?: string } & Record<string, unknown>;
-    if (!parsed.type) {
+    const parsed = JSON.parse(rawData) as unknown;
+    const validated = baseMessageSchema.safeParse(parsed);
+    if (!validated.success) {
         return null;
     }
 
@@ -96,12 +106,30 @@ function parseOpenClawMessage(rawData: unknown): OpenClawMessage | null {
 }
 
 function extractSessionsFromPayload(payload: unknown): Session[] {
-    if (!payload || typeof payload !== "object") {
-        return [];
+    if (Array.isArray(payload)) {
+        return payload as Session[];
     }
 
-    const maybe = payload as { sessions?: unknown };
-    return Array.isArray(maybe.sessions) ? (maybe.sessions as Session[]) : [];
+    const parsed = responsePayloadWithSessionsSchema.safeParse(payload);
+    if (parsed.success) {
+        return parsed.data.sessions as Session[];
+    }
+
+    if (payload && typeof payload === "object") {
+        const maybe = payload as { result?: unknown; data?: unknown };
+
+        const fromResult = responsePayloadWithSessionsSchema.safeParse(maybe.result);
+        if (fromResult.success) {
+            return fromResult.data.sessions as Session[];
+        }
+
+        const fromData = responsePayloadWithSessionsSchema.safeParse(maybe.data);
+        if (fromData.success) {
+            return fromData.data.sessions as Session[];
+        }
+    }
+
+    return [];
 }
 
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
