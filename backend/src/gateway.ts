@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import WebSocket from "ws";
 
 import {
@@ -427,9 +429,11 @@ function sendRequestAsync(
 }
 
 async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
-    await sendRequestAsync("sessions_send", {
+    await sendRequestAsync("chat.send", {
         sessionKey,
         message,
+        idempotencyKey: `tasks-notify-${crypto.randomUUID()}`,
+        timeoutMs: 10_000,
     });
 }
 
