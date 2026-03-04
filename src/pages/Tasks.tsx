@@ -5,7 +5,7 @@ import {
     DragOverlay,
     type DragStartEvent,
 } from "@dnd-kit/core";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -20,6 +20,8 @@ import { Button } from "../components/ui/Button";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageHeader } from "../components/ui/PageHeader";
+import { RefreshButton } from "../components/ui/RefreshButton";
+import { SearchInput } from "../components/ui/SearchInput";
 import { useCreateTask, useMoveTask, useTasks } from "../hooks";
 import type { ColumnId, Task } from "../types/task";
 
@@ -137,10 +139,7 @@ export function Tasks() {
         return (
             <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-4 p-6">
                 <p className="text-red-400">{error.message}</p>
-                <Button variant="secondary" onClick={() => refetch()}>
-                    <RefreshCw className="h-4 w-4" />
-                    Retry
-                </Button>
+                <RefreshButton onClick={() => void refetch()} label="Retry" />
             </div>
         );
     }
@@ -164,32 +163,22 @@ export function Tasks() {
                                 <Plus className="h-4 w-4" />
                                 New Task
                             </Button>
-                            <Button
+                            <RefreshButton
+                                onClick={() => void refetch()}
+                                isLoading={isLoading}
+                                label=""
                                 variant="secondary"
-                                size="sm"
-                                onClick={() => refetch()}
-                            >
-                                <RefreshCw
-                                    className={
-                                        "h-4 w-4 " + (isLoading ? "animate-spin" : "")
-                                    }
-                                />
-                            </Button>
+                            />
                         </>
                     }
                 />
 
                 <div className="mb-4 flex items-center gap-4">
-                    <div className="relative max-w-md flex-1">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Search tasks..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="w-full rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-sm text-slate-100 focus:border-accent-500 focus:outline-none"
-                        />
-                    </div>
+                    <SearchInput
+                        value={search}
+                        onChange={setSearch}
+                        placeholder="Search tasks..."
+                    />
                     <FilterButtonGroup
                         options={ASSIGNMENT_FILTERS}
                         value={filter}

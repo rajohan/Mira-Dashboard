@@ -1,14 +1,8 @@
+import type { SocketEnvelope } from "../../types/socket";
+
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
-}
-
-interface SocketMessage {
-    type?: string;
-    id?: string;
-    ok?: boolean;
-    payload?: unknown;
-    error?: unknown;
 }
 
 interface SocketClientOptions {
@@ -16,7 +10,7 @@ interface SocketClientOptions {
     onOpen?: () => void;
     onClose?: () => void;
     onError?: () => void;
-    onMessage?: (data: SocketMessage) => void;
+    onMessage?: (data: SocketEnvelope) => void;
 }
 
 export interface SocketClient {
@@ -52,7 +46,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
 
         ws.addEventListener("message", (event) => {
             try {
-                const data = JSON.parse(event.data) as SocketMessage;
+                const data = JSON.parse(event.data) as SocketEnvelope;
 
                 if (data.type === "res" && data.id) {
                     const pending = pendingRequests.get(data.id);

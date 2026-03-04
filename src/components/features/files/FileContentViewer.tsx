@@ -1,11 +1,5 @@
-import ReactJsonView from "@microlink/react-json-view";
-import JSON5 from "json5";
 import { AlertTriangle, File } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import SyntaxHighlighter from "react-syntax-highlighter";
-import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
-import remarkFrontmatter from "remark-frontmatter";
-import remarkGfm from "remark-gfm";
+import { lazy, Suspense } from "react";
 
 import { type FileContent } from "../../../types/file";
 import {
@@ -16,6 +10,18 @@ import {
     isMarkdownFile,
 } from "../../../utils/fileUtils";
 import { Textarea } from "../../ui/Textarea";
+
+const MarkdownPreview = lazy(() =>
+    import("./viewers/MarkdownPreview").then((module) => ({
+        default: module.MarkdownPreview,
+    }))
+);
+const JsonPreview = lazy(() =>
+    import("./viewers/JsonPreview").then((module) => ({ default: module.JsonPreview }))
+);
+const CodePreview = lazy(() =>
+    import("./viewers/CodePreview").then((module) => ({ default: module.CodePreview }))
+);
 
 interface FileContentViewerProps {
     fileContent: FileContent;
@@ -72,37 +78,21 @@ export function FileContentViewer({
                     />
                 </div>
             ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
-                <div className="prose prose-invert max-w-none p-6 prose-headings:mb-4 prose-headings:mt-6 prose-p:my-4 prose-blockquote:my-4 prose-pre:my-4 prose-ol:my-4 prose-ul:my-4 prose-li:my-1 prose-table:my-4 prose-hr:my-6">
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkFrontmatter]}>
-                        {editedContent}
-                    </ReactMarkdown>
-                </div>
+                <Suspense
+                    fallback={
+                        <div className="p-4 text-slate-400">Loading preview...</div>
+                    }
+                >
+                    <MarkdownPreview content={editedContent} />
+                </Suspense>
             ) : isJsonFile(fileContent.path) && jsonPreview ? (
-                <div className="overflow-auto p-4">
-                    <ReactJsonView
-                        src={(() => {
-                            try {
-                                return JSON5.parse(editedContent);
-                            } catch {
-                                try {
-                                    return JSON.parse(editedContent);
-                                } catch {
-                                    return {
-                                        error: "Failed to parse JSON",
-                                        raw: editedContent,
-                                    };
-                                }
-                            }
-                        })()}
-                        theme="monokai"
-                        collapsed={false}
-                        enableClipboard={false}
-                        displayDataTypes={false}
-                        displayObjectSize={false}
-                        indentWidth={4}
-                        style={{ fontSize: "13px" }}
-                    />
-                </div>
+                <Suspense
+                    fallback={
+                        <div className="p-4 text-slate-400">Loading preview...</div>
+                    }
+                >
+                    <JsonPreview content={editedContent} />
+                </Suspense>
             ) : isCodeFile(fileContent.path) ? (
                 codeEditMode ? (
                     <Textarea
@@ -113,27 +103,16 @@ export function FileContentViewer({
                         spellCheck={false}
                     />
                 ) : (
-                    <div className="h-full overflow-auto">
-                        <SyntaxHighlighter
+                    <Suspense
+                        fallback={
+                            <div className="p-4 text-slate-400">Loading preview...</div>
+                        }
+                    >
+                        <CodePreview
                             language={getLanguage(fileContent.path)}
-                            style={monokai}
-                            customStyle={{
-                                margin: 0,
-                                padding: "1rem",
-                                background: "transparent",
-                                fontSize: "13px",
-                                height: "100%",
-                            }}
-                            showLineNumbers={true}
-                            lineNumberStyle={{
-                                minWidth: "2.5em",
-                                paddingRight: "1em",
-                                color: "#6b7280",
-                            }}
-                        >
-                            {editedContent}
-                        </SyntaxHighlighter>
-                    </div>
+                            content={editedContent}
+                        />
+                    </Suspense>
                 )
             ) : isEditable ? (
                 <Textarea

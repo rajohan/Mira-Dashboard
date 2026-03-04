@@ -15,14 +15,13 @@ import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
+import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 export function Sessions() {
     const { isConnected, error, request } = useOpenClawSocket();
-    const sessionAction = useSessionAction();
-    const deleteSessionMutation = useDeleteSession();
+    const sessionActions = useSessionActions();
     const [isLoading, setIsLoading] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
@@ -45,7 +44,7 @@ export function Sessions() {
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key) return;
         try {
-            await deleteSessionMutation.mutateAsync(deleteTarget.key);
+            await sessionActions.remove(deleteTarget.key);
             setDeleteTarget(null);
         } catch (error_) {
             console.error("Failed to delete session:", error_);
@@ -53,15 +52,15 @@ export function Sessions() {
     };
 
     const handleStop = (sessionKey: string) => {
-        sessionAction.mutate({ key: sessionKey, action: "stop" });
+        sessionActions.stop(sessionKey);
     };
 
     const handleCompact = (sessionKey: string) => {
-        sessionAction.mutate({ key: sessionKey, action: "compact" });
+        sessionActions.compact(sessionKey);
     };
 
     const handleReset = (sessionKey: string) => {
-        sessionAction.mutate({ key: sessionKey, action: "reset" });
+        sessionActions.reset(sessionKey);
     };
 
     const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
@@ -121,7 +120,7 @@ export function Sessions() {
                 session={deleteTarget}
                 onConfirm={handleDeleteConfirm}
                 onCancel={() => setDeleteTarget(null)}
-                isLoading={deleteSessionMutation.isPending}
+                isLoading={sessionActions.isDeleting}
             />
 
             <SessionDetails

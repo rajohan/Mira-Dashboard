@@ -1,33 +1,16 @@
-import { z } from "zod";
-
 import { writeAgentsFromWebSocket } from "../../collections/agents";
 import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
 import type { AgentInfo, Session } from "../../types/session";
-
-const baseMessageSchema = z.object({
-    type: z.string(),
-});
-
-const responsePayloadWithSessionsSchema = z.object({
-    sessions: z.array(z.unknown()),
-});
-
-interface SocketMessage {
-    type?: string;
-    event?: string;
-    payload?: unknown;
-    sessions?: Session[];
-    line?: string;
-    gatewayConnected?: boolean;
-}
+import type { SocketEnvelope } from "../../types/socket";
+import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
 
 function extractSessionsFromPayload(payload: unknown): Session[] {
     if (Array.isArray(payload)) {
         return payload as Session[];
     }
 
-    const parsed = responsePayloadWithSessionsSchema.safeParse(payload);
+    const parsed = sessionsPayloadSchema.safeParse(payload);
     if (parsed.success) {
         return parsed.data.sessions as Session[];
     }
@@ -35,12 +18,12 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
     if (payload && typeof payload === "object") {
         const maybe = payload as { result?: unknown; data?: unknown };
 
-        const fromResult = responsePayloadWithSessionsSchema.safeParse(maybe.result);
+        const fromResult = sessionsPayloadSchema.safeParse(maybe.result);
         if (fromResult.success) {
             return fromResult.data.sessions as Session[];
         }
 
-        const fromData = responsePayloadWithSessionsSchema.safeParse(maybe.data);
+        const fromData = sessionsPayloadSchema.safeParse(maybe.data);
         if (fromData.success) {
             return fromData.data.sessions as Session[];
         }
@@ -49,7 +32,7 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
     return [];
 }
 
-function readGatewayConnectionState(data: SocketMessage): boolean | null {
+function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
     if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
     }
@@ -62,12 +45,12 @@ function readGatewayConnectionState(data: SocketMessage): boolean | null {
 }
 
 export function handleSocketMessage(raw: unknown): boolean | null {
-    const validated = baseMessageSchema.safeParse(raw);
+    const validated = socketEnvelopeSchema.safeParse(raw);
     if (!validated.success) {
         return null;
     }
 
-    const data = raw as SocketMessage;
+    const data = raw as SocketEnvelope;
 
     if (data.type === "state" && data.sessions) {
         replaceSessionsFromWebSocket(data.sessions);
@@ -77,13 +60,12 @@ export function handleSocketMessage(raw: unknown): boolean | null {
         replaceSessionsFromWebSocket(data.sessions);
     }
 
-    if (data.type === "event") {
-        if (
-            (data.event === "agents" || data.event === "agents.list") &&
-            Array.isArray(data.payload)
-        ) {
-            writeAgentsFromWebSocket(data.payload as AgentInfo[]);
-        }
+    if (
+        data.type === "event" &&
+        (data.event === "agents" || data.event === "agents.list") &&
+        Array.isArray(data.payload)
+    ) {
+        writeAgentsFromWebSocket(data.payload as AgentInfo[]);
     }
 
     if (data.type === "log" && data.line) {
