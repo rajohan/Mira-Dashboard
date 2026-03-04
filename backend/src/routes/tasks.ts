@@ -334,6 +334,7 @@ export default function tasksRoutes(
             return;
         }
 
+        db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
         if (existing.assignee === TASK_ASSIGNEES.mira.id) {
@@ -406,6 +407,77 @@ export default function tasksRoutes(
         }
 
         res.status(201).json(toFrontendTaskUpdate(row));
+    });
+
+    app.patch("/api/tasks/:id/updates/:updateId", express.json(), (req, res) => {
+        const id = Number(req.params.id);
+        const updateId = Number(req.params.updateId);
+        const { author, messageMd } = req.body as {
+            author?: Assignee;
+            messageMd?: string;
+        };
+
+        if (
+            !Number.isInteger(id) ||
+            !Number.isInteger(updateId) ||
+            !isValidAssignee(author) ||
+            !messageMd?.trim()
+        ) {
+            res.status(400).json({ error: "Invalid update payload" });
+            return;
+        }
+
+        const existing = db
+            .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
+            .get(updateId, id);
+
+        if (!existing) {
+            res.status(404).json({ error: "Update not found" });
+            return;
+        }
+
+        const updatedAt = new Date().toISOString();
+        db.prepare(
+            `UPDATE task_updates
+             SET author = ?, message_md = ?
+             WHERE id = ? AND task_id = ?`
+        ).run(author, messageMd.trim(), updateId, id);
+        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+
+        const row = db
+            .prepare(
+                `SELECT id, task_id, author, message_md, created_at
+                 FROM task_updates
+                 WHERE id = ?`
+            )
+            .get(updateId) as unknown as DbTaskUpdate;
+
+        res.json(toFrontendTaskUpdate(row));
+    });
+
+    app.delete("/api/tasks/:id/updates/:updateId", (req, res) => {
+        const id = Number(req.params.id);
+        const updateId = Number(req.params.updateId);
+        if (!Number.isInteger(id) || !Number.isInteger(updateId)) {
+            res.status(400).json({ error: "Invalid id" });
+            return;
+        }
+
+        const existing = db
+            .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
+            .get(updateId, id);
+        if (!existing) {
+            res.status(404).json({ error: "Update not found" });
+            return;
+        }
+
+        db.prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?").run(updateId, id);
+        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(
+            new Date().toISOString(),
+            id
+        );
+
+        res.json({ ok: true });
     });
 
     app.post("/api/tasks/:id/move", express.json(), (async (req, res) => {

@@ -37,10 +37,12 @@ export {
     useCreateTask,
     useCreateTaskUpdate,
     useDeleteTask,
+    useDeleteTaskUpdate,
     useMoveTask,
     useTasks,
     useTaskUpdates,
     useUpdateTask,
+    useUpdateTaskUpdate,
 } from "./useTasks";
 
 // WebSocket hook (for connection management)

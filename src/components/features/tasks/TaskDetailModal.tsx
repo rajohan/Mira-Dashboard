@@ -24,7 +24,13 @@ interface TaskDetailModalProps {
         labels?: string[];
     }) => Promise<Task>;
     updates: TaskUpdate[];
-    onAddUpdate: (messageMd: string) => Promise<void>;
+    onAddUpdate: (author: TaskAssigneeId, messageMd: string) => Promise<void>;
+    onEditUpdate: (
+        updateId: number,
+        author: TaskAssigneeId,
+        messageMd: string
+    ) => Promise<void>;
+    onDeleteUpdate: (updateId: number) => Promise<void>;
 }
 
 export function TaskDetailModal({
@@ -36,19 +42,33 @@ export function TaskDetailModal({
     onUpdate,
     updates,
     onAddUpdate,
+    onEditUpdate,
+    onDeleteUpdate,
 }: TaskDetailModalProps) {
-    const [isMoving, setIsMoving] = useState(false);
     const [isAssigning, setIsAssigning] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
+
+    const [isEditingTask, setIsEditingTask] = useState(false);
     const [editTitle, setEditTitle] = useState(task?.title || "");
     const [editBody, setEditBody] = useState(task?.body || "");
     const [editPriority, setEditPriority] = useState<"low" | "medium" | "high">(
         getPriority(task?.labels || [])
     );
+
+    const [progressAuthor, setProgressAuthor] = useState<TaskAssigneeId>(
+        TASK_ASSIGNEES.mira.id
+    );
     const [progressMessage, setProgressMessage] = useState("");
 
-    if (!task) return null;
+    const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
+    const [editingUpdateAuthor, setEditingUpdateAuthor] = useState<TaskAssigneeId>(
+        TASK_ASSIGNEES.mira.id
+    );
+    const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
+
+    if (!task) {
+        return null;
+    }
 
     const priority = getPriority(task.labels);
     const currentColumn = getColumnId(task) || "todo";
@@ -58,34 +78,41 @@ export function TaskDetailModal({
         setEditTitle(task.title);
         setEditBody(task.body || "");
         setEditPriority(getPriority(task.labels || []));
-    }, [task]);
+
+        const preferredAuthor =
+            assigneeLogin === TASK_ASSIGNEES.raymond.id
+                ? TASK_ASSIGNEES.raymond.id
+                : TASK_ASSIGNEES.mira.id;
+        setProgressAuthor(preferredAuthor);
+    }, [task, assigneeLogin]);
 
     const assigneeProfileUrl = useMemo(() => {
-        if (assigneeLogin === TASK_ASSIGNEES.mira.id) return TASK_ASSIGNEES.mira.githubUrl;
-        if (assigneeLogin === TASK_ASSIGNEES.raymond.id)
+        if (assigneeLogin === TASK_ASSIGNEES.mira.id) {
+            return TASK_ASSIGNEES.mira.githubUrl;
+        }
+        if (assigneeLogin === TASK_ASSIGNEES.raymond.id) {
             return TASK_ASSIGNEES.raymond.githubUrl;
+        }
         return null;
     }, [assigneeLogin]);
 
     const handleMove = async (column: ColumnId) => {
-        setIsMoving(true);
         await onMove(column);
-        setIsMoving(false);
     };
 
-    const handleAssign = async (nextAssignee: TaskAssigneeId) => {
+    const handleAssign = async (assignee: TaskAssigneeId) => {
         setIsAssigning(true);
-        await onAssign(nextAssignee);
+        await onAssign(assignee);
         setIsAssigning(false);
     };
 
-    const handleDelete = async () => {
+    const handleDeleteTask = async () => {
         setIsDeleting(true);
         await onDelete();
         setIsDeleting(false);
     };
 
-    const handleSaveEdit = async () => {
+    const handleSaveTask = async () => {
         const nextLabels = task.labels
             .map((label) => label.name)
             .filter((name) => {
@@ -95,6 +122,7 @@ export function TaskDetailModal({
                     !["high", "medium", "low"].includes(normalized)
                 );
             });
+
         nextLabels.push(`priority-${editPriority}`);
 
         await onUpdate({
@@ -102,7 +130,8 @@ export function TaskDetailModal({
             body: editBody,
             labels: nextLabels,
         });
-        setIsEditing(false);
+
+        setIsEditingTask(false);
     };
 
     const handleAddUpdate = async () => {
@@ -110,8 +139,29 @@ export function TaskDetailModal({
             return;
         }
 
-        await onAddUpdate(progressMessage.trim());
+        await onAddUpdate(progressAuthor, progressMessage.trim());
         setProgressMessage("");
+    };
+
+    const startEditUpdate = (update: TaskUpdate) => {
+        setEditingUpdateId(update.id);
+        setEditingUpdateAuthor(update.author);
+        setEditingUpdateMessage(update.messageMd);
+    };
+
+    const saveUpdateEdit = async () => {
+        if (!editingUpdateId || !editingUpdateMessage.trim()) {
+            return;
+        }
+
+        await onEditUpdate(
+            editingUpdateId,
+            editingUpdateAuthor,
+            editingUpdateMessage.trim()
+        );
+
+        setEditingUpdateId(null);
+        setEditingUpdateMessage("");
     };
 
     return (
@@ -138,26 +188,9 @@ export function TaskDetailModal({
                             >
                                 {priority.toUpperCase()}
                             </span>
-                            {task.labels
-                                .filter((l) => {
-                                    const normalized = l.name.toLowerCase();
-                                    return (
-                                        !normalized.startsWith("priority-") &&
-                                        !["todo", "in-progress", "blocked", "done"].includes(
-                                            normalized
-                                        )
-                                    );
-                                })
-                                .map((label) => (
-                                    <span
-                                        key={label.name}
-                                        className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
-                                    >
-                                        {label.name}
-                                    </span>
-                                ))}
                         </div>
-                        {isEditing ? (
+
+                        {isEditingTask ? (
                             <div className="space-y-2">
                                 <Input
                                     label="Title"
@@ -178,11 +211,11 @@ export function TaskDetailModal({
                                         {(["low", "medium", "high"] as const).map((p) => (
                                             <Button
                                                 key={p}
-                                                variant={editPriority === p ? "primary" : "secondary"}
                                                 type="button"
+                                                variant={editPriority === p ? "primary" : "secondary"}
                                                 onClick={() => setEditPriority(p)}
                                             >
-                                                {p.charAt(0).toUpperCase() + p.slice(1)}
+                                                {p}
                                             </Button>
                                         ))}
                                     </div>
@@ -194,12 +227,7 @@ export function TaskDetailModal({
                             </h2>
                         )}
                     </div>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={onClose}
-                        className="text-slate-400 hover:text-slate-200"
-                    >
+                    <Button variant="ghost" size="sm" onClick={onClose}>
                         <X className="h-5 w-5" />
                     </Button>
                 </div>
@@ -209,12 +237,7 @@ export function TaskDetailModal({
                         <span>
                             Assigned:{" "}
                             {assigneeProfileUrl ? (
-                                <a
-                                    href={assigneeProfileUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-accent-300 hover:text-accent-200"
-                                >
+                                <a href={assigneeProfileUrl} target="_blank" rel="noreferrer">
                                     @{assigneeLogin}
                                 </a>
                             ) : (
@@ -226,10 +249,10 @@ export function TaskDetailModal({
                     <span>Updated {formatDuration(new Date(task.updatedAt).getTime())}</span>
                 </div>
 
-                {task.body && !isEditing && (
+                {task.body && !isEditingTask && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
                         <h3 className="mb-2 text-sm font-semibold text-slate-300">Description</h3>
-                        <div className="prose prose-invert max-w-none text-sm prose-p:my-2">
+                        <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.body}</ReactMarkdown>
                         </div>
                     </div>
@@ -241,31 +264,145 @@ export function TaskDetailModal({
                         {updates.length === 0 ? (
                             <p className="text-sm text-slate-500">No updates yet.</p>
                         ) : (
-                            updates.map((update) => (
-                                <div
-                                    key={update.id}
-                                    className="rounded border border-slate-700 bg-slate-900/40 p-2"
-                                >
-                                    <div className="mb-1 text-xs text-slate-500">
-                                        {update.author} · {formatDate(update.createdAt)}
+                            updates.map((update) => {
+                                const authorMeta =
+                                    update.author === TASK_ASSIGNEES.mira.id
+                                        ? TASK_ASSIGNEES.mira
+                                        : TASK_ASSIGNEES.raymond;
+                                const isEditingThis = editingUpdateId === update.id;
+
+                                return (
+                                    <div
+                                        key={update.id}
+                                        className="rounded border border-slate-700 bg-slate-900/40 p-2"
+                                    >
+                                        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                                            <span>
+                                                <a
+                                                    href={authorMeta.githubUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                >
+                                                    @{authorMeta.id}
+                                                </a>{" "}
+                                                · {formatDate(update.createdAt)}
+                                            </span>
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => startEditUpdate(update)}
+                                                >
+                                                    Edit
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => onDeleteUpdate(update.id)}
+                                                >
+                                                    Delete
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {isEditingThis ? (
+                                            <div className="space-y-2">
+                                                <Textarea
+                                                    value={editingUpdateMessage}
+                                                    onChange={(event) =>
+                                                        setEditingUpdateMessage(event.target.value)
+                                                    }
+                                                    rows={3}
+                                                />
+                                                <div className="flex gap-2">
+                                                    <Button
+                                                        size="sm"
+                                                        variant={
+                                                            editingUpdateAuthor === TASK_ASSIGNEES.mira.id
+                                                                ? "primary"
+                                                                : "secondary"
+                                                        }
+                                                        onClick={() =>
+                                                            setEditingUpdateAuthor(
+                                                                TASK_ASSIGNEES.mira.id
+                                                            )
+                                                        }
+                                                    >
+                                                        Mira
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant={
+                                                            editingUpdateAuthor ===
+                                                            TASK_ASSIGNEES.raymond.id
+                                                                ? "primary"
+                                                                : "secondary"
+                                                        }
+                                                        onClick={() =>
+                                                            setEditingUpdateAuthor(
+                                                                TASK_ASSIGNEES.raymond.id
+                                                            )
+                                                        }
+                                                    >
+                                                        Raymond
+                                                    </Button>
+                                                    <Button size="sm" variant="primary" onClick={saveUpdateEdit}>
+                                                        Save
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        onClick={() => setEditingUpdateId(null)}
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {update.messageMd}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                            {update.messageMd}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
+
                     <div className="space-y-2">
                         <Textarea
                             label="Add progress update"
                             value={progressMessage}
                             onChange={(event) => setProgressMessage(event.target.value)}
                             rows={3}
-                            placeholder="What changed? (Markdown supported)"
+                            placeholder="Markdown supported"
                         />
+                        <div className="flex gap-2">
+                            <Button
+                                size="sm"
+                                variant={
+                                    progressAuthor === TASK_ASSIGNEES.mira.id
+                                        ? "primary"
+                                        : "secondary"
+                                }
+                                onClick={() => setProgressAuthor(TASK_ASSIGNEES.mira.id)}
+                            >
+                                Post as Mira
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant={
+                                    progressAuthor === TASK_ASSIGNEES.raymond.id
+                                        ? "primary"
+                                        : "secondary"
+                                }
+                                onClick={() => setProgressAuthor(TASK_ASSIGNEES.raymond.id)}
+                            >
+                                Post as Raymond
+                            </Button>
+                        </div>
                         <Button variant="secondary" onClick={handleAddUpdate}>
                             Add Update
                         </Button>
@@ -275,54 +412,39 @@ export function TaskDetailModal({
                 <div className="space-y-3 pt-2">
                     <div className="flex flex-wrap gap-2">
                         {currentColumn !== "todo" && (
-                            <Button variant="secondary" onClick={() => handleMove("todo")} disabled={isMoving}>
+                            <Button variant="secondary" onClick={() => handleMove("todo")}>
                                 Move to New
                             </Button>
                         )}
                         {currentColumn !== "in-progress" && (
-                            <Button
-                                variant="secondary"
-                                onClick={() => handleMove("in-progress")}
-                                disabled={isMoving}
-                            >
+                            <Button variant="secondary" onClick={() => handleMove("in-progress")}>
                                 Move to In Progress
                             </Button>
                         )}
                         {currentColumn !== "blocked" && (
-                            <Button
-                                variant="secondary"
-                                onClick={() => handleMove("blocked")}
-                                disabled={isMoving}
-                            >
+                            <Button variant="secondary" onClick={() => handleMove("blocked")}>
                                 Move to Blocked
                             </Button>
                         )}
                         {currentColumn !== "done" && (
-                            <Button variant="primary" onClick={() => handleMove("done")} disabled={isMoving}>
+                            <Button variant="primary" onClick={() => handleMove("done")}>
                                 Mark Done
                             </Button>
                         )}
                     </div>
 
                     <div className="flex flex-wrap gap-2 border-t border-slate-700 pt-3">
-                        {isEditing ? (
+                        {isEditingTask ? (
                             <>
-                                <Button variant="primary" onClick={handleSaveEdit}>
+                                <Button variant="primary" onClick={handleSaveTask}>
                                     Save Changes
                                 </Button>
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => {
-                                        setEditTitle(task.title);
-                                        setEditBody(task.body || "");
-                                        setIsEditing(false);
-                                    }}
-                                >
+                                <Button variant="secondary" onClick={() => setIsEditingTask(false)}>
                                     Cancel Edit
                                 </Button>
                             </>
                         ) : (
-                            <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                            <Button variant="secondary" onClick={() => setIsEditingTask(true)}>
                                 Edit
                             </Button>
                         )}
@@ -348,7 +470,7 @@ export function TaskDetailModal({
 
                         <Button
                             variant="danger"
-                            onClick={handleDelete}
+                            onClick={handleDeleteTask}
                             disabled={isDeleting}
                             className="ml-auto"
                         >

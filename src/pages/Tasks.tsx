@@ -29,10 +29,12 @@ import {
     useCreateTask,
     useCreateTaskUpdate,
     useDeleteTask,
+    useDeleteTaskUpdate,
     useMoveTask,
     useTasks,
     useTaskUpdates,
     useUpdateTask,
+    useUpdateTaskUpdate,
 } from "../hooks";
 import type { ColumnId, Task } from "../types/task";
 import { getPriority } from "../utils/taskUtils";
@@ -51,6 +53,8 @@ export function Tasks() {
     const deleteTask = useDeleteTask();
     const updateTask = useUpdateTask();
     const createTaskUpdate = useCreateTaskUpdate();
+    const updateTaskUpdate = useUpdateTaskUpdate();
+    const deleteTaskUpdate = useDeleteTaskUpdate();
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | TaskAssigneeId>("all");
@@ -179,6 +183,8 @@ export function Tasks() {
 
     const handleDeleteTask = async () => {
         if (!selectedTask) return;
+        const ok = window.confirm(`Delete task #${selectedTask.number}?`);
+        if (!ok) return;
         await deleteTask.mutateAsync({ number: selectedTask.number });
         setSelectedTask(null);
     };
@@ -200,17 +206,42 @@ export function Tasks() {
         return updated;
     };
 
-    const handleAddTaskUpdate = async (messageMd: string) => {
+    const handleAddTaskUpdate = async (author: TaskAssigneeId, messageMd: string) => {
         if (!selectedTask) return;
-
-        const assignee = (selectedTask.assignees[0]?.login ||
-            selectedTask.assignees[0]?.name ||
-            TASK_ASSIGNEES.mira.id) as TaskAssigneeId;
 
         await createTaskUpdate.mutateAsync({
             taskId: selectedTask.number,
-            author: assignee,
+            author,
             messageMd,
+        });
+    };
+
+
+
+    const handleEditTaskUpdate = async (
+        updateId: number,
+        author: TaskAssigneeId,
+        messageMd: string
+    ) => {
+        if (!selectedTask) return;
+
+        await updateTaskUpdate.mutateAsync({
+            taskId: selectedTask.number,
+            updateId,
+            author,
+            messageMd,
+        });
+    };
+
+    const handleDeleteTaskUpdate = async (updateId: number) => {
+        if (!selectedTask) return;
+
+        const ok = window.confirm("Delete this progress update?");
+        if (!ok) return;
+
+        await deleteTaskUpdate.mutateAsync({
+            taskId: selectedTask.number,
+            updateId,
         });
     };
 
@@ -293,6 +324,8 @@ export function Tasks() {
                             onUpdate={handleUpdateTask}
                             updates={taskUpdates}
                             onAddUpdate={handleAddTaskUpdate}
+                            onEditUpdate={handleEditTaskUpdate}
+                            onDeleteUpdate={handleDeleteTaskUpdate}
                         />
                     )}
 

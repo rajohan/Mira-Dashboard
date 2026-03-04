@@ -1,3 +1,5 @@
+import type { TaskAssigneeId } from "../constants/taskActors";
+
 export interface Task {
     number: number;
     title: string;
@@ -13,7 +15,7 @@ export interface Task {
 export interface TaskUpdate {
     id: number;
     taskId: number;
-    author: "mira-2026" | "rajohan";
+    author: TaskAssigneeId;
     messageMd: string;
     createdAt: string;
 }
