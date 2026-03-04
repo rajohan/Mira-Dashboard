@@ -49,22 +49,8 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
     return [];
 }
 
-export function routeSocketMessage(raw: unknown): boolean | undefined {
-    const validated = baseMessageSchema.safeParse(raw);
-    if (!validated.success) {
-        return undefined;
-    }
-
-    const data = raw as SocketMessage;
-
-    if (data.type === "state") {
-        if (data.sessions) {
-            replaceSessionsFromWebSocket(data.sessions);
-        }
-        return data.gatewayConnected ?? true;
-    }
-
-    if (data.type === "connected") {
+function readGatewayConnectionState(data: SocketMessage): boolean | null {
+    if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
     }
 
@@ -72,9 +58,23 @@ export function routeSocketMessage(raw: unknown): boolean | undefined {
         return false;
     }
 
+    return null;
+}
+
+export function handleSocketMessage(raw: unknown): boolean | null {
+    const validated = baseMessageSchema.safeParse(raw);
+    if (!validated.success) {
+        return null;
+    }
+
+    const data = raw as SocketMessage;
+
+    if (data.type === "state" && data.sessions) {
+        replaceSessionsFromWebSocket(data.sessions);
+    }
+
     if (data.type === "sessions" && data.sessions) {
         replaceSessionsFromWebSocket(data.sessions);
-        return undefined;
     }
 
     if (data.type === "event") {
@@ -84,12 +84,10 @@ export function routeSocketMessage(raw: unknown): boolean | undefined {
         ) {
             writeAgentsFromWebSocket(data.payload as AgentInfo[]);
         }
-        return undefined;
     }
 
     if (data.type === "log" && data.line) {
         writeLogFromWebSocket(data.line);
-        return undefined;
     }
 
     if (data.type === "res") {
@@ -99,5 +97,5 @@ export function routeSocketMessage(raw: unknown): boolean | undefined {
         }
     }
 
-    return undefined;
+    return readGatewayConnectionState(data);
 }

@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { createSocketClient, type SocketClient } from "../lib/socket/socketClient";
-import { routeSocketMessage } from "../lib/socket/socketMessageRouter";
+import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { useAuthToken } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
 
@@ -58,12 +58,12 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 },
                 onMessage: (data) => {
                     try {
-                        const nextConnected = routeSocketMessage(data);
-                        if (typeof nextConnected === "boolean") {
-                            setIsConnected(nextConnected);
+                        const connectionState = handleSocketMessage(data);
+                        if (connectionState !== null) {
+                            setIsConnected(connectionState);
                         }
                     } catch (error_) {
-                        console.error("[WebSocket] Failed to route message:", error_);
+                        console.error("[WebSocket] Failed to process message:", error_);
                     }
                 },
             });
