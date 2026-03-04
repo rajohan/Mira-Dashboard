@@ -264,7 +264,7 @@ function connect(token: string): void {
             }
         });
 
-        ws.on("close", (code: number) => {
+        ws.on("close", (_code: number) => {
             gatewayWs = null;
             isGatewayConnected = false;
             broadcast({ type: "disconnected" });

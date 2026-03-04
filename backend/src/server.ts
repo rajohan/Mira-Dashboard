@@ -15,6 +15,7 @@ import moltbookRoutes from "./routes/moltbook.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
+import tasksRoutes from "./routes/tasks.js";
 
 dotenv.config();
 
@@ -52,6 +53,7 @@ metricsRoutes(app);
 moltbookRoutes(app);
 settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
+tasksRoutes(app, express);
 
 // Static files & SPA (must be last)
 staticRoutes(app, frontendPath);

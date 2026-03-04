@@ -31,14 +31,7 @@ export {
     useSessionAction,
     useSessionHistory,
 } from "./useSessions";
-export {
-    execCommand,
-    taskKeys,
-    useCreateTask,
-    useMoveTask,
-    useTasks,
-    useUpdateTask,
-} from "./useTasks";
+export { taskKeys, useCreateTask, useMoveTask, useTasks, useUpdateTask } from "./useTasks";
 
 // WebSocket hook (for connection management)
 export { useOpenClawSocket } from "./useOpenClawSocket";
