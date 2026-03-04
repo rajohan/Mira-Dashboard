@@ -1,38 +1,18 @@
-import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { createCollection } from "@tanstack/react-db";
 
-import { queryClient } from "../lib/queryClient";
 import type { Session } from "../types/session";
 
-export const sessionsCollection = createCollection(
-    queryCollectionOptions({
-        queryKey: ["sessions"],
-        queryFn: async () => [],
-        queryClient,
-        staleTime: Number.POSITIVE_INFINITY,
-        getKey: (item: Session) => item.key || item.id,
-    })
-);
-
-export function writeSessionFromWebSocket(session: Session) {
-    sessionsCollection.utils.writeUpsert(
-        session as unknown as Partial<Record<string, unknown>>
-    );
-}
-
-export function writeSessionsFromWebSocket(sessions: Session[]) {
-    sessionsCollection.utils.writeBatch(() => {
-        for (const session of sessions) {
-            sessionsCollection.utils.writeUpsert(
-                session as unknown as Partial<Record<string, unknown>>
-            );
-        }
-    });
-}
+export const sessionsCollection = createCollection<Session>({
+    getKey: (item) => item.key || item.id,
+    sync: {
+        sync: () => {},
+    },
+    startSync: true,
+});
 
 export function replaceSessionsFromWebSocket(sessions: Session[]) {
-    const nextKeys = new Set(
-        sessions.map((session) => session.key || session.id).filter(Boolean)
+    const nextKeys = new Set<string | number>(
+        sessions.map((session) => session.key || session.id)
     );
 
     sessionsCollection.utils.writeBatch(() => {
@@ -43,9 +23,7 @@ export function replaceSessionsFromWebSocket(sessions: Session[]) {
         }
 
         for (const session of sessions) {
-            sessionsCollection.utils.writeUpsert(
-                session as unknown as Partial<Record<string, unknown>>
-            );
+            sessionsCollection.utils.writeUpsert(session);
         }
     });
 }

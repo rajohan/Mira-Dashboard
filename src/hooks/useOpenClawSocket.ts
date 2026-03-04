@@ -348,7 +348,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         return () => clearInterval(interval);
     }, [isConnected, connectionId]);
 
-    useEffect(() => disconnect, []);
+    useEffect(() => {
+        return () => {
+            if (import.meta.env.PROD) {
+                disconnect();
+            }
+        };
+    }, []);
 
     return createElement(
         OpenClawSocketContext.Provider,
