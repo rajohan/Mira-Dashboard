@@ -14,7 +14,7 @@ interface TaskCardProps {
 
 export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
     const { attributes, listeners, setNodeRef, transform } = useSortable({
-        id: `task-${task.number}`,
+        id: String(task.number),
     });
 
     const style = transform

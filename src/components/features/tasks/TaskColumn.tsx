@@ -1,3 +1,6 @@
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+
 import type { ColumnId, Task } from "../../../types/task";
 import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
 import { TaskCard } from "./TaskCard";
@@ -11,6 +14,7 @@ interface TaskColumnProps {
 
 export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) {
     const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
+    const { setNodeRef } = useDroppable({ id });
 
     if (!config) return null;
 
@@ -24,6 +28,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
                 </span>
             </div>
             <div
+                ref={setNodeRef}
                 data-column={id}
                 className={
                     "flex min-h-[400px] flex-1 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
@@ -33,13 +38,18 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
                 }
             >
                 {tasks.length > 0 ? (
-                    tasks.map((task) => (
-                        <TaskCard
-                            key={task.number}
-                            task={task}
-                            onClick={() => onTaskClick(task)}
-                        />
-                    ))
+                    <SortableContext
+                        items={tasks.map((task) => String(task.number))}
+                        strategy={verticalListSortingStrategy}
+                    >
+                        {tasks.map((task) => (
+                            <TaskCard
+                                key={task.number}
+                                task={task}
+                                onClick={() => onTaskClick(task)}
+                            />
+                        ))}
+                    </SortableContext>
                 ) : (
                     <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
                         No tasks

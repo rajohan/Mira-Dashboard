@@ -1,11 +1,13 @@
 import { Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ColumnId, Task } from "../../../types/task";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
+import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
+import { Textarea } from "../../ui/Textarea";
 
 interface TaskDetailModalProps {
     task: Task | null;
@@ -17,7 +19,7 @@ interface TaskDetailModalProps {
         title?: string;
         body?: string;
         labels?: string[];
-    }) => Promise<void>;
+    }) => Promise<Task>;
 }
 
 export function TaskDetailModal({
@@ -34,12 +36,21 @@ export function TaskDetailModal({
     const [isEditing, setIsEditing] = useState(false);
     const [editTitle, setEditTitle] = useState(task?.title || "");
     const [editBody, setEditBody] = useState(task?.body || "");
+    const [editPriority, setEditPriority] = useState<"low" | "medium" | "high">(
+        getPriority(task?.labels || [])
+    );
 
     if (!task) return null;
 
     const priority = getPriority(task.labels);
     const assignee = task.assignees[0];
     const currentColumn = getColumnId(task) || "todo";
+
+    useEffect(() => {
+        setEditTitle(task.title);
+        setEditBody(task.body || "");
+        setEditPriority(getPriority(task.labels || []));
+    }, [task]);
 
     const handleMove = async (column: ColumnId) => {
         setIsMoving(true);
@@ -60,9 +71,21 @@ export function TaskDetailModal({
     };
 
     const handleSaveEdit = async () => {
+        const nextLabels = task.labels
+            .map((label) => label.name)
+            .filter((name) => {
+                const normalized = name.toLowerCase();
+                return (
+                    !normalized.startsWith("priority-") &&
+                    !["high", "medium", "low"].includes(normalized)
+                );
+            });
+        nextLabels.push(`priority-${editPriority}`);
+
         await onUpdate({
             title: editTitle.trim(),
             body: editBody,
+            labels: nextLabels,
         });
         setIsEditing(false);
     };
@@ -114,17 +137,38 @@ export function TaskDetailModal({
                         </div>
                         {isEditing ? (
                             <div className="space-y-2">
-                                <input
+                                <Input
+                                    label="Title"
                                     value={editTitle}
                                     onChange={(event) => setEditTitle(event.target.value)}
-                                    className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-100"
                                 />
-                                <textarea
+                                <Textarea
+                                    label="Description"
                                     value={editBody}
                                     onChange={(event) => setEditBody(event.target.value)}
                                     rows={4}
-                                    className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-300"
                                 />
+                                <div>
+                                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                        Priority
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {(["low", "medium", "high"] as const).map((p) => (
+                                            <Button
+                                                key={p}
+                                                variant={
+                                                    editPriority === p
+                                                        ? "primary"
+                                                        : "secondary"
+                                                }
+                                                type="button"
+                                                onClick={() => setEditPriority(p)}
+                                            >
+                                                {p.charAt(0).toUpperCase() + p.slice(1)}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
                         ) : (
                             <h2 className="text-lg font-semibold text-slate-100">

@@ -85,13 +85,29 @@ export function Tasks() {
         setActiveId(event.active.id as string);
     };
 
+    const resolveColumnFromOverId = (overIdValue: string): ColumnId | null => {
+        const directColumn = getColumnId(overIdValue);
+        if (directColumn) {
+            return directColumn;
+        }
+
+        const overTask = tasks.find((task) => String(task.number) === overIdValue);
+        if (!overTask) {
+            return null;
+        }
+
+        return getColumnId(overTask);
+    };
+
     const handleDragOver = (event: DragOverEvent) => {
         const { over } = event;
-        if (over) {
-            const columnId = getColumnId(over.id as string);
-            if (columnId) {
-                setOverId(columnId);
-            }
+        if (!over) {
+            return;
+        }
+
+        const columnId = resolveColumnFromOverId(String(over.id));
+        if (columnId) {
+            setOverId(columnId);
         }
     };
 
@@ -102,8 +118,8 @@ export function Tasks() {
 
         if (!over) return;
 
-        const taskId = active.id as string;
-        const columnId = getColumnId(over.id as string);
+        const taskId = String(active.id);
+        const columnId = resolveColumnFromOverId(String(over.id));
 
         if (columnId) {
             const column = COLUMN_CONFIG.find((c) => c.id === columnId);
@@ -131,16 +147,21 @@ export function Tasks() {
         if (!selectedTask) return;
         const col = COLUMN_CONFIG.find((c) => c.id === column);
         if (col) {
-            await moveTask.mutateAsync({
+            const updated = await moveTask.mutateAsync({
                 number: selectedTask.number,
                 columnLabel: col.label,
             });
+            setSelectedTask(updated);
         }
     };
 
     const handleAssignTask = async (assignee: string | null) => {
         if (!selectedTask) return;
-        await assignTask.mutateAsync({ number: selectedTask.number, assignee });
+        const updated = await assignTask.mutateAsync({
+            number: selectedTask.number,
+            assignee,
+        });
+        setSelectedTask(updated);
     };
 
     const handleDeleteTask = async () => {
@@ -154,8 +175,16 @@ export function Tasks() {
         body?: string;
         labels?: string[];
     }) => {
-        if (!selectedTask) return;
-        await updateTask.mutateAsync({ number: selectedTask.number, updates });
+        if (!selectedTask) {
+            throw new Error("No selected task");
+        }
+
+        const updated = await updateTask.mutateAsync({
+            number: selectedTask.number,
+            updates,
+        });
+        setSelectedTask(updated);
+        return updated;
     };
 
     const activeTask = activeId
