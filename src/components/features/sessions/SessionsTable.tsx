@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ProgressBar } from "../../ui/ProgressBar";
-import type { Session } from "../../../hooks/useOpenClaw";
+import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtils";
 import { SessionActionsDropdown } from "./SessionActionsDropdown";

@@ -17,7 +17,7 @@ export function LogLine({ log }: LogLineProps) {
                 <span
                     className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(log.level)}`}
                 >
-                    {log.level.toUpperCase().slice(0, 5)}
+                    {log.level.toUpperCase()?.slice(0, 5) || log.level}
                 </span>
             )}
             {log.subsystem && (

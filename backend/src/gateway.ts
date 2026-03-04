@@ -1,5 +1,10 @@
 import WebSocket from "ws";
 
+import {
+    subscribeToLogs as logsSubscribe,
+    unsubscribeFromLogs as logsUnsubscribe,
+} from "./routes/logs.js";
+
 interface Session {
     id: string;
     key: string;
@@ -134,7 +139,6 @@ function connect(token: string): void {
     }
 
     const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
-    console.log("[Gateway] Connecting to:", gatewayUrl);
 
     try {
         const ws = new WebSocket(gatewayUrl + "?token=" + encodeURIComponent(token));
@@ -142,7 +146,6 @@ function connect(token: string): void {
         connectionAttempts++;
 
         ws.on("open", () => {
-            console.log("[Gateway] WS open, sending connect...");
             ws.send(
                 JSON.stringify({
                     type: "req",
@@ -172,7 +175,6 @@ function connect(token: string): void {
 
                 if (msg.type === "res" && msg.id === "connect-1") {
                     if (msg.ok) {
-                        console.log("[Gateway] Connected!");
                         isGatewayConnected = true;
                         connectionAttempts = 0;
                         broadcast({ type: "connected", gatewayConnected: true });
@@ -263,7 +265,6 @@ function connect(token: string): void {
         });
 
         ws.on("close", (code: number) => {
-            console.log("[Gateway] Closed:", code);
             gatewayWs = null;
             isGatewayConnected = false;
             broadcast({ type: "disconnected" });
@@ -282,7 +283,6 @@ function connect(token: string): void {
 function scheduleReconnect(token: string): void {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     const delay = Math.min(5000 * Math.pow(1.5, connectionAttempts), 60000);
-    console.log("[Gateway] Reconnecting in " + delay + "ms...");
     reconnectTimer = setTimeout(() => connect(token), delay);
 }
 
@@ -321,6 +321,42 @@ function handleClient(ws: WebSocket): void {
         try {
             const msg = JSON.parse(data.toString());
 
+            // Handle log subscribe/unsubscribe
+            if (msg.type === "subscribe" && msg.channel === "logs") {
+                logsSubscribe(ws);
+                return;
+            }
+
+            if (msg.type === "unsubscribe" && msg.channel === "logs") {
+                logsUnsubscribe(ws);
+                return;
+            }
+
+            if (
+                (msg.type === "request" || msg.type === "req") &&
+                msg.method === "subscribe" &&
+                msg.params?.channel === "logs"
+            ) {
+                logsSubscribe(ws);
+                if (msg.id) {
+                    ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                }
+                return;
+            }
+
+            if (
+                (msg.type === "request" || msg.type === "req") &&
+                msg.method === "unsubscribe" &&
+                msg.params?.channel === "logs"
+            ) {
+                logsUnsubscribe(ws);
+                if (msg.id) {
+                    ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                }
+                return;
+            }
+
+            // Handle gateway requests
             if ((msg.type === "request" || msg.type === "req") && msg.method) {
                 sendRequest(msg.method, msg.params || {}, ws, msg.id);
             }
@@ -331,6 +367,7 @@ function handleClient(ws: WebSocket): void {
 
     ws.on("close", () => {
         subscribers.delete(ws);
+        logsUnsubscribe(ws);
     });
 }
 
@@ -393,13 +430,20 @@ async function getSessionHistory(
     sessionKey: string,
     limit: number = 50,
     offset: number = 0
-): Promise<{ messages: Array<{ role: string; content: string; timestamp?: string }>; total: number }> {
+): Promise<{
+    messages: Array<{ role: string; content: string; timestamp?: string }>;
+    total: number;
+}> {
     try {
         const fetchLimit = 500;
-        const result = await sendRequestAsync("chat.history", {
+        const result = (await sendRequestAsync("chat.history", {
             sessionKey,
             limit: fetchLimit,
-        }) as { messages?: Array<{ role?: string; content?: string; timestamp?: string }>; sessionKey?: string; sessionId?: string };
+        })) as {
+            messages?: Array<{ role?: string; content?: string; timestamp?: string }>;
+            sessionKey?: string;
+            sessionId?: string;
+        };
 
         const allMessages = (result.messages || [])
             .map((msg) => ({

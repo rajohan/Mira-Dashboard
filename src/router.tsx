@@ -9,7 +9,6 @@ import { lazy, Suspense } from "react";
 
 import { Layout } from "./components/layout/Layout";
 import { LoadingState } from "./components/ui/LoadingState";
-import { authStore } from "./stores/authStore";
 
 // Lazy-loaded page components
 const Dashboard = lazy(() =>
@@ -62,7 +61,9 @@ const authenticatedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "authenticated",
     beforeLoad: () => {
-        if (!authStore.state.isAuthenticated) {
+        // Check localStorage directly for immediate auth state
+        const token = typeof window !== "undefined" ? localStorage.getItem("openclaw_token") : null;
+        if (!token) {
             throw redirect({ to: "/login" });
         }
     },

@@ -1,6 +1,6 @@
 import { Activity, Cpu, HardDrive, Users } from "lucide-react";
 
-import type { AgentStatus, Session } from "../../../hooks/useOpenClaw";
+import type { AgentStatus, Session } from "../../../types/session";
 import { Card } from "../../ui/Card";
 
 interface StatusCardsProps {

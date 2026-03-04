@@ -1,4 +1,4 @@
-import type { AgentStatus } from "../../../hooks/useOpenClaw";
+import type { AgentStatus } from "../../../types/session";
 import { formatUptime } from "../../../utils/format";
 import { Card, CardTitle } from "../../ui/Card";
 

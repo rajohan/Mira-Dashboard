@@ -1,6 +1,6 @@
 import { MessageSquare, RefreshCw, X } from "lucide-react";
 
-import type { Session } from "../../../hooks/useOpenClaw";
+import type { Session } from "../../../types/session";
 import { useSessionHistory } from "../../../hooks/useSessions";
 import { formatSessionType } from "../../../utils/sessionUtils";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";

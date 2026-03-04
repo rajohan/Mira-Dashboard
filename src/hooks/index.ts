@@ -41,6 +41,5 @@ export {
     useUpdateTask,
 } from "./useTasks";
 
-// WebSocket hook (kept for real-time sessions)
-export type { AgentStatus, Session } from "./useOpenClaw";
-export { useOpenClaw } from "./useOpenClaw";
+// WebSocket hook (for connection management)
+export { useOpenClawSocket } from "./useOpenClawSocket";

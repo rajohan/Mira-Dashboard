@@ -18,13 +18,13 @@ export function ExpandableCard({
 }: ExpandableCardProps) {
     return (
         <Card variant="bordered" className="mb-4">
-            <Disclosure defaultOpen={defaultExpanded}>
+            <Disclosure defaultOpen={defaultExpanded} as="div">
                 <DisclosureButton className="flex w-full items-center justify-between py-1">
                     <div className="flex items-center gap-2">
                         <Icon size={18} className="text-accent-400" />
                         <CardTitle>{title}</CardTitle>
                     </div>
-                    <ChevronDown className="data-[open]:rotate-180 h-[18px] w-[18px] transition-transform" />
+                    <ChevronDown className="h-[18px] w-[18px] transition-transform data-[open]:rotate-180" />
                 </DisclosureButton>
                 <DisclosurePanel className="mt-4 border-t border-primary-700 pt-4">
                     {children}

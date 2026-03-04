@@ -1,0 +1,25 @@
+import { queryCollectionOptions } from "@tanstack/query-db-collection";
+import { createCollection } from "@tanstack/react-db";
+import { parseLogLine } from "../utils/logUtils";
+import { queryClient } from "../lib/queryClient";
+import type { LogEntry } from "../types/log";
+
+export const logsCollection = createCollection(
+    queryCollectionOptions({
+        queryKey: ["logs"],
+        queryFn: async () => [],
+        queryClient,
+        getKey: (item: LogEntry) => item.ts || item.raw,
+    })
+);
+
+export function writeLogFromWebSocket(line: string) {
+    try {
+        const parsed = parseLogLine(line);
+        if (parsed) {
+            logsCollection.utils.writeInsert(parsed);
+        }
+    } catch (error) {
+        console.error("Error parsing log line:", line, error);
+    }
+}

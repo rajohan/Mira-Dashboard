@@ -41,7 +41,7 @@ export function Dropdown({
     };
 
     return (
-        <Menu>
+        <Menu as="div">
             <MenuButton
                 className={cn(
                     "inline-flex items-center justify-center gap-1 rounded-lg font-medium",
@@ -54,7 +54,7 @@ export function Dropdown({
                 {icon}
                 {label}
                 {label && (
-                    <ChevronDown className="data-[open]:rotate-180 h-4 w-4 transition-transform" />
+                    <ChevronDown className="h-4 w-4 transition-transform data-[open]:rotate-180" />
                 )}
             </MenuButton>
 

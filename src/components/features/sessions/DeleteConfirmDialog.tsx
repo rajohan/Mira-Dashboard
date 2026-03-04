@@ -2,7 +2,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
-import type { Session } from "../../../hooks/useOpenClaw";
+import type { Session } from "../../../types/session";
 
 interface DeleteConfirmDialogProps {
     session: Session | null;

@@ -1,4 +1,4 @@
-import type { Session } from "../hooks/useOpenClaw";
+import type { Session } from "../types/session";
 
 export function formatSessionType(session: Session): string {
     const type = (session.type || "unknown").toUpperCase();

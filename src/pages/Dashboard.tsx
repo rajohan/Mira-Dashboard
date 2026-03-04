@@ -11,10 +11,13 @@ import { Alert } from "../components/ui/Alert";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { MetricCard } from "../components/ui/MetricCard";
 import { PageHeader } from "../components/ui/PageHeader";
-import { useMetrics } from "../hooks/useMetrics";
-import { type Session, useOpenClaw } from "../hooks/useOpenClaw";
+import { useMetrics } from "../hooks";
+import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { sessionsCollection } from "../collections/sessions";
+import { type Session } from "../types/session";
 import { useAuthStore } from "../stores/authStore";
 import { formatLoad, formatUptime } from "../utils/format";
+import { useLiveQuery } from "@tanstack/react-db";
 
 function sortSessions(sessions: Session[]): Session[] {
     return [...sessions].sort((a, b) => {
@@ -26,9 +29,13 @@ function sortSessions(sessions: Session[]): Session[] {
 
 export function Dashboard() {
     const { token } = useAuthStore();
-    const { isConnected, error, connect, status, sessions } = useOpenClaw(token);
+    const { isConnected, connect, error } = useOpenClawSocket({ token });
     const { data: metrics } = useMetrics();
     const hasConnected = useRef(false);
+
+    const { data: sessions = [] } = useLiveQuery((q) =>
+        q.from({ session: sessionsCollection })
+    );
 
     useEffect(() => {
         if (token && !hasConnected.current) {
@@ -48,11 +55,7 @@ export function Dashboard() {
 
             {error && <Alert variant="error">{error}</Alert>}
 
-            <StatusCards
-                isConnected={isConnected}
-                sessions={sessions}
-                status={status}
-            />
+            <StatusCards isConnected={isConnected} sessions={sessions} status={null} />
 
             <h2 className="mb-4 text-lg font-semibold">System Health</h2>
             <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -91,7 +94,7 @@ export function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <AgentInfoCard status={status} />
+                <AgentInfoCard status={null} />
                 <ActiveSessionsCard sessions={sortedSessions} />
             </div>
         </div>

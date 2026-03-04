@@ -11,25 +11,32 @@ import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { Input } from "../components/ui/Input";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Select } from "../components/ui/Select";
-import { useLogContent, useLogFiles } from "../hooks";
-import { useLogStream } from "../hooks/useLogStream";
+import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
+import { logsCollection } from "../collections/logs";
+import { useAuthStore } from "../stores/authStore";
+import { parseLogLine } from "../utils/logUtils";
 import { LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
+import { useLiveQuery } from "@tanstack/react-db";
 
 export function Logs() {
     const [autoFollow, setAutoFollow] = useState(true);
-    const [selectedFile, setSelectedFile] = useState<string>("");
+    const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [lineCount, setLineCount] = useState<number>(100);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
+    const hasConnected = useRef(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
     const isAutoScrollingRef = useRef(false);
 
-    // Log stream via WebSocket
-    const { isConnected, logs, clearLogs, setLogsFromContent } = useLogStream({
-        lineCount,
-    });
+    const { token } = useAuthStore();
+
+    // OpenClaw connection (shared WebSocket)
+    const { isConnected, request, connect } = useOpenClawSocket({ token });
+
+    // Logs from collection using live query
+    const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
 
     // Queries
     const { data: logFiles = [] } = useLogFiles();
@@ -49,12 +56,35 @@ export function Logs() {
         }
     }, [logFiles, selectedFile]);
 
+    useEffect(() => {
+        if (token && !hasConnected.current) {
+            hasConnected.current = true;
+            connect();
+        }
+    }, [token, connect]);
+
+    // Subscribe to log stream on connect
+    useEffect(() => {
+        if (isConnected) {
+            request("subscribe", { channel: "logs" });
+        }
+    }, [isConnected, request]);
+
     // Load log content when file/lineCount changes
     const loadLogContent = async () => {
         if (!selectedFile) return;
         const result = await refetchContent();
         if (result.data) {
-            setLogsFromContent(result.data);
+            // Clear and load new logs
+            const lines = result.data.split("\n").filter((l) => l.trim());
+            logsCollection.utils.writeBatch(() => {
+                lines.forEach((line) => {
+                    const parsed = parseLogLine(line);
+                    if (parsed) {
+                        logsCollection.utils.writeInsert(parsed);
+                    }
+                });
+            });
         }
     };
 
@@ -159,6 +189,15 @@ export function Logs() {
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
+    const clearLogs = () => {
+        // Get all current logs and delete them
+        logsCollection.utils.writeBatch(() => {
+            logs.forEach((log) => {
+                logsCollection.utils.writeDelete(log.ts || log.raw);
+            });
+        });
+    };
+
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
             <PageHeader
@@ -168,8 +207,8 @@ export function Logs() {
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
                 <Select
-                    value={selectedFile}
-                    onChange={setSelectedFile}
+                    value={selectedFile || ""}
+                    onChange={(v) => setSelectedFile(v || null)}
                     options={sortedLogFiles.map((f) => ({
                         value: f.name,
                         label: f.name,

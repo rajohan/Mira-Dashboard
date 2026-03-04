@@ -1,8 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { devtools } from "@tanstack/devtools-vite";
 
 export default defineConfig({
     plugins: [
+        devtools(),
         react({
             babel: {
                 plugins: [["babel-plugin-react-compiler", {}]],
@@ -33,5 +35,7 @@ export default defineConfig({
                 },
             },
         },
+        // Add version to bust browser cache
+        watch: {},
     },
 });

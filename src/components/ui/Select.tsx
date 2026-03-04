@@ -31,7 +31,7 @@ export function Select({
     const selectedOption = options.find((opt) => opt.value === value);
 
     return (
-        <Menu>
+        <Menu as="div">
             <MenuButton
                 className={cn(
                     "flex items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors",
@@ -44,7 +44,7 @@ export function Select({
                 <span className="flex-1 truncate text-left">
                     {selectedOption?.label || placeholder}
                 </span>
-                <ChevronDown className="data-[open]:rotate-180 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform" />
+                <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform data-[open]:rotate-180" />
             </MenuButton>
             <MenuItems
                 anchor="bottom start"

@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
-import type { Session } from "./useOpenClaw";
+import type { Session } from "../types/session";
 
 // Types
 interface SessionsResponse {

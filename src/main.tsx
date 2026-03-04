@@ -1,3 +1,6 @@
+// Polyfills must be imported first!
+import "./polyfills";
+
 import "./index.css";
 
 import { StrictMode } from "react";

@@ -57,9 +57,7 @@ export function formatTokenCount(tokens: number): string {
     return tokens.toString();
 }
 
-export function getTokenPercent(current: number, max: number): number {
-    if (max <= 0) return 0;
+export function getTokenPercent(current: number | undefined | null, max: number): number {
+    if (current === undefined || current === null || max <= 0) return 0;
     return Math.min(Math.round((current / max) * 100), 100);
 }
-
-

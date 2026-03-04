@@ -12,10 +12,13 @@ import { Button } from "../components/ui/Button";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
-import { type Session, useOpenClaw } from "../hooks/useOpenClaw";
 import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
+import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { sessionsCollection } from "../collections/sessions";
+import { type Session } from "../types/session";
 import { useAuthStore } from "../stores/authStore";
 import { getTypeSortOrder } from "../utils/sessionUtils";
+import { useLiveQuery } from "@tanstack/react-db";
 
 const sortSessions = (sessions: Session[]): Session[] => {
     return [...sessions].sort((a, b) => {
@@ -27,7 +30,7 @@ const sortSessions = (sessions: Session[]): Session[] => {
 
 export function Sessions() {
     const { token } = useAuthStore();
-    const { isConnected, error, connect, sessions, fetchSessions } = useOpenClaw(token);
+    const { isConnected, error, connect, request } = useOpenClawSocket({ token });
     const sessionAction = useSessionAction();
     const deleteSessionMutation = useDeleteSession();
     const hasConnected = useRef(false);
@@ -43,13 +46,15 @@ export function Sessions() {
         }
     }, [token, connect]);
 
-    // Note: fetchSessions is handled via WebSocket events in useOpenClaw
-    // No need to call it here as well
+    // Sessions from collection using live query
+    const { data: sessions = [] } = useLiveQuery((q) =>
+        q.from({ session: sessionsCollection })
+    );
 
     const handleRefresh = async () => {
         setIsLoading(true);
         try {
-            await fetchSessions();
+            await request("sessions.list", {});
         } finally {
             setTimeout(() => setIsLoading(false), 300);
         }

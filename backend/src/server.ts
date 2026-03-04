@@ -9,7 +9,7 @@ import gateway from "./gateway.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
 import filesRoutes from "./routes/files.js";
-import logsRoutes, { subscribeToLogs, unsubscribeFromLogs } from "./routes/logs.js";
+import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import sessionsRoutes from "./routes/sessions.js";
@@ -60,28 +60,7 @@ staticRoutes(app, frontendPath);
 // WebSocket
 // =====================
 wss.on("connection", (ws: WebSocket) => {
-    console.log("[Frontend] Client connected");
     gateway.handleClient(ws);
-
-    ws.on("message", (data: Buffer) => {
-        try {
-            const msg = JSON.parse(data.toString());
-
-            if (msg.type === "subscribe" && msg.channel === "logs") {
-                subscribeToLogs(ws);
-            }
-
-            if (msg.type === "unsubscribe" && msg.channel === "logs") {
-                unsubscribeFromLogs(ws);
-            }
-        } catch (error) {
-            console.error("[Frontend] Message error:", (error as Error).message);
-        }
-    });
-
-    ws.on("close", () => {
-        unsubscribeFromLogs(ws);
-    });
 });
 
 // =====================
@@ -89,8 +68,6 @@ wss.on("connection", (ws: WebSocket) => {
 // =====================
 const PORT = process.env.PORT || 3100;
 server.listen(PORT, () => {
-    console.log("[Backend] Server listening on port", PORT);
-
     const token = process.env.OPENCLAW_TOKEN;
     if (token) {
         gateway.init(token);
