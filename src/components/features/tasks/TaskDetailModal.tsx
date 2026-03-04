@@ -13,7 +13,7 @@ interface TaskDetailModalProps {
     task: Task | null;
     onClose: () => void;
     onMove: (column: ColumnId) => Promise<void>;
-    onAssign: (assignee: string | null) => Promise<void>;
+    onAssign: (assignee: "mira-2026" | "rajohan") => Promise<void>;
     onDelete: () => Promise<void>;
     onUpdate: (updates: {
         title?: string;
@@ -58,7 +58,7 @@ export function TaskDetailModal({
         setIsMoving(false);
     };
 
-    const handleAssign = async (nextAssignee: string | null) => {
+    const handleAssign = async (nextAssignee: "mira-2026" | "rajohan") => {
         setIsAssigning(true);
         await onAssign(nextAssignee);
         setIsAssigning(false);
@@ -278,13 +278,6 @@ export function TaskDetailModal({
                             disabled={isAssigning}
                         >
                             Assign to Raymond
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            onClick={() => handleAssign(null)}
-                            disabled={isAssigning}
-                        >
-                            Unassign
                         </Button>
                         <Button
                             variant="danger"

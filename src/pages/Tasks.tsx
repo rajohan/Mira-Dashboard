@@ -32,6 +32,7 @@ import {
     useUpdateTask,
 } from "../hooks";
 import type { ColumnId, Task } from "../types/task";
+import { getPriority } from "../utils/taskUtils";
 
 const ASSIGNMENT_FILTERS = [
     { value: "all", label: "All" },
@@ -75,10 +76,16 @@ export function Tasks() {
     for (const col of COLUMN_CONFIG) {
         tasksByColumn[col.id] = filteredTasks
             .filter((task) => col.filter(task))
-            .sort(
-                (a, b) =>
-                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-            );
+            .sort((a, b) => {
+                const rank = { high: 0, medium: 1, low: 2 };
+                const priorityDiff =
+                    rank[getPriority(a.labels)] - rank[getPriority(b.labels)];
+                if (priorityDiff !== 0) {
+                    return priorityDiff;
+                }
+
+                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+            });
     }
 
     const handleDragStart = (event: DragStartEvent) => {
@@ -155,7 +162,7 @@ export function Tasks() {
         }
     };
 
-    const handleAssignTask = async (assignee: string | null) => {
+    const handleAssignTask = async (assignee: "mira-2026" | "rajohan") => {
         if (!selectedTask) return;
         const updated = await assignTask.mutateAsync({
             number: selectedTask.number,
@@ -271,13 +278,14 @@ export function Tasks() {
                         <NewTaskModal
                             isOpen={isNewTaskOpen}
                             onClose={() => setIsNewTaskOpen(false)}
-                            onSubmit={async (title, body, priority) => {
+                            onSubmit={async (title, body, priority, assignee) => {
                                 const labels = [];
                                 if (priority) labels.push(`priority-${priority}`);
                                 await createTask.mutateAsync({
                                     title,
                                     body: body || "",
                                     labels,
+                                    assignee: assignee || "mira-2026",
                                 });
                                 setIsNewTaskOpen(false);
                             }}

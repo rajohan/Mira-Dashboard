@@ -12,8 +12,13 @@ async function fetchTasks(): Promise<Task[]> {
     return apiFetch<Task[]>("/tasks");
 }
 
-async function createTask(title: string, body: string, labels: string[]): Promise<Task> {
-    return apiPost<Task>("/tasks", { title, body, labels });
+async function createTask(
+    title: string,
+    body: string,
+    labels: string[],
+    assignee: "mira-2026" | "rajohan"
+): Promise<Task> {
+    return apiPost<Task>("/tasks", { title, body, labels, assignee });
 }
 
 async function updateTask(
@@ -30,7 +35,10 @@ async function moveTask(number: number, columnLabel: string): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/move`, { columnLabel });
 }
 
-async function assignTask(number: number, assignee: string | null): Promise<Task> {
+async function assignTask(
+    number: number,
+    assignee: "mira-2026" | "rajohan"
+): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/assign`, { assignee });
 }
 
@@ -55,11 +63,13 @@ export function useCreateTask() {
             title,
             body,
             labels,
+            assignee,
         }: {
             title: string;
             body: string;
             labels: string[];
-        }) => createTask(title, body, labels),
+            assignee: "mira-2026" | "rajohan";
+        }) => createTask(title, body, labels, assignee),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },
@@ -99,8 +109,13 @@ export function useAssignTask() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ number, assignee }: { number: number; assignee: string | null }) =>
-            assignTask(number, assignee),
+        mutationFn: ({
+            number,
+            assignee,
+        }: {
+            number: number;
+            assignee: "mira-2026" | "rajohan";
+        }) => assignTask(number, assignee),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },

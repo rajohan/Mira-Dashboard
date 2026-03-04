@@ -4,6 +4,8 @@ import { db } from "../db.js";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 
+type Assignee = "mira-2026" | "rajohan";
+
 interface DbTask {
     id: number;
     title: string;
@@ -11,9 +13,13 @@ interface DbTask {
     status: Status;
     priority: "low" | "medium" | "high";
     labels_json: string;
-    assignee: string | null;
+    assignee: Assignee | null;
     created_at: string;
     updated_at: string;
+}
+
+function isValidAssignee(value: unknown): value is Assignee {
+    return value === "mira-2026" || value === "rajohan";
 }
 
 function normalizeStatus(columnLabel?: string): Status {
@@ -77,7 +83,7 @@ function toFrontendTask(task: DbTask) {
 }
 
 async function notifyMira(eventType: string, task: { id: number; title: string }) {
-    const message = `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task that may need pickup.`;
+    const message = `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task assigned to Mira.`;
 
     // NOTE: OpenClaw gateway WS does not currently expose a stable session-send RPC
     // method in this backend path. Keep event logged and use app-side polling until
@@ -109,10 +115,11 @@ export default function tasksRoutes(
     });
 
     app.post("/api/tasks", express.json(), (async (req, res) => {
-        const { title, body, labels } = req.body as {
+        const { title, body, labels, assignee } = req.body as {
             title?: string;
             body?: string;
             labels?: string[];
+            assignee?: Assignee;
         };
 
         if (!title || !title.trim()) {
@@ -120,8 +127,14 @@ export default function tasksRoutes(
             return;
         }
 
+        if (!isValidAssignee(assignee)) {
+            res.status(400).json({ error: "Assignee must be mira-2026 or rajohan" });
+            return;
+        }
+
         const now = new Date().toISOString();
         const labelList = Array.isArray(labels) ? labels : [];
+        const safeAssignee = assignee;
         const status = normalizeStatus(
             labelList.includes("done")
                 ? "done"
@@ -136,7 +149,7 @@ export default function tasksRoutes(
         const result = db
             .prepare(
                 `INSERT INTO tasks (title, body, status, priority, labels_json, assignee, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
                 title.trim(),
@@ -144,13 +157,21 @@ export default function tasksRoutes(
                 status,
                 priority,
                 JSON.stringify(labelList),
+                safeAssignee,
                 now,
                 now
             );
 
         const id = Number(result.lastInsertRowid);
-        recordEvent(id, "created", { title: title.trim(), status, priority });
-        void notifyMira("created", { id, title: title.trim() });
+        recordEvent(id, "created", {
+            title: title.trim(),
+            status,
+            priority,
+            assignee: safeAssignee,
+        });
+        if (safeAssignee === "mira-2026") {
+            void notifyMira("created", { id, title: title.trim() });
+        }
 
         const row = db
             .prepare(
@@ -209,8 +230,15 @@ export default function tasksRoutes(
              WHERE id = ?`
         ).run(title, body, nextStatus, nextPriority, JSON.stringify(labels), updatedAt, id);
 
-        recordEvent(id, "updated", { title, status: nextStatus, priority: nextPriority });
-        void notifyMira("updated", { id, title });
+        recordEvent(id, "updated", {
+            title,
+            status: nextStatus,
+            priority: nextPriority,
+            assignee: existing.assignee,
+        });
+        if (existing.assignee === "mira-2026") {
+            void notifyMira("updated", { id, title });
+        }
 
         const row = db
             .prepare(
@@ -231,6 +259,11 @@ export default function tasksRoutes(
             return;
         }
 
+        if (!isValidAssignee(assignee)) {
+            res.status(400).json({ error: "Assignee must be mira-2026 or rajohan" });
+            return;
+        }
+
         const existing = db
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
@@ -243,15 +276,18 @@ export default function tasksRoutes(
             return;
         }
 
+        const safeAssignee = assignee;
         const updatedAt = new Date().toISOString();
         db.prepare(`UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?`).run(
-            assignee || null,
+            safeAssignee,
             updatedAt,
             id
         );
 
-        recordEvent(id, "assigned", { assignee: assignee || null });
-        void notifyMira("assigned", { id, title: existing.title });
+        recordEvent(id, "assigned", { assignee: safeAssignee });
+        if (safeAssignee === "mira-2026") {
+            void notifyMira("assigned", { id, title: existing.title });
+        }
 
         const row = db
             .prepare(
@@ -271,8 +307,8 @@ export default function tasksRoutes(
         }
 
         const existing = db
-            .prepare("SELECT id, title FROM tasks WHERE id = ?")
-            .get(id) as unknown as { id: number; title: string } | undefined;
+            .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
+            .get(id) as unknown as { id: number; title: string; assignee?: string } | undefined;
 
         if (!existing) {
             res.status(404).json({ error: "Task not found" });
@@ -281,7 +317,9 @@ export default function tasksRoutes(
 
         db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-        void notifyMira("deleted", existing);
+        if (existing.assignee === "mira-2026") {
+            void notifyMira("deleted", existing);
+        }
         res.json({ ok: true });
     });
 

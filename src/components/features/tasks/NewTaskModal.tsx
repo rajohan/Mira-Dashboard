@@ -13,7 +13,8 @@ interface NewTaskModalProps {
     onSubmit: (
         title: string,
         body?: string,
-        priority?: "high" | "medium" | "low"
+        priority?: "high" | "medium" | "low",
+        assignee?: "mira-2026" | "rajohan"
     ) => Promise<void>;
 }
 
@@ -23,11 +24,17 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
             title: "",
             body: "",
             priority: "medium" as "high" | "medium" | "low",
+            assignee: "mira-2026" as "mira-2026" | "rajohan",
         },
         onSubmit: async ({ value }) => {
             if (!value.title.trim()) return;
             const trimmedBody = value.body.trim();
-            await onSubmit(value.title.trim(), trimmedBody || undefined, value.priority);
+            await onSubmit(
+                value.title.trim(),
+                trimmedBody || undefined,
+                value.priority,
+                value.assignee
+            );
             form.reset();
             onClose();
         },
@@ -107,6 +114,40 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                         {p.charAt(0).toUpperCase() + p.slice(1)}
                                     </Button>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+                </form.Field>
+
+                <form.Field name="assignee">
+                    {(field) => (
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                Assignee
+                            </label>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant={
+                                        field.state.value === "mira-2026"
+                                            ? "primary"
+                                            : "secondary"
+                                    }
+                                    onClick={() => field.handleChange("mira-2026")}
+                                >
+                                    Mira
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={
+                                        field.state.value === "rajohan"
+                                            ? "primary"
+                                            : "secondary"
+                                    }
+                                    onClick={() => field.handleChange("rajohan")}
+                                >
+                                    Raymond
+                                </Button>
                             </div>
                         </div>
                     )}
