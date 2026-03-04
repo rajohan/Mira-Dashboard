@@ -9,6 +9,15 @@ export default defineConfig({
             },
         }),
     ],
+    server: {
+        host: true, // Listen on all addresses (needed for Tailscale)
+        proxy: {
+            "/api": {
+                target: "http://localhost:3100",
+                changeOrigin: true,
+            },
+        },
+    },
     build: {
         outDir: "dist",
         emptyOutDir: true,

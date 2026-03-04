@@ -116,6 +116,14 @@ export function SessionDetails({
                             </div>
                         ) : (
                             <div className="space-y-3">
+                                {allMessages.map((msg, i) => (
+                                    <MessageBubble
+                                        key={`${msg.timestamp}-${i}`}
+                                        role={msg.role}
+                                        content={msg.content}
+                                        timestamp={msg.timestamp}
+                                    />
+                                ))}
                                 {hasNextPage && (
                                     <div className="text-center">
                                         <Button
@@ -132,14 +140,6 @@ export function SessionDetails({
                                         </Button>
                                     </div>
                                 )}
-                                {allMessages.map((msg, i) => (
-                                    <MessageBubble
-                                        key={`${msg.timestamp}-${i}`}
-                                        role={msg.role}
-                                        content={msg.content}
-                                        timestamp={msg.timestamp}
-                                    />
-                                ))}
                             </div>
                         )}
                     </div>
