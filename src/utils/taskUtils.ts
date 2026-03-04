@@ -78,7 +78,8 @@ export function getColumnId(taskOrId: Task | string): ColumnId | null {
 
     const task = taskOrId as Task;
     if (task.state === "CLOSED") return "done";
-    if (task.labels?.some((l: { name: string }) => l.name === "blocked")) return "blocked";
+    if (task.labels?.some((l: { name: string }) => l.name === "blocked"))
+        return "blocked";
     if (task.labels?.some((l: { name: string }) => l.name === "in-progress")) {
         return "in-progress";
     }

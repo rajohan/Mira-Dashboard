@@ -1,7 +1,11 @@
 import express, { type RequestHandler } from "express";
 
+import {
+    TASK_ASSIGNEE_IDS,
+    TASK_ASSIGNEES,
+    type TaskAssigneeId,
+} from "../constants/taskActors.js";
 import { db } from "../db.js";
-import { TASK_ASSIGNEE_IDS, TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors.js";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 
@@ -247,7 +251,15 @@ export default function tasksRoutes(
             `UPDATE tasks
              SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, updated_at = ?
              WHERE id = ?`
-        ).run(title, body, nextStatus, nextPriority, JSON.stringify(labels), updatedAt, id);
+        ).run(
+            title,
+            body,
+            nextStatus,
+            nextPriority,
+            JSON.stringify(labels),
+            updatedAt,
+            id
+        );
 
         recordEvent(id, "updated", {
             title,
@@ -327,7 +339,9 @@ export default function tasksRoutes(
 
         const existing = db
             .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
-            .get(id) as unknown as { id: number; title: string; assignee?: string } | undefined;
+            .get(id) as unknown as
+            | { id: number; title: string; assignee?: string }
+            | undefined;
 
         if (!existing) {
             res.status(404).json({ error: "Task not found" });
@@ -471,7 +485,10 @@ export default function tasksRoutes(
             return;
         }
 
-        db.prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?").run(updateId, id);
+        db.prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?").run(
+            updateId,
+            id
+        );
         db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(
             new Date().toISOString(),
             id
@@ -502,9 +519,12 @@ export default function tasksRoutes(
         }
 
         const status = normalizeStatus(columnLabel);
-        const labels = labelsFromTask(existing)
-            .filter((label) => !["todo", "in-progress", "blocked", "done"].includes(label))
-            .concat([status]);
+        const labels = [
+            ...labelsFromTask(existing).filter(
+                (label) => !["todo", "in-progress", "blocked", "done"].includes(label)
+            ),
+            status,
+        ];
 
         const updatedAt = new Date().toISOString();
 

@@ -63,33 +63,42 @@ export default function sessionsRoutes(app: express.Application): void {
 
             // Get history from gateway
             const history = await gateway.getSessionHistory(session.key, limit, offset);
-            
+
             // Transform messages to match frontend expectations
-            const messages = history.messages.map((msg: { role?: string; content?: string | Array<{ type?: string; text?: string }>; timestamp?: string | number }, idx: number) => {
-                // Handle content as array of blocks
-                let content = "";
-                if (Array.isArray(msg.content)) {
-                    content = msg.content
-                        .map((block: { type?: string; text?: string }) => block.text || "")
-                        .join("");
-                } else {
-                    content = String(msg.content || "");
+            const messages = history.messages.map(
+                (
+                    msg: {
+                        role?: string;
+                        content?: string | Array<{ type?: string; text?: string }>;
+                        timestamp?: string | number;
+                    },
+                    idx: number
+                ) => {
+                    // Handle content as array of blocks
+                    const content = Array.isArray(msg.content)
+                        ? msg.content
+                              .map(
+                                  (block: { type?: string; text?: string }) =>
+                                      block.text || ""
+                              )
+                              .join("")
+                        : String(msg.content || "");
+
+                    // Handle timestamp
+                    const timestamp = msg.timestamp
+                        ? typeof msg.timestamp === "number"
+                            ? new Date(msg.timestamp).toISOString()
+                            : msg.timestamp
+                        : undefined;
+
+                    return {
+                        id: `${offset + idx}`,
+                        role: msg.role || "unknown",
+                        content,
+                        timestamp,
+                    };
                 }
-
-                // Handle timestamp
-                const timestamp = msg.timestamp
-                    ? typeof msg.timestamp === "number"
-                        ? new Date(msg.timestamp).toISOString()
-                        : msg.timestamp
-                    : undefined;
-
-                return {
-                    id: `${offset + idx}`,
-                    role: msg.role || "unknown",
-                    content,
-                    timestamp,
-                };
-            });
+            );
 
             const hasMore = history.total > offset + messages.length;
             const nextOffset = hasMore ? offset + messages.length : undefined;

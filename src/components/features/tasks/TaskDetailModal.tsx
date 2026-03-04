@@ -1,6 +1,6 @@
 import { Trash2, X } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
@@ -68,7 +68,6 @@ export function TaskDetailModal({
         setEditTitle(task.title);
         setEditBody(task.body || "");
         setEditPriority(getPriority(task.labels || []));
-
     }, [task, assigneeLogin]);
 
     const assigneeProfileUrl = useMemo(() => {
@@ -158,7 +157,9 @@ export function TaskDetailModal({
                                         : "border-blue-500/30 bg-blue-500/20 text-blue-400")
                                 }
                             >
-                                {task.state === "CLOSED" ? "DONE" : currentColumn.toUpperCase()}
+                                {task.state === "CLOSED"
+                                    ? "DONE"
+                                    : currentColumn.toUpperCase()}
                             </span>
                             <span
                                 className={
@@ -192,7 +193,11 @@ export function TaskDetailModal({
                                             <Button
                                                 key={p}
                                                 type="button"
-                                                variant={editPriority === p ? "primary" : "secondary"}
+                                                variant={
+                                                    editPriority === p
+                                                        ? "primary"
+                                                        : "secondary"
+                                                }
                                                 onClick={() => setEditPriority(p)}
                                             >
                                                 {p}
@@ -217,7 +222,11 @@ export function TaskDetailModal({
                         <span>
                             Assigned:{" "}
                             {assigneeProfileUrl ? (
-                                <a href={assigneeProfileUrl} target="_blank" rel="noreferrer">
+                                <a
+                                    href={assigneeProfileUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                >
                                     @{assigneeLogin}
                                 </a>
                             ) : (
@@ -226,20 +235,28 @@ export function TaskDetailModal({
                         </span>
                     )}
                     <span>Created {formatDate(task.createdAt)}</span>
-                    <span>Updated {formatDuration(new Date(task.updatedAt).getTime())}</span>
+                    <span>
+                        Updated {formatDuration(new Date(task.updatedAt).getTime())}
+                    </span>
                 </div>
 
                 {task.body && !isEditingTask && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                        <h3 className="mb-2 text-sm font-semibold text-slate-300">Description</h3>
+                        <h3 className="mb-2 text-sm font-semibold text-slate-300">
+                            Description
+                        </h3>
                         <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.body}</ReactMarkdown>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {task.body}
+                            </ReactMarkdown>
                         </div>
                     </div>
                 )}
 
                 <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
-                    <h3 className="mb-2 text-sm font-semibold text-slate-300">Progress updates</h3>
+                    <h3 className="mb-2 text-sm font-semibold text-slate-300">
+                        Progress updates
+                    </h3>
                     <div className="mb-3 space-y-2">
                         {updates.length === 0 ? (
                             <p className="text-sm text-slate-500">No updates yet.</p>
@@ -271,14 +288,18 @@ export function TaskDetailModal({
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    onClick={() => startEditUpdate(update)}
+                                                    onClick={() =>
+                                                        startEditUpdate(update)
+                                                    }
                                                 >
                                                     Edit
                                                 </Button>
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    onClick={() => onDeleteUpdate(update.id)}
+                                                    onClick={() =>
+                                                        onDeleteUpdate(update.id)
+                                                    }
                                                 >
                                                     Delete
                                                 </Button>
@@ -290,18 +311,26 @@ export function TaskDetailModal({
                                                 <Textarea
                                                     value={editingUpdateMessage}
                                                     onChange={(event) =>
-                                                        setEditingUpdateMessage(event.target.value)
+                                                        setEditingUpdateMessage(
+                                                            event.target.value
+                                                        )
                                                     }
                                                     rows={3}
                                                 />
                                                 <div className="flex gap-2">
-                                                    <Button size="sm" variant="primary" onClick={saveUpdateEdit}>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="primary"
+                                                        onClick={saveUpdateEdit}
+                                                    >
                                                         Save
                                                     </Button>
                                                     <Button
                                                         size="sm"
                                                         variant="secondary"
-                                                        onClick={() => setEditingUpdateId(null)}
+                                                        onClick={() =>
+                                                            setEditingUpdateId(null)
+                                                        }
                                                     >
                                                         Cancel
                                                     </Button>
@@ -309,7 +338,9 @@ export function TaskDetailModal({
                                             </div>
                                         ) : (
                                             <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
-                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                <ReactMarkdown
+                                                    remarkPlugins={[remarkGfm]}
+                                                >
                                                     {update.messageMd}
                                                 </ReactMarkdown>
                                             </div>
@@ -337,17 +368,26 @@ export function TaskDetailModal({
                 <div className="space-y-3 pt-2">
                     <div className="flex flex-wrap gap-2">
                         {currentColumn !== "todo" && (
-                            <Button variant="secondary" onClick={() => handleMove("todo")}>
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("todo")}
+                            >
                                 Move to New
                             </Button>
                         )}
                         {currentColumn !== "in-progress" && (
-                            <Button variant="secondary" onClick={() => handleMove("in-progress")}>
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("in-progress")}
+                            >
                                 Move to In Progress
                             </Button>
                         )}
                         {currentColumn !== "blocked" && (
-                            <Button variant="secondary" onClick={() => handleMove("blocked")}>
+                            <Button
+                                variant="secondary"
+                                onClick={() => handleMove("blocked")}
+                            >
                                 Move to Blocked
                             </Button>
                         )}
@@ -364,12 +404,18 @@ export function TaskDetailModal({
                                 <Button variant="primary" onClick={handleSaveTask}>
                                     Save Changes
                                 </Button>
-                                <Button variant="secondary" onClick={() => setIsEditingTask(false)}>
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => setIsEditingTask(false)}
+                                >
                                     Cancel Edit
                                 </Button>
                             </>
                         ) : (
-                            <Button variant="secondary" onClick={() => setIsEditingTask(true)}>
+                            <Button
+                                variant="secondary"
+                                onClick={() => setIsEditingTask(true)}
+                            >
                                 Edit
                             </Button>
                         )}

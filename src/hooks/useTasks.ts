@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { Task, TaskUpdate } from "../types/task";
 import type { TaskAssigneeId } from "../constants/taskActors";
+import type { Task, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 export const taskKeys = {
@@ -11,7 +11,7 @@ export const taskKeys = {
 };
 
 async function fetchTasks(): Promise<Task[]> {
-    return apiFetch<Task[]>('/tasks');
+    return apiFetch<Task[]>("/tasks");
 }
 
 async function createTask(

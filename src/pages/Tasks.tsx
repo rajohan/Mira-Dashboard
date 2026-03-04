@@ -16,7 +16,6 @@ import {
     TaskDetailModal,
     TaskOverlay,
 } from "../components/features/tasks";
-import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors";
 import { Button } from "../components/ui/Button";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
@@ -25,6 +24,7 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { SearchInput } from "../components/ui/SearchInput";
+import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors";
 import {
     useAssignTask,
     useCreateTask,
@@ -64,7 +64,9 @@ export function Tasks() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
     const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null);
-    const [pendingDeleteUpdateId, setPendingDeleteUpdateId] = useState<number | null>(null);
+    const [pendingDeleteUpdateId, setPendingDeleteUpdateId] = useState<number | null>(
+        null
+    );
 
     const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
 
@@ -222,8 +224,6 @@ export function Tasks() {
             messageMd,
         });
     };
-
-
 
     const handleEditTaskUpdate = async (updateId: number, messageMd: string) => {
         if (!selectedTask) return;

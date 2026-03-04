@@ -4,12 +4,12 @@ import { useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
-    DeleteConfirmDialog,
     SESSION_TYPES,
     SessionDetails,
     SessionsTable,
 } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -116,11 +116,20 @@ export function Sessions() {
                 />
             )}
 
-            <DeleteConfirmDialog
-                session={deleteTarget}
-                onConfirm={handleDeleteConfirm}
+            <ConfirmModal
+                isOpen={!!deleteTarget}
+                title="Delete session"
+                message={
+                    deleteTarget
+                        ? `Are you sure you want to delete ${deleteTarget.displayLabel || deleteTarget.key}?`
+                        : "Are you sure you want to delete this session?"
+                }
+                confirmLabel={sessionActions.isDeleting ? "Deleting..." : "Delete"}
+                danger
                 onCancel={() => setDeleteTarget(null)}
-                isLoading={sessionActions.isDeleting}
+                onConfirm={() => {
+                    void handleDeleteConfirm();
+                }}
             />
 
             <SessionDetails

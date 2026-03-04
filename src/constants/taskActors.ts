@@ -11,8 +11,7 @@ export const TASK_ASSIGNEES = {
     },
 } as const;
 
-export type TaskAssigneeId =
-    (typeof TASK_ASSIGNEES)[keyof typeof TASK_ASSIGNEES]["id"];
+export type TaskAssigneeId = (typeof TASK_ASSIGNEES)[keyof typeof TASK_ASSIGNEES]["id"];
 
 export const TASK_ASSIGNEE_IDS = [
     TASK_ASSIGNEES.mira.id,

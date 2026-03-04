@@ -1,10 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { Loader2, Plus, X } from "lucide-react";
 
-import {
-    TASK_ASSIGNEES,
-    type TaskAssigneeId,
-} from "../../../constants/taskActors";
+import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
 import { PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -137,7 +134,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                             ? "primary"
                                             : "secondary"
                                     }
-                                    onClick={() => field.handleChange(TASK_ASSIGNEES.mira.id)}
+                                    onClick={() =>
+                                        field.handleChange(TASK_ASSIGNEES.mira.id)
+                                    }
                                 >
                                     Mira
                                 </Button>
@@ -148,7 +147,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                             ? "primary"
                                             : "secondary"
                                     }
-                                    onClick={() => field.handleChange(TASK_ASSIGNEES.raymond.id)}
+                                    onClick={() =>
+                                        field.handleChange(TASK_ASSIGNEES.raymond.id)
+                                    }
                                 >
                                     Raymond
                                 </Button>
