@@ -17,6 +17,8 @@ export {
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
+export { liveFeedKeys, useLiveFeed } from "./useLiveFeed";
+export type { FeedItem } from "./useLiveFeed";
 export { useWeather } from "./useWeather";
 export {
     moltbookKeys,

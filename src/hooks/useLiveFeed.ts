@@ -1,0 +1,72 @@
+import { useQuery } from "@tanstack/react-query";
+
+import { type Session } from "../types/session";
+import { apiFetch } from "./useApi";
+
+interface SessionHistoryResponse {
+    messages: Array<{ role: string; content: string; timestamp?: string }>;
+}
+
+export interface FeedItem {
+    id: string;
+    sessionKey: string;
+    sessionLabel: string;
+    sessionType: string;
+    role: string;
+    content: string;
+    timestamp: number;
+}
+
+export const liveFeedKeys = {
+    all: ["live-feed"] as const,
+    list: (sessionSignature: string, updatedSignature: string) =>
+        [...liveFeedKeys.all, sessionSignature, updatedSignature] as const,
+};
+
+export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
+    const feedSessionCandidates = sessions.slice(0, 8);
+    const sessionSignature = feedSessionCandidates.map((s) => s.key).join("|");
+    const updatedSignature = feedSessionCandidates.map((s) => s.updatedAt || 0).join("|");
+
+    return useQuery({
+        queryKey: liveFeedKeys.list(sessionSignature, updatedSignature),
+        enabled: feedSessionCandidates.length > 0,
+        refetchInterval: refreshInterval,
+        staleTime: 2_000,
+        queryFn: async () => {
+            const historyBySession = await Promise.all(
+                feedSessionCandidates.map(async (session) => {
+                    const history = await apiFetch<SessionHistoryResponse>(
+                        `/sessions/${encodeURIComponent(session.key)}/history?limit=8&offset=0`
+                    );
+
+                    return history.messages.map((message, index) => {
+                        const fallbackTimestamp = session.updatedAt || Date.now();
+                        const parsedTimestamp = message.timestamp
+                            ? new Date(message.timestamp).getTime()
+                            : fallbackTimestamp;
+
+                        return {
+                            id: `${session.key}-${index}-${parsedTimestamp}`,
+                            sessionKey: session.key,
+                            sessionLabel:
+                                session.displayLabel || session.displayName || session.key,
+                            sessionType: (session.type || "unknown").toUpperCase(),
+                            role: (message.role || "unknown").toLowerCase(),
+                            content: (message.content || "").trim(),
+                            timestamp: Number.isFinite(parsedTimestamp)
+                                ? parsedTimestamp
+                                : fallbackTimestamp,
+                        } as FeedItem;
+                    });
+                })
+            );
+
+            return historyBySession
+                .flat()
+                .filter((item) => item.content.length > 0)
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .slice(0, 60);
+        },
+    });
+}

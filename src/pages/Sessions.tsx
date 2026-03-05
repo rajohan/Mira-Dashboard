@@ -1,7 +1,6 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { useQuery } from "@tanstack/react-query";
 import { WifiOff } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -16,27 +15,14 @@ import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
-import { apiFetch } from "../hooks";
+import { Select } from "../components/ui/Select";
+import { type FeedItem, useLiveFeed } from "../hooks";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
 import { formatOsloTime } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
-
-interface SessionHistoryResponse {
-    messages: Array<{ role: string; content: string; timestamp?: string }>;
-}
-
-interface FeedItem {
-    id: string;
-    sessionKey: string;
-    sessionLabel: string;
-    sessionType: string;
-    role: string;
-    content: string;
-    timestamp: number;
-}
 
 function roleBadgeColor(role: string) {
     switch (role.toLowerCase()) {
@@ -51,7 +37,18 @@ function roleBadgeColor(role: string) {
     }
 }
 
-const FeedRow = memo(function FeedRow({ item }: { item: FeedItem }) {
+const FeedRow = memo(function FeedRow({
+    item,
+}: {
+    item: {
+        id: string;
+        sessionLabel: string;
+        sessionType: string;
+        role: string;
+        content: string;
+        timestamp: number;
+    };
+}) {
     return (
         <div className="rounded-lg border border-primary-700 bg-primary-800/40 p-3">
             <div className="mb-1 flex items-center justify-between gap-2 text-xs">
@@ -95,67 +92,19 @@ export function Sessions() {
             ? sortedSessions
             : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
 
-    const sessionByKey = useMemo(
-        () => new Map(sortedSessions.map((s) => [s.key, s] as const)),
-        [sortedSessions]
+    const { data: latestFeedItems = [] } = useLiveFeed(
+        sortedSessions,
+        isConnected ? AUTO_REFRESH_MS : false
     );
 
-    const feedSessionCandidates = useMemo(() => sortedSessions.slice(0, 8), [sortedSessions]);
-
-    const { data: feedItems = [] } = useQuery({
-        queryKey: [
-            "live-feed",
-            feedSessionCandidates.map((s) => s.key).join("|"),
-            feedSessionCandidates.map((s) => s.updatedAt || 0).join("|"),
-        ],
-        enabled: isConnected && feedSessionCandidates.length > 0,
-        refetchInterval: AUTO_REFRESH_MS,
-        staleTime: 2_000,
-        queryFn: async () => {
-            const historyBySession = await Promise.all(
-                feedSessionCandidates.map(async (session) => {
-                    const history = await apiFetch<SessionHistoryResponse>(
-                        `/sessions/${encodeURIComponent(session.key)}/history?limit=8&offset=0`
-                    );
-
-                    return history.messages.map((message, index) => {
-                        const fallbackTimestamp = session.updatedAt || Date.now();
-                        const parsedTimestamp = message.timestamp
-                            ? new Date(message.timestamp).getTime()
-                            : fallbackTimestamp;
-
-                        return {
-                            id: `${session.key}-${index}-${parsedTimestamp}`,
-                            sessionKey: session.key,
-                            sessionLabel:
-                                session.displayLabel || session.displayName || session.key,
-                            sessionType: (session.type || "unknown").toUpperCase(),
-                            role: (message.role || "unknown").toLowerCase(),
-                            content: (message.content || "").trim(),
-                            timestamp: Number.isFinite(parsedTimestamp)
-                                ? parsedTimestamp
-                                : fallbackTimestamp,
-                        } as FeedItem;
-                    });
-                })
-            );
-
-            return historyBySession
-                .flat()
-                .filter((item) => item.content.length > 0)
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .slice(0, 60);
-        },
-    });
-
     useEffect(() => {
-        if (!feedItems.length) return;
+        if (!latestFeedItems.length) return;
 
         setLiveFeed((prev) => {
             const seen = new Set(prev.map((item) => item.id));
             const next = [...prev];
 
-            for (const item of feedItems) {
+            for (const item of latestFeedItems) {
                 if (!seen.has(item.id)) {
                     next.unshift(item);
                     seen.add(item.id);
@@ -164,25 +113,37 @@ export function Sessions() {
 
             return next.sort((a, b) => b.timestamp - a.timestamp).slice(0, 120);
         });
-    }, [feedItems]);
+    }, [latestFeedItems]);
 
-    const filteredFeed = useMemo(() => {
-        return liveFeed.filter((item) => {
-            if (feedRoleFilter !== "ALL" && item.role !== feedRoleFilter) return false;
-            if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter) return false;
-            if (feedTypeFilter !== "ALL" && item.sessionType !== feedTypeFilter) return false;
-            return true;
-        });
-    }, [liveFeed, feedRoleFilter, feedSessionFilter, feedTypeFilter]);
+    const filteredFeed = liveFeed.filter((item) => {
+        if (feedRoleFilter !== "ALL" && item.role !== feedRoleFilter) return false;
+        if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter) return false;
+        if (feedTypeFilter !== "ALL" && item.sessionType !== feedTypeFilter) return false;
+        return true;
+    });
 
-    const feedSessionOptions = useMemo(
-        () =>
-            sortedSessions.slice(0, 20).map((session) => ({
-                value: session.key,
-                label: session.displayLabel || session.displayName || session.key,
-            })),
-        [sortedSessions]
-    );
+    const feedRoleOptions = [
+        { value: "ALL", label: "All roles" },
+        { value: "assistant", label: "assistant" },
+        { value: "user", label: "user" },
+        { value: "system", label: "system" },
+    ];
+
+    const feedTypeOptions = [
+        { value: "ALL", label: "All types" },
+        ...SESSION_TYPES.filter((type) => type !== "ALL").map((type) => ({
+            value: type,
+            label: type,
+        })),
+    ];
+
+    const feedSessionOptions = [
+        { value: "ALL", label: "All sessions" },
+        ...sortedSessions.slice(0, 20).map((session) => ({
+            value: session.key,
+            label: session.displayLabel || session.displayName || session.key,
+        })),
+    ];
 
     const handleRefresh = async () => {
         setIsLoading(true);
@@ -202,10 +163,6 @@ export function Sessions() {
             console.error("Failed to delete session:", error_);
         }
     };
-
-    const handleStop = (sessionKey: string) => sessionActions.stop(sessionKey);
-    const handleCompact = (sessionKey: string) => sessionActions.compact(sessionKey);
-    const handleReset = (sessionKey: string) => sessionActions.reset(sessionKey);
 
     const filterOptions = SESSION_TYPES.map((type) => ({ value: type, label: type }));
 
@@ -231,41 +188,25 @@ export function Sessions() {
                     <span className="text-xs text-primary-400">Auto-refresh: 5s</span>
                 </div>
 
-                <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-                    <select
+                <div className="mb-3 flex flex-wrap gap-2">
+                    <Select
                         value={feedRoleFilter}
-                        onChange={(e) => setFeedRoleFilter(e.target.value)}
-                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
-                    >
-                        <option value="ALL">All roles</option>
-                        <option value="assistant">assistant</option>
-                        <option value="user">user</option>
-                        <option value="system">system</option>
-                    </select>
-                    <select
+                        onChange={setFeedRoleFilter}
+                        options={feedRoleOptions}
+                        width="min-w-[150px]"
+                    />
+                    <Select
                         value={feedTypeFilter}
-                        onChange={(e) => setFeedTypeFilter(e.target.value)}
-                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
-                    >
-                        <option value="ALL">All types</option>
-                        {SESSION_TYPES.filter((t) => t !== "ALL").map((type) => (
-                            <option key={type} value={type}>
-                                {type}
-                            </option>
-                        ))}
-                    </select>
-                    <select
+                        onChange={setFeedTypeFilter}
+                        options={feedTypeOptions}
+                        width="min-w-[150px]"
+                    />
+                    <Select
                         value={feedSessionFilter}
-                        onChange={(e) => setFeedSessionFilter(e.target.value)}
-                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
-                    >
-                        <option value="ALL">All sessions</option>
-                        {feedSessionOptions.map((session) => (
-                            <option key={session.value} value={session.value}>
-                                {session.label}
-                            </option>
-                        ))}
-                    </select>
+                        onChange={setFeedSessionFilter}
+                        options={feedSessionOptions}
+                        width="min-w-[280px]"
+                    />
                 </div>
 
                 {filteredFeed.length === 0 ? (
@@ -273,14 +214,7 @@ export function Sessions() {
                 ) : (
                     <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                         {filteredFeed.map((item) => (
-                            <FeedRow
-                                key={item.id}
-                                item={{
-                                    ...item,
-                                    sessionType:
-                                        (sessionByKey.get(item.sessionKey)?.type || item.sessionType).toUpperCase(),
-                                }}
-                            />
+                            <FeedRow key={item.id} item={item} />
                         ))}
                     </div>
                 )}
@@ -307,9 +241,9 @@ export function Sessions() {
                 <SessionsTable
                     sessions={filteredSessions}
                     onSelectSession={setSelectedSession}
-                    onStop={handleStop}
-                    onCompact={handleCompact}
-                    onReset={handleReset}
+                    onStop={(sessionKey: string) => sessionActions.stop(sessionKey)}
+                    onCompact={(sessionKey: string) => sessionActions.compact(sessionKey)}
+                    onReset={(sessionKey: string) => sessionActions.reset(sessionKey)}
                     onDelete={setDeleteTarget}
                 />
             )}
@@ -341,19 +275,19 @@ export function Sessions() {
                 }}
                 onStop={() => {
                     if (selectedSession) {
-                        handleStop(selectedSession.key);
+                        sessionActions.stop(selectedSession.key);
                         setSelectedSession(null);
                     }
                 }}
                 onCompact={() => {
                     if (selectedSession) {
-                        handleCompact(selectedSession.key);
+                        sessionActions.compact(selectedSession.key);
                         setSelectedSession(null);
                     }
                 }}
                 onReset={() => {
                     if (selectedSession) {
-                        handleReset(selectedSession.key);
+                        sessionActions.reset(selectedSession.key);
                         setSelectedSession(null);
                     }
                 }}
