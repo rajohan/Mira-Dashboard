@@ -17,15 +17,14 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-
 import { sessionsCollection } from "../collections/sessions";
-import { ActiveSessionsCard } from "../components/features/dashboard";
+import { ActiveSessionsCard, QuotaOverviewCard } from "../components/features/dashboard";
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { MetricCard } from "../components/ui/MetricCard";
 import { PageHeader } from "../components/ui/PageHeader";
-import { useMetrics, useWeather } from "../hooks";
+import { useMetrics, useQuotas, useWeather } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import {
     formatLoad,
@@ -143,6 +142,7 @@ function WeatherTimeCard() {
 export function Dashboard() {
     const { isConnected, error } = useOpenClawSocket();
     const { data: metrics } = useMetrics();
+    const { data: quotas } = useQuotas();
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -199,8 +199,9 @@ export function Dashboard() {
                 />
             </div>
 
-            <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <ActiveSessionsCard sessions={sortedSessions} />
+                <QuotaOverviewCard quotas={quotas} />
             </div>
         </div>
     );

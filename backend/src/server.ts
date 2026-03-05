@@ -12,6 +12,7 @@ import filesRoutes from "./routes/files.js";
 import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
+import quotasRoutes from "./routes/quotas.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
@@ -56,6 +57,7 @@ settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
 tasksRoutes(app, express);
 weatherRoutes(app);
+quotasRoutes(app);
 
 // Static files & SPA (must be last)
 staticRoutes(app, frontendPath);
