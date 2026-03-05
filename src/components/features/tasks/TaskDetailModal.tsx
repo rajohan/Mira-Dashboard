@@ -1,5 +1,5 @@
 import { Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -70,15 +70,12 @@ export function TaskDetailModal({
         setEditPriority(getPriority(task.labels || []));
     }, [task, assigneeLogin]);
 
-    const assigneeProfileUrl = useMemo(() => {
-        if (assigneeLogin === TASK_ASSIGNEES.mira.id) {
-            return TASK_ASSIGNEES.mira.githubUrl;
-        }
-        if (assigneeLogin === TASK_ASSIGNEES.raymond.id) {
-            return TASK_ASSIGNEES.raymond.githubUrl;
-        }
-        return null;
-    }, [assigneeLogin]);
+    const assigneeProfileUrl =
+        assigneeLogin === TASK_ASSIGNEES.mira.id
+            ? TASK_ASSIGNEES.mira.githubUrl
+            : assigneeLogin === TASK_ASSIGNEES.raymond.id
+              ? TASK_ASSIGNEES.raymond.githubUrl
+              : null;
 
     const handleMove = async (column: ColumnId) => {
         await onMove(column);
