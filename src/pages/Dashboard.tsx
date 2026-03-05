@@ -161,7 +161,7 @@ export function Dashboard() {
         <div className="space-y-6 p-6">
             <PageHeader
                 title="Dashboard"
-                status={
+                actions={
                     <div className="flex items-center gap-2">
                         <ConnectionStatus isConnected={isConnected} />
                         {hasVersionMismatch && (
