@@ -1,14 +1,7 @@
 import { Bell, BellRing } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
-import {
-    hasQuotaStatus,
-    useCreateNotification,
-    useMarkAllNotificationsRead,
-    useMarkNotificationRead,
-    useNotifications,
-    useQuotas,
-} from "../../hooks";
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "../../hooks";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
@@ -21,82 +14,12 @@ type NotificationFilter = "all" | "unread" | "warning";
 
 export function NotificationBell({ isConnected }: NotificationBellProps) {
     const { data: notifications } = useNotifications(isConnected ? 15_000 : false);
-    const { data: quotas } = useQuotas(isConnected ? 60_000 : false);
-    const createNotification = useCreateNotification();
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const [filter, setFilter] = useState<NotificationFilter>("all");
 
     const items = notifications?.items || [];
     const unreadCount = notifications?.unreadCount || 0;
-
-    const existingDedupeKeys = useMemo(() => {
-        return new Set(items.map((item) => item.dedupeKey).filter(Boolean));
-    }, [items]);
-
-    useEffect(() => {
-        if (!quotas) return;
-
-        const quotaEntries: Array<{ key: string; title: string; description: string; percent: number }> = [];
-
-        if (!hasQuotaStatus(quotas.openrouter) && (quotas.openrouter.percentUsed || 0) >= 80) {
-            quotaEntries.push({
-                key: "openrouter",
-                title: "OpenRouter usage high",
-                description: `${quotas.openrouter.percentUsed}% used ($${quotas.openrouter.remaining.toFixed(2)} remaining)`,
-                percent: quotas.openrouter.percentUsed || 0,
-            });
-        }
-
-        if (!hasQuotaStatus(quotas.elevenlabs) && (quotas.elevenlabs.percentUsed || 0) >= 80) {
-            quotaEntries.push({
-                key: "elevenlabs",
-                title: "ElevenLabs usage high",
-                description: `${quotas.elevenlabs.percentUsed}% used (${quotas.elevenlabs.remaining.toLocaleString()} chars remaining)`,
-                percent: quotas.elevenlabs.percentUsed || 0,
-            });
-        }
-
-        if (!hasQuotaStatus(quotas.zai)) {
-            const highest = Math.max(quotas.zai.fiveHour.usedPercentage, quotas.zai.weekly.usedPercentage);
-            if (highest >= 80) {
-                quotaEntries.push({
-                    key: "zai",
-                    title: "Z.ai usage high",
-                    description: `5h ${quotas.zai.fiveHour.usedPercentage}% · weekly ${quotas.zai.weekly.usedPercentage}%`,
-                    percent: highest,
-                });
-            }
-        }
-
-        if (!hasQuotaStatus(quotas.openai) && (quotas.openai.percentUsed || 0) >= 80) {
-            quotaEntries.push({
-                key: "openai",
-                title: "OpenAI API usage high",
-                description: `${quotas.openai.percentUsed}% of hard limit used`,
-                percent: quotas.openai.percentUsed || 0,
-            });
-        }
-
-        for (const entry of quotaEntries) {
-            const severityBucket = entry.percent >= 95 ? "95" : entry.percent >= 90 ? "90" : "80";
-            const dedupeKey = `quota:${entry.key}:${severityBucket}`;
-
-            if (existingDedupeKeys.has(dedupeKey)) {
-                continue;
-            }
-
-            createNotification.mutate({
-                title: entry.title,
-                description: entry.description,
-                type: "warning",
-                source: "quota",
-                dedupeKey,
-                metadata: { provider: entry.key, percent: entry.percent },
-                occurredAt: new Date(quotas.checkedAt).toISOString(),
-            });
-        }
-    }, [createNotification, existingDedupeKeys, quotas]);
 
     const sortedItems = [...items].sort(
         (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()

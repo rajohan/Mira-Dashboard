@@ -19,6 +19,7 @@ import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
 import tasksRoutes from "./routes/tasks.js";
 import weatherRoutes from "./routes/weather.js";
+import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 dotenv.config();
 
@@ -83,4 +84,6 @@ server.listen(PORT, () => {
         console.error("[Backend] OPENCLAW_TOKEN required");
         throw new Error("OPENCLAW_TOKEN required");
     }
+
+    startQuotaNotificationMonitor();
 });

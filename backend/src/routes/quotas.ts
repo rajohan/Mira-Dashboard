@@ -36,7 +36,7 @@ interface OpenAiQuota {
     resetAt: string | null;
 }
 
-interface QuotasResponse {
+export interface QuotasResponse {
     openrouter: OpenRouterQuota | { status: "not_configured" | "error"; note?: string };
     elevenlabs: ElevenLabsQuota | { status: "not_configured" | "error"; note?: string };
     zai: ZaiQuota | { status: "not_configured" | "error"; note?: string };
@@ -222,7 +222,16 @@ async function checkOpenAi(): Promise<QuotasResponse["openai"]> {
     }
 }
 
-async function fetchQuotas(): Promise<QuotasResponse> {
+export function hasQuotaStatus(value: unknown): value is { status: "not_configured" | "error"; note?: string } {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "status" in value &&
+        (value.status === "not_configured" || value.status === "error")
+    );
+}
+
+export async function fetchQuotas(): Promise<QuotasResponse> {
     const [openrouter, elevenlabs, zai, openai] = await Promise.all([
         checkOpenRouter(),
         checkElevenLabs(),

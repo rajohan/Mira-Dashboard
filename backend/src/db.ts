@@ -55,4 +55,13 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_occurred_at ON notifications(occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+
+CREATE TABLE IF NOT EXISTS quota_alert_state (
+    provider TEXT NOT NULL,
+    bucket INTEGER NOT NULL,
+    is_armed INTEGER NOT NULL DEFAULT 1,
+    period_key TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, bucket)
+);
 `);
