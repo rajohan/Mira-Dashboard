@@ -21,9 +21,7 @@ import { sessionsCollection } from "../collections/sessions";
 import { ActiveSessionsCard, QuotaOverviewCard } from "../components/features/dashboard";
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
-import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { MetricCard } from "../components/ui/MetricCard";
-import { PageHeader } from "../components/ui/PageHeader";
 import { useHealth, useMetrics, useQuotas, useWeather } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
@@ -141,7 +139,7 @@ function WeatherTimeCard() {
 }
 
 export function Dashboard() {
-    const { isConnected, error } = useOpenClawSocket();
+    const { error } = useOpenClawSocket();
     const { data: health } = useHealth();
     const { data: metrics } = useMetrics(AUTO_REFRESH_MS);
     const { data: quotas } = useQuotas(AUTO_REFRESH_MS);
@@ -159,21 +157,12 @@ export function Dashboard() {
 
     return (
         <div className="space-y-6 p-6">
-            <PageHeader
-                title="Dashboard"
-                actions={
-                    <div className="flex items-center gap-2">
-                        <ConnectionStatus isConnected={isConnected} />
-                        {hasVersionMismatch && (
-                            <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
-                                Version mismatch (FE {frontendCommit} / BE {backendCommit})
-                            </span>
-                        )}
-                    </div>
-                }
-            />
-
             {error && <Alert variant="error">{error}</Alert>}
+            {hasVersionMismatch && (
+                <Alert variant="warning">
+                    Version mismatch (FE {frontendCommit} / BE {backendCommit})
+                </Alert>
+            )}
 
             <div className="max-w-sm">
                 <WeatherTimeCard />
