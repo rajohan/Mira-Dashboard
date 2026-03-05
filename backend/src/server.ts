@@ -18,7 +18,7 @@ import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
 import tasksRoutes from "./routes/tasks.js";
-import weatherRoutes from "./routes/weather.js";
+import weatherRoutes, { startWeatherMonitor } from "./routes/weather.js";
 import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 dotenv.config();
@@ -86,4 +86,5 @@ server.listen(PORT, () => {
     }
 
     startQuotaNotificationMonitor();
+    startWeatherMonitor();
 });
