@@ -52,6 +52,14 @@ function getWeatherIcon(description?: string) {
     return Cloud;
 }
 
+function formatTemp(value: number | null | undefined): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "--";
+    }
+
+    return Math.round(value).toString();
+}
+
 function WeatherTimeCard() {
     const [now, setNow] = useState(() => new Date());
     const { data: weather, isLoading, isError } = useWeather(AUTO_REFRESH_MS);
@@ -87,7 +95,7 @@ function WeatherTimeCard() {
                     <CurrentWeatherIcon className="h-7 w-7 text-amber-300" />
                     <div>
                         <div className="text-2xl font-semibold text-primary-50">
-                            {weather?.temperatureC ?? "--"}°C
+                            {formatTemp(weather?.temperatureC)}°C
                         </div>
                         <div className="text-xs text-primary-300">
                             {isLoading ? "Loading weather..." : weather?.description || "Unknown"}
@@ -98,7 +106,7 @@ function WeatherTimeCard() {
                 <div className="flex flex-wrap items-center gap-3 text-sm text-primary-200">
                     <span className="inline-flex items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
                         <Cloud className="h-4 w-4 text-primary-400" />
-                        Feels {weather?.feelsLikeC ?? "--"}°
+                        Feels {formatTemp(weather?.feelsLikeC)}°
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
                         <Droplets className="h-4 w-4 text-accent-300" />
@@ -129,7 +137,7 @@ function WeatherTimeCard() {
                         >
                             <span className="text-primary-400">{index === 0 ? "Today" : dayLabel}</span>
                             <ForecastIcon className="h-4 w-4 text-primary-300" />
-                            <span className="text-primary-100">{day.maxTempC ?? "--"}°/{day.minTempC ?? "--"}°</span>
+                            <span className="text-primary-100">{formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°</span>
                         </div>
                     );
                 })}
