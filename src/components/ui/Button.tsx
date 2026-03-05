@@ -17,13 +17,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                     "inline-flex items-center justify-center rounded-lg font-medium transition-colors",
                     "outline-none",
                     {
-                        "data-hover:bg-accent-600 data-active:bg-accent-700 bg-accent-500 text-white":
+                        "bg-accent-500 text-white hover:bg-accent-600 active:bg-accent-700 data-[hover]:bg-accent-600 data-[active]:bg-accent-700":
                             variant === "primary",
-                        "data-hover:bg-primary-600 data-active:bg-primary-500 bg-primary-700 text-primary-100":
+                        "bg-primary-700 text-primary-100 hover:bg-primary-600 active:bg-primary-500 data-[hover]:bg-primary-600 data-[active]:bg-primary-500":
                             variant === "secondary",
-                        "data-hover:bg-red-600 data-active:bg-red-700 bg-red-500 text-white":
+                        "bg-red-500 text-white hover:bg-red-600 active:bg-red-700 data-[hover]:bg-red-600 data-[active]:bg-red-700":
                             variant === "danger",
-                        "data-hover:bg-primary-700 data-active:bg-primary-600 bg-transparent text-primary-300":
+                        "bg-transparent text-primary-300 hover:bg-primary-700 active:bg-primary-600 data-[hover]:bg-primary-700 data-[active]:bg-primary-600":
                             variant === "ghost",
                     },
                     {
@@ -31,7 +31,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                         "px-4 py-2 text-sm": size === "md",
                         "px-6 py-3 text-base": size === "lg",
                     },
-                    "data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                    "disabled:cursor-not-allowed disabled:opacity-50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
                     className
                 )}
                 {...props}

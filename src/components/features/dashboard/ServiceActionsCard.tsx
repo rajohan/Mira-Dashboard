@@ -12,6 +12,7 @@ export function ServiceActionsCard() {
     const runAction = useRunOpsAction();
     const { data: versionInfo } = useOpenClawVersion();
     const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
+    const [runningActionId, setRunningActionId] = useState<string | null>(null);
     const [result, setResult] = useState<{
         action: string;
         response: ExecResponse;
@@ -23,13 +24,20 @@ export function ServiceActionsCard() {
             return;
         }
 
-        const response = await runAction.mutateAsync(pendingAction);
-        setResult({
-            action: pendingAction.label,
-            response,
-            ranAt: Date.now(),
-        });
+        const actionToRun = pendingAction;
         setPendingAction(null);
+        setRunningActionId(actionToRun.id);
+
+        try {
+            const response = await runAction.mutateAsync(actionToRun);
+            setResult({
+                action: actionToRun.label,
+                response,
+                ranAt: Date.now(),
+            });
+        } finally {
+            setRunningActionId(null);
+        }
     }
 
     const logs = result
@@ -76,7 +84,7 @@ export function ServiceActionsCard() {
                                             {action.danger ? <Badge variant="error">Sensitive</Badge> : null}
                                         </div>
                                         <div className="text-xs text-primary-400">{action.description}</div>
-                                        {runAction.isPending && pendingAction?.id === action.id ? (
+                                        {runAction.isPending && runningActionId === action.id ? (
                                             <div className="mt-2 inline-flex items-center gap-1 text-xs text-primary-300">
                                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                 Running...
