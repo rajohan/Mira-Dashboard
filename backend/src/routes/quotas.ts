@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import express, { type RequestHandler } from "express";
 
 interface OpenRouterQuota {
@@ -47,6 +48,35 @@ export interface QuotasResponse {
 
 const CACHE_TTL_MS = 60_000;
 let cache: { value: QuotasResponse; fetchedAt: number } | null = null;
+const secretCache = new Map<string, string | null>();
+
+function readSecretFromDoppler(name: string): string | null {
+    if (secretCache.has(name)) {
+        return secretCache.get(name) ?? null;
+    }
+
+    try {
+        const value = execSync(`/usr/local/bin/doppler secrets get ${name} --plain`, {
+            stdio: ["ignore", "pipe", "ignore"],
+            encoding: "utf8",
+        }).trim();
+        const result = value || null;
+        secretCache.set(name, result);
+        return result;
+    } catch {
+        secretCache.set(name, null);
+        return null;
+    }
+}
+
+function getSecret(name: string): string | null {
+    const value = process.env[name];
+    if (value && value.trim()) {
+        return value;
+    }
+
+    return readSecretFromDoppler(name);
+}
 
 function toNumber(value: unknown, fallback = 0): number {
     const parsed = Number(value);
@@ -68,7 +98,7 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
 }
 
 async function checkOpenRouter(): Promise<QuotasResponse["openrouter"]> {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = getSecret("OPENROUTER_API_KEY");
     if (!apiKey) return { status: "not_configured" };
 
     try {
@@ -100,7 +130,7 @@ async function checkOpenRouter(): Promise<QuotasResponse["openrouter"]> {
 }
 
 async function checkElevenLabs(): Promise<QuotasResponse["elevenlabs"]> {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey = getSecret("ELEVENLABS_API_KEY");
     if (!apiKey) return { status: "not_configured" };
 
     try {
@@ -128,7 +158,7 @@ async function checkElevenLabs(): Promise<QuotasResponse["elevenlabs"]> {
 }
 
 async function checkZai(): Promise<QuotasResponse["zai"]> {
-    const apiKey = process.env.ZAI_API_KEY;
+    const apiKey = getSecret("ZAI_API_KEY");
     if (!apiKey) return { status: "not_configured" };
 
     try {
@@ -171,7 +201,7 @@ async function checkZai(): Promise<QuotasResponse["zai"]> {
 }
 
 async function checkOpenAi(): Promise<QuotasResponse["openai"]> {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = getSecret("OPENAI_API_KEY");
     if (!apiKey) return { status: "not_configured" };
 
     try {
