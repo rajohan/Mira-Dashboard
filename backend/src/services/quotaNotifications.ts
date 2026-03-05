@@ -4,7 +4,7 @@ import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "openai";
 
-const DEFAULT_THRESHOLDS = [80, 90, 95] as const;
+const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -26,44 +26,40 @@ function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<ty
     return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;
 }
 
-function getNotificationPayload(provider: ProviderKey, quotas: Awaited<ReturnType<typeof fetchQuotas>>) {
+function getNotificationPayload(
+    provider: ProviderKey,
+    bucket: number,
+    quotas: Awaited<ReturnType<typeof fetchQuotas>>
+) {
     if (provider === "openrouter" && !hasQuotaStatus(quotas.openrouter)) {
         return {
-            title: "OpenRouter usage high",
+            title: `OpenRouter usage high (${bucket}%)`,
             description: `${quotas.openrouter.percentUsed}% used ($${quotas.openrouter.remaining.toFixed(2)} remaining)`,
         };
     }
 
     if (provider === "elevenlabs" && !hasQuotaStatus(quotas.elevenlabs)) {
         return {
-            title: "ElevenLabs usage high",
+            title: `ElevenLabs usage high (${bucket}%)`,
             description: `${quotas.elevenlabs.percentUsed}% used (${quotas.elevenlabs.remaining.toLocaleString()} chars remaining)`,
         };
     }
 
     if (provider === "zai" && !hasQuotaStatus(quotas.zai)) {
         return {
-            title: "Z.ai usage high",
+            title: `Z.ai usage high (${bucket}%)`,
             description: `5h ${quotas.zai.fiveHour.usedPercentage}% · weekly ${quotas.zai.weekly.usedPercentage}%`,
         };
     }
 
     if (provider === "openai" && !hasQuotaStatus(quotas.openai)) {
         return {
-            title: "OpenAI API usage high",
+            title: `OpenAI API usage high (${bucket}%)`,
             description: `${quotas.openai.percentUsed}% of hard limit used`,
         };
     }
 
     return null;
-}
-
-function getThresholds(provider: ProviderKey): readonly number[] {
-    if (provider === "openrouter") {
-        return [90];
-    }
-
-    return DEFAULT_THRESHOLDS;
 }
 
 function ensureStateRow(provider: ProviderKey, bucket: number): void {
@@ -146,12 +142,12 @@ export async function runQuotaNotificationCheck(): Promise<void> {
                 continue;
             }
 
-            const payload = getNotificationPayload(provider, quotas);
-            if (!payload) {
-                continue;
-            }
+            for (const bucket of THRESHOLDS) {
+                const payload = getNotificationPayload(provider, bucket, quotas);
+                if (!payload) {
+                    continue;
+                }
 
-            for (const bucket of getThresholds(provider)) {
                 ensureStateRow(provider, bucket);
                 const state = getState(provider, bucket);
 
