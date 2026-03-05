@@ -6,8 +6,8 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
-        "start": "node dist/server.js",
-        "dev": "tsx watch src/server.ts",
+        "start": "doppler run --config prd --project openclaw -- node dist/server.js",
+        "dev": "doppler run --config prd --project openclaw -- tsx watch src/server.ts",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
