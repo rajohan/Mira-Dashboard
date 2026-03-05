@@ -20,6 +20,10 @@ function getRoleVariant(role: string) {
             return "success" as const;
         case "system":
             return "warning" as const;
+        case "tool":
+        case "tool_result":
+        case "toolresult":
+            return "hook" as const;
         default:
             return "default" as const;
     }

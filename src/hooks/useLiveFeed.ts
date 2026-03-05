@@ -46,13 +46,19 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
                             ? new Date(message.timestamp).getTime()
                             : fallbackTimestamp;
 
+                        const rawRole = (message.role || "unknown").toLowerCase();
+                        const normalizedRole =
+                            rawRole === "toolresult" || rawRole === "tool-result"
+                                ? "tool_result"
+                                : rawRole;
+
                         return {
                             id: `${session.key}-${index}-${parsedTimestamp}`,
                             sessionKey: session.key,
                             sessionLabel:
                                 session.displayLabel || session.displayName || session.key,
                             sessionType: (session.type || "unknown").toUpperCase(),
-                            role: (message.role || "unknown").toLowerCase(),
+                            role: normalizedRole,
                             content: (message.content || "").trim(),
                             timestamp: Number.isFinite(parsedTimestamp)
                                 ? parsedTimestamp

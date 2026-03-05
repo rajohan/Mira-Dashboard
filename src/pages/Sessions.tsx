@@ -81,6 +81,8 @@ export function Sessions() {
         { value: "assistant", label: "assistant" },
         { value: "user", label: "user" },
         { value: "system", label: "system" },
+        { value: "tool", label: "tool" },
+        { value: "tool_result", label: "tool_result" },
     ];
 
     const feedTypeOptions = [
