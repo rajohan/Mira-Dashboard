@@ -46,7 +46,7 @@ export interface QuotasResponse {
     cacheAgeMs: number;
 }
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 30 * 60 * 1000;
 let cache: { value: QuotasResponse; fetchedAt: number } | null = null;
 const secretCache = new Map<string, string | null>();
 
