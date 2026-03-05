@@ -2,6 +2,7 @@ import { Bell, BellRing } from "lucide-react";
 import { useState } from "react";
 
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "../../hooks";
+import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
@@ -13,7 +14,7 @@ interface NotificationBellProps {
 type NotificationFilter = "all" | "unread" | "warning";
 
 export function NotificationBell({ isConnected: _isConnected }: NotificationBellProps) {
-    const { data: notifications } = useNotifications(false);
+    const { data: notifications } = useNotifications(AUTO_REFRESH_MS);
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const [filter, setFilter] = useState<NotificationFilter>("all");
