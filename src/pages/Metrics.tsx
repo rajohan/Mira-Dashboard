@@ -4,7 +4,6 @@ import {
     TokenUsageCard,
 } from "../components/features/metrics";
 import { LoadingState } from "../components/ui/LoadingState";
-import { PageHeader } from "../components/ui/PageHeader";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { useMetrics } from "../hooks";
@@ -32,16 +31,13 @@ export function Metrics() {
             empty={null}
         >
             <div className="space-y-6 p-6">
-                <PageHeader
-                    title="Metrics"
-                    actions={
-                        <RefreshButton
-                            onClick={() => void refetch()}
-                            label=""
-                            variant="secondary"
-                        />
-                    }
-                />
+                <div className="flex items-center justify-end">
+                    <RefreshButton
+                        onClick={() => void refetch()}
+                        label=""
+                        variant="secondary"
+                    />
+                </div>
 
                 {metrics && <SystemStatsGrid metrics={metrics} />}
 

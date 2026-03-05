@@ -20,7 +20,6 @@ import { Button } from "../components/ui/Button";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
-import { PageHeader } from "../components/ui/PageHeader";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { SearchInput } from "../components/ui/SearchInput";
@@ -272,27 +271,22 @@ export function Tasks() {
                 onDragEnd={handleDragEnd}
             >
                 <div className="flex h-full flex-col p-6">
-                    <PageHeader
-                        title="Tasks"
-                        actions={
-                            <>
-                                <Button
-                                    variant="primary"
-                                    size="sm"
-                                    onClick={() => setIsNewTaskOpen(true)}
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    New Task
-                                </Button>
-                                <RefreshButton
-                                    onClick={() => void refetch()}
-                                    isLoading={isLoading}
-                                    label=""
-                                    variant="secondary"
-                                />
-                            </>
-                        }
-                    />
+                    <div className="mb-6 flex items-center justify-end gap-2">
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => setIsNewTaskOpen(true)}
+                        >
+                            <Plus className="h-4 w-4" />
+                            New Task
+                        </Button>
+                        <RefreshButton
+                            onClick={() => void refetch()}
+                            isLoading={isLoading}
+                            label=""
+                            variant="secondary"
+                        />
+                    </div>
 
                     <div className="mb-4 flex items-center gap-4">
                         <SearchInput

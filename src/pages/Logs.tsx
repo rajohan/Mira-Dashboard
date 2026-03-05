@@ -8,9 +8,7 @@ import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
-import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { Input } from "../components/ui/Input";
-import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
@@ -195,10 +193,6 @@ export function Logs() {
 
     return (
         <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
-            <PageHeader
-                title="Logs"
-                status={<ConnectionStatus isConnected={isConnected} />}
-            />
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
                 <Select

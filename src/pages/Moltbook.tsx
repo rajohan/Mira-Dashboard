@@ -12,7 +12,6 @@ import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
-import { PageHeader } from "../components/ui/PageHeader";
 import { useMoltbookData } from "../hooks";
 import { getMoltbookUrl } from "../utils/moltbookUtils";
 
@@ -56,25 +55,20 @@ export function Moltbook() {
 
     return (
         <div className="space-y-6 p-6">
-            <PageHeader
-                title="Moltbook"
-                actions={
-                    <>
-                        <a
-                            href={getMoltbookUrl("/u/mira_2026")}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300"
-                        >
-                            View Profile
-                            <ExternalLink className="h-3 w-3" />
-                        </a>
-                        <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                            <RefreshCw className="h-4 w-4" />
-                        </Button>
-                    </>
-                }
-            />
+            <div className="flex items-center justify-end gap-3">
+                <a
+                    href={getMoltbookUrl("/u/mira_2026")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300"
+                >
+                    View Profile
+                    <ExternalLink className="h-3 w-3" />
+                </a>
+                <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                    <RefreshCw className="h-4 w-4" />
+                </Button>
+            </div>
 
             {/* Profile Stats Card */}
             {profile && (

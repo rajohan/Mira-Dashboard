@@ -3,7 +3,6 @@ import { X } from "lucide-react";
 import { FileEditorPanel, FilesSidebar } from "../components/features/files";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
-import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { getSyntaxClass } from "../utils/fileUtils";
@@ -43,16 +42,13 @@ export function Files() {
 
     return (
         <div className="flex h-full flex-col p-6">
-            <PageHeader
-                title="Files"
-                actions={
-                    <RefreshButton
-                        onClick={handleRefresh}
-                        isLoading={isLoading}
-                        disabled={isLoading}
-                    />
-                }
-            />
+            <div className="mb-6 flex items-center justify-end">
+                <RefreshButton
+                    onClick={handleRefresh}
+                    isLoading={isLoading}
+                    disabled={isLoading}
+                />
+            </div>
 
             {error && (
                 <Alert variant="error">

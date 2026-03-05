@@ -13,9 +13,7 @@ import {
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
-import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
-import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { type FeedItem, useLiveFeed } from "../hooks";
@@ -166,17 +164,13 @@ export function Sessions() {
 
     return (
         <div className="p-6">
-            <PageHeader
-                title="Agents"
-                actions={
-                    <RefreshButton
-                        onClick={handleRefresh}
-                        isLoading={isLoading}
-                        disabled={!isConnected}
-                    />
-                }
-                status={<ConnectionStatus isConnected={isConnected} />}
-            />
+            <div className="mb-6 flex justify-end">
+                <RefreshButton
+                    onClick={handleRefresh}
+                    isLoading={isLoading}
+                    disabled={!isConnected}
+                />
+            </div>
 
             <Card className="mb-4">
                 <div className="mb-3 flex items-center justify-between">

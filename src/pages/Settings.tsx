@@ -14,7 +14,6 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Modal } from "../components/ui/Modal";
-import { PageHeader } from "../components/ui/PageHeader";
 import {
     useConfig,
     useCreateBackup,
@@ -144,37 +143,34 @@ export function Settings() {
 
     return (
         <div className="p-6">
-            <PageHeader
-                title="Settings"
-                actions={
-                    <div className="flex gap-2">
-                        <Button
-                            variant="secondary"
-                            onClick={handleBackup}
-                            disabled={createBackup.isPending}
-                        >
-                            {createBackup.isPending ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Backing up...
-                                </>
-                            ) : (
-                                <>
-                                    <Download className="h-4 w-4" />
-                                    Backup
-                                </>
-                            )}
-                        </Button>
-                        <Button
-                            variant="danger"
-                            onClick={() => setShowRestartModal(true)}
-                        >
-                            <RefreshCw className="h-4 w-4" />
-                            Restart
-                        </Button>
-                    </div>
-                }
-            />
+            <div className="mb-6 flex justify-end">
+                <div className="flex gap-2">
+                    <Button
+                        variant="secondary"
+                        onClick={handleBackup}
+                        disabled={createBackup.isPending}
+                    >
+                        {createBackup.isPending ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Backing up...
+                            </>
+                        ) : (
+                            <>
+                                <Download className="h-4 w-4" />
+                                Backup
+                            </>
+                        )}
+                    </Button>
+                    <Button
+                        variant="danger"
+                        onClick={() => setShowRestartModal(true)}
+                    >
+                        <RefreshCw className="h-4 w-4" />
+                        Restart
+                    </Button>
+                </div>
+            </div>
 
             {error && (
                 <Alert variant="error">
