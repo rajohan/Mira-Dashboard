@@ -1,6 +1,7 @@
 import { writeAgentsFromWebSocket } from "../../collections/agents";
 import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
+import { queryClient } from "../queryClient";
 import type { AgentInfo, Session } from "../../types/session";
 import type { SocketEnvelope } from "../../types/socket";
 import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
@@ -70,6 +71,10 @@ export function handleSocketMessage(raw: unknown): boolean | null {
 
     if (data.type === "log" && data.line) {
         writeLogFromWebSocket(data.line);
+    }
+
+    if (data.type === "event" && data.event === "notifications.updated") {
+        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
     }
 
     if (data.type === "res") {

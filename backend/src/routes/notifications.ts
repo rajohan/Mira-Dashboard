@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
+import { emitNotificationsUpdated } from "../lib/notificationEvents.js";
 
 type NotificationType = "info" | "warning" | "error" | "success";
 
@@ -122,6 +123,7 @@ export default function notificationsRoutes(app: express.Application): void {
             occurredAt
         );
 
+        emitNotificationsUpdated("created");
         res.json({ ok: true, id: result.lastInsertRowid ?? null });
     }) as RequestHandler);
 
@@ -129,6 +131,7 @@ export default function notificationsRoutes(app: express.Application): void {
         db.prepare("UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0").run(
             new Date().toISOString()
         );
+        emitNotificationsUpdated("read_all");
         res.json({ ok: true });
     }) as RequestHandler);
 
@@ -144,6 +147,7 @@ export default function notificationsRoutes(app: express.Application): void {
             id
         );
 
+        emitNotificationsUpdated("read");
         res.json({ ok: true });
     }) as RequestHandler);
 }

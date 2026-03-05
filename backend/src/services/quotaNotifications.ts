@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { emitNotificationsUpdated } from "../lib/notificationEvents.js";
 import { fetchQuotas, hasQuotaStatus } from "../routes/quotas.js";
 
 type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "openai";
@@ -113,6 +114,8 @@ function insertNotification(
         now,
         occurredAt
     );
+
+    emitNotificationsUpdated("created");
 }
 
 let running = false;

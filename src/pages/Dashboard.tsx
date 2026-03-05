@@ -26,6 +26,7 @@ import { MetricCard } from "../components/ui/MetricCard";
 import { PageHeader } from "../components/ui/PageHeader";
 import { useMetrics, useQuotas, useWeather } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import {
     formatLoad,
     formatOsloDate,
@@ -55,7 +56,7 @@ function getWeatherIcon(description?: string) {
 
 function WeatherTimeCard() {
     const [now, setNow] = useState(() => new Date());
-    const { data: weather, isLoading, isError } = useWeather(false);
+    const { data: weather, isLoading, isError } = useWeather(AUTO_REFRESH_MS);
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -141,8 +142,8 @@ function WeatherTimeCard() {
 
 export function Dashboard() {
     const { isConnected, error } = useOpenClawSocket();
-    const { data: metrics } = useMetrics(false);
-    const { data: quotas } = useQuotas(false);
+    const { data: metrics } = useMetrics(AUTO_REFRESH_MS);
+    const { data: quotas } = useQuotas(AUTO_REFRESH_MS);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })

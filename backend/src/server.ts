@@ -5,6 +5,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
+import { setNotificationSocketServer } from "./lib/notificationEvents.js";
+
 import gateway from "./gateway.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
@@ -29,6 +31,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+setNotificationSocketServer(wss);
 
 const frontendPath = path.join(__dirname, "..", "..", "dist");
 
