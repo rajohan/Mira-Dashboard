@@ -9,7 +9,7 @@ const sizeClasses = {
     sm: "h-32",
     md: "h-48",
     lg: "h-64",
-    fullscreen: "h-[calc(100vh-4rem)]",
+    fullscreen: "h-full min-h-0",
 };
 
 const iconSizes = {
