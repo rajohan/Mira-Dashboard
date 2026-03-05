@@ -4,7 +4,7 @@ import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "openai";
 
-const THRESHOLDS = [80, 90, 95] as const;
+const DEFAULT_THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -58,6 +58,14 @@ function getNotificationPayload(provider: ProviderKey, quotas: Awaited<ReturnTyp
     return null;
 }
 
+function getThresholds(provider: ProviderKey): readonly number[] {
+    if (provider === "openrouter") {
+        return [90];
+    }
+
+    return DEFAULT_THRESHOLDS;
+}
+
 function ensureStateRow(provider: ProviderKey, bucket: number): void {
     db.prepare(
         `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
@@ -93,7 +101,7 @@ function insertNotification(
     description: string
 ): void {
     const now = new Date().toISOString();
-    const dedupeKey = `quota:${provider}`;
+    const dedupeKey = `quota:${provider}:${bucket}`;
 
     db.prepare(
         `INSERT INTO notifications (
@@ -143,7 +151,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
                 continue;
             }
 
-            for (const bucket of THRESHOLDS) {
+            for (const bucket of getThresholds(provider)) {
                 ensureStateRow(provider, bucket);
                 const state = getState(provider, bucket);
 
