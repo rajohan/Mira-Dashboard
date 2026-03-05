@@ -1,9 +1,10 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { WifiOff } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
+    LiveFeedRow,
     SESSION_TYPES,
     SessionDetails,
     SessionsTable,
@@ -21,54 +22,7 @@ import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
-import { formatOsloTime } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
-
-function roleBadgeColor(role: string) {
-    switch (role.toLowerCase()) {
-        case "user":
-            return "text-blue-300 border-blue-500/30 bg-blue-500/10";
-        case "assistant":
-            return "text-emerald-300 border-emerald-500/30 bg-emerald-500/10";
-        case "system":
-            return "text-amber-300 border-amber-500/30 bg-amber-500/10";
-        default:
-            return "text-primary-300 border-primary-600 bg-primary-800/40";
-    }
-}
-
-const FeedRow = memo(function FeedRow({
-    item,
-}: {
-    item: {
-        id: string;
-        sessionLabel: string;
-        sessionType: string;
-        role: string;
-        content: string;
-        timestamp: number;
-    };
-}) {
-    return (
-        <div className="rounded-lg border border-primary-700 bg-primary-800/40 p-3">
-            <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <span className="truncate text-primary-300">{item.sessionLabel}</span>
-                <span className="text-primary-500">{formatOsloTime(new Date(item.timestamp))}</span>
-            </div>
-            <div className="mb-2 flex items-center gap-2">
-                <span
-                    className={`inline-flex rounded border px-2 py-0.5 text-[11px] font-medium ${roleBadgeColor(item.role)}`}
-                >
-                    {item.role}
-                </span>
-                <span className="inline-flex rounded border border-primary-700 px-2 py-0.5 text-[11px] text-primary-300">
-                    {item.sessionType || "unknown"}
-                </span>
-            </div>
-            <p className="line-clamp-3 text-sm text-primary-100">{item.content}</p>
-        </div>
-    );
-});
 
 export function Sessions() {
     const { isConnected, error, request } = useOpenClawSocket();
@@ -214,7 +168,7 @@ export function Sessions() {
                 ) : (
                     <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                         {filteredFeed.map((item) => (
-                            <FeedRow key={item.id} item={item} />
+                            <LiveFeedRow key={item.id} item={item} />
                         ))}
                     </div>
                 )}

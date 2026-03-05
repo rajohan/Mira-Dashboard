@@ -8,3 +8,4 @@ export { SessionActionsDropdown } from "./SessionActionsDropdown";
 export { SessionDetails } from "./SessionDetails";
 export { SessionsTable } from "./SessionsTable";
 export { SessionStatsBar } from "./SessionStatsBar";
+export { LiveFeedRow } from "./LiveFeedRow";
