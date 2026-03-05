@@ -15,6 +15,7 @@ interface ElevenLabsQuota {
     remaining: number;
     tier: string;
     percentUsed: number | null;
+    resetAt: string | null;
 }
 
 interface ZaiQuota {
@@ -136,7 +137,13 @@ async function checkElevenLabs(): Promise<QuotasResponse["elevenlabs"]> {
         const data = (await fetchJson("https://api.elevenlabs.io/v1/user", {
             "xi-api-key": apiKey,
         })) as {
-            subscription?: { character_count?: number; character_limit?: number; tier?: string };
+            subscription?: {
+                character_count?: number;
+                character_limit?: number;
+                tier?: string;
+                next_character_count_reset_unix?: number;
+                next_character_count_reset_unix_ms?: number;
+            };
         };
 
         const used = toNumber(data.subscription?.character_count);
@@ -144,12 +151,21 @@ async function checkElevenLabs(): Promise<QuotasResponse["elevenlabs"]> {
         const remaining = Math.max(total - used, 0);
         const percentUsed = total > 0 ? Math.round((used / total) * 100) : null;
 
+        const resetMsCandidate = Number(data.subscription?.next_character_count_reset_unix_ms);
+        const resetSecCandidate = Number(data.subscription?.next_character_count_reset_unix);
+        const resetAt = Number.isFinite(resetMsCandidate)
+            ? new Date(resetMsCandidate).toISOString()
+            : Number.isFinite(resetSecCandidate)
+              ? new Date(resetSecCandidate * 1000).toISOString()
+              : null;
+
         return {
             used,
             total,
             remaining,
             tier: data.subscription?.tier || "unknown",
             percentUsed,
+            resetAt,
         };
     } catch (error) {
         return { status: "error", note: (error as Error).message };

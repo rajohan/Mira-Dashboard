@@ -23,6 +23,7 @@ export interface ElevenLabsQuota {
     remaining: number;
     tier: string;
     percentUsed: number | null;
+    resetAt: string | null;
 }
 
 export interface ZaiQuota {
