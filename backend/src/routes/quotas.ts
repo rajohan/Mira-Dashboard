@@ -46,7 +46,7 @@ export interface QuotasResponse {
     cacheAgeMs: number;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000;
+const CACHE_TTL_MS = 60_000;
 let cache: { value: QuotasResponse; fetchedAt: number } | null = null;
 const secretCache = new Map<string, string | null>();
 
@@ -61,10 +61,11 @@ function readSecretFromDoppler(name: string): string | null {
             encoding: "utf8",
         }).trim();
         const result = value || null;
-        secretCache.set(name, result);
+        if (result) {
+            secretCache.set(name, result);
+        }
         return result;
     } catch {
-        secretCache.set(name, null);
         return null;
     }
 }
