@@ -21,7 +21,7 @@ export function LevelFilter({ levels, activeLevels, onToggle }: LevelFilterProps
                         "rounded px-2 py-0.5 text-xs",
                         activeLevels.has(level)
                             ? getLevelColor(level)
-                            : "bg-slate-700 text-slate-500"
+                            : "bg-primary-700 text-primary-500"
                     )}
                 >
                     {level}

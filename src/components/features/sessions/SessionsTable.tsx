@@ -59,7 +59,7 @@ export function SessionsTable({
                 id: "name",
                 header: "Name",
                 cell: (info) => (
-                    <span className="block max-w-xs truncate text-sm text-slate-200">
+                    <span className="block max-w-xs truncate text-sm text-primary-200">
                         {info.getValue()?.slice(0, 40) || "unknown"}
                     </span>
                 ),
@@ -68,7 +68,7 @@ export function SessionsTable({
         columnHelper.accessor("model", {
             header: "Model",
             cell: (info) => (
-                <span className="text-sm text-slate-300">
+                <span className="text-sm text-primary-300">
                     {info.getValue() || "Unknown"}
                 </span>
             ),
@@ -81,7 +81,7 @@ export function SessionsTable({
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-300">
+                        <span className="text-sm text-primary-300">
                             {formatTokens(current, max)}
                         </span>
                         <ProgressBar percent={percent} size="sm" className="w-16" />
@@ -92,7 +92,7 @@ export function SessionsTable({
         columnHelper.accessor("updatedAt", {
             header: "Last Active",
             cell: (info) => (
-                <span className="text-sm text-slate-400">
+                <span className="text-sm text-primary-400">
                     {formatDuration(info.getValue())}
                 </span>
             ),
@@ -126,7 +126,7 @@ export function SessionsTable({
     if (sessions.length === 0) {
         return (
             <Card className="py-8 text-center">
-                <p className="text-slate-400">No sessions found</p>
+                <p className="text-primary-400">No sessions found</p>
             </Card>
         );
     }
@@ -134,16 +134,16 @@ export function SessionsTable({
     return (
         <Card>
             <table className="w-full">
-                <thead className="bg-slate-800/50">
+                <thead className="bg-primary-800/50">
                     {table.getHeaderGroups().map((headerGroup) => (
                         <tr key={headerGroup.id}>
                             {headerGroup.headers.map((header) => (
                                 <th
                                     key={header.id}
                                     className={
-                                        "px-4 py-3 text-xs font-medium uppercase text-slate-400 " +
+                                        "px-4 py-3 text-xs font-medium uppercase text-primary-400 " +
                                         (header.column.getCanSort()
-                                            ? "cursor-pointer select-none hover:text-slate-200"
+                                            ? "cursor-pointer select-none hover:text-primary-200"
                                             : "") +
                                         (header.id === "actions"
                                             ? " text-right"
@@ -157,7 +157,7 @@ export function SessionsTable({
                                             header.getContext()
                                         )}
                                         {header.column.getCanSort() && (
-                                            <span className="text-slate-500">
+                                            <span className="text-primary-500">
                                                 {header.column.getIsSorted() === "asc" ? (
                                                     <ChevronDown className="h-3 w-3" />
                                                 ) : header.column.getIsSorted() ===
@@ -176,7 +176,7 @@ export function SessionsTable({
                     {table.getRowModel().rows.map((row) => (
                         <tr
                             key={row.id}
-                            className="cursor-pointer border-b border-slate-700/50 hover:bg-slate-700/30"
+                            className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
                             onClick={() => onSelectSession(row.original)}
                         >
                             {row.getVisibleCells().map((cell) => (

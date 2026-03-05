@@ -17,6 +17,7 @@ export {
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
+export { useWeather } from "./useWeather";
 export {
     moltbookKeys,
     useMoltbookData,

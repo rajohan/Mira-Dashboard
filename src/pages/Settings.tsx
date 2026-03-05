@@ -234,20 +234,20 @@ export function Settings() {
             <SkillsSection skills={skills as Skill[]} onToggle={handleSkillToggle} />
 
             {/* Server Info */}
-            <div className="mb-4 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+            <div className="mb-4 rounded-lg border border-primary-700 bg-primary-800/50 p-4">
                 <div className="mb-2 flex items-center gap-2">
                     <Server className="h-4 w-4 text-accent-400" />
-                    <h3 className="text-sm font-medium text-slate-200">Server</h3>
+                    <h3 className="text-sm font-medium text-primary-200">Server</h3>
                 </div>
                 <div className="space-y-2">
                     <div className="flex items-center justify-between py-1">
-                        <span className="text-sm text-slate-400">Version</span>
+                        <span className="text-sm text-primary-400">Version</span>
                         <span className="font-mono text-sm text-primary-100">
                             2026.2.23
                         </span>
                     </div>
                     <div className="flex items-center justify-between py-1">
-                        <span className="text-sm text-slate-400">Platform</span>
+                        <span className="text-sm text-primary-400">Platform</span>
                         <span className="font-mono text-sm text-primary-100">
                             {typeof window === "undefined"
                                 ? "Unknown"
@@ -265,7 +265,7 @@ export function Settings() {
                 size="sm"
             >
                 <div className="space-y-4">
-                    <p className="text-sm text-slate-300">
+                    <p className="text-sm text-primary-300">
                         Are you sure you want to restart the gateway? This will
                         temporarily disconnect all sessions.
                     </p>

@@ -2,21 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom scrollbar for dark mode */
+:root {
+    color-scheme: dark;
+}
+
+body {
+    background: #0b0b0c;
+    color: #e7e9ee;
+}
+
+/* Custom scrollbar for dark neutral theme */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #1e293b;
+    background: #121316;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #475569;
+    background: #2a2d33;
     border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #64748b;
+    background: #4a505a;
 }

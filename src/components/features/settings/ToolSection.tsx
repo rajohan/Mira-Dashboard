@@ -19,9 +19,9 @@ export function ToolSection({
         <ExpandableCard title="Tools" icon={Wrench}>
             <div className="space-y-2">
                 <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-400">Web Search</span>
+                    <span className="text-sm text-primary-400">Web Search</span>
                     <span
-                        className={webSearchEnabled ? "text-green-400" : "text-slate-500"}
+                        className={webSearchEnabled ? "text-green-400" : "text-primary-500"}
                     >
                         {webSearchEnabled
                             ? "Enabled (" + webSearchProvider + ")"
@@ -29,8 +29,8 @@ export function ToolSection({
                     </span>
                 </div>
                 <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-400">Exec</span>
-                    <span className={execEnabled ? "text-green-400" : "text-slate-500"}>
+                    <span className="text-sm text-primary-400">Exec</span>
+                    <span className={execEnabled ? "text-green-400" : "text-primary-500"}>
                         {execEnabled ? "Enabled (" + execMode + ")" : "Disabled"}
                     </span>
                 </div>

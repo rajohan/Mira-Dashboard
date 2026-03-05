@@ -49,7 +49,7 @@ export function Switch({
                 )}
             >
                 <span className="sr-only">{label}</span>
-                <span className="group-data-checked:translate-x-6 size-4 translate-x-1 rounded-full bg-white transition" />
+                <span className="group-data-checked:tranprimary-x-6 size-4 tranprimary-x-1 rounded-full bg-white transition" />
             </HeadlessSwitch>
         </Field>
     );

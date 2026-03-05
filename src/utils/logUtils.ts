@@ -1,7 +1,5 @@
-import { format } from "date-fns";
-import { enUS } from "date-fns/locale";
-
 import type { LogEntry } from "../types/log";
+import { formatOsloTime } from "./format";
 
 export const LINE_OPTIONS = [100, 500, 1000, 2000, 5000] as const;
 
@@ -83,7 +81,7 @@ export function parseLogLine(line: string): LogEntry | null {
 export function formatLogTime(ts?: string): string {
     if (!ts) return "";
     try {
-        return format(new Date(ts), "HH:mm:ss", { locale: enUS });
+        return formatOsloTime(new Date(ts));
     } catch {
         return ts;
     }
@@ -105,13 +103,13 @@ export function getLevelColor(level?: string): string {
             return "text-blue-400 bg-blue-500/20";
         }
         case "debug": {
-            return "text-slate-400 bg-slate-500/20";
+            return "text-primary-400 bg-primary-500/20";
         }
         case "trace": {
-            return "text-slate-500 bg-slate-500/10";
+            return "text-primary-500 bg-primary-500/10";
         }
         default: {
-            return "text-slate-400 bg-slate-500/20";
+            return "text-primary-400 bg-primary-500/20";
         }
     }
 }

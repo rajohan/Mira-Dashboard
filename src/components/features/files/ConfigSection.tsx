@@ -26,9 +26,9 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 onClick={() => setConfigDirExpanded(!configDirExpanded)}
             >
                 {configDirExpanded ? (
-                    <ChevronDown size={14} className="text-slate-400" />
+                    <ChevronDown size={14} className="text-primary-400" />
                 ) : (
-                    <ChevronRight size={14} className="text-slate-400" />
+                    <ChevronRight size={14} className="text-primary-400" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">config</span>
@@ -48,7 +48,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             style={{ paddingLeft: 28 }}
                             onClick={() => onSelect(file.path)}
                         >
-                            <File size={14} className="flex-shrink-0 text-slate-400" />
+                            <File size={14} className="flex-shrink-0 text-primary-400" />
                             <span className="truncate font-mono">{file.label}</span>
                         </div>
                     );
@@ -60,9 +60,9 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 onClick={() => setCronDirExpanded(!cronDirExpanded)}
             >
                 {cronDirExpanded ? (
-                    <ChevronDown size={14} className="text-slate-400" />
+                    <ChevronDown size={14} className="text-primary-400" />
                 ) : (
-                    <ChevronRight size={14} className="text-slate-400" />
+                    <ChevronRight size={14} className="text-primary-400" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">cron</span>
@@ -82,7 +82,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             style={{ paddingLeft: 28 }}
                             onClick={() => onSelect(file.path)}
                         >
-                            <File size={14} className="flex-shrink-0 text-slate-400" />
+                            <File size={14} className="flex-shrink-0 text-primary-400" />
                             <span className="truncate font-mono">{file.label}</span>
                         </div>
                     );
@@ -94,9 +94,9 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
             >
                 {hooksDirExpanded ? (
-                    <ChevronDown size={14} className="text-slate-400" />
+                    <ChevronDown size={14} className="text-primary-400" />
                 ) : (
-                    <ChevronRight size={14} className="text-slate-400" />
+                    <ChevronRight size={14} className="text-primary-400" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="truncate">hooks</span>
@@ -107,7 +107,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         className="flex items-center gap-1 px-2 py-1 text-sm text-primary-200"
                         style={{ paddingLeft: 20 }}
                     >
-                        <ChevronDown size={14} className="text-slate-400" />
+                        <ChevronDown size={14} className="text-primary-400" />
                         <Folder size={14} className="flex-shrink-0 text-yellow-400" />
                         <span className="truncate">transforms</span>
                     </div>
@@ -127,7 +127,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             >
                                 <File
                                     size={14}
-                                    className="flex-shrink-0 text-slate-400"
+                                    className="flex-shrink-0 text-primary-400"
                                 />
                                 <span className="truncate font-mono">{file.label}</span>
                             </div>
@@ -151,7 +151,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         style={{ paddingLeft: 22 }}
                         onClick={() => onSelect(file.path)}
                     >
-                        <File size={14} className="flex-shrink-0 text-slate-400" />
+                        <File size={14} className="flex-shrink-0 text-primary-400" />
                         <span className="truncate font-mono">{file.label}</span>
                     </div>
                 );

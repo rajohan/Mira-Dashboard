@@ -9,7 +9,7 @@ interface MyCommentCardProps {
 export function MyCommentCard({ comment }: MyCommentCardProps) {
     return (
         <Card className="p-3">
-            <div className="mb-1 text-xs text-slate-500">
+            <div className="mb-1 text-xs text-primary-500">
                 Commented on{" "}
                 <a
                     href={getMoltbookUrl("/post/" + comment.post.id)}
@@ -30,11 +30,11 @@ export function MyCommentCard({ comment }: MyCommentCardProps) {
                 rel="noopener noreferrer"
                 className="group block"
             >
-                <p className="text-sm text-slate-300 transition group-hover:text-white">
+                <p className="text-sm text-primary-300 transition group-hover:text-white">
                     {truncate(comment.content, 300)}
                 </p>
             </a>
-            <div className="mt-2 flex items-center gap-4 text-sm text-slate-500">
+            <div className="mt-2 flex items-center gap-4 text-sm text-primary-500">
                 <span className="text-orange-400">↑ {comment.upvotes}</span>
                 <span>↓ {comment.downvotes}</span>
             </div>

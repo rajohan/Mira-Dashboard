@@ -20,17 +20,17 @@ export function SessionActionsDropdown({
     const items: DropdownItem[] = [
         {
             label: "Stop",
-            icon: <Square className="h-4 w-4 text-slate-400" />,
+            icon: <Square className="h-4 w-4 text-primary-400" />,
             onClick: onStop,
         },
         {
             label: "Compact",
-            icon: <Database className="h-4 w-4 text-slate-400" />,
+            icon: <Database className="h-4 w-4 text-primary-400" />,
             onClick: onCompact,
         },
         {
             label: "Reset",
-            icon: <RotateCcw className="h-4 w-4 text-slate-400" />,
+            icon: <RotateCcw className="h-4 w-4 text-primary-400" />,
             onClick: onReset,
         },
     ];

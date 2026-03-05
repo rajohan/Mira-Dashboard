@@ -56,9 +56,9 @@ export function FileEditorPanel({
         <Card variant="bordered" className="flex flex-1 flex-col overflow-hidden p-0">
             {selectedPath ? (
                 <>
-                    <div className="flex items-center justify-between gap-4 border-b border-slate-700 p-3">
+                    <div className="flex items-center justify-between gap-4 border-b border-primary-700 p-3">
                         <div className="flex min-w-0 items-center gap-2">
-                            <File size={16} className="flex-shrink-0 text-slate-400" />
+                            <File size={16} className="flex-shrink-0 text-primary-400" />
                             <span
                                 className="truncate font-mono text-sm"
                                 title={selectedPath}
@@ -66,7 +66,7 @@ export function FileEditorPanel({
                                 {selectedPath}
                             </span>
                             {fileContent && (
-                                <span className="flex-shrink-0 text-xs text-slate-400">
+                                <span className="flex-shrink-0 text-xs text-primary-400">
                                     {formatSize(fileContent.size)}
                                 </span>
                             )}
@@ -119,7 +119,7 @@ export function FileEditorPanel({
 
                     <div className="flex-1 overflow-hidden">
                         {contentLoading ? (
-                            <div className="flex h-full items-center justify-center text-slate-400">
+                            <div className="flex h-full items-center justify-center text-primary-400">
                                 Loading...
                             </div>
                         ) : fileContent ? (
@@ -135,14 +135,14 @@ export function FileEditorPanel({
                                 syntaxClass={syntaxClass}
                             />
                         ) : (
-                            <div className="flex h-full items-center justify-center text-slate-400">
+                            <div className="flex h-full items-center justify-center text-primary-400">
                                 Failed to load file
                             </div>
                         )}
                     </div>
 
                     {fileContent && (
-                        <div className="flex items-center justify-between border-t border-slate-700 px-4 py-2 text-xs text-slate-400">
+                        <div className="flex items-center justify-between border-t border-primary-700 px-4 py-2 text-xs text-primary-400">
                             <span>
                                 Modified:{" "}
                                 {fileContent.modified
@@ -153,7 +153,7 @@ export function FileEditorPanel({
                     )}
                 </>
             ) : (
-                <div className="flex h-full items-center justify-center text-slate-400">
+                <div className="flex h-full items-center justify-center text-primary-400">
                     Select a file to view
                 </div>
             )}

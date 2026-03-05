@@ -23,7 +23,7 @@ export function ConfirmModal({
     return (
         <Modal isOpen={isOpen} onClose={onCancel} title={title} size="md">
             <div className="space-y-4">
-                <p className="text-sm text-slate-300">{message}</p>
+                <p className="text-sm text-primary-300">{message}</p>
                 <div className="flex justify-end gap-2">
                     <Button variant="secondary" onClick={onCancel}>
                         Cancel

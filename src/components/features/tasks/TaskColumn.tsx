@@ -22,8 +22,8 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
         <div className="flex min-w-[280px] flex-1 flex-col">
             <div className="mb-2 flex items-center gap-2">
                 <div className={"h-2 w-2 rounded-full " + config.dotColor} />
-                <h2 className="text-sm font-medium text-slate-300">{config.title}</h2>
-                <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-xs text-slate-400">
+                <h2 className="text-sm font-medium text-primary-300">{config.title}</h2>
+                <span className="rounded bg-primary-700/50 px-1.5 py-0.5 text-xs text-primary-400">
                     {tasks.length}
                 </span>
             </div>
@@ -34,7 +34,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
                     "flex min-h-[400px] flex-1 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
-                        : "border-slate-700/50 bg-slate-800/30")
+                        : "border-primary-700/50 bg-primary-800/30")
                 }
             >
                 {tasks.length > 0 ? (
@@ -51,7 +51,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
                         ))}
                     </SortableContext>
                 ) : (
-                    <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+                    <div className="flex flex-1 items-center justify-center text-sm text-primary-500">
                         No tasks
                     </div>
                 )}

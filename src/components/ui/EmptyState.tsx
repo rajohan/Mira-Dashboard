@@ -7,7 +7,7 @@ interface EmptyStateProps {
 
 export function EmptyState({ message = "No items found.", children }: EmptyStateProps) {
     return (
-        <Card className="p-6 text-center text-slate-400">
+        <Card className="p-6 text-center text-primary-400">
             <p>{message}</p>
             {children}
         </Card>

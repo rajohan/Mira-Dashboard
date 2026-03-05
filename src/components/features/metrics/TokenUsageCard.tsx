@@ -17,15 +17,15 @@ export function TokenUsageCard({ totalTokens, byModel, byAgent }: TokenUsageCard
         <Card className="p-6">
             <div className="mb-6 flex items-center gap-3">
                 <Coins className="h-6 w-6 text-yellow-400" />
-                <h2 className="text-lg font-semibold text-slate-100">Token Usage</h2>
-                <span className="ml-auto text-2xl font-bold text-slate-100">
+                <h2 className="text-lg font-semibold text-primary-100">Token Usage</h2>
+                <span className="ml-auto text-2xl font-bold text-primary-100">
                     {formatTokenCount(totalTokens)}
                 </span>
             </div>
 
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
                 <div>
-                    <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-slate-400">
+                    <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-primary-400">
                         <BarChart3 className="h-4 w-4" /> By Model
                     </h3>
                     <div className="space-y-3">
@@ -35,8 +35,8 @@ export function TokenUsageCard({ totalTokens, byModel, byAgent }: TokenUsageCard
                             return (
                                 <div key={model}>
                                     <div className="mb-1 flex justify-between text-sm">
-                                        <span className="text-slate-300">{model}</span>
-                                        <span className="text-slate-400">
+                                        <span className="text-primary-300">{model}</span>
+                                        <span className="text-primary-400">
                                             {formatTokenCount(count)}
                                         </span>
                                     </div>
@@ -48,7 +48,7 @@ export function TokenUsageCard({ totalTokens, byModel, byAgent }: TokenUsageCard
                 </div>
 
                 <div>
-                    <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-slate-400">
+                    <h3 className="mb-4 flex items-center gap-2 text-sm font-medium text-primary-400">
                         <BarChart3 className="h-4 w-4" /> By Agent
                     </h3>
                     <div className="max-h-64 space-y-2 overflow-y-auto">
@@ -57,16 +57,16 @@ export function TokenUsageCard({ totalTokens, byModel, byAgent }: TokenUsageCard
                                 totalTokens > 0 ? (agent.tokens / totalTokens) * 100 : 0;
                             return (
                                 <div key={i} className="flex items-center gap-3">
-                                    <span className="w-16 text-xs text-slate-500">
+                                    <span className="w-16 text-xs text-primary-500">
                                         {agent.type}
                                     </span>
                                     <span
-                                        className="flex-1 truncate text-sm text-slate-300"
+                                        className="flex-1 truncate text-sm text-primary-300"
                                         title={agent.label}
                                     >
                                         {agent.label}
                                     </span>
-                                    <span className="w-16 text-right text-sm text-slate-400">
+                                    <span className="w-16 text-right text-sm text-primary-400">
                                         {formatTokenCount(agent.tokens)}
                                     </span>
                                     <ProgressBar

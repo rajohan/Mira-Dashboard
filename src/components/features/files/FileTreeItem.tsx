@@ -27,8 +27,8 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         bash: { icon: "SH", color: "text-green-300" },
         json: { icon: "{ }", color: "text-yellow-400" },
         json5: { icon: "{ }", color: "text-yellow-400" },
-        md: { icon: "MD", color: "text-slate-400" },
-        markdown: { icon: "MD", color: "text-slate-400" },
+        md: { icon: "MD", color: "text-primary-400" },
+        markdown: { icon: "MD", color: "text-primary-400" },
         go: { icon: "GO", color: "text-cyan-400" },
         rs: { icon: "RS", color: "text-orange-400" },
         java: { icon: "JV", color: "text-red-400" },
@@ -59,7 +59,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         );
     }
 
-    return <File size={16} className="flex-shrink-0 text-slate-400" />;
+    return <File size={16} className="flex-shrink-0 text-primary-400" />;
 }
 
 export function FileTreeItem({
@@ -97,14 +97,14 @@ export function FileTreeItem({
                     <>
                         {hasChildren ? (
                             isExpanded ? (
-                                <ChevronDown size={14} className="text-slate-400" />
+                                <ChevronDown size={14} className="text-primary-400" />
                             ) : (
-                                <ChevronRight size={14} className="text-slate-400" />
+                                <ChevronRight size={14} className="text-primary-400" />
                             )
                         ) : isLoading ? (
                             <RefreshCw
                                 size={14}
-                                className="animate-spin text-slate-400"
+                                className="animate-spin text-primary-400"
                             />
                         ) : (
                             <span className="w-3.5" />

@@ -34,8 +34,8 @@ export function Checkbox({
                     "flex h-5 w-5 items-center justify-center rounded border",
                     "transition-colors",
                     "data-checked:border-accent-500 data-checked:bg-accent-500",
-                    "data-unchecked:border-slate-600 data-unchecked:bg-slate-800",
-                    "data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-slate-900",
+                    "data-unchecked:border-primary-600 data-unchecked:bg-primary-800",
+                    "data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-900",
                     "data-disabled:cursor-not-allowed data-disabled:opacity-50"
                 )}
             >
@@ -43,9 +43,9 @@ export function Checkbox({
             </HeadlessCheckbox>
             {(label || description) && (
                 <div className="flex flex-col">
-                    {label && <Label className="text-sm text-slate-300">{label}</Label>}
+                    {label && <Label className="text-sm text-primary-300">{label}</Label>}
                     {description && (
-                        <Description className="text-xs text-slate-400">
+                        <Description className="text-xs text-primary-400">
                             {description}
                         </Description>
                     )}

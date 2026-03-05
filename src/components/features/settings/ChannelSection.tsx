@@ -12,9 +12,9 @@ export function ChannelSection({ discordEnabled, discordBotId }: ChannelSectionP
         <ExpandableCard title="Channels" icon={MessageSquare}>
             <div className="space-y-2">
                 <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-400">Discord</span>
+                    <span className="text-sm text-primary-400">Discord</span>
                     <span
-                        className={discordEnabled ? "text-green-400" : "text-slate-500"}
+                        className={discordEnabled ? "text-green-400" : "text-primary-500"}
                     >
                         {discordEnabled ? "Enabled" : "Disabled"}
                     </span>

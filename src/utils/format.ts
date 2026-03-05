@@ -3,13 +3,45 @@ import { enUS } from "date-fns/locale";
 
 const defaultLocale = enUS;
 
-// Date formatting
+// Date & time formatting
 export function formatDate(date: Date | string | number): string {
     try {
         const d = date instanceof Date ? date : new Date(date);
         return format(d, "dd.MM.yyyy, HH:mm", { locale: defaultLocale });
     } catch {
         return String(date);
+    }
+}
+
+export function formatDateStamp(date: Date = new Date()): string {
+    try {
+        return format(date, "yyyy-MM-dd", { locale: defaultLocale });
+    } catch {
+        return "unknown-date";
+    }
+}
+
+export function formatOsloTime(date: Date): string {
+    try {
+        return format(date, "HH:mm:ss", { locale: defaultLocale });
+    } catch {
+        return "--:--:--";
+    }
+}
+
+export function formatOsloDate(date: Date): string {
+    try {
+        return format(date, "EEEE dd. MMM yyyy", { locale: defaultLocale });
+    } catch {
+        return "Unknown date";
+    }
+}
+
+export function formatWeekdayShort(date: Date): string {
+    try {
+        return format(date, "EEE", { locale: defaultLocale });
+    } catch {
+        return "---";
     }
 }
 

@@ -133,7 +133,7 @@ export function getSyntaxClass(filename: string): string {
         tsx: "text-blue-400",
         json: "text-green-400",
         json5: "text-green-400",
-        md: "text-slate-300",
+        md: "text-primary-300",
         html: "text-orange-400",
         css: "text-pink-400",
         py: "text-blue-300",
@@ -143,5 +143,5 @@ export function getSyntaxClass(filename: string): string {
         yml: "text-purple-400",
         yaml: "text-purple-400",
     };
-    return syntaxMap[ext] || "text-slate-300";
+    return syntaxMap[ext] || "text-primary-300";
 }

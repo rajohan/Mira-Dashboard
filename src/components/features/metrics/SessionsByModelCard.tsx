@@ -13,7 +13,7 @@ export function SessionsByModelCard({ sessionsByModel }: SessionsByModelCardProp
         <Card className="p-6">
             <div className="mb-4 flex items-center gap-3">
                 <Users className="h-6 w-6 text-cyan-400" />
-                <h2 className="text-lg font-semibold text-slate-100">
+                <h2 className="text-lg font-semibold text-primary-100">
                     Sessions by Model
                 </h2>
             </div>
@@ -22,10 +22,10 @@ export function SessionsByModelCard({ sessionsByModel }: SessionsByModelCardProp
                 {sorted.map(([model, count]) => (
                     <div
                         key={model}
-                        className="rounded-lg bg-slate-800/50 p-3 text-center"
+                        className="rounded-lg bg-primary-800/50 p-3 text-center"
                     >
-                        <p className="text-2xl font-bold text-slate-100">{count}</p>
-                        <p className="mt-1 truncate text-xs text-slate-400" title={model}>
+                        <p className="text-2xl font-bold text-primary-100">{count}</p>
+                        <p className="mt-1 truncate text-xs text-primary-400" title={model}>
                             {model}
                         </p>
                     </div>

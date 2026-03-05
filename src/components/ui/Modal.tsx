@@ -33,7 +33,7 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
                 <DialogPanel
                     transition
                     className={cn(
-                        "w-full rounded-lg border border-slate-700 bg-slate-800 shadow-xl",
+                        "w-full rounded-lg border border-primary-700 bg-primary-800 shadow-xl",
                         "flex flex-col",
                         "max-h-[90vh]",
                         "data-closed:opacity-0 data-enter:opacity-100 data-closed:scale-95 data-enter:scale-100",
@@ -42,15 +42,15 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
                     )}
                 >
                     {title && (
-                        <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-                            <DialogTitle className="text-lg font-semibold text-slate-100">
+                        <div className="flex flex-shrink-0 items-center justify-between border-b border-primary-700 px-4 py-3">
+                            <DialogTitle className="text-lg font-semibold text-primary-100">
                                 {title}
                             </DialogTitle>
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={onClose}
-                                className="text-slate-400 hover:text-slate-200"
+                                className="text-primary-400 hover:text-primary-200"
                             >
                                 <X size={20} />
                             </Button>

@@ -33,15 +33,15 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
             style={style}
             {...attributes}
             className={
-                "group relative cursor-pointer rounded-lg border border-slate-700 bg-slate-800 p-3 transition-all " +
-                "hover:border-slate-600 " +
+                "group relative cursor-pointer rounded-lg border border-primary-700 bg-primary-800 p-3 transition-all " +
+                "hover:border-primary-600 " +
                 (isDragging ? "cursor-grabbing border-accent-500 opacity-90" : "")
             }
             onClick={onClick}
         >
             <button
                 {...listeners}
-                className="absolute left-1.5 top-1/2 -translate-y-1/2 cursor-grab text-slate-600 opacity-0 transition-opacity hover:text-slate-400 group-hover:opacity-100"
+                className="absolute left-1.5 top-1/2 -tranprimary-y-1/2 cursor-grab text-primary-600 opacity-0 transition-opacity hover:text-primary-400 group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
@@ -49,7 +49,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
 
             <div className="ml-3">
                 <div className="mb-1.5 flex items-center gap-2">
-                    <span className="text-xs text-slate-500">#{task.number}</span>
+                    <span className="text-xs text-primary-500">#{task.number}</span>
                     <span
                         className={
                             "rounded border px-1.5 py-0.5 text-[10px] font-medium " +
@@ -60,12 +60,12 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                     </span>
                 </div>
 
-                <h3 className="mb-1.5 line-clamp-2 text-sm font-medium text-slate-200">
+                <h3 className="mb-1.5 line-clamp-2 text-sm font-medium text-primary-200">
                     {task.title}
                 </h3>
 
                 <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-primary-500">
                         {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                     {assignee && (
@@ -77,7 +77,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                                     className="h-5 w-5 rounded-full"
                                 />
                             ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[10px] text-slate-300">
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-700 text-[10px] text-primary-300">
                                     {(assignee.login ||
                                         assignee.name ||
                                         "?")[0].toUpperCase()}

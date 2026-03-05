@@ -185,7 +185,7 @@ export function TaskDetailModal({
                                     rows={4}
                                 />
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
                                         Priority
                                     </label>
                                     <div className="flex gap-2">
@@ -207,7 +207,7 @@ export function TaskDetailModal({
                                 </div>
                             </div>
                         ) : (
-                            <h2 className="text-lg font-semibold text-slate-100">
+                            <h2 className="text-lg font-semibold text-primary-100">
                                 #{task.number}: {task.title}
                             </h2>
                         )}
@@ -217,7 +217,7 @@ export function TaskDetailModal({
                     </Button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
+                <div className="flex flex-wrap items-center gap-4 text-sm text-primary-400">
                     {assigneeLogin && (
                         <span>
                             Assigned:{" "}
@@ -241,8 +241,8 @@ export function TaskDetailModal({
                 </div>
 
                 {task.body && !isEditingTask && (
-                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                        <h3 className="mb-2 text-sm font-semibold text-slate-300">
+                    <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
+                        <h3 className="mb-2 text-sm font-semibold text-primary-300">
                             Description
                         </h3>
                         <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
@@ -253,13 +253,13 @@ export function TaskDetailModal({
                     </div>
                 )}
 
-                <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
-                    <h3 className="mb-2 text-sm font-semibold text-slate-300">
+                <div className="rounded-lg border border-primary-700 bg-primary-800/30 p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-primary-300">
                         Progress updates
                     </h3>
                     <div className="mb-3 space-y-2">
                         {updates.length === 0 ? (
-                            <p className="text-sm text-slate-500">No updates yet.</p>
+                            <p className="text-sm text-primary-500">No updates yet.</p>
                         ) : (
                             updates.map((update) => {
                                 const authorMeta =
@@ -271,9 +271,9 @@ export function TaskDetailModal({
                                 return (
                                     <div
                                         key={update.id}
-                                        className="rounded border border-slate-700 bg-slate-900/40 p-2"
+                                        className="rounded border border-primary-700 bg-primary-900/40 p-2"
                                     >
-                                        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                                        <div className="mb-1 flex items-center justify-between text-xs text-primary-500">
                                             <span>
                                                 <a
                                                     href={authorMeta.githubUrl}
@@ -398,7 +398,7 @@ export function TaskDetailModal({
                         )}
                     </div>
 
-                    <div className="flex flex-wrap gap-2 border-t border-slate-700 pt-3">
+                    <div className="flex flex-wrap gap-2 border-t border-primary-700 pt-3">
                         {isEditingTask ? (
                             <>
                                 <Button variant="primary" onClick={handleSaveTask}>

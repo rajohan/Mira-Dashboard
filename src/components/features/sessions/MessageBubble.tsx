@@ -15,7 +15,7 @@ export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) 
                 "rounded-lg p-3 " +
                 (isUser
                     ? "border border-blue-500/20 bg-blue-500/10"
-                    : "border border-slate-600/50 bg-slate-700/50")
+                    : "border border-primary-600/50 bg-primary-700/50")
             }
         >
             <div className="mb-1 flex items-center justify-between">
@@ -28,12 +28,12 @@ export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) 
                     {role}
                 </span>
                 {timestamp && (
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-primary-500">
                         {formatDate(timestamp)}
                     </span>
                 )}
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm text-slate-200">
+            <p className="whitespace-pre-wrap break-words text-sm text-primary-200">
                 {content?.slice(0, 500)}
                 {content?.length > 500 && "..."}
             </p>

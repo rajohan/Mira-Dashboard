@@ -29,7 +29,7 @@ export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionPr
                 className="space-y-4"
             >
                 <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
                         Idle Timeout (minutes)
                     </label>
                     <form.Field name="idleMinutes">

@@ -43,7 +43,7 @@ export function ReadOnlyField({
 }) {
     return (
         <div className="flex items-center justify-between py-2">
-            <span className="text-sm text-slate-400">{label}</span>
+            <span className="text-sm text-primary-400">{label}</span>
             <span className="font-mono text-sm text-primary-100">
                 {value === undefined || value === null ? "—" : String(value)}
             </span>

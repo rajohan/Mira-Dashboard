@@ -34,22 +34,22 @@ export function Select({
         <Menu as="div">
             <MenuButton
                 className={cn(
-                    "flex items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm transition-colors",
+                    "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm transition-colors",
                     "data-hover:border-indigo-500 data-focus:outline-none data-focus:ring-2 data-focus:ring-indigo-500",
                     width,
                     className
                 )}
             >
-                {icon && <span className="flex-shrink-0 text-slate-400">{icon}</span>}
+                {icon && <span className="flex-shrink-0 text-primary-400">{icon}</span>}
                 <span className="flex-1 truncate text-left">
                     {selectedOption?.label || placeholder}
                 </span>
-                <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform data-[open]:rotate-180" />
+                <ChevronDown className="h-4 w-4 flex-shrink-0 text-primary-400 transition-transform data-[open]:rotate-180" />
             </MenuButton>
             <MenuItems
                 anchor="bottom start"
                 className={cn(
-                    "z-10 max-h-60 overflow-y-auto rounded border border-slate-700 bg-slate-800 shadow-lg",
+                    "z-10 max-h-60 overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg",
                     width
                 )}
             >
@@ -59,13 +59,13 @@ export function Select({
                             onClick={() => onChange(option.value)}
                             className={cn(
                                 "flex w-full flex-col px-3 py-2 text-left text-sm",
-                                "data-focus:bg-slate-700",
+                                "data-focus:bg-primary-700",
                                 value === option.value && "text-indigo-400"
                             )}
                         >
                             <span>{option.label}</span>
                             {option.description && (
-                                <span className="text-xs text-slate-500">
+                                <span className="text-xs text-primary-500">
                                     {option.description}
                                 </span>
                             )}

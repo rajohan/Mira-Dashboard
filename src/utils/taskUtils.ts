@@ -3,7 +3,7 @@ import type { ColumnId, Task } from "../types/task";
 export const PRIORITY_COLORS: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",
     medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-    low: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+    low: "bg-primary-500/20 text-primary-400 border-primary-500/30",
 };
 
 export interface ColumnConfig {

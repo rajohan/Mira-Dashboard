@@ -31,8 +31,8 @@ export function Dropdown({
     const variantStyles = {
         primary: "bg-accent-500 text-white hover:bg-accent-600",
         secondary:
-            "border border-slate-600 bg-slate-700 text-slate-100 hover:bg-slate-600",
-        ghost: "text-slate-300 hover:bg-primary-700",
+            "border border-primary-600 bg-primary-700 text-primary-100 hover:bg-primary-600",
+        ghost: "text-primary-300 hover:bg-primary-700",
     };
 
     const sizeStyles = {
@@ -60,7 +60,7 @@ export function Dropdown({
 
             <MenuItems
                 anchor={align === "right" ? "bottom end" : "bottom start"}
-                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-slate-600 bg-slate-800 p-1 shadow-lg focus:outline-none"
+                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-primary-600 bg-primary-800 p-1 shadow-lg focus:outline-none"
             >
                 {items.map((item, index) => (
                     <MenuItem key={index} disabled={item.disabled}>
@@ -69,11 +69,11 @@ export function Dropdown({
                             onClick={item.onClick}
                             className={cn(
                                 "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                                "data-focus:bg-slate-700 data-focus:text-slate-100",
+                                "data-focus:bg-primary-700 data-focus:text-primary-100",
                                 "data-disabled:cursor-not-allowed data-disabled:opacity-50",
                                 item.variant === "danger"
                                     ? "data-focus:bg-red-500/20 text-red-400"
-                                    : "text-slate-300"
+                                    : "text-primary-300"
                             )}
                         >
                             {item.icon}

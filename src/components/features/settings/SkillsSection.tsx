@@ -14,7 +14,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
         <ExpandableCard title="Skills" icon={Users}>
             <div className="space-y-2">
                 {skills.length === 0 ? (
-                    <p className="text-sm text-slate-400">No skills configured</p>
+                    <p className="text-sm text-primary-400">No skills configured</p>
                 ) : (
                     skills.map((skill) => (
                         <div
@@ -22,11 +22,11 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                             className="flex items-center justify-between py-2"
                         >
                             <div>
-                                <p className="text-sm font-medium text-slate-200">
+                                <p className="text-sm font-medium text-primary-200">
                                     {skill.name}
                                 </p>
                                 {skill.description && (
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-primary-400">
                                         {skill.description}
                                     </p>
                                 )}

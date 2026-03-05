@@ -33,7 +33,7 @@ export function Layout({ children }: LayoutProps) {
 
     return (
         <div className="flex min-h-screen bg-primary-900 text-primary-50">
-            <aside className="flex w-64 flex-col border-r border-primary-700 bg-primary-800">
+            <aside className="flex w-64 flex-col border-r border-primary-700 bg-primary-950">
                 <div className="border-b border-primary-700 p-4">
                     <h1 className="flex items-center gap-2 text-xl font-bold">
                         <span className="text-2xl">👩‍💻</span>
@@ -51,8 +51,8 @@ export function Layout({ children }: LayoutProps) {
                                 className={cn(
                                     "mb-1 flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
                                     isActive
-                                        ? "bg-accent-500 text-white"
-                                        : "text-primary-300 hover:bg-primary-700 hover:text-primary-50"
+                                        ? "bg-accent-500/90 text-white"
+                                        : "text-primary-300 hover:bg-primary-800 hover:text-primary-50"
                                 )}
                             >
                                 <item.icon size={20} />
@@ -70,7 +70,7 @@ export function Layout({ children }: LayoutProps) {
                 </div>
             </aside>
 
-            <main className="flex-1 overflow-auto">{children}</main>
+            <main className="flex-1 overflow-auto bg-primary-900">{children}</main>
         </div>
     );
 }

@@ -10,19 +10,19 @@ interface MetricCardProps {
 }
 
 const colorClasses = {
-    green: "bg-green-500/20 text-green-400",
-    blue: "bg-blue-500/20 text-blue-400",
-    purple: "bg-purple-500/20 text-purple-400",
-    orange: "bg-orange-500/20 text-orange-400",
-    red: "bg-red-500/20 text-red-400",
+    green: "bg-emerald-500/20 text-emerald-300",
+    blue: "bg-accent-500/20 text-accent-300",
+    purple: "bg-primary-700 text-primary-200",
+    orange: "bg-amber-500/20 text-amber-300",
+    red: "bg-rose-500/20 text-rose-300",
 };
 
 const barColorClasses = {
-    green: "bg-green-500",
-    blue: "bg-blue-500",
-    purple: "bg-purple-500",
-    orange: "bg-orange-500",
-    red: "bg-red-500",
+    green: "bg-emerald-500",
+    blue: "bg-accent-500",
+    purple: "bg-primary-500",
+    orange: "bg-amber-500",
+    red: "bg-rose-500",
 };
 
 export function MetricCard({
@@ -50,21 +50,21 @@ export function MetricCard({
                         {icon}
                     </div>
                 )}
-                <div className="text-sm text-slate-400">{title}</div>
+                <div className="text-sm text-primary-300">{title}</div>
             </div>
             <div className="flex items-end justify-between">
                 <div>
                     <div className="text-2xl font-bold">{value}</div>
                     {subtitle && (
-                        <div className="mt-1 text-xs text-slate-500">{subtitle}</div>
+                        <div className="mt-1 text-xs text-primary-400">{subtitle}</div>
                     )}
                 </div>
                 {percent !== undefined && (
-                    <div className="text-lg font-semibold text-slate-400">{percent}%</div>
+                    <div className="text-lg font-semibold text-primary-300">{percent}%</div>
                 )}
             </div>
             {percent !== undefined && (
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary-700">
                     <div
                         className={
                             "h-full transition-all duration-500 " +

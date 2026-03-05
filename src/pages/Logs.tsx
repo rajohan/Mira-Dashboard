@@ -1,6 +1,5 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { format } from "date-fns";
 import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -15,8 +14,8 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
-import { parseLogLine } from "../utils/logUtils";
-import { LINE_OPTIONS, LOG_LEVELS } from "../utils/logUtils";
+import { formatDateStamp } from "../utils/format";
+import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
 export function Logs() {
     const [autoFollow, setAutoFollow] = useState(true);
@@ -48,7 +47,7 @@ export function Logs() {
     useEffect(() => {
         if (logFiles.length > 0 && !selectedFile) {
             const sorted = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
-            const today = format(new Date(), "yyyy-MM-dd");
+            const today = formatDateStamp();
             const todayFile = sorted.find((f) => f.name.includes(today));
             setSelectedFile(todayFile?.name || sorted[0]?.name || "");
         }
@@ -112,7 +111,7 @@ export function Logs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${selectedFile || "logs"}-${format(new Date(), "yyyy-MM-dd")}.txt`;
+        a.download = `${selectedFile || "logs"}-${formatDateStamp()}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -239,7 +238,7 @@ export function Logs() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-slate-400">
+                <div className="text-sm text-primary-400">
                     {isLoadingContent
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
@@ -284,10 +283,10 @@ export function Logs() {
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="h-full overflow-y-auto bg-slate-900/50 font-mono text-xs"
+                    className="h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
                 >
                     {filteredLogs.length === 0 ? (
-                        <div className="py-8 text-center text-slate-400">
+                        <div className="py-8 text-center text-primary-400">
                             {logs.length === 0
                                 ? "Waiting for logs..."
                                 : "No logs match your filter."}

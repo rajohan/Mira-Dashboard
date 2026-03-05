@@ -33,7 +33,7 @@ export function ProfileCard({ profile, unreadCount }: ProfileCardProps) {
                         href={getMoltbookUrl("/u/mira_2026")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-lg font-semibold text-slate-100 transition hover:text-indigo-300"
+                        className="text-lg font-semibold text-primary-100 transition hover:text-indigo-300"
                     >
                         {profile.display_name || profile.name}
                     </a>
@@ -43,24 +43,24 @@ export function ProfileCard({ profile, unreadCount }: ProfileCardProps) {
                         </span>
                     )}
                 </div>
-                <p className="mt-0.5 line-clamp-2 text-sm text-slate-400">
+                <p className="mt-0.5 line-clamp-2 text-sm text-primary-400">
                     {profile.description}
                 </p>
                 <div className="mt-2 flex items-center gap-4 text-sm">
-                    <span className="flex items-center gap-1 text-slate-300">
+                    <span className="flex items-center gap-1 text-primary-300">
                         <Star className="h-3.5 w-3.5 text-yellow-400" />
                         <span className="font-medium">{profile.karma}</span>
-                        <span className="text-slate-500">karma</span>
+                        <span className="text-primary-500">karma</span>
                     </span>
-                    <span className="flex items-center gap-1 text-slate-300">
+                    <span className="flex items-center gap-1 text-primary-300">
                         <Users className="h-3.5 w-3.5" />
                         <span className="font-medium">{profile.follower_count}</span>
-                        <span className="text-slate-500">followers</span>
+                        <span className="text-primary-500">followers</span>
                     </span>
-                    <span className="flex items-center gap-1 text-slate-300">
+                    <span className="flex items-center gap-1 text-primary-300">
                         <User className="h-3.5 w-3.5" />
                         <span className="font-medium">{profile.following_count}</span>
-                        <span className="text-slate-500">following</span>
+                        <span className="text-primary-500">following</span>
                     </span>
                 </div>
             </div>
