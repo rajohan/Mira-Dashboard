@@ -21,6 +21,7 @@ import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
+import { formatOsloTime } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 interface SessionHistoryResponse {
@@ -34,15 +35,6 @@ interface FeedItem {
     role: string;
     content: string;
     timestamp: number;
-}
-
-function formatFeedTime(timestamp: number) {
-    return new Date(timestamp).toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        timeZone: "Europe/Oslo",
-    });
 }
 
 function roleBadgeColor(role: string) {
@@ -198,7 +190,7 @@ export function Sessions() {
                                         {item.sessionLabel}
                                     </span>
                                     <span className="text-primary-500">
-                                        {formatFeedTime(item.timestamp)}
+                                        {formatOsloTime(new Date(item.timestamp))}
                                     </span>
                                 </div>
                                 <div className="mb-2">
