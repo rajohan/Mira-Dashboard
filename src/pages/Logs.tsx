@@ -192,7 +192,7 @@ export function Logs() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-2rem)] flex-col p-6">
+        <div className="flex h-full min-h-0 flex-col p-6">
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
                 <Select

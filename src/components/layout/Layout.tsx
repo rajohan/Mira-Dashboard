@@ -33,8 +33,8 @@ export function Layout({ children }: LayoutProps) {
     const location = useLocation();
 
     return (
-        <div className="flex min-h-screen bg-primary-900 text-primary-50">
-            <aside className="flex w-64 flex-col border-r border-primary-700 bg-primary-950">
+        <div className="flex h-screen overflow-hidden bg-primary-900 text-primary-50">
+            <aside className="flex w-64 flex-col overflow-y-auto border-r border-primary-700 bg-primary-950">
                 <div className="border-b border-primary-700 p-4">
                     <h1 className="flex items-center gap-2 text-xl font-bold">
                         <span className="text-2xl">👩‍💻</span>
@@ -71,13 +71,13 @@ export function Layout({ children }: LayoutProps) {
                 </div>
             </aside>
 
-            <main className="flex-1 overflow-auto bg-primary-900">
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-primary-900">
                 <AppHeader
                     title={
                         navItems.find((item) => item.to === location.pathname)?.label || "Mira Dashboard"
                     }
                 />
-                {children}
+                <div className="flex-1 min-h-0 overflow-auto">{children}</div>
             </main>
         </div>
     );
