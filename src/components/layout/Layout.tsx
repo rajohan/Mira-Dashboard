@@ -16,7 +16,7 @@ import { cn } from "../../utils/cn";
 const navItems = [
     { to: "/", icon: Home, label: "Dashboard" },
     { to: "/tasks", icon: CheckSquare, label: "Tasks" },
-    { to: "/sessions", icon: Users, label: "Sessions" },
+    { to: "/sessions", icon: Users, label: "Agents" },
     { to: "/logs", icon: FileText, label: "Logs" },
     { to: "/files", icon: FolderOpen, label: "Files" },
     { to: "/metrics", icon: Activity, label: "Metrics" },
