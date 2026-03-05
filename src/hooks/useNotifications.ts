@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { apiFetch, apiPost } from "./useApi";
 
 export interface NotificationItem {
@@ -36,7 +35,7 @@ function fetchNotifications() {
     return apiFetch<NotificationsResponse>("/notifications");
 }
 
-export function useNotifications(refreshInterval: number | false = AUTO_REFRESH_MS) {
+export function useNotifications(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: ["notifications"],
         queryFn: fetchNotifications,

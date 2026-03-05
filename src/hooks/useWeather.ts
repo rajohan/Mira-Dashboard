@@ -24,7 +24,7 @@ function fetchWeather(): Promise<WeatherData> {
     return apiFetch<WeatherData>("/weather");
 }
 
-export function useWeather(refreshInterval = 300000) {
+export function useWeather(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: ["weather"],
         queryFn: fetchWeather,

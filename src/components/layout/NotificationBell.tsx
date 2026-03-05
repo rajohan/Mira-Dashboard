@@ -12,8 +12,8 @@ interface NotificationBellProps {
 
 type NotificationFilter = "all" | "unread" | "warning";
 
-export function NotificationBell({ isConnected }: NotificationBellProps) {
-    const { data: notifications } = useNotifications(isConnected ? 15_000 : false);
+export function NotificationBell({ isConnected: _isConnected }: NotificationBellProps) {
+    const { data: notifications } = useNotifications(false);
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const [filter, setFilter] = useState<NotificationFilter>("all");

@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { apiFetch } from "./useApi";
 
 type QuotaStatus = "not_configured" | "error";
@@ -59,7 +58,7 @@ function fetchQuotas() {
     return apiFetch<QuotasResponse>("/quotas");
 }
 
-export function useQuotas(refreshInterval: number | false = AUTO_REFRESH_MS) {
+export function useQuotas(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: ["quotas"],
         queryFn: fetchQuotas,

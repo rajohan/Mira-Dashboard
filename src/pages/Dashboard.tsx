@@ -55,7 +55,7 @@ function getWeatherIcon(description?: string) {
 
 function WeatherTimeCard() {
     const [now, setNow] = useState(() => new Date());
-    const { data: weather, isLoading, isError } = useWeather();
+    const { data: weather, isLoading, isError } = useWeather(false);
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -141,8 +141,8 @@ function WeatherTimeCard() {
 
 export function Dashboard() {
     const { isConnected, error } = useOpenClawSocket();
-    const { data: metrics } = useMetrics();
-    const { data: quotas } = useQuotas(15 * 60_000);
+    const { data: metrics } = useMetrics(false);
+    const { data: quotas } = useQuotas(false);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
