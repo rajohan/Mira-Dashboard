@@ -2,6 +2,7 @@ import { Link, useLocation } from "@tanstack/react-router";
 import {
     Activity,
     CheckSquare,
+    Clock3,
     FileText,
     FolderOpen,
     Home,
@@ -19,6 +20,7 @@ const navItems = [
     { to: "/tasks", icon: CheckSquare, label: "Tasks" },
     { to: "/sessions", icon: Users, label: "Agents" },
     { to: "/logs", icon: FileText, label: "Logs" },
+    { to: "/cron", icon: Clock3, label: "Cron" },
     { to: "/files", icon: FolderOpen, label: "Files" },
     { to: "/metrics", icon: Activity, label: "Metrics" },
     { to: "/moltbook", icon: MessageSquare, label: "Moltbook" },

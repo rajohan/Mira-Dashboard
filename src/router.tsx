@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
+import { Cron } from "./pages/Cron";
 import { Dashboard } from "./pages/Dashboard";
 import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
@@ -68,6 +69,12 @@ const logsRoute = createRoute({
     component: Logs,
 });
 
+const cronRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/cron",
+    component: Cron,
+});
+
 const filesRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/files",
@@ -99,6 +106,7 @@ const routeTree = rootRoute.addChildren([
         tasksRoute,
         sessionsRoute,
         logsRoute,
+        cronRoute,
         filesRoute,
         metricsRoute,
         moltbookRoute,

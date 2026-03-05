@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { sessionsCollection } from "../collections/sessions";
 import {
     ActiveSessionsCard,
+    CronOverviewCard,
     QuotaOverviewCard,
     ServiceActionsCard,
 } from "../components/features/dashboard";
@@ -213,9 +214,10 @@ export function Dashboard() {
                 />
             </div>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <ActiveSessionsCard sessions={sortedSessions} />
                 <QuotaOverviewCard quotas={quotas} />
+                <CronOverviewCard />
             </div>
 
             <div className="max-w-2xl">

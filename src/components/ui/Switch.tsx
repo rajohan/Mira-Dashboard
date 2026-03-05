@@ -21,7 +21,7 @@ export function Switch({
 }: SwitchProps) {
     return (
         <Field
-            className={cn("flex items-center justify-between", className)}
+            className={cn("flex items-center justify-between gap-3", className)}
             disabled={disabled}
         >
             {(label || description) && (
@@ -42,14 +42,19 @@ export function Switch({
                 checked={checked}
                 onChange={onChange}
                 className={cn(
-                    "group inline-flex h-6 w-11 items-center rounded-full transition",
-                    "data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-800 focus:outline-none",
-                    "data-checked:bg-accent-500 data-unchecked:bg-primary-600",
-                    "data-disabled:cursor-not-allowed data-disabled:opacity-50"
+                    "inline-flex h-6 w-11 items-center rounded-full transition focus:outline-none",
+                    "ring-offset-2 ring-offset-primary-800 data-focus:ring-2 data-focus:ring-accent-500",
+                    checked ? "bg-accent-500" : "bg-primary-600",
+                    disabled ? "cursor-not-allowed opacity-50" : ""
                 )}
             >
                 <span className="sr-only">{label}</span>
-                <span className="group-data-checked:tranprimary-x-6 size-4 tranprimary-x-1 rounded-full bg-white transition" />
+                <span
+                    className={cn(
+                        "size-4 rounded-full bg-white transition",
+                        checked ? "translate-x-6" : "translate-x-1"
+                    )}
+                />
             </HeadlessSwitch>
         </Field>
     );

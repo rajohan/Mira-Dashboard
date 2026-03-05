@@ -17,6 +17,14 @@ export {
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
+export {
+    cronKeys,
+    useCronJobs,
+    useRunCronJobNow,
+    useToggleCronJob,
+    useUpdateCronJob,
+} from "./useCron";
+export type { CronJob } from "./useCron";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export { OPS_ACTIONS, useOpenClawVersion, useRunOpsAction } from "./useOpsActions";
 export type {

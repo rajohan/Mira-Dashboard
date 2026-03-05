@@ -437,6 +437,10 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
     });
 }
 
+async function request(method: string, params: Record<string, unknown>): Promise<unknown> {
+    return sendRequestAsync(method, params);
+}
+
 async function getSessionHistory(
     sessionKey: string,
     limit: number = 50,
@@ -491,6 +495,7 @@ export default {
     getGatewayWs,
     getSessionHistory,
     sendSessionMessage,
+    request,
 };
 
 export type { GatewaySession, Session };

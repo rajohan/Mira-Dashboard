@@ -10,6 +10,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import gateway from "./gateway.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
+import cronRoutes from "./routes/cron.js";
 import filesRoutes from "./routes/files.js";
 import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
@@ -73,6 +74,7 @@ app.get("/api/sessions", (_req, res) => {
 filesRoutes(app, express);
 configFilesRoutes(app, express);
 logsRoutes(app);
+cronRoutes(app);
 execRoutes(app, express);
 metricsRoutes(app);
 moltbookRoutes(app);
