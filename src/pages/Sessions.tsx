@@ -68,7 +68,7 @@ export function Sessions() {
                 }
             }
 
-            return next.sort((a, b) => b.timestamp - a.timestamp).slice(0, 120);
+            return next.sort((a, b) => b.timestamp - a.timestamp).slice(0, 500);
         });
     }, [latestFeedItems]);
 

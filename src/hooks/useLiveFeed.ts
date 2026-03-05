@@ -24,7 +24,7 @@ export const liveFeedKeys = {
 };
 
 export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
-    const feedSessionCandidates = sessions.slice(0, 8);
+    const feedSessionCandidates = sessions.slice(0, 20);
     const sessionSignature = feedSessionCandidates.map((s) => s.key).join("|");
     const updatedSignature = feedSessionCandidates.map((s) => s.updatedAt || 0).join("|");
 
@@ -37,7 +37,7 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
             const historyBySession = await Promise.all(
                 feedSessionCandidates.map(async (session) => {
                     const history = await apiFetch<SessionHistoryResponse>(
-                        `/sessions/${encodeURIComponent(session.key)}/history?limit=8&offset=0`
+                        `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
                     );
 
                     return history.messages.map((message, index) => {
@@ -72,7 +72,7 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
                 .flat()
                 .filter((item) => item.content.length > 0)
                 .sort((a, b) => b.timestamp - a.timestamp)
-                .slice(0, 60);
+                .slice(0, 300);
         },
     });
 }
