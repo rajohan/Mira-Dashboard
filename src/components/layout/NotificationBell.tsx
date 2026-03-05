@@ -1,7 +1,13 @@
 import { Bell, BellRing } from "lucide-react";
 import { useState } from "react";
 
-import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "../../hooks";
+import {
+    useClearReadNotifications,
+    useDeleteNotification,
+    useMarkAllNotificationsRead,
+    useMarkNotificationRead,
+    useNotifications,
+} from "../../hooks";
 import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
@@ -17,6 +23,8 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
     const { data: notifications } = useNotifications(AUTO_REFRESH_MS);
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
+    const clearRead = useClearReadNotifications();
+    const deleteNotification = useDeleteNotification();
     const [filter, setFilter] = useState<NotificationFilter>("all");
 
     const items = notifications?.items || [];
@@ -48,18 +56,28 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
             }
             content={
                 <div className="w-[380px] p-2">
-                    <div className="mb-2 flex items-center justify-between">
+                    <div className="mb-2 flex items-center justify-between gap-2">
                         <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                             Notifications
                         </h2>
-                        <button
-                            type="button"
-                            className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
-                            onClick={() => markAllRead.mutate()}
-                            disabled={items.length === 0}
-                        >
-                            Mark all read
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                onClick={() => clearRead.mutate()}
+                                disabled={items.length === 0}
+                            >
+                                Clear read
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                onClick={() => markAllRead.mutate()}
+                                disabled={items.length === 0}
+                            >
+                                Mark all read
+                            </button>
+                        </div>
                     </div>
 
                     <div className="mb-2 flex gap-2">
@@ -88,15 +106,9 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                             <p className="text-sm text-primary-400">No notifications for this filter.</p>
                         ) : (
                             filteredItems.map((notification) => (
-                                <button
+                                <div
                                     key={notification.id}
-                                    type="button"
                                     className="w-full rounded-lg border border-primary-700 bg-primary-800/30 px-3 py-2 text-left"
-                                    onClick={() => {
-                                        if (!notification.isRead) {
-                                            markNotificationRead.mutate(notification.id);
-                                        }
-                                    }}
                                 >
                                     <div className="mb-1 flex items-center justify-between gap-2">
                                         <div className="inline-flex items-center gap-2">
@@ -113,7 +125,25 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                                     <div className="line-clamp-2 text-xs text-primary-300">
                                         {notification.description}
                                     </div>
-                                </button>
+                                    <div className="mt-2 flex items-center gap-2">
+                                        {!notification.isRead && (
+                                            <button
+                                                type="button"
+                                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                                onClick={() => markNotificationRead.mutate(notification.id)}
+                                            >
+                                                Mark read
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                            onClick={() => deleteNotification.mutate(notification.id)}
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                </div>
                             ))
                         )}
                     </div>

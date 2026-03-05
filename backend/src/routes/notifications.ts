@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
+import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 
 type NotificationType = "info" | "warning" | "error" | "success";
 
@@ -122,6 +123,7 @@ export default function notificationsRoutes(app: express.Application): void {
             occurredAt
         );
 
+        pruneReadNotifications();
         res.json({ ok: true, id: result.lastInsertRowid ?? null });
     }) as RequestHandler);
 
@@ -130,6 +132,11 @@ export default function notificationsRoutes(app: express.Application): void {
             new Date().toISOString()
         );
         res.json({ ok: true });
+    }) as RequestHandler);
+
+    app.post("/api/notifications/clear-read", ((_, res) => {
+        const result = db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
+        res.json({ ok: true, deleted: result.changes ?? 0 });
     }) as RequestHandler);
 
     app.post("/api/notifications/:id/read", ((req, res) => {
@@ -145,5 +152,16 @@ export default function notificationsRoutes(app: express.Application): void {
         );
 
         res.json({ ok: true });
+    }) as RequestHandler);
+
+    app.delete("/api/notifications/:id", ((req, res) => {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+            res.status(400).json({ error: "invalid id" });
+            return;
+        }
+
+        const result = db.prepare("DELETE FROM notifications WHERE id = ?").run(id);
+        res.json({ ok: true, deleted: result.changes ?? 0 });
     }) as RequestHandler);
 }

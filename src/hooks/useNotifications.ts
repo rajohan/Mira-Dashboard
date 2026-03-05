@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 export interface NotificationItem {
     id: number;
@@ -72,6 +72,28 @@ export function useMarkAllNotificationsRead() {
 
     return useMutation({
         mutationFn: () => apiPost<{ ok: boolean }>("/notifications/mark-all-read"),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        },
+    });
+}
+
+export function useClearReadNotifications() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () => apiPost<{ ok: boolean; deleted: number }>("/notifications/clear-read"),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        },
+    });
+}
+
+export function useDeleteNotification() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (id: number) => apiDelete<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },

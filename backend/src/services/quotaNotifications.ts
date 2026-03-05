@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { fetchQuotas, hasQuotaStatus } from "../routes/quotas.js";
+import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "openai";
 
@@ -92,7 +93,7 @@ function insertNotification(
     description: string
 ): void {
     const now = new Date().toISOString();
-    const dedupeKey = `quota:${provider}:${bucket}`;
+    const dedupeKey = `quota:${provider}`;
 
     db.prepare(
         `INSERT INTO notifications (
@@ -114,6 +115,7 @@ function insertNotification(
         occurredAt
     );
 
+    pruneReadNotifications();
 }
 
 let running = false;

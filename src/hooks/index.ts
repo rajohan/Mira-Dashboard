@@ -19,7 +19,9 @@ export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export {
+    useClearReadNotifications,
     useCreateNotification,
+    useDeleteNotification,
     useMarkAllNotificationsRead,
     useMarkNotificationRead,
     useNotifications,
