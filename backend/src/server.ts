@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+
 import dotenv from "dotenv";
 import express from "express";
 import http from "http";
@@ -32,17 +34,34 @@ const wss = new WebSocketServer({ server });
 
 const frontendPath = path.join(__dirname, "..", "..", "dist");
 
+const backendCommit = (() => {
+    try {
+        return execSync("git rev-parse --short HEAD", {
+            cwd: path.join(__dirname, "..", ".."),
+            stdio: ["ignore", "pipe", "ignore"],
+        })
+            .toString()
+            .trim();
+    } catch {
+        return "unknown";
+    }
+})();
+
 // =====================
 // API Routes
 // =====================
 
-app.get("/health", (_req, res) => {
+const healthHandler: express.RequestHandler = (_req, res) => {
     res.json({
         status: "ok",
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
+        backendCommit,
     });
-});
+};
+
+app.get("/health", healthHandler);
+app.get("/api/health", healthHandler);
 
 app.get("/api/sessions", (_req, res) => {
     res.json(gateway.getSessions());

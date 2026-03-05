@@ -1,6 +1,18 @@
+import { execSync } from "node:child_process";
+
 import { devtools } from "@tanstack/devtools-vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+const appCommit = (() => {
+    try {
+        return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+            .toString()
+            .trim();
+    } catch {
+        return "unknown";
+    }
+})();
 
 export default defineConfig({
     plugins: [
@@ -11,6 +23,9 @@ export default defineConfig({
             },
         }),
     ],
+    define: {
+        __APP_COMMIT__: JSON.stringify(appCommit),
+    },
     server: {
         host: true, // Listen on all addresses (needed for Tailscale)
         proxy: {

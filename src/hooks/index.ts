@@ -28,6 +28,7 @@ export {
 } from "./useNotifications";
 export { liveFeedKeys, useLiveFeed } from "./useLiveFeed";
 export type { FeedItem } from "./useLiveFeed";
+export { useHealth } from "./useHealth";
 export { useWeather } from "./useWeather";
 export {
     moltbookKeys,
