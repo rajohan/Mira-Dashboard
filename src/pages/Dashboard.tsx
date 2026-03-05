@@ -142,7 +142,7 @@ function WeatherTimeCard() {
 export function Dashboard() {
     const { isConnected, error } = useOpenClawSocket();
     const { data: metrics } = useMetrics();
-    const { data: quotas } = useQuotas();
+    const { data: quotas } = useQuotas(15 * 60_000);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })

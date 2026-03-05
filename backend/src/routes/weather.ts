@@ -41,7 +41,7 @@ interface WeatherResponse {
     cacheAgeMs?: number;
 }
 
-const WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+const WEATHER_CACHE_TTL_MS = 60 * 60 * 1000;
 let weatherCache: WeatherResponse | null = null;
 let weatherFetchInFlight: Promise<WeatherResponse> | null = null;
 
