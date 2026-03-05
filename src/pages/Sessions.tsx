@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery } from "@tanstack/react-query";
 import { WifiOff } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -32,6 +32,7 @@ interface FeedItem {
     id: string;
     sessionKey: string;
     sessionLabel: string;
+    sessionType: string;
     role: string;
     content: string;
     timestamp: number;
@@ -50,6 +51,28 @@ function roleBadgeColor(role: string) {
     }
 }
 
+const FeedRow = memo(function FeedRow({ item }: { item: FeedItem }) {
+    return (
+        <div className="rounded-lg border border-primary-700 bg-primary-800/40 p-3">
+            <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                <span className="truncate text-primary-300">{item.sessionLabel}</span>
+                <span className="text-primary-500">{formatOsloTime(new Date(item.timestamp))}</span>
+            </div>
+            <div className="mb-2 flex items-center gap-2">
+                <span
+                    className={`inline-flex rounded border px-2 py-0.5 text-[11px] font-medium ${roleBadgeColor(item.role)}`}
+                >
+                    {item.role}
+                </span>
+                <span className="inline-flex rounded border border-primary-700 px-2 py-0.5 text-[11px] text-primary-300">
+                    {item.sessionType || "unknown"}
+                </span>
+            </div>
+            <p className="line-clamp-3 text-sm text-primary-100">{item.content}</p>
+        </div>
+    );
+});
+
 export function Sessions() {
     const { isConnected, error, request } = useOpenClawSocket();
     const sessionActions = useSessionActions();
@@ -57,6 +80,10 @@ export function Sessions() {
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
+    const [feedRoleFilter, setFeedRoleFilter] = useState<string>("ALL");
+    const [feedSessionFilter, setFeedSessionFilter] = useState<string>("ALL");
+    const [feedTypeFilter, setFeedTypeFilter] = useState<string>("ALL");
+    const [liveFeed, setLiveFeed] = useState<FeedItem[]>([]);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -68,10 +95,12 @@ export function Sessions() {
             ? sortedSessions
             : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
 
-    const feedSessionCandidates = useMemo(
-        () => sortedSessions.slice(0, 8),
+    const sessionByKey = useMemo(
+        () => new Map(sortedSessions.map((s) => [s.key, s] as const)),
         [sortedSessions]
     );
+
+    const feedSessionCandidates = useMemo(() => sortedSessions.slice(0, 8), [sortedSessions]);
 
     const { data: feedItems = [] } = useQuery({
         queryKey: [
@@ -100,7 +129,8 @@ export function Sessions() {
                             sessionKey: session.key,
                             sessionLabel:
                                 session.displayLabel || session.displayName || session.key,
-                            role: message.role || "unknown",
+                            sessionType: (session.type || "unknown").toUpperCase(),
+                            role: (message.role || "unknown").toLowerCase(),
                             content: (message.content || "").trim(),
                             timestamp: Number.isFinite(parsedTimestamp)
                                 ? parsedTimestamp
@@ -117,6 +147,42 @@ export function Sessions() {
                 .slice(0, 60);
         },
     });
+
+    useEffect(() => {
+        if (!feedItems.length) return;
+
+        setLiveFeed((prev) => {
+            const seen = new Set(prev.map((item) => item.id));
+            const next = [...prev];
+
+            for (const item of feedItems) {
+                if (!seen.has(item.id)) {
+                    next.unshift(item);
+                    seen.add(item.id);
+                }
+            }
+
+            return next.sort((a, b) => b.timestamp - a.timestamp).slice(0, 120);
+        });
+    }, [feedItems]);
+
+    const filteredFeed = useMemo(() => {
+        return liveFeed.filter((item) => {
+            if (feedRoleFilter !== "ALL" && item.role !== feedRoleFilter) return false;
+            if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter) return false;
+            if (feedTypeFilter !== "ALL" && item.sessionType !== feedTypeFilter) return false;
+            return true;
+        });
+    }, [liveFeed, feedRoleFilter, feedSessionFilter, feedTypeFilter]);
+
+    const feedSessionOptions = useMemo(
+        () =>
+            sortedSessions.slice(0, 20).map((session) => ({
+                value: session.key,
+                label: session.displayLabel || session.displayName || session.key,
+            })),
+        [sortedSessions]
+    );
 
     const handleRefresh = async () => {
         setIsLoading(true);
@@ -137,22 +203,11 @@ export function Sessions() {
         }
     };
 
-    const handleStop = (sessionKey: string) => {
-        sessionActions.stop(sessionKey);
-    };
+    const handleStop = (sessionKey: string) => sessionActions.stop(sessionKey);
+    const handleCompact = (sessionKey: string) => sessionActions.compact(sessionKey);
+    const handleReset = (sessionKey: string) => sessionActions.reset(sessionKey);
 
-    const handleCompact = (sessionKey: string) => {
-        sessionActions.compact(sessionKey);
-    };
-
-    const handleReset = (sessionKey: string) => {
-        sessionActions.reset(sessionKey);
-    };
-
-    const filterOptions = SESSION_TYPES.map((type) => ({
-        value: type,
-        label: type,
-    }));
+    const filterOptions = SESSION_TYPES.map((type) => ({ value: type, label: type }));
 
     return (
         <div className="p-6">
@@ -176,34 +231,56 @@ export function Sessions() {
                     <span className="text-xs text-primary-400">Auto-refresh: 5s</span>
                 </div>
 
-                {feedItems.length === 0 ? (
+                <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <select
+                        value={feedRoleFilter}
+                        onChange={(e) => setFeedRoleFilter(e.target.value)}
+                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
+                    >
+                        <option value="ALL">All roles</option>
+                        <option value="assistant">assistant</option>
+                        <option value="user">user</option>
+                        <option value="system">system</option>
+                    </select>
+                    <select
+                        value={feedTypeFilter}
+                        onChange={(e) => setFeedTypeFilter(e.target.value)}
+                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
+                    >
+                        <option value="ALL">All types</option>
+                        {SESSION_TYPES.filter((t) => t !== "ALL").map((type) => (
+                            <option key={type} value={type}>
+                                {type}
+                            </option>
+                        ))}
+                    </select>
+                    <select
+                        value={feedSessionFilter}
+                        onChange={(e) => setFeedSessionFilter(e.target.value)}
+                        className="rounded-lg border border-primary-700 bg-primary-900 px-3 py-2 text-sm text-primary-100"
+                    >
+                        <option value="ALL">All sessions</option>
+                        {feedSessionOptions.map((session) => (
+                            <option key={session.value} value={session.value}>
+                                {session.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                {filteredFeed.length === 0 ? (
                     <p className="text-sm text-primary-400">No live messages yet.</p>
                 ) : (
                     <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-                        {feedItems.map((item) => (
-                            <div
+                        {filteredFeed.map((item) => (
+                            <FeedRow
                                 key={item.id}
-                                className="rounded-lg border border-primary-700 bg-primary-800/40 p-3"
-                            >
-                                <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                                    <span className="truncate text-primary-300">
-                                        {item.sessionLabel}
-                                    </span>
-                                    <span className="text-primary-500">
-                                        {formatOsloTime(new Date(item.timestamp))}
-                                    </span>
-                                </div>
-                                <div className="mb-2">
-                                    <span
-                                        className={`inline-flex rounded border px-2 py-0.5 text-[11px] font-medium ${roleBadgeColor(item.role)}`}
-                                    >
-                                        {item.role}
-                                    </span>
-                                </div>
-                                <p className="line-clamp-3 text-sm text-primary-100">
-                                    {item.content}
-                                </p>
-                            </div>
+                                item={{
+                                    ...item,
+                                    sessionType:
+                                        (sessionByKey.get(item.sessionKey)?.type || item.sessionType).toUpperCase(),
+                                }}
+                            />
                         ))}
                     </div>
                 )}
