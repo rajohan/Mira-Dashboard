@@ -12,11 +12,13 @@ import {
 import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
-import { Button } from "../ui/Button";
+import { Dropdown } from "../ui/Dropdown";
 
 interface NotificationBellProps {
     isConnected: boolean;
 }
+
+type NotificationFilter = "all" | "unread" | "warning";
 
 export function NotificationBell({ isConnected }: NotificationBellProps) {
     const { data: notifications } = useNotifications(isConnected ? AUTO_REFRESH_MS : false);
@@ -24,7 +26,7 @@ export function NotificationBell({ isConnected }: NotificationBellProps) {
     const createNotification = useCreateNotification();
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
-    const [isOpen, setIsOpen] = useState(false);
+    const [filter, setFilter] = useState<NotificationFilter>("all");
 
     useEffect(() => {
         if (!quotas) return;
@@ -92,43 +94,68 @@ export function NotificationBell({ isConnected }: NotificationBellProps) {
         (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
     );
 
-    return (
-        <div className="relative">
-            <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsOpen((prev) => !prev)}
-                className="relative"
-            >
-                {unreadCount > 0 ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
-                {unreadCount > 0 && (
-                    <span className="absolute -right-1 -top-1 rounded-full bg-accent-500 px-1.5 text-[10px] font-semibold text-white">
-                        {unreadCount}
-                    </span>
-                )}
-            </Button>
+    const filteredItems = sortedItems.filter((notification) => {
+        if (filter === "unread") return !notification.isRead;
+        if (filter === "warning") return notification.type === "warning";
+        return true;
+    });
 
-            {isOpen && (
-                <div className="absolute right-0 top-11 w-[380px] rounded-lg border border-primary-700 bg-primary-900 p-3 shadow-2xl">
+    return (
+        <Dropdown
+            align="right"
+            variant="ghost"
+            icon={
+                <span className="relative inline-flex">
+                    {unreadCount > 0 ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+                    {unreadCount > 0 && (
+                        <span className="absolute -right-2 -top-2 rounded-full bg-accent-500 px-1.5 text-[10px] font-semibold text-white">
+                            {unreadCount}
+                        </span>
+                    )}
+                </span>
+            }
+            content={
+                <div className="w-[380px] p-2">
                     <div className="mb-2 flex items-center justify-between">
                         <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                             Notifications
                         </h2>
-                        <Button
-                            variant="secondary"
-                            size="sm"
+                        <button
+                            type="button"
+                            className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                             onClick={() => markAllRead.mutate()}
                             disabled={items.length === 0}
                         >
                             Mark all read
-                        </Button>
+                        </button>
+                    </div>
+
+                    <div className="mb-2 flex gap-2">
+                        {([
+                            ["all", "All"],
+                            ["unread", "Unread"],
+                            ["warning", "Warning"],
+                        ] as const).map(([value, label]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                className={`rounded-md px-2 py-1 text-xs ${
+                                    filter === value
+                                        ? "bg-accent-500 text-white"
+                                        : "border border-primary-600 text-primary-300 hover:bg-primary-700"
+                                }`}
+                                onClick={() => setFilter(value)}
+                            >
+                                {label}
+                            </button>
+                        ))}
                     </div>
 
                     <div className="max-h-80 space-y-2 overflow-y-auto">
-                        {sortedItems.length === 0 ? (
-                            <p className="text-sm text-primary-400">No notifications yet.</p>
+                        {filteredItems.length === 0 ? (
+                            <p className="text-sm text-primary-400">No notifications for this filter.</p>
                         ) : (
-                            sortedItems.map((notification) => (
+                            filteredItems.map((notification) => (
                                 <button
                                     key={notification.id}
                                     type="button"
@@ -159,7 +186,7 @@ export function NotificationBell({ isConnected }: NotificationBellProps) {
                         )}
                     </div>
                 </div>
-            )}
-        </div>
+            }
+        />
     );
 }
