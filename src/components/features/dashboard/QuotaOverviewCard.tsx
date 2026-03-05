@@ -75,23 +75,16 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
         },
         {
             key: "openai",
-            label: "OpenAI",
+            label: "OpenAI / Codex",
             icon: <DollarSign className="h-4 w-4" />,
             line1: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.status.replaceAll("_", " ")
-                : quotas.openai.hardLimitUsd
-                  ? `$${quotas.openai.monthUsd.toFixed(2)} / $${quotas.openai.hardLimitUsd.toFixed(2)}`
-                  : `$${quotas.openai.monthUsd.toFixed(2)} this month`,
+                : `5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left`,
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
-                : quotas.openai.remainingUsd !== null
-                  ? `$${quotas.openai.remainingUsd.toFixed(2)} remaining`
-                  : "No hard limit in API",
-            percent:
-                !hasQuotaStatus(quotas.openai) && quotas.openai.percentUsed !== null
-                    ? quotas.openai.percentUsed
-                    : null,
-            resetAt: !hasQuotaStatus(quotas.openai) ? quotas.openai.resetAt : null,
+                : `Resets: 5h ${quotas.openai.fiveHourReset || "unknown"} · weekly ${quotas.openai.weeklyReset || "unknown"}`,
+            percent: !hasQuotaStatus(quotas.openai) ? quotas.openai.percentUsed : null,
+            resetAt: null,
         },
     ];
 

@@ -30,10 +30,13 @@ interface ZaiQuota {
 }
 
 interface OpenAiQuota {
-    monthUsd: number;
-    hardLimitUsd: number | null;
-    remainingUsd: number | null;
-    percentUsed: number | null;
+    account: string | null;
+    model: string | null;
+    fiveHourLeftPercent: number;
+    weeklyLeftPercent: number;
+    fiveHourReset: string | null;
+    weeklyReset: string | null;
+    percentUsed: number;
     resetAt: string | null;
 }
 
@@ -82,11 +85,6 @@ function getSecret(name: string): string | null {
 function toNumber(value: unknown, fallback = 0): number {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toIsoFromUnixSeconds(value: number | null | undefined): string | null {
-    if (!value || !Number.isFinite(value) || value <= 0) return null;
-    return new Date(value * 1000).toISOString();
 }
 
 async function fetchJson(url: string, headers: Record<string, string>): Promise<unknown> {
@@ -201,52 +199,148 @@ async function checkZai(): Promise<QuotasResponse["zai"]> {
     }
 }
 
+function stripAnsi(value: string): string {
+    return value.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1B[@-_]/g, "");
+}
+
+function cleanPanelText(value: string | null | undefined): string | null {
+    if (!value) {
+        return null;
+    }
+
+    const cleaned = value.replace(/[│╭╮╰╯]/g, "").trim();
+    return cleaned || null;
+}
+
 async function checkOpenAi(): Promise<QuotasResponse["openai"]> {
-    const apiKey = getSecret("OPENAI_API_KEY");
-    if (!apiKey) return { status: "not_configured" };
-
     try {
-        const now = new Date();
-        const monthStart = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
+        const codexPath = process.env.CODEX_BIN || "/home/ubuntu/.npm-global/bin/codex";
 
-        const [costsData, subscriptionData] = await Promise.all([
-            fetchJson(
-                `https://api.openai.com/v1/organization/costs?start_time=${monthStart}&bucket_width=1d`,
-                {
-                    Authorization: `Bearer ${apiKey}`,
-                }
-            ) as Promise<{
-                data?: Array<{ results?: Array<{ amount?: { value?: number } }> }>;
-            }>,
-            fetchJson("https://api.openai.com/v1/dashboard/billing/subscription", {
-                Authorization: `Bearer ${apiKey}`,
-            }).catch(() => ({}) as unknown) as Promise<{
-                hard_limit_usd?: number;
-                access_until?: number;
-            }>,
-        ]);
+        const command = `bash -lc '
+set -e
+SESSION="codex_quota_$$_$(date +%s)"
+cleanup() {
+  tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
-        let monthUsd = 0;
-        for (const bucket of costsData.data || []) {
-            for (const result of bucket.results || []) {
-                monthUsd += toNumber(result.amount?.value);
-            }
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "__ERR__:tmux_not_found"
+  exit 0
+fi
+
+if [ ! -x "${codexPath}" ]; then
+  echo "__ERR__:codex_not_found"
+  exit 0
+fi
+
+tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw "${codexPath}"
+
+READY=""
+for i in $(seq 1 20); do
+  SNAP=$(tmux capture-pane -pt "$SESSION" -S -120 || true)
+  if echo "$SNAP" | grep -Eiq "OpenAI Codex|Tip:|model:"; then
+    READY="1"
+    break
+  fi
+  sleep 1
+done
+
+if [ -z "$READY" ]; then
+  echo "__ERR__:codex_not_ready"
+  tmux capture-pane -pt "$SESSION" -S -200 || true
+  exit 0
+fi
+
+tmux send-keys -t "$SESSION" C-u
+sleep 0.2
+tmux send-keys -t "$SESSION" "/status" Enter
+sleep 0.4
+tmux send-keys -t "$SESSION" Enter
+
+OUT=""
+for i in $(seq 1 20); do
+  OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true)
+  if echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:"; then
+    break
+  fi
+  sleep 1
+done
+
+printf "%s\\n" "$OUT"
+'`;
+
+        const rawOutput = execSync(command, {
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+            timeout: 45000,
+        });
+
+        const output = stripAnsi(rawOutput).replace(/\r/g, "");
+
+        if (output.includes("__ERR__:tmux_not_found")) {
+            return { status: "error", note: "tmux not found" };
         }
 
-        const hardLimitUsd =
-            typeof subscriptionData.hard_limit_usd === "number"
-                ? subscriptionData.hard_limit_usd
-                : null;
-        const remainingUsd = hardLimitUsd === null ? null : Math.max(hardLimitUsd - monthUsd, 0);
-        const percentUsed =
-            hardLimitUsd && hardLimitUsd > 0 ? Math.round((monthUsd / hardLimitUsd) * 100) : null;
+        if (output.includes("__ERR__:codex_not_found")) {
+            return { status: "not_configured", note: "codex binary not found" };
+        }
+
+        if (output.includes("__ERR__:codex_not_ready")) {
+            return { status: "error", note: "Codex CLI did not become ready in time" };
+        }
+
+        const lines = output
+            .split("\n")
+            .map((line) => line.replace(/[│╭╮╰╯]/g, "").trim())
+            .filter(Boolean);
+
+        function parseLimit(prefix: string): { leftPercent: number; resetAt: string | null } | null {
+            const index = lines.findIndex((line) => line.toLowerCase().includes(prefix.toLowerCase()));
+            if (index < 0) {
+                return null;
+            }
+
+            const currentLine = lines[index];
+            const nextLine = lines[index + 1] || "";
+            const joined = `${currentLine} ${nextLine}`;
+
+            const leftMatch = joined.match(/(\d+)%\s*left/i);
+            if (!leftMatch) {
+                return null;
+            }
+
+            const resetMatch = joined.match(/\(resets\s*([^\)]+)\)/i);
+
+            return {
+                leftPercent: toNumber(leftMatch[1]),
+                resetAt: resetMatch?.[1]?.trim() || null,
+            };
+        }
+
+        const fiveHour = parseLimit("5h limit:");
+        const weekly = parseLimit("weekly limit:");
+        const accountMatch = output.match(/Account:\s*(.+)/i);
+        const modelMatch = output.match(/Model:\s*(.+?)(?:\s*\(|$)/i);
+
+        if (!fiveHour || !weekly) {
+            console.error("[OpenAI Quota] Failed to parse /status output", { preview: output.slice(0, 1000) });
+            return { status: "error", note: "Could not parse Codex /status output" };
+        }
+
+        const fiveHourLeftPercent = fiveHour.leftPercent;
+        const weeklyLeftPercent = weekly.leftPercent;
+        const percentUsed = Math.max(100 - Math.min(fiveHourLeftPercent, weeklyLeftPercent), 0);
 
         return {
-            monthUsd: Math.round(monthUsd * 100) / 100,
-            hardLimitUsd,
-            remainingUsd: remainingUsd === null ? null : Math.round(remainingUsd * 100) / 100,
+            account: cleanPanelText(accountMatch?.[1]),
+            model: cleanPanelText(modelMatch?.[1]),
+            fiveHourLeftPercent,
+            weeklyLeftPercent,
+            fiveHourReset: fiveHour.resetAt,
+            weeklyReset: weekly.resetAt,
             percentUsed,
-            resetAt: toIsoFromUnixSeconds(subscriptionData.access_until),
+            resetAt: weekly.resetAt,
         };
     } catch (error) {
         return { status: "error", note: (error as Error).message };

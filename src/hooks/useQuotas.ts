@@ -38,10 +38,13 @@ export interface ZaiQuota {
 }
 
 export interface OpenAiQuota {
-    monthUsd: number;
-    hardLimitUsd: number | null;
-    remainingUsd: number | null;
-    percentUsed: number | null;
+    account: string | null;
+    model: string | null;
+    fiveHourLeftPercent: number;
+    weeklyLeftPercent: number;
+    fiveHourReset: string | null;
+    weeklyReset: string | null;
+    percentUsed: number;
     resetAt: string | null;
 }
 

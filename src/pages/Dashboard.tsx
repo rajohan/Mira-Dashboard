@@ -87,7 +87,9 @@ function WeatherTimeCard() {
                         <Clock className="h-3.5 w-3.5" />
                         {weather?.location || "Spydeberg"}
                     </div>
-                    <div className="text-2xl font-semibold text-primary-50">{localTime}</div>
+                    <div className="text-2xl font-semibold text-primary-50">
+                        {localTime}
+                    </div>
                     <div className="text-sm text-primary-300">{localDate}</div>
                 </div>
 
@@ -98,7 +100,9 @@ function WeatherTimeCard() {
                             {formatTemp(weather?.temperatureC)}°C
                         </div>
                         <div className="text-xs text-primary-300">
-                            {isLoading ? "Loading weather..." : weather?.description || "Unknown"}
+                            {isLoading
+                                ? "Loading weather..."
+                                : weather?.description || "Unknown"}
                         </div>
                     </div>
                 </div>
@@ -121,7 +125,7 @@ function WeatherTimeCard() {
 
             {isError && (
                 <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-sm text-rose-300">
-                    Kunne ikke hente værdata akkurat nå.
+                    Couldn't retrieve weather data right now.
                 </div>
             )}
 
@@ -135,9 +139,13 @@ function WeatherTimeCard() {
                             key={day.date}
                             className="inline-flex items-center gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm"
                         >
-                            <span className="text-primary-400">{index === 0 ? "Today" : dayLabel}</span>
+                            <span className="text-primary-400">
+                                {index === 0 ? "Today" : dayLabel}
+                            </span>
                             <ForecastIcon className="h-4 w-4 text-primary-300" />
-                            <span className="text-primary-100">{formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°</span>
+                            <span className="text-primary-100">
+                                {formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°
+                            </span>
                         </div>
                     );
                 })}
