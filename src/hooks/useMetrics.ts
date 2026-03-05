@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { apiFetch } from "./useApi";
 
 export interface Metrics {
@@ -47,7 +48,7 @@ async function fetchMetrics(): Promise<Metrics> {
     return apiFetch<Metrics>("/metrics");
 }
 
-export function useMetrics(refreshInterval = 5000) {
+export function useMetrics(refreshInterval = AUTO_REFRESH_MS) {
     return useQuery({
         queryKey: ["metrics"],
         queryFn: fetchMetrics,

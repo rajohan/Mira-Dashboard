@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { TaskAssigneeId } from "../constants/taskActors";
+import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import type { Task, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
@@ -78,7 +79,7 @@ export function useTasks() {
         queryKey: taskKeys.list(),
         queryFn: fetchTasks,
         staleTime: 10_000,
-        refetchInterval: 15_000,
+        refetchInterval: AUTO_REFRESH_MS,
     });
 }
 
@@ -166,7 +167,7 @@ export function useTaskUpdates(taskId: number | null) {
         queryFn: () => fetchTaskUpdates(taskId!),
         enabled: !!taskId,
         staleTime: 5_000,
-        refetchInterval: 10_000,
+        refetchInterval: AUTO_REFRESH_MS,
     });
 }
 
