@@ -1,5 +1,5 @@
 import { Bell, BellRing } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
     hasQuotaStatus,
@@ -9,7 +9,6 @@ import {
     useNotifications,
     useQuotas,
 } from "../../hooks";
-import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
@@ -21,12 +20,19 @@ interface NotificationBellProps {
 type NotificationFilter = "all" | "unread" | "warning";
 
 export function NotificationBell({ isConnected }: NotificationBellProps) {
-    const { data: notifications } = useNotifications(isConnected ? AUTO_REFRESH_MS : false);
-    const { data: quotas } = useQuotas(isConnected ? AUTO_REFRESH_MS : false);
+    const { data: notifications } = useNotifications(isConnected ? 15_000 : false);
+    const { data: quotas } = useQuotas(isConnected ? 60_000 : false);
     const createNotification = useCreateNotification();
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const [filter, setFilter] = useState<NotificationFilter>("all");
+
+    const items = notifications?.items || [];
+    const unreadCount = notifications?.unreadCount || 0;
+
+    const existingDedupeKeys = useMemo(() => {
+        return new Set(items.map((item) => item.dedupeKey).filter(Boolean));
+    }, [items]);
 
     useEffect(() => {
         if (!quotas) return;
@@ -75,6 +81,11 @@ export function NotificationBell({ isConnected }: NotificationBellProps) {
         for (const entry of quotaEntries) {
             const severityBucket = entry.percent >= 95 ? "95" : entry.percent >= 90 ? "90" : "80";
             const dedupeKey = `quota:${entry.key}:${severityBucket}`;
+
+            if (existingDedupeKeys.has(dedupeKey)) {
+                continue;
+            }
+
             createNotification.mutate({
                 title: entry.title,
                 description: entry.description,
@@ -85,10 +96,7 @@ export function NotificationBell({ isConnected }: NotificationBellProps) {
                 occurredAt: new Date(quotas.checkedAt).toISOString(),
             });
         }
-    }, [createNotification, quotas]);
-
-    const items = notifications?.items || [];
-    const unreadCount = notifications?.unreadCount || 0;
+    }, [createNotification, existingDedupeKeys, quotas]);
 
     const sortedItems = [...items].sort(
         (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
