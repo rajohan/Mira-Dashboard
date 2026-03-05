@@ -76,13 +76,16 @@ export function Sessions() {
         return true;
     });
 
+    const roleCount = (role: string) =>
+        liveFeed.filter((item) => item.role === role).length;
+
     const feedRoleOptions = [
-        { value: "ALL", label: "All roles" },
-        { value: "assistant", label: "assistant" },
-        { value: "user", label: "user" },
-        { value: "system", label: "system" },
-        { value: "tool", label: "tool" },
-        { value: "tool_result", label: "tool_result" },
+        { value: "ALL", label: `All roles (${liveFeed.length})` },
+        { value: "assistant", label: `assistant (${roleCount("assistant")})` },
+        { value: "user", label: `user (${roleCount("user")})` },
+        { value: "system", label: `system (${roleCount("system")})` },
+        { value: "tool", label: `tool (${roleCount("tool")})` },
+        { value: "tool_result", label: `tool_result (${roleCount("tool_result")})` },
     ];
 
     const feedTypeOptions = [
@@ -166,7 +169,9 @@ export function Sessions() {
                 </div>
 
                 {filteredFeed.length === 0 ? (
-                    <p className="text-sm text-primary-400">No live messages yet.</p>
+                    <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed border-primary-700 bg-primary-900/30 px-4 py-6">
+                        <p className="text-sm text-primary-400">No live messages yet.</p>
+                    </div>
                 ) : (
                     <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                         {filteredFeed.map((item) => (
