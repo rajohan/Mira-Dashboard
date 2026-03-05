@@ -42,7 +42,7 @@ export function LiveFeedRow({ item }: LiveFeedRowProps) {
                     {item.sessionType || "unknown"}
                 </Badge>
             </div>
-            <p className="line-clamp-3 text-sm text-primary-100">{item.content}</p>
+            <p className="whitespace-pre-wrap break-words text-sm text-primary-100">{item.content}</p>
         </div>
     );
 }

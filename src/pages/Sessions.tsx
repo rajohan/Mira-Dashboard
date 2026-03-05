@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { WifiOff } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -23,6 +23,7 @@ import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
+import { formatDate } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 export function Sessions() {
@@ -78,39 +79,33 @@ export function Sessions() {
         return true;
     });
 
-    const feedRows = useMemo(() => {
-        const rows: Array<
-            | { kind: "separator"; key: string; label: string }
-            | { kind: "message"; key: string; item: FeedItem }
-        > = [];
+    const feedRows: Array<
+        | { kind: "separator"; key: string; label: string }
+        | { kind: "message"; key: string; item: FeedItem }
+    > = [];
 
-        let previousBucket = "";
+    let previousBucket = "";
 
-        for (const item of filteredFeed) {
-            const bucket = new Date(item.timestamp).toISOString().slice(0, 16);
+    for (const item of filteredFeed) {
+        const bucket = new Date(item.timestamp).toISOString().slice(0, 16);
 
-            if (bucket !== previousBucket) {
-                const label = new Date(item.timestamp).toLocaleString("en-GB", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    day: "2-digit",
-                    month: "short",
-                });
-
-                rows.push({ kind: "separator", key: `sep-${bucket}`, label });
-                previousBucket = bucket;
-            }
-
-            rows.push({ kind: "message", key: item.id, item });
+        if (bucket !== previousBucket) {
+            feedRows.push({
+                kind: "separator",
+                key: `sep-${bucket}`,
+                label: formatDate(new Date(item.timestamp)),
+            });
+            previousBucket = bucket;
         }
 
-        return rows;
-    }, [filteredFeed]);
+        feedRows.push({ kind: "message", key: item.id, item });
+    }
 
     const feedVirtualizer = useVirtualizer({
         count: feedRows.length,
         getScrollElement: () => liveFeedContainerReference.current,
-        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 108),
+        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 88),
+        measureElement: (element) => element.getBoundingClientRect().height,
         overscan: 8,
     });
 
@@ -224,6 +219,8 @@ export function Sessions() {
                                 return (
                                     <div
                                         key={row.key}
+                                        ref={feedVirtualizer.measureElement}
+                                        data-index={virtualItem.index}
                                         className="absolute left-0 top-0 w-full"
                                         style={{ transform: `translateY(${virtualItem.start}px)` }}
                                     >
