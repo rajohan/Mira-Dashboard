@@ -1,7 +1,12 @@
 import { AlertTriangle, Loader2, Play, Terminal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { OPS_ACTIONS, useOpenClawVersion, useRunOpsAction } from "../../../hooks";
+import {
+    OPS_ACTIONS,
+    useExecJob,
+    useOpenClawVersion,
+    useStartOpsAction,
+} from "../../../hooks";
 import type { ExecResponse, OpsActionDefinition } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
@@ -9,15 +14,42 @@ import { Card } from "../../ui/Card";
 import { ConfirmModal } from "../../ui/ConfirmModal";
 
 export function ServiceActionsCard() {
-    const runAction = useRunOpsAction();
+    const startAction = useStartOpsAction();
     const { data: versionInfo } = useOpenClawVersion();
+
     const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
     const [runningActionId, setRunningActionId] = useState<string | null>(null);
+    const [runningActionLabel, setRunningActionLabel] = useState<string | null>(null);
+    const [runningJobId, setRunningJobId] = useState<string | null>(null);
     const [result, setResult] = useState<{
         action: string;
         response: ExecResponse;
         ranAt: number;
     } | null>(null);
+    const outputRef = useRef<HTMLPreElement | null>(null);
+    const [shouldAutoFollowOutput, setShouldAutoFollowOutput] = useState(true);
+
+    const execJob = useExecJob(runningJobId);
+
+    useEffect(() => {
+        if (!execJob.data || execJob.data.status !== "done" || !runningActionLabel) {
+            return;
+        }
+
+        setResult({
+            action: runningActionLabel,
+            response: {
+                code: execJob.data.code,
+                stdout: execJob.data.stdout,
+                stderr: execJob.data.stderr,
+            },
+            ranAt: execJob.data.endedAt || Date.now(),
+        });
+
+        setRunningActionId(null);
+        setRunningActionLabel(null);
+        setRunningJobId(null);
+    }, [execJob.data, runningActionLabel]);
 
     async function confirmRun() {
         if (!pendingAction) {
@@ -27,25 +59,63 @@ export function ServiceActionsCard() {
         const actionToRun = pendingAction;
         setPendingAction(null);
         setRunningActionId(actionToRun.id);
+        setRunningActionLabel(actionToRun.label);
 
         try {
-            const response = await runAction.mutateAsync(actionToRun);
-            setResult({
-                action: actionToRun.label,
-                response,
-                ranAt: Date.now(),
-            });
-        } finally {
+            const started = await startAction.mutateAsync(actionToRun);
+            setRunningJobId(started.jobId);
+        } catch {
             setRunningActionId(null);
+            setRunningActionLabel(null);
+            setRunningJobId(null);
         }
     }
 
-    const logs = result
-        ? [result.response.stdout, result.response.stderr]
-              .filter(Boolean)
-              .join("\n")
-              .trim()
+    const liveLogs = useMemo(() => {
+        if (!execJob.data) {
+            return null;
+        }
+
+        return [execJob.data.stdout, execJob.data.stderr].filter(Boolean).join("\n").trim();
+    }, [execJob.data]);
+
+    const finishedLogs = result
+        ? [result.response.stdout, result.response.stderr].filter(Boolean).join("\n").trim()
         : "";
+
+    const logs = liveLogs ?? finishedLogs;
+
+    const outputMeta = execJob.data
+        ? {
+              action: runningActionLabel || "Running action",
+              ranAt: execJob.data.startedAt,
+              code: execJob.data.status === "done" ? execJob.data.code : null,
+              running: execJob.data.status === "running",
+          }
+        : result
+          ? {
+                action: result.action,
+                ranAt: result.ranAt,
+                code: result.response.code,
+                running: false,
+            }
+          : null;
+
+    const isAnyActionPending = startAction.isPending || Boolean(runningActionId);
+
+    useEffect(() => {
+        if (!shouldAutoFollowOutput || !outputRef.current) {
+            return;
+        }
+
+        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }, [logs, shouldAutoFollowOutput]);
+
+    useEffect(() => {
+        if (runningActionId) {
+            setShouldAutoFollowOutput(true);
+        }
+    }, [runningActionId]);
 
     return (
         <>
@@ -75,22 +145,24 @@ export function ServiceActionsCard() {
                                     <button
                                         key={action.id}
                                         type="button"
-                                        className="rounded-lg border border-primary-700 bg-primary-800/40 p-3 text-left transition hover:border-primary-500"
+                                        className="flex h-full flex-col rounded-lg border border-primary-700 bg-primary-800/40 p-3 text-left transition hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
                                         onClick={() => setPendingAction(action)}
-                                        disabled={runAction.isPending}
+                                        disabled={isAnyActionPending}
                                     >
                                         <div className="mb-1 flex items-center justify-between gap-2">
                                             <span className="text-sm text-primary-100">{action.label}</span>
                                             {action.danger ? <Badge variant="error">Sensitive</Badge> : null}
                                         </div>
-                                        <div className="text-xs text-primary-400">{action.description}</div>
-                                        {runAction.isPending && runningActionId === action.id ? (
-                                            <div className="mt-2 inline-flex items-center gap-1 text-xs text-primary-300">
+                                        <div className="min-h-[2.5rem] text-xs text-primary-400">
+                                            {action.description}
+                                        </div>
+                                        {runningActionId === action.id ? (
+                                            <div className="mt-auto inline-flex items-center gap-1 pt-2 text-xs text-primary-300">
                                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                 Running...
                                             </div>
                                         ) : (
-                                            <div className="mt-2 inline-flex items-center gap-1 text-xs text-primary-300">
+                                            <div className="mt-auto inline-flex items-center gap-1 pt-2 text-xs text-primary-300">
                                                 <Play className="h-3.5 w-3.5" />
                                                 Run
                                             </div>
@@ -102,16 +174,30 @@ export function ServiceActionsCard() {
                     ))}
                 </div>
 
-                {result && (
+                {outputMeta && (
                     <div className="mt-4 rounded-lg border border-primary-700 bg-primary-900/60 p-3">
                         <div className="mb-2 text-xs text-primary-400">
-                            Last run: {result.action} · {formatDate(new Date(result.ranAt))} · exit code {String(result.response.code)}
+                            {outputMeta.running ? "Running" : "Last run"}: {outputMeta.action} ·{" "}
+                            {formatDate(new Date(outputMeta.ranAt))}
+                            {outputMeta.running ? " · in progress" : ` · exit code ${String(outputMeta.code)}`}
                         </div>
                         <div className="mb-1 inline-flex items-center gap-1 text-xs text-primary-300">
                             <Terminal className="h-3.5 w-3.5" />
                             Output
                         </div>
-                        <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-xs text-primary-200">
+                        <pre
+                            ref={outputRef}
+                            onScroll={(event) => {
+                                const element = event.currentTarget;
+                                const distanceFromBottom =
+                                    element.scrollHeight - element.scrollTop - element.clientHeight;
+                                const isAtBottom = distanceFromBottom <= 8;
+                                setShouldAutoFollowOutput((previous) =>
+                                    previous === isAtBottom ? previous : isAtBottom
+                                );
+                            }}
+                            className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-xs text-primary-200"
+                        >
                             {logs || "No output"}
                         </pre>
                     </div>
@@ -125,7 +211,7 @@ export function ServiceActionsCard() {
                 confirmLabel={pendingAction?.confirmLabel || "Run"}
                 danger={pendingAction?.danger}
                 onCancel={() => {
-                    if (!runAction.isPending) {
+                    if (!startAction.isPending) {
                         setPendingAction(null);
                     }
                 }}

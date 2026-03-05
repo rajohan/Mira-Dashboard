@@ -26,8 +26,14 @@ export {
 } from "./useCron";
 export type { CronJob } from "./useCron";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
-export { OPS_ACTIONS, useOpenClawVersion, useRunOpsAction } from "./useOpsActions";
+export {
+    OPS_ACTIONS,
+    useExecJob,
+    useOpenClawVersion,
+    useStartOpsAction,
+} from "./useOpsActions";
 export type {
+    ExecJobResponse,
     ExecResponse,
     OpenClawVersionInfo,
     OpsActionDefinition,
