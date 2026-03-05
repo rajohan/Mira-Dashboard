@@ -103,11 +103,16 @@ export function Sessions() {
 
     const feedVirtualizer = useVirtualizer({
         count: feedRows.length,
+        getItemKey: (index) => feedRows[index]?.key ?? `row-${index}`,
         getScrollElement: () => liveFeedContainerReference.current,
         estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 88),
         measureElement: (element) => element.getBoundingClientRect().height,
         overscan: 8,
     });
+
+    useEffect(() => {
+        feedVirtualizer.measure();
+    }, [feedRows.length, feedVirtualizer]);
 
     const roleCount = (role: string) =>
         liveFeed.filter((item) => item.role === role).length;
