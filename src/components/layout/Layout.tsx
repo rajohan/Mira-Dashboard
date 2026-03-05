@@ -12,6 +12,7 @@ import {
 import { type ReactNode } from "react";
 
 import { cn } from "../../utils/cn";
+import { AppHeader } from "./AppHeader";
 
 const navItems = [
     { to: "/", icon: Home, label: "Dashboard" },
@@ -70,7 +71,14 @@ export function Layout({ children }: LayoutProps) {
                 </div>
             </aside>
 
-            <main className="flex-1 overflow-auto bg-primary-900">{children}</main>
+            <main className="flex-1 overflow-auto bg-primary-900">
+                <AppHeader
+                    title={
+                        navItems.find((item) => item.to === location.pathname)?.label || "Mira Dashboard"
+                    }
+                />
+                {children}
+            </main>
         </div>
     );
 }

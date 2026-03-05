@@ -1,6 +1,6 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Bell, BellRing, WifiOff } from "lucide-react";
+import { WifiOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
@@ -11,8 +11,6 @@ import {
     SessionsTable,
 } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
-import { Badge } from "../components/ui/Badge";
-import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
@@ -20,7 +18,7 @@ import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { PageHeader } from "../components/ui/PageHeader";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
-import { hasQuotaStatus, type FeedItem, useLiveFeed, useQuotas } from "../hooks";
+import { type FeedItem, useLiveFeed } from "../hooks";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
@@ -39,10 +37,7 @@ export function Sessions() {
     const [feedSessionFilter, setFeedSessionFilter] = useState<string>("ALL");
     const [feedTypeFilter, setFeedTypeFilter] = useState<string>("ALL");
     const [liveFeed, setLiveFeed] = useState<FeedItem[]>([]);
-    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-    const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
-    const notificationsInitializedReference = useRef(false);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -58,7 +53,6 @@ export function Sessions() {
         sortedSessions,
         isConnected ? AUTO_REFRESH_MS : false
     );
-    const { data: quotas } = useQuotas(isConnected ? AUTO_REFRESH_MS : false);
 
     useEffect(() => {
         if (!latestFeedItems.length) return;
@@ -85,85 +79,6 @@ export function Sessions() {
         return true;
     });
 
-    const notifications: Array<{
-        id: string;
-        title: string;
-        description: string;
-        timestamp: number;
-        type: "alert" | "info";
-    }> = [];
-
-    if (quotas) {
-        if (!hasQuotaStatus(quotas.openrouter) && (quotas.openrouter.percentUsed || 0) >= 80) {
-            notifications.push({
-                id: `quota-openrouter-${quotas.checkedAt}`,
-                title: "OpenRouter usage high",
-                description: `${quotas.openrouter.percentUsed}% used ($${quotas.openrouter.remaining.toFixed(2)} remaining)`,
-                timestamp: quotas.checkedAt,
-                type: "alert",
-            });
-        }
-
-        if (!hasQuotaStatus(quotas.elevenlabs) && (quotas.elevenlabs.percentUsed || 0) >= 80) {
-            notifications.push({
-                id: `quota-elevenlabs-${quotas.checkedAt}`,
-                title: "ElevenLabs usage high",
-                description: `${quotas.elevenlabs.percentUsed}% used (${quotas.elevenlabs.remaining.toLocaleString()} chars remaining)`,
-                timestamp: quotas.checkedAt,
-                type: "alert",
-            });
-        }
-
-        if (!hasQuotaStatus(quotas.zai)) {
-            const highestZai = Math.max(
-                quotas.zai.fiveHour.usedPercentage,
-                quotas.zai.weekly.usedPercentage
-            );
-            if (highestZai >= 80) {
-                notifications.push({
-                    id: `quota-zai-${quotas.checkedAt}`,
-                    title: "Z.ai usage high",
-                    description: `5h ${quotas.zai.fiveHour.usedPercentage}% · weekly ${quotas.zai.weekly.usedPercentage}%`,
-                    timestamp: quotas.checkedAt,
-                    type: "alert",
-                });
-            }
-        }
-
-        if (!hasQuotaStatus(quotas.openai) && (quotas.openai.percentUsed || 0) >= 80) {
-            notifications.push({
-                id: `quota-openai-${quotas.checkedAt}`,
-                title: "OpenAI usage high",
-                description: `${quotas.openai.percentUsed}% of hard limit used`,
-                timestamp: quotas.checkedAt,
-                type: "alert",
-            });
-        }
-    }
-
-    for (const item of liveFeed.slice(0, 24)) {
-        notifications.push({
-            id: `feed-${item.id}`,
-            title: `${item.sessionLabel} · ${item.role}`,
-            description: item.content,
-            timestamp: item.timestamp,
-            type: "info",
-        });
-    }
-
-    notifications.sort((a, b) => b.timestamp - a.timestamp);
-
-    useEffect(() => {
-        if (notificationsInitializedReference.current) return;
-        if (notifications.length === 0) return;
-
-        setReadNotificationIds(notifications.map((notification) => notification.id));
-        notificationsInitializedReference.current = true;
-    }, [notifications]);
-
-    const unreadNotificationCount = notifications.filter(
-        (notification) => !readNotificationIds.includes(notification.id)
-    ).length;
 
     const feedRows: Array<
         | { kind: "separator"; key: string; label: string }
@@ -249,10 +164,6 @@ export function Sessions() {
 
     const filterOptions = SESSION_TYPES.map((type) => ({ value: type, label: type }));
 
-    const markAllNotificationsAsRead = () => {
-        setReadNotificationIds(notifications.map((notification) => notification.id));
-    };
-
     return (
         <div className="p-6">
             <PageHeader
@@ -266,82 +177,6 @@ export function Sessions() {
                 }
                 status={<ConnectionStatus isConnected={isConnected} />}
             />
-
-            <Card className="mb-4">
-                <div className="mb-2 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
-                        Notifications
-                    </h2>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setIsNotificationOpen((prev) => !prev)}
-                            className="relative"
-                        >
-                            {unreadNotificationCount > 0 ? (
-                                <BellRing className="h-4 w-4" />
-                            ) : (
-                                <Bell className="h-4 w-4" />
-                            )}
-                            <span className="ml-1">{unreadNotificationCount}</span>
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={markAllNotificationsAsRead}
-                            disabled={notifications.length === 0}
-                        >
-                            Mark all read
-                        </Button>
-                    </div>
-                </div>
-
-                {isNotificationOpen && (
-                    <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-primary-700 bg-primary-900/30 p-2">
-                        {notifications.length === 0 ? (
-                            <p className="text-sm text-primary-400">No notifications yet.</p>
-                        ) : (
-                            notifications.map((notification) => {
-                                const isRead = readNotificationIds.includes(notification.id);
-                                return (
-                                    <button
-                                        key={notification.id}
-                                        type="button"
-                                        onClick={() => {
-                                            if (!isRead) {
-                                                setReadNotificationIds((previous) => [
-                                                    ...previous,
-                                                    notification.id,
-                                                ]);
-                                            }
-                                        }}
-                                        className="w-full rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2 text-left data-[read=false]:border-primary-500/50"
-                                        data-read={isRead}
-                                    >
-                                        <div className="mb-1 flex items-center justify-between gap-2">
-                                            <div className="inline-flex items-center gap-2">
-                                                <Badge variant={notification.type === "alert" ? "warning" : "info"}>
-                                                    {notification.type === "alert" ? "alert" : "feed"}
-                                                </Badge>
-                                                {!isRead && <Badge variant="success">unread</Badge>}
-                                                {isRead && <Badge variant="default">read</Badge>}
-                                            </div>
-                                            <span className="text-xs text-primary-500">
-                                                {formatDate(new Date(notification.timestamp))}
-                                            </span>
-                                        </div>
-                                        <div className="text-sm text-primary-100">{notification.title}</div>
-                                        <div className="line-clamp-2 text-xs text-primary-300">
-                                            {notification.description}
-                                        </div>
-                                    </button>
-                                );
-                            })
-                        )}
-                    </div>
-                )}
-            </Card>
 
             <Card className="mb-4">
                 <div className="mb-3 flex items-center justify-between">
