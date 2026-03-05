@@ -7,10 +7,6 @@ const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
-function getPeriodKey(date = new Date()): string {
-    return date.toISOString().slice(0, 10);
-}
-
 function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<typeof fetchQuotas>>): number | null {
     if (provider === "openrouter") {
         return hasQuotaStatus(quotas.openrouter) ? null : quotas.openrouter.percentUsed;
@@ -61,44 +57,42 @@ function getNotificationPayload(provider: ProviderKey, quotas: Awaited<ReturnTyp
     return null;
 }
 
-function ensureStateRow(provider: ProviderKey, bucket: number, periodKey: string): void {
+function ensureStateRow(provider: ProviderKey, bucket: number): void {
     db.prepare(
-        `INSERT INTO quota_alert_state (provider, bucket, is_armed, period_key, updated_at)
-         VALUES (?, ?, 1, ?, ?)
+        `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
+         VALUES (?, ?, 1, ?)
          ON CONFLICT(provider, bucket) DO NOTHING`
-    ).run(provider, bucket, periodKey, new Date().toISOString());
+    ).run(provider, bucket, new Date().toISOString());
 }
 
-function getState(provider: ProviderKey, bucket: number): { is_armed: number; period_key: string | null } {
+function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
     const state = db
-        .prepare("SELECT is_armed, period_key FROM quota_alert_state WHERE provider = ? AND bucket = ?")
-        .get(provider, bucket) as { is_armed?: number; period_key?: string | null } | undefined;
+        .prepare("SELECT is_armed FROM quota_alert_state WHERE provider = ? AND bucket = ?")
+        .get(provider, bucket) as { is_armed?: number } | undefined;
 
     return {
         is_armed: state?.is_armed ?? 1,
-        period_key: state?.period_key ?? null,
     };
 }
 
-function setState(provider: ProviderKey, bucket: number, isArmed: number, periodKey: string): void {
+function setState(provider: ProviderKey, bucket: number, isArmed: number): void {
     db.prepare(
         `UPDATE quota_alert_state
-         SET is_armed = ?, period_key = ?, updated_at = ?
+         SET is_armed = ?, updated_at = ?
          WHERE provider = ? AND bucket = ?`
-    ).run(isArmed, periodKey, new Date().toISOString(), provider, bucket);
+    ).run(isArmed, new Date().toISOString(), provider, bucket);
 }
 
 function insertNotification(
     provider: ProviderKey,
     bucket: number,
-    periodKey: string,
     percent: number,
     occurredAt: string,
     title: string,
     description: string
 ): void {
     const now = new Date().toISOString();
-    const dedupeKey = `quota:${provider}:${bucket}:${periodKey}`;
+    const dedupeKey = `quota:${provider}:${bucket}`;
 
     db.prepare(
         `INSERT INTO notifications (
@@ -114,7 +108,7 @@ function insertNotification(
         title,
         description,
         dedupeKey,
-        JSON.stringify({ provider, bucket, percent, periodKey }),
+        JSON.stringify({ provider, bucket, percent }),
         now,
         now,
         occurredAt
@@ -132,7 +126,6 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 
     try {
         const quotas = await fetchQuotas();
-        const periodKey = getPeriodKey();
         const occurredAt = new Date(quotas.checkedAt).toISOString();
         const providers: ProviderKey[] = ["openrouter", "elevenlabs", "zai", "openai"];
 
@@ -148,30 +141,19 @@ export async function runQuotaNotificationCheck(): Promise<void> {
             }
 
             for (const bucket of THRESHOLDS) {
-                ensureStateRow(provider, bucket, periodKey);
+                ensureStateRow(provider, bucket);
                 const state = getState(provider, bucket);
 
                 let isArmed = state.is_armed;
-                if (state.period_key !== periodKey) {
-                    isArmed = 1;
-                }
 
                 if (isArmed === 1 && percent >= bucket) {
-                    insertNotification(
-                        provider,
-                        bucket,
-                        periodKey,
-                        percent,
-                        occurredAt,
-                        payload.title,
-                        payload.description
-                    );
+                    insertNotification(provider, bucket, percent, occurredAt, payload.title, payload.description);
                     isArmed = 0;
                 } else if (percent < bucket - HYSTERESIS) {
                     isArmed = 1;
                 }
 
-                setState(provider, bucket, isArmed, periodKey);
+                setState(provider, bucket, isArmed);
             }
         }
     } catch (error) {
