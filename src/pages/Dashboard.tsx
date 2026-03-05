@@ -18,7 +18,11 @@ import {
 import { useEffect, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
-import { ActiveSessionsCard, QuotaOverviewCard } from "../components/features/dashboard";
+import {
+    ActiveSessionsCard,
+    QuotaOverviewCard,
+    ServiceActionsCard,
+} from "../components/features/dashboard";
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { MetricCard } from "../components/ui/MetricCard";
@@ -212,6 +216,10 @@ export function Dashboard() {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <ActiveSessionsCard sessions={sortedSessions} />
                 <QuotaOverviewCard quotas={quotas} />
+            </div>
+
+            <div className="max-w-2xl">
+                <ServiceActionsCard />
             </div>
         </div>
     );

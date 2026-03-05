@@ -64,4 +64,11 @@ CREATE TABLE IF NOT EXISTS quota_alert_state (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (provider, bucket)
 );
+
+CREATE TABLE IF NOT EXISTS openclaw_alert_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    is_armed INTEGER NOT NULL DEFAULT 1,
+    last_latest TEXT,
+    updated_at TEXT NOT NULL
+);
 `);

@@ -18,6 +18,13 @@ export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
+export { OPS_ACTIONS, useOpenClawVersion, useRunOpsAction } from "./useOpsActions";
+export type {
+    ExecResponse,
+    OpenClawVersionInfo,
+    OpsActionDefinition,
+    OpsActionId,
+} from "./useOpsActions";
 export {
     useClearReadNotifications,
     useCreateNotification,

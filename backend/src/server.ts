@@ -15,12 +15,14 @@ import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
+import openclawRoutes from "./routes/openclaw.js";
 import quotasRoutes from "./routes/quotas.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
 import tasksRoutes from "./routes/tasks.js";
 import weatherRoutes, { startWeatherMonitor } from "./routes/weather.js";
+import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 dotenv.config();
@@ -80,6 +82,7 @@ tasksRoutes(app, express);
 weatherRoutes(app);
 quotasRoutes(app);
 notificationsRoutes(app);
+openclawRoutes(app, express);
 
 // Static files & SPA (must be last)
 staticRoutes(app, frontendPath);
@@ -105,5 +108,6 @@ server.listen(PORT, () => {
     }
 
     startQuotaNotificationMonitor();
+    startOpenClawNotificationMonitor();
     startWeatherMonitor();
 });
