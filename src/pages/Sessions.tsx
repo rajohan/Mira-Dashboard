@@ -1,6 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { WifiOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -35,6 +36,7 @@ export function Sessions() {
     const [feedSessionFilter, setFeedSessionFilter] = useState<string>("ALL");
     const [feedTypeFilter, setFeedTypeFilter] = useState<string>("ALL");
     const [liveFeed, setLiveFeed] = useState<FeedItem[]>([]);
+    const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -74,6 +76,42 @@ export function Sessions() {
         if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter) return false;
         if (feedTypeFilter !== "ALL" && item.sessionType !== feedTypeFilter) return false;
         return true;
+    });
+
+    const feedRows = useMemo(() => {
+        const rows: Array<
+            | { kind: "separator"; key: string; label: string }
+            | { kind: "message"; key: string; item: FeedItem }
+        > = [];
+
+        let previousBucket = "";
+
+        for (const item of filteredFeed) {
+            const bucket = new Date(item.timestamp).toISOString().slice(0, 16);
+
+            if (bucket !== previousBucket) {
+                const label = new Date(item.timestamp).toLocaleString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    day: "2-digit",
+                    month: "short",
+                });
+
+                rows.push({ kind: "separator", key: `sep-${bucket}`, label });
+                previousBucket = bucket;
+            }
+
+            rows.push({ kind: "message", key: item.id, item });
+        }
+
+        return rows;
+    }, [filteredFeed]);
+
+    const feedVirtualizer = useVirtualizer({
+        count: feedRows.length,
+        getScrollElement: () => liveFeedContainerReference.current,
+        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 108),
+        overscan: 8,
     });
 
     const roleCount = (role: string) =>
@@ -173,10 +211,35 @@ export function Sessions() {
                         <p className="text-sm text-primary-400">No live messages yet.</p>
                     </div>
                 ) : (
-                    <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-                        {filteredFeed.map((item) => (
-                            <LiveFeedRow key={item.id} item={item} />
-                        ))}
+                    <div ref={liveFeedContainerReference} className="max-h-96 overflow-y-auto pr-1">
+                        <div
+                            className="relative w-full"
+                            style={{ height: `${feedVirtualizer.getTotalSize()}px` }}
+                        >
+                            {feedVirtualizer.getVirtualItems().map((virtualItem) => {
+                                const row = feedRows[virtualItem.index];
+
+                                if (!row) return null;
+
+                                return (
+                                    <div
+                                        key={row.key}
+                                        className="absolute left-0 top-0 w-full"
+                                        style={{ transform: `translateY(${virtualItem.start}px)` }}
+                                    >
+                                        {row.kind === "separator" ? (
+                                            <div className="my-1 border-t border-primary-700 pt-1 text-center text-[11px] uppercase tracking-wide text-primary-500">
+                                                {row.label}
+                                            </div>
+                                        ) : (
+                                            <div className="mb-2">
+                                                <LiveFeedRow item={row.item} />
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
             </Card>
