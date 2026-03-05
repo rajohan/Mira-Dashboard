@@ -271,34 +271,36 @@ export function Tasks() {
                 onDragEnd={handleDragEnd}
             >
                 <div className="flex h-full flex-col p-6">
-                    <div className="mb-6 flex items-center justify-end gap-2">
-                        <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => setIsNewTaskOpen(true)}
-                        >
-                            <Plus className="h-4 w-4" />
-                            New Task
-                        </Button>
-                        <RefreshButton
-                            onClick={() => void refetch()}
-                            isLoading={isLoading}
-                            label=""
-                            variant="secondary"
-                        />
-                    </div>
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4">
+                            <SearchInput
+                                value={search}
+                                onChange={setSearch}
+                                placeholder="Search tasks..."
+                            />
+                            <FilterButtonGroup
+                                options={ASSIGNMENT_FILTERS}
+                                value={filter}
+                                onChange={setFilter}
+                            />
+                        </div>
 
-                    <div className="mb-4 flex items-center gap-4">
-                        <SearchInput
-                            value={search}
-                            onChange={setSearch}
-                            placeholder="Search tasks..."
-                        />
-                        <FilterButtonGroup
-                            options={ASSIGNMENT_FILTERS}
-                            value={filter}
-                            onChange={setFilter}
-                        />
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => setIsNewTaskOpen(true)}
+                            >
+                                <Plus className="h-4 w-4" />
+                                New Task
+                            </Button>
+                            <RefreshButton
+                                onClick={() => void refetch()}
+                                isLoading={isLoading}
+                                label=""
+                                variant="secondary"
+                            />
+                        </div>
                     </div>
 
                     <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
