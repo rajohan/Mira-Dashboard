@@ -178,16 +178,9 @@ export function Agents() {
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
     return (
-        <div className="p-6">
-            <div className="mb-6">
-                <h1 className="text-2xl font-bold text-primary-50">Agents</h1>
-                <p className="text-sm text-primary-400">
-                    Real-time status of configured agents
-                </p>
-            </div>
-
+        <div className="p-6 space-y-6">
             {error && (
-                <div className="mb-4 rounded-lg bg-red-500/20 p-4 text-red-300">
+                <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
                     {error instanceof Error ? error.message : "Failed to load agents"}
                 </div>
             )}
@@ -200,7 +193,7 @@ export function Agents() {
                 <>
                     {/* Active Agents */}
                     {activeAgents.length > 0 && (
-                        <div className="mb-8">
+                        <div>
                             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
                                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
                                 Active ({activeAgents.length})
@@ -224,7 +217,7 @@ export function Agents() {
 
                     {/* Idle Agents */}
                     {idleAgents.length > 0 && (
-                        <div className="mb-8">
+                        <div>
                             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
                                 <span className="h-2 w-2 rounded-full bg-primary-400" />
                                 Idle ({idleAgents.length})
@@ -248,7 +241,7 @@ export function Agents() {
 
                     {/* Offline Agents */}
                     {offlineAgents.length > 0 && (
-                        <div className="mb-8">
+                        <div>
                             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-400">
                                 <span className="h-2 w-2 rounded-full bg-primary-600" />
                                 Offline ({offlineAgents.length})
