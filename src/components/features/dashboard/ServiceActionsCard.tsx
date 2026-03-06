@@ -76,11 +76,17 @@ export function ServiceActionsCard() {
             return null;
         }
 
-        return [execJob.data.stdout, execJob.data.stderr].filter(Boolean).join("\n").trim();
+        return [execJob.data.stdout, execJob.data.stderr]
+            .filter(Boolean)
+            .join("\n")
+            .trim();
     }, [execJob.data]);
 
     const finishedLogs = result
-        ? [result.response.stdout, result.response.stderr].filter(Boolean).join("\n").trim()
+        ? [result.response.stdout, result.response.stderr]
+              .filter(Boolean)
+              .join("\n")
+              .trim()
         : "";
 
     const logs = liveLogs ?? finishedLogs;
@@ -129,19 +135,27 @@ export function ServiceActionsCard() {
                 {versionInfo?.updateAvailable && (
                     <div className="mb-3 flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                         <AlertTriangle className="h-3.5 w-3.5" />
-                        New OpenClaw version available ({versionInfo.current} → {versionInfo.latest}).
+                        New OpenClaw version available ({versionInfo.current} →{" "}
+                        {versionInfo.latest}).
                     </div>
                 )}
 
                 <div className="grid grid-cols-1 gap-3">
                     {(["system", "openclaw"] as const).map((scope) => (
-                        <div key={scope} className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                        <div
+                            key={scope}
+                            className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
+                        >
                             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
-                                {scope === "system" ? "System Actions" : "OpenClaw Actions"}
+                                {scope === "system"
+                                    ? "System Actions"
+                                    : "OpenClaw Actions"}
                             </div>
 
                             <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
-                                {OPS_ACTIONS.filter((action) => action.scope === scope).map((action) => (
+                                {OPS_ACTIONS.filter(
+                                    (action) => action.scope === scope
+                                ).map((action) => (
                                     <button
                                         key={action.id}
                                         type="button"
@@ -150,8 +164,12 @@ export function ServiceActionsCard() {
                                         disabled={isAnyActionPending}
                                     >
                                         <div className="mb-1 flex items-center justify-between gap-2">
-                                            <span className="text-sm text-primary-100">{action.label}</span>
-                                            {action.danger ? <Badge variant="error">Sensitive</Badge> : null}
+                                            <span className="text-sm text-primary-100">
+                                                {action.label}
+                                            </span>
+                                            {action.danger ? (
+                                                <Badge variant="error">Caution</Badge>
+                                            ) : null}
                                         </div>
                                         <div className="min-h-[2.5rem] text-xs text-primary-400">
                                             {action.description}
@@ -177,9 +195,11 @@ export function ServiceActionsCard() {
                 {outputMeta && (
                     <div className="mt-4 rounded-lg border border-primary-700 bg-primary-900/60 p-3">
                         <div className="mb-2 text-xs text-primary-400">
-                            {outputMeta.running ? "Running" : "Last run"}: {outputMeta.action} ·{" "}
-                            {formatDate(new Date(outputMeta.ranAt))}
-                            {outputMeta.running ? " · in progress" : ` · exit code ${String(outputMeta.code)}`}
+                            {outputMeta.running ? "Running" : "Last run"}:{" "}
+                            {outputMeta.action} · {formatDate(new Date(outputMeta.ranAt))}
+                            {outputMeta.running
+                                ? " · in progress"
+                                : ` · exit code ${String(outputMeta.code)}`}
                         </div>
                         <div className="mb-1 inline-flex items-center gap-1 text-xs text-primary-300">
                             <Terminal className="h-3.5 w-3.5" />
@@ -190,7 +210,9 @@ export function ServiceActionsCard() {
                             onScroll={(event) => {
                                 const element = event.currentTarget;
                                 const distanceFromBottom =
-                                    element.scrollHeight - element.scrollTop - element.clientHeight;
+                                    element.scrollHeight -
+                                    element.scrollTop -
+                                    element.clientHeight;
                                 const isAtBottom = distanceFromBottom <= 8;
                                 setShouldAutoFollowOutput((previous) =>
                                     previous === isAtBottom ? previous : isAtBottom

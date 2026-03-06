@@ -48,8 +48,7 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
         description: "Reboot server immediately",
         command: "sudo reboot",
         confirmLabel: "Restart system",
-        confirmMessage:
-            "Reboot system now? This will interrupt services immediately.",
+        confirmMessage: "Reboot system now? This will interrupt services immediately.",
         scope: "system",
         danger: true,
     },
@@ -63,7 +62,6 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
         confirmMessage:
             "Run system cleanup now? This removes unused apt packages/cache, old journal logs, and unused Docker images/cache/networks.",
         scope: "system",
-        danger: true,
     },
     {
         id: "system_update",
@@ -87,7 +85,7 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "openclaw_update",
         label: "Update OpenClaw",
-        description: "Install latest OpenClaw CLI globally",
+        description: "Update to latest OpenClaw version",
         command: "$HOME/.local/bin/openclaw update --yes",
         confirmLabel: "Update OpenClaw",
         confirmMessage: "Update OpenClaw to latest version now?",
@@ -96,14 +94,13 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "openclaw_cleanup",
         label: "Cleanup OpenClaw",
-        description: "Prune old OpenClaw artifacts",
+        description: "Clean old OpenClaw data",
         command:
             "find $HOME/.openclaw/agents -type f -path '*/sessions/*' -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/agents -type d -path '*/sessions/*' -empty -delete 2>/dev/null || true; find $HOME/.openclaw/media -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/workspace/images -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/tmp -type f -mtime +7 -delete 2>/dev/null || true; find $HOME/.openclaw/delivery-queue/failed -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/completions -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/cron/runs -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/logs -type f -mtime +14 -delete 2>/dev/null || true",
         confirmLabel: "Run OpenClaw cleanup",
         confirmMessage:
             "Run OpenClaw cleanup now? This removes old OpenClaw session/media/log/queue/temp artifacts.",
         scope: "openclaw",
-        danger: true,
     },
 ];
 
