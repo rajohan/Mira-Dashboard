@@ -2,7 +2,6 @@ import express, { type RequestHandler } from "express";
 import FS from "fs";
 import JSON5 from "json5";
 import Path from "path";
-import gateway from "../gateway.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
@@ -66,24 +65,6 @@ function parseAgentsConfig(): AgentsConfig | null {
     }
 }
 
-function getSessions(): SessionInfo[] {
-    // Get sessions from gateway
-    try {
-        const sessions = gateway.getSessions();
-        return sessions.map((s) => ({
-            key: s.key,
-            sessionId: s.id,
-            updatedAt: s.updatedAt,
-            channel: s.channel,
-            displayName: s.displayName,
-            label: s.label,
-        }));
-    } catch (error) {
-        console.error("[Agents] Failed to get sessions from gateway:", (error as Error).message);
-        return [];
-    }
-}
-
 // Get sessions from agent's sessions.json file
 function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
@@ -97,6 +78,75 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     } catch (error) {
         console.error("[Agents] Failed to read agent sessions.json:", (error as Error).message);
         return [];
+    }
+}
+
+// Get the last few lines from a JSONL session file to find current activity
+function getLatestActivityFromFile(agentId: string): { content: string; modTime: number } | null {
+    const sessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
+    if (!FS.existsSync(sessionsDir)) {
+        return null;
+    }
+
+    try {
+        // Find most recently modified JSONL file
+        const files = FS.readdirSync(sessionsDir)
+            .filter((f) => f.endsWith(".jsonl"))
+            .map((f) => ({
+                name: f,
+                path: Path.join(sessionsDir, f),
+                mtime: FS.statSync(Path.join(sessionsDir, f)).mtimeMs,
+            }))
+            .sort((a, b) => b.mtime - a.mtime);
+
+        if (files.length === 0) {
+            return null;
+        }
+
+        const latestFile = files[0];
+        
+        // Read the file and find last user message
+        const content = FS.readFileSync(latestFile.path, "utf8");
+        const lines = content.trim().split("\n");
+        
+        // Find the last user message by scanning from the end
+        for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+                const entry = JSON.parse(lines[i]);
+                const msg = entry.message || entry;
+                
+                if (msg.role === "user" && msg.content) {
+                    let text = typeof msg.content === "string" 
+                        ? msg.content 
+                        : Array.isArray(msg.content)
+                          ? msg.content
+                              .filter((c: { type?: string }) => c.type === "text")
+                              .map((c: { text?: string }) => c.text)
+                              .join(" ")
+                          : String(msg.content);
+                    
+                    // Skip metadata blocks and extract actual message
+                    text = text
+                        .replace(/```json[\s\S]*?```/g, "") // Remove JSON blocks
+                        .replace(/```[\s\S]*?```/g, "") // Remove other code blocks
+                        .replace(/\[media attached[^\]]*\]/g, "") // Remove media references
+                        .replace(/Conversation info[^\n]*/g, "") // Remove conversation info headers
+                        .replace(/Sender[^\n]*/g, "") // Remove sender headers
+                        .replace(/\n+/g, " ") // Replace newlines
+                        .replace(/\s+/g, " ") // Collapse whitespace
+                        .trim()
+                        .slice(0, 100);
+                    
+                    return { content: text || "Processing", modTime: latestFile.mtime };
+                }
+            } catch {
+                // Skip malformed lines
+            }
+        }
+
+        return { content: "Processing", modTime: latestFile.mtime };
+    } catch (error) {
+        return null;
     }
 }
 
@@ -197,27 +247,15 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
     return "idle";
 }
 
-function getAgentStatus(agentId: string, sessions: SessionInfo[]): AgentStatus {
-    // Get sessions from both gateway and agent's sessions.json file
+function getAgentStatus(agentId: string): AgentStatus {
+    // Get sessions from agent's sessions.json file
     const fileSessions = getAgentSessionsFromFiles(agentId);
-    const allSessions = [...sessions, ...fileSessions];
 
-    // Find sessions for this agent
-    const agentSessions = allSessions.filter((s) => {
-        if (!s.key) return false;
-        // Match session key pattern: agent:{agentId}:... or agent:{agentId}
-        const parts = s.key.split(":");
-        return parts[0] === "agent" && parts[1] === agentId;
-    });
-
-    // Get latest session file modification time
-    const fileModTime = getSessionFileModTime(agentId);
-
-    // Find most recent session activity
+    // Find most recent session
     let latestSession: SessionInfo | null = null;
     let latestTime = 0;
 
-    for (const session of agentSessions) {
+    for (const session of fileSessions) {
         const sessionTime = session.updatedAt || 0;
         if (sessionTime > latestTime) {
             latestTime = sessionTime;
@@ -225,22 +263,34 @@ function getAgentStatus(agentId: string, sessions: SessionInfo[]): AgentStatus {
         }
     }
 
-    // Use whichever is more recent: file mod time or session updatedAt
-    // Both are already in milliseconds
-    const effectiveTime = Math.max(fileModTime || 0, latestTime);
-    const status = determineStatus(effectiveTime);
+    // Get latest activity from JSONL file
+    const activity = getLatestActivityFromFile(agentId);
+    
+    // Determine status from file modification time
+    const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
+    const status = determineStatus(fileModTime);
 
-    // Derive current task from session key
+    // Derive current task from session key or file content
     const sessionKey = latestSession?.key || null;
-    const currentTask = sessionKey ? deriveActivityFromSessionKey(sessionKey) : null;
+    let currentTask: string | null = null;
+    
+    if (activity?.content) {
+        // Use activity from file content
+        currentTask = activity.content;
+    } else if (sessionKey) {
+        // Fallback to session key derivation
+        currentTask = deriveActivityFromSessionKey(sessionKey);
+    }
+
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
+    const effectiveModTime = fileModTime || 0;
 
     return {
         id: agentId,
         status,
         model: "unknown", // Will be filled from config
         currentTask,
-        lastActivity: effectiveTime > 0 ? new Date(effectiveTime).toISOString() : null,
+        lastActivity: effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
         sessionKey,
         channel,
     };
@@ -272,11 +322,10 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const sessions = getSessions();
             const defaultModel = config.defaults?.model?.primary || "unknown";
 
             const agents: AgentStatus[] = config.list.map((agent) => {
-                const status = getAgentStatus(agent.id, sessions);
+                const status = getAgentStatus(agent.id);
                 status.model = agent.model?.primary || defaultModel;
                 return status;
             });
@@ -305,8 +354,7 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const sessions = getSessions();
-            const status = getAgentStatus(agentId, sessions);
+            const status = getAgentStatus(agentId);
             status.model = agentConfig.model?.primary || config.defaults?.model?.primary || "unknown";
 
             res.json(status);
