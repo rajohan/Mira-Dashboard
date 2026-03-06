@@ -76,10 +76,11 @@ export function Layout({ children }: LayoutProps) {
             <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-primary-900">
                 <AppHeader
                     title={
-                        navItems.find((item) => item.to === location.pathname)?.label || "Mira Dashboard"
+                        navItems.find((item) => item.to === location.pathname)?.label ||
+                        "Mira Dashboard"
                     }
                 />
-                <div className="flex-1 min-h-0 overflow-auto">{children}</div>
+                <div className="min-h-0 flex-1 overflow-auto">{children}</div>
             </main>
         </div>
     );

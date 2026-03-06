@@ -25,7 +25,10 @@ export function SessionsByModelCard({ sessionsByModel }: SessionsByModelCardProp
                         className="rounded-lg bg-primary-800/50 p-3 text-center"
                     >
                         <p className="text-2xl font-bold text-primary-100">{count}</p>
-                        <p className="mt-1 truncate text-xs text-primary-400" title={model}>
+                        <p
+                            className="mt-1 truncate text-xs text-primary-400"
+                            title={model}
+                        >
                             {model}
                         </p>
                     </div>

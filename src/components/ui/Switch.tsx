@@ -43,7 +43,7 @@ export function Switch({
                 onChange={onChange}
                 className={cn(
                     "inline-flex h-6 w-11 items-center rounded-full transition focus:outline-none",
-                    "ring-offset-2 ring-offset-primary-800 data-focus:ring-2 data-focus:ring-accent-500",
+                    "data-focus:ring-2 data-focus:ring-accent-500 ring-offset-2 ring-offset-primary-800",
                     checked ? "bg-accent-500" : "bg-primary-600",
                     disabled ? "cursor-not-allowed opacity-50" : ""
                 )}

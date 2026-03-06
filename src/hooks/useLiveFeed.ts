@@ -56,7 +56,9 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
                             id: `${session.key}-${index}-${parsedTimestamp}`,
                             sessionKey: session.key,
                             sessionLabel:
-                                session.displayLabel || session.displayName || session.key,
+                                session.displayLabel ||
+                                session.displayName ||
+                                session.key,
                             sessionType: (session.type || "unknown").toUpperCase(),
                             role: normalizedRole,
                             content: (message.content || "").trim(),

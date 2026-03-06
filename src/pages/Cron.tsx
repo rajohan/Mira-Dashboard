@@ -5,15 +5,15 @@ import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
+import type { CronJob } from "../hooks";
 import {
     useCronJobs,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
 } from "../hooks";
-import type { CronJob } from "../hooks";
+import { getCronJobId, sortCronJobs } from "../utils/cronUtils";
 import { formatDate } from "../utils/format";
-import { sortCronJobs, getCronJobId } from "../utils/cronUtils";
 import { validateJsonString } from "../utils/json";
 
 export function Cron() {
@@ -43,7 +43,9 @@ export function Cron() {
     const payloadValidation = validateJsonString(payloadDraft);
     const deliveryValidation = validateJsonString(deliveryDraft);
     const hasInvalidJson =
-        !scheduleValidation.valid || !payloadValidation.valid || !deliveryValidation.valid;
+        !scheduleValidation.valid ||
+        !payloadValidation.valid ||
+        !deliveryValidation.valid;
 
     useEffect(() => {
         if (!currentJob) {
@@ -97,7 +99,9 @@ export function Cron() {
             await updateJob.mutateAsync({ id, patch });
             setEditError(null);
         } catch (error) {
-            setEditError(error instanceof Error ? error.message : "Invalid JSON in edit fields");
+            setEditError(
+                error instanceof Error ? error.message : "Invalid JSON in edit fields"
+            );
         }
     }
 

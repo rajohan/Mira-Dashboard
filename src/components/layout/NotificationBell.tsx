@@ -13,13 +13,9 @@ import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
 
-interface NotificationBellProps {
-    isConnected: boolean;
-}
-
 type NotificationFilter = "all" | "unread" | "warning";
 
-export function NotificationBell({ isConnected: _isConnected }: NotificationBellProps) {
+export function NotificationBell() {
     const { data: notifications } = useNotifications(AUTO_REFRESH_MS);
     const markNotificationRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
@@ -46,7 +42,11 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
             variant="ghost"
             icon={
                 <span className="relative inline-flex">
-                    {unreadCount > 0 ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+                    {unreadCount > 0 ? (
+                        <BellRing className="h-5 w-5" />
+                    ) : (
+                        <Bell className="h-5 w-5" />
+                    )}
                     {unreadCount > 0 && (
                         <span className="absolute -right-2 -top-2 rounded-full bg-accent-500 px-1.5 text-[10px] font-semibold text-white">
                             {unreadCount}
@@ -81,11 +81,13 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                     </div>
 
                     <div className="mb-2 flex gap-2">
-                        {([
-                            ["all", "All"],
-                            ["unread", "Unread"],
-                            ["warning", "Warning"],
-                        ] as const).map(([value, label]) => (
+                        {(
+                            [
+                                ["all", "All"],
+                                ["unread", "Unread"],
+                                ["warning", "Warning"],
+                            ] as const
+                        ).map(([value, label]) => (
                             <button
                                 key={value}
                                 type="button"
@@ -103,7 +105,9 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
 
                     <div className="max-h-80 space-y-2 overflow-y-auto">
                         {filteredItems.length === 0 ? (
-                            <p className="text-sm text-primary-400">No notifications for this filter.</p>
+                            <p className="text-sm text-primary-400">
+                                No notifications for this filter.
+                            </p>
                         ) : (
                             filteredItems.map((notification) => (
                                 <div
@@ -112,16 +116,28 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                                 >
                                     <div className="mb-1 flex items-center justify-between gap-2">
                                         <div className="inline-flex items-center gap-2">
-                                            <Badge variant={notification.type === "warning" ? "warning" : "info"}>
+                                            <Badge
+                                                variant={
+                                                    notification.type === "warning"
+                                                        ? "warning"
+                                                        : "info"
+                                                }
+                                            >
                                                 {notification.type}
                                             </Badge>
-                                            {!notification.isRead && <Badge variant="success">unread</Badge>}
+                                            {!notification.isRead && (
+                                                <Badge variant="success">unread</Badge>
+                                            )}
                                         </div>
                                         <span className="text-xs text-primary-500">
-                                            {formatDate(new Date(notification.occurredAt))}
+                                            {formatDate(
+                                                new Date(notification.occurredAt)
+                                            )}
                                         </span>
                                     </div>
-                                    <div className="text-sm text-primary-100">{notification.title}</div>
+                                    <div className="text-sm text-primary-100">
+                                        {notification.title}
+                                    </div>
                                     <div className="line-clamp-2 text-xs text-primary-300">
                                         {notification.description}
                                     </div>
@@ -130,7 +146,11 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                                             <button
                                                 type="button"
                                                 className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
-                                                onClick={() => markNotificationRead.mutate(notification.id)}
+                                                onClick={() =>
+                                                    markNotificationRead.mutate(
+                                                        notification.id
+                                                    )
+                                                }
                                             >
                                                 Mark read
                                             </button>
@@ -138,7 +158,9 @@ export function NotificationBell({ isConnected: _isConnected }: NotificationBell
                                         <button
                                             type="button"
                                             className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
-                                            onClick={() => deleteNotification.mutate(notification.id)}
+                                            onClick={() =>
+                                                deleteNotification.mutate(notification.id)
+                                            }
                                         >
                                             Clear
                                         </button>

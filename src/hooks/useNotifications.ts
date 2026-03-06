@@ -82,7 +82,8 @@ export function useClearReadNotifications() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<{ ok: boolean; deleted: number }>("/notifications/clear-read"),
+        mutationFn: () =>
+            apiPost<{ ok: boolean; deleted: number }>("/notifications/clear-read"),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -93,7 +94,8 @@ export function useDeleteNotification() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (id: number) => apiDelete<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
+        mutationFn: (id: number) =>
+            apiDelete<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },

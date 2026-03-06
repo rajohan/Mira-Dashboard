@@ -16,7 +16,12 @@ interface CronJobListProps {
     onSelect: (id: string) => void;
 }
 
-export function CronJobList({ jobs, selectedId, currentJobId, onSelect }: CronJobListProps) {
+export function CronJobList({
+    jobs,
+    selectedId,
+    currentJobId,
+    onSelect,
+}: CronJobListProps) {
     return (
         <Card variant="bordered" className="p-0">
             <div className="border-b border-primary-700 px-4 py-3 text-sm font-semibold text-primary-200">
@@ -25,7 +30,8 @@ export function CronJobList({ jobs, selectedId, currentJobId, onSelect }: CronJo
             <div className="max-h-[70vh] overflow-auto p-2">
                 {jobs.map((job) => {
                     const id = getCronJobId(job);
-                    const isSelected = id === selectedId || (!selectedId && id === currentJobId);
+                    const isSelected =
+                        id === selectedId || (!selectedId && id === currentJobId);
 
                     return (
                         <Button
@@ -44,17 +50,29 @@ export function CronJobList({ jobs, selectedId, currentJobId, onSelect }: CronJo
                                 <div className="truncate text-sm font-medium text-primary-100">
                                     {getCronJobName(job)}
                                 </div>
-                                <Badge variant={job.enabled === false ? "warning" : "success"}>
+                                <Badge
+                                    variant={
+                                        job.enabled === false ? "warning" : "success"
+                                    }
+                                >
                                     {job.enabled === false ? "Disabled" : "Enabled"}
                                 </Badge>
                             </div>
-                            <div className="mt-1 w-full truncate text-xs text-primary-400">{id}</div>
+                            <div className="mt-1 w-full truncate text-xs text-primary-400">
+                                {id}
+                            </div>
                             <div className="mt-2 grid w-full grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-primary-400">
                                 <span>
-                                    Last: {formatCronTimestamp(getCronStateValue(job, "lastRunAtMs"))}
+                                    Last:{" "}
+                                    {formatCronTimestamp(
+                                        getCronStateValue(job, "lastRunAtMs")
+                                    )}
                                 </span>
                                 <span>
-                                    Next: {formatCronTimestamp(getCronStateValue(job, "nextRunAtMs"))}
+                                    Next:{" "}
+                                    {formatCronTimestamp(
+                                        getCronStateValue(job, "nextRunAtMs")
+                                    )}
                                 </span>
                             </div>
                         </Button>

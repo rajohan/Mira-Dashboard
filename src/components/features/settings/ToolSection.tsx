@@ -21,7 +21,9 @@ export function ToolSection({
                 <div className="flex items-center justify-between py-2">
                     <span className="text-sm text-primary-400">Web Search</span>
                     <span
-                        className={webSearchEnabled ? "text-green-400" : "text-primary-500"}
+                        className={
+                            webSearchEnabled ? "text-green-400" : "text-primary-500"
+                        }
                     >
                         {webSearchEnabled
                             ? "Enabled (" + webSearchProvider + ")"

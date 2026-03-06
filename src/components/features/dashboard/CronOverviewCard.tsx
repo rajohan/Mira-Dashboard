@@ -65,7 +65,9 @@ export function CronOverviewCard() {
                     <span>Last run</span>
                     <span className="truncate text-right text-primary-100">
                         {formatCronTimestamp(
-                            latestRunJob ? getCronStateValue(latestRunJob, "lastRunAtMs") : undefined
+                            latestRunJob
+                                ? getCronStateValue(latestRunJob, "lastRunAtMs")
+                                : undefined
                         )}
                         {latestRunJob ? ` (${getCronJobName(latestRunJob)})` : ""}
                     </span>
@@ -74,7 +76,9 @@ export function CronOverviewCard() {
                     <span>Next run</span>
                     <span className="truncate text-right text-primary-100">
                         {formatCronTimestamp(
-                            nextRunJob ? getCronStateValue(nextRunJob, "nextRunAtMs") : undefined
+                            nextRunJob
+                                ? getCronStateValue(nextRunJob, "nextRunAtMs")
+                                : undefined
                         )}
                         {nextRunJob ? ` (${getCronJobName(nextRunJob)})` : ""}
                     </span>

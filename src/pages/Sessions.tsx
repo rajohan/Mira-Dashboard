@@ -17,9 +17,9 @@ import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { type FeedItem, useLiveFeed } from "../hooks";
-import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
+import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { type Session } from "../types/session";
 import { formatDate } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
@@ -53,7 +53,7 @@ export function Sessions() {
     );
 
     useEffect(() => {
-        if (!latestFeedItems.length) return;
+        if (latestFeedItems.length === 0) return;
 
         setLiveFeed((prev) => {
             const seen = new Set(prev.map((item) => item.id));
@@ -72,11 +72,11 @@ export function Sessions() {
 
     const filteredFeed = liveFeed.filter((item) => {
         if (feedRoleFilter !== "ALL" && item.role !== feedRoleFilter) return false;
-        if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter) return false;
+        if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter)
+            return false;
         if (feedTypeFilter !== "ALL" && item.sessionType !== feedTypeFilter) return false;
         return true;
     });
-
 
     const feedRows: Array<
         | { kind: "separator"; key: string; label: string }
@@ -206,7 +206,10 @@ export function Sessions() {
                         <p className="text-sm text-primary-400">No live messages yet.</p>
                     </div>
                 ) : (
-                    <div ref={liveFeedContainerReference} className="max-h-96 overflow-y-auto pr-1">
+                    <div
+                        ref={liveFeedContainerReference}
+                        className="max-h-96 overflow-y-auto pr-1"
+                    >
                         <div
                             className="relative w-full"
                             style={{ height: `${feedVirtualizer.getTotalSize()}px` }}
@@ -222,7 +225,9 @@ export function Sessions() {
                                         ref={feedVirtualizer.measureElement}
                                         data-index={virtualItem.index}
                                         className="absolute left-0 top-0 w-full"
-                                        style={{ transform: `translateY(${virtualItem.start}px)` }}
+                                        style={{
+                                            transform: `translateY(${virtualItem.start}px)`,
+                                        }}
                                     >
                                         {row.kind === "separator" ? (
                                             <div className="my-1 border-t border-primary-700 pt-1 text-center text-[11px] uppercase tracking-wide text-primary-500">

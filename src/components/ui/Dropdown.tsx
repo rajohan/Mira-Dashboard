@@ -64,9 +64,7 @@ export function Dropdown({
                 anchor={align === "right" ? "bottom end" : "bottom start"}
                 className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-primary-600 bg-primary-800 p-1 shadow-lg focus:outline-none"
             >
-                {content ? (
-                    content
-                ) : (
+                {content ||
                     items.map((item, index) => (
                         <MenuItem key={index} disabled={item.disabled}>
                             <button
@@ -85,8 +83,7 @@ export function Dropdown({
                                 {item.label}
                             </button>
                         </MenuItem>
-                    ))
-                )}
+                    ))}
             </MenuItems>
         </Menu>
     );

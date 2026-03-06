@@ -14,7 +14,9 @@ export function AppHeader({ title }: AppHeaderProps) {
     const backendCommit = health?.backendCommit || "unknown";
     const frontendCommit = __APP_COMMIT__;
     const hasVersionMismatch =
-        backendCommit !== "unknown" && frontendCommit !== "unknown" && backendCommit !== frontendCommit;
+        backendCommit !== "unknown" &&
+        frontendCommit !== "unknown" &&
+        backendCommit !== frontendCommit;
 
     return (
         <header className="sticky top-0 z-20 border-b border-primary-700 bg-primary-950/95 px-6 py-4 backdrop-blur">
@@ -35,7 +37,11 @@ export function AppHeader({ title }: AppHeaderProps) {
                                     ? "border-green-500/40 bg-green-500/10 text-green-300"
                                     : "border-red-500/40 bg-red-500/10 text-red-300",
                             ].join(" ")}
-                            title={isConnected ? "WebSocket connected" : "WebSocket disconnected"}
+                            title={
+                                isConnected
+                                    ? "WebSocket connected"
+                                    : "WebSocket disconnected"
+                            }
                         >
                             <span className="font-medium">WS</span>
                             <span>{isConnected ? "●" : "○"}</span>
@@ -48,14 +54,16 @@ export function AppHeader({ title }: AppHeaderProps) {
                                     : "border-red-500/40 bg-red-500/10 text-red-300",
                             ].join(" ")}
                             title={
-                                isBackendConnected ? "Backend connected" : "Backend disconnected"
+                                isBackendConnected
+                                    ? "Backend connected"
+                                    : "Backend disconnected"
                             }
                         >
                             <span className="font-medium">BE</span>
                             <span>{isBackendConnected ? "●" : "○"}</span>
                         </span>
                     </div>
-                    <NotificationBell isConnected={isConnected} />
+                    <NotificationBell />
                 </div>
             </div>
         </header>

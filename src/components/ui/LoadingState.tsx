@@ -23,7 +23,9 @@ export function LoadingState({ message, size = "md" }: LoadingStateProps) {
     return (
         <div className={`flex ${sizeClasses[size]} items-center justify-center`}>
             <div className="flex flex-col items-center gap-2">
-                <RefreshCw className={`${iconSizes[size]} animate-spin text-primary-400`} />
+                <RefreshCw
+                    className={`${iconSizes[size]} animate-spin text-primary-400`}
+                />
                 {message && <p className="text-sm text-primary-400">{message}</p>}
             </div>
         </div>

@@ -60,7 +60,9 @@ export function MetricCard({
                     )}
                 </div>
                 {percent !== undefined && (
-                    <div className="text-lg font-semibold text-primary-300">{percent}%</div>
+                    <div className="text-lg font-semibold text-primary-300">
+                        {percent}%
+                    </div>
                 )}
             </div>
             {percent !== undefined && (

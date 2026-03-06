@@ -162,10 +162,7 @@ export function Settings() {
                             </>
                         )}
                     </Button>
-                    <Button
-                        variant="danger"
-                        onClick={() => setShowRestartModal(true)}
-                    >
+                    <Button variant="danger" onClick={() => setShowRestartModal(true)}>
                         <RefreshCw className="h-4 w-4" />
                         Restart
                     </Button>

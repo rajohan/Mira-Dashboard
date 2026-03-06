@@ -103,7 +103,12 @@ export function CronJobDetails({
                         disabled={runPending}
                         onClick={() => onRunNow(job)}
                     >
-                        <Play className={["h-4 w-4", runPending ? "animate-pulse" : ""].join(" ")} />
+                        <Play
+                            className={[
+                                "h-4 w-4",
+                                runPending ? "animate-pulse" : "",
+                            ].join(" ")}
+                        />
                         {runPending ? "Triggering..." : "Trigger now"}
                     </Button>
                     {runPending ? (
@@ -123,21 +128,29 @@ export function CronJobDetails({
                 <div className="grid grid-cols-1 gap-3 text-sm text-primary-200 lg:grid-cols-3">
                     <div>
                         <div className="text-xs text-primary-400">Last run</div>
-                        <div>{formatCronTimestamp(getCronStateValue(job, "lastRunAtMs"))}</div>
+                        <div>
+                            {formatCronTimestamp(getCronStateValue(job, "lastRunAtMs"))}
+                        </div>
                     </div>
                     <div>
                         <div className="text-xs text-primary-400">Next run</div>
-                        <div>{formatCronTimestamp(getCronStateValue(job, "nextRunAtMs"))}</div>
+                        <div>
+                            {formatCronTimestamp(getCronStateValue(job, "nextRunAtMs"))}
+                        </div>
                     </div>
                     <div>
                         <div className="text-xs text-primary-400">Last status</div>
                         <div className="mt-1">
                             <Badge
                                 variant={getCronStatusVariant(
-                                    formatCronLastStatus(getCronStateValue(job, "lastRunStatus"))
+                                    formatCronLastStatus(
+                                        getCronStateValue(job, "lastRunStatus")
+                                    )
                                 )}
                             >
-                                {formatCronLastStatus(getCronStateValue(job, "lastRunStatus"))}
+                                {formatCronLastStatus(
+                                    getCronStateValue(job, "lastRunStatus")
+                                )}
                             </Badge>
                         </div>
                     </div>
@@ -182,10 +195,14 @@ export function CronJobDetails({
                 {isEditMode ? (
                     <>
                         <div>
-                            <label className="mb-1 block text-xs text-primary-300">Name</label>
+                            <label className="mb-1 block text-xs text-primary-300">
+                                Name
+                            </label>
                             <Input
                                 value={nameDraft}
-                                onChange={(event) => onNameDraftChange(event.target.value)}
+                                onChange={(event) =>
+                                    onNameDraftChange(event.target.value)
+                                }
                                 placeholder="Job name"
                             />
                         </div>
@@ -198,7 +215,9 @@ export function CronJobDetails({
                                 <Textarea
                                     className="h-48 font-mono text-xs"
                                     value={scheduleDraft}
-                                    onChange={(event) => onScheduleDraftChange(event.target.value)}
+                                    onChange={(event) =>
+                                        onScheduleDraftChange(event.target.value)
+                                    }
                                 />
                                 <p
                                     className={
@@ -219,7 +238,9 @@ export function CronJobDetails({
                                 <Textarea
                                     className="h-48 font-mono text-xs"
                                     value={payloadDraft}
-                                    onChange={(event) => onPayloadDraftChange(event.target.value)}
+                                    onChange={(event) =>
+                                        onPayloadDraftChange(event.target.value)
+                                    }
                                 />
                                 <p
                                     className={
@@ -240,7 +261,9 @@ export function CronJobDetails({
                                 <Textarea
                                     className="h-48 font-mono text-xs"
                                     value={deliveryDraft}
-                                    onChange={(event) => onDeliveryDraftChange(event.target.value)}
+                                    onChange={(event) =>
+                                        onDeliveryDraftChange(event.target.value)
+                                    }
                                 />
                                 <p
                                     className={

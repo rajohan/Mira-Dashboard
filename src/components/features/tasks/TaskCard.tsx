@@ -41,7 +41,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
         >
             <button
                 {...listeners}
-                className="absolute left-1.5 top-1/2 -tranprimary-y-1/2 cursor-grab text-primary-600 opacity-0 transition-opacity hover:text-primary-400 group-hover:opacity-100"
+                className="-tranprimary-y-1/2 absolute left-1.5 top-1/2 cursor-grab text-primary-600 opacity-0 transition-opacity hover:text-primary-400 group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />

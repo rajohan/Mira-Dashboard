@@ -9,7 +9,9 @@ interface QuotaOverviewCardProps {
     quotas: QuotasResponse | undefined;
 }
 
-function getSeverity(percent: number | null | undefined): "success" | "warning" | "error" {
+function getSeverity(
+    percent: number | null | undefined
+): "success" | "warning" | "error" {
     if (!percent || percent < 80) return "success";
     if (percent < 95) return "warning";
     return "error";
@@ -24,7 +26,9 @@ function tryParseOpenAiReset(value: string): Date | null {
         return date;
     }
 
-    const withDayMonthMatch = value.match(/^(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]{3})$/i);
+    const withDayMonthMatch = value.match(
+        /^(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]{3})$/i
+    );
     if (withDayMonthMatch) {
         const monthMap: Record<string, number> = {
             jan: 0,
@@ -103,7 +107,8 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 ? quotas.openrouter.note || ""
                 : `$${quotas.openrouter.remaining.toFixed(2)} remaining`,
             percent:
-                !hasQuotaStatus(quotas.openrouter) && quotas.openrouter.percentUsed !== null
+                !hasQuotaStatus(quotas.openrouter) &&
+                quotas.openrouter.percentUsed !== null
                     ? quotas.openrouter.percentUsed
                     : null,
             resetAt: null,
@@ -119,7 +124,8 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 ? quotas.elevenlabs.note || ""
                 : `Reset ${formatResetValue(quotas.elevenlabs.resetAt)}`,
             percent:
-                !hasQuotaStatus(quotas.elevenlabs) && quotas.elevenlabs.percentUsed !== null
+                !hasQuotaStatus(quotas.elevenlabs) &&
+                quotas.elevenlabs.percentUsed !== null
                     ? quotas.elevenlabs.percentUsed
                     : null,
             resetAt: null,
@@ -134,10 +140,12 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
             line2: hasQuotaStatus(quotas.zai)
                 ? quotas.zai.note || ""
                 : `Resets: 5h ${formatResetValue(quotas.zai.fiveHour.resetAt)} · weekly ${formatResetValue(quotas.zai.weekly.resetAt)}`,
-            percent:
-                !hasQuotaStatus(quotas.zai)
-                    ? Math.max(quotas.zai.fiveHour.usedPercentage, quotas.zai.weekly.usedPercentage)
-                    : null,
+            percent: hasQuotaStatus(quotas.zai)
+                ? null
+                : Math.max(
+                      quotas.zai.fiveHour.usedPercentage,
+                      quotas.zai.weekly.usedPercentage
+                  ),
             resetAt: null,
         },
         {
@@ -150,7 +158,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
                 : `Resets: 5h ${formatResetValue(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
-            percent: !hasQuotaStatus(quotas.openai) ? quotas.openai.percentUsed : null,
+            percent: hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed,
             resetAt: null,
         },
     ];
@@ -184,7 +192,11 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                             )}
                         </div>
                         <div className="text-xs text-primary-300">{provider.line1}</div>
-                        {provider.line2 && <div className="text-xs text-primary-400">{provider.line2}</div>}
+                        {provider.line2 && (
+                            <div className="text-xs text-primary-400">
+                                {provider.line2}
+                            </div>
+                        )}
                         {provider.resetAt && provider.resetAt !== "unknown" && (
                             <div className="text-xs text-primary-500">
                                 Reset {formatDate(new Date(provider.resetAt))}
