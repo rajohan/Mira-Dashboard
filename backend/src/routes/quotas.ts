@@ -204,39 +204,18 @@ async function checkZai(): Promise<QuotasResponse["zai"]> {
             return new Date(timestamp).toISOString();
         };
 
-        // Calculate next 5-hour window reset
-        // Z.ai resets every 5 hours from midnight UTC, so windows are: 00:00, 05:00, 10:00, 15:00, 20:00
-        const calculate5hReset = (): string => {
-            if (fiveHour?.nextResetTime) {
-                return formatReset(fiveHour.nextResetTime);
-            }
-            
-            // Calculate next 5-hour window from now
-            const now = new Date();
-            const hours = now.getUTCHours();
-            
-            // Find next 5-hour boundary (00, 05, 10, 15, 20)
-            const currentWindow = Math.floor(hours / 5);
-            const nextWindow = (currentWindow + 1) % 5;
-            const nextWindowHour = nextWindow * 5;
-            
-            const resetTime = new Date(now);
-            resetTime.setUTCHours(nextWindowHour, 0, 0, 0);
-            
-            // If we're past the last window (20:00-00:00), next reset is at 00:00 next day
-            if (hours >= 20) {
-                resetTime.setUTCDate(resetTime.getUTCDate() + 1);
-                resetTime.setUTCHours(0, 0, 0, 0);
-            }
-            
-            return resetTime.toISOString();
-        };
+        // 5-hour reset is only shown when there's usage (API doesn't provide it at 0%)
+        const fiveHourReset = fiveHour?.nextResetTime
+            ? formatReset(fiveHour.nextResetTime)
+            : fiveHour?.percentage === 0
+              ? "resets with usage"
+              : "unknown";
 
         return {
             level: data.data?.level || "unknown",
             fiveHour: {
                 usedPercentage: toNumber(fiveHour?.percentage),
-                resetAt: calculate5hReset(),
+                resetAt: fiveHourReset,
             },
             weekly: {
                 usedPercentage: toNumber(weekly?.percentage),
