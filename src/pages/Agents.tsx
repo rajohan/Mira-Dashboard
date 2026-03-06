@@ -1,8 +1,7 @@
 import { useAgentsStatus } from "../hooks/useAgents";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
-import { RefreshButton } from "../components/ui/RefreshButton";
-import { formatDate, formatDuration } from "../utils/format";
+import { formatDuration } from "../utils/format";
 
 const statusColors = {
     active: {
@@ -169,11 +168,7 @@ function AgentCard({
 }
 
 export function Agents() {
-    const { data, isLoading, error, refetch } = useAgentsStatus();
-
-    const handleRefresh = async () => {
-        await refetch();
-    };
+    const { data, isLoading, error } = useAgentsStatus();
 
     const agents = data?.agents || [];
 
@@ -184,14 +179,11 @@ export function Agents() {
 
     return (
         <div className="p-6">
-            <div className="mb-6 flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-primary-50">Agents</h1>
-                    <p className="text-sm text-primary-400">
-                        Real-time status of configured agents
-                    </p>
-                </div>
-                <RefreshButton onClick={handleRefresh} isLoading={isLoading} />
+            <div className="mb-6">
+                <h1 className="text-2xl font-bold text-primary-50">Agents</h1>
+                <p className="text-sm text-primary-400">
+                    Real-time status of configured agents
+                </p>
             </div>
 
             {error && (
@@ -287,13 +279,6 @@ export function Agents() {
                                 </code>
                             </p>
                         </Card>
-                    )}
-
-                    {/* Last updated */}
-                    {data?.timestamp && (
-                        <div className="mt-6 text-center text-xs text-primary-500">
-                            Last updated: {formatDate(new Date(data.timestamp))}
-                        </div>
                     )}
                 </>
             )}
