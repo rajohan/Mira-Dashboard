@@ -11,6 +11,12 @@ const ACTIVE_THRESHOLD = 15_000; // < 15s = active
 const THINKING_THRESHOLD = 45_000; // 15-45s = thinking, 45s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 
+interface AgentMetadata {
+    currentTask?: string;
+    status?: "working" | "waiting" | "completed";
+    updatedAt?: string;
+}
+
 interface AgentConfig {
     id: string;
     default?: boolean;
@@ -63,6 +69,20 @@ function parseAgentsConfig(): AgentsConfig | null {
         return JSON5.parse(content) as AgentsConfig;
     } catch (error) {
         console.error("[Agents] Failed to parse agents config:", (error as Error).message);
+        return null;
+    }
+}
+
+// Read agent metadata file for current task
+function getAgentMetadata(agentId: string): AgentMetadata | null {
+    const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
+    try {
+        if (!FS.existsSync(metadataPath)) {
+            return null;
+        }
+        const content = FS.readFileSync(metadataPath, "utf8");
+        return JSON5.parse(content) as AgentMetadata;
+    } catch (error) {
         return null;
     }
 }
@@ -244,6 +264,9 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
 }
 
 function getAgentStatus(agentId: string): AgentStatus {
+    // Get metadata (current task from agent)
+    const metadata = getAgentMetadata(agentId);
+    
     // Get sessions from agent's sessions.json file
     const fileSessions = getAgentSessionsFromFiles(agentId);
 
@@ -270,11 +293,14 @@ function getAgentStatus(agentId: string): AgentStatus {
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
     const effectiveModTime = fileModTime || 0;
 
+    // Use metadata for currentTask if available, otherwise fall back to activity
+    const currentTask = metadata?.currentTask || activity?.task || null;
+
     return {
         id: agentId,
         status,
         model: "unknown", // Will be filled from config
-        currentTask: activity?.task || null,
+        currentTask,
         currentActivity: activity?.activity || null,
         lastActivity: effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
         sessionKey,
@@ -346,6 +372,53 @@ export default function agentsRoutes(app: express.Application): void {
             res.json(status);
         } catch (error) {
             console.error("[Agents] Status error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
+
+    // Update agent metadata (current task)
+    app.put("/api/agents/:id/metadata", (async (req, res) => {
+        try {
+            const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const { currentTask, status } = req.body as { currentTask?: string; status?: string };
+
+            if (!currentTask && !status) {
+                res.status(400).json({ error: "Provide currentTask or status" });
+                return;
+            }
+
+            const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
+            const metadataDir = Path.dirname(metadataPath);
+
+            // Ensure directory exists
+            if (!FS.existsSync(metadataDir)) {
+                FS.mkdirSync(metadataDir, { recursive: true });
+            }
+
+            // Read existing metadata or create new
+            let metadata: AgentMetadata = {};
+            if (FS.existsSync(metadataPath)) {
+                try {
+                    metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
+                } catch {
+                    // Start fresh if parse fails
+                }
+            }
+
+            // Update fields
+            if (currentTask !== undefined) {
+                metadata.currentTask = currentTask.slice(0, 100); // Max 100 chars
+            }
+            if (status !== undefined) {
+                metadata.status = status as "working" | "waiting" | "completed";
+            }
+            metadata.updatedAt = new Date().toISOString();
+
+            // Write back
+            FS.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            res.json(metadata);
+        } catch (error) {
+            console.error("[Agents] Metadata update error:", (error as Error).message);
             res.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
