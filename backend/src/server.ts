@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
 import gateway from "./gateway.js";
+import agentsRoutes from "./routes/agents.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
 import cronRoutes from "./routes/cron.js";
@@ -73,6 +74,7 @@ app.get("/api/sessions", (_req, res) => {
 // Route modules
 filesRoutes(app, express);
 configFilesRoutes(app, express);
+agentsRoutes(app);
 logsRoutes(app);
 cronRoutes(app);
 execRoutes(app, express);

@@ -18,7 +18,8 @@ import { AppHeader } from "./AppHeader";
 const navItems = [
     { to: "/", icon: Home, label: "Dashboard" },
     { to: "/tasks", icon: CheckSquare, label: "Tasks" },
-    { to: "/sessions", icon: Users, label: "Agents" },
+    { to: "/agents", icon: Users, label: "Agents" },
+    { to: "/sessions", icon: MessageSquare, label: "Sessions" },
     { to: "/logs", icon: FileText, label: "Logs" },
     { to: "/cron", icon: Clock3, label: "Cron" },
     { to: "/files", icon: FolderOpen, label: "Files" },

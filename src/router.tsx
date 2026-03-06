@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
+import { Agents } from "./pages/Agents";
 import { Cron } from "./pages/Cron";
 import { Dashboard } from "./pages/Dashboard";
 import { Files } from "./pages/Files";
@@ -57,6 +58,12 @@ const tasksRoute = createRoute({
     component: Tasks,
 });
 
+const agentsRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/agents",
+    component: Agents,
+});
+
 const sessionsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/sessions",
@@ -104,6 +111,7 @@ const routeTree = rootRoute.addChildren([
     authenticatedRoute.addChildren([
         indexRoute,
         tasksRoute,
+        agentsRoute,
         sessionsRoute,
         logsRoute,
         cronRoute,

@@ -33,3 +33,14 @@ export interface AgentInfo {
     model?: string;
     status?: string;
 }
+
+// Agent with real-time status
+export interface Agent {
+    id: string;
+    status: "active" | "thinking" | "idle" | "offline";
+    model: string;
+    currentTask: string | null;
+    lastActivity: string | null;
+    sessionKey: string | null;
+    channel: string | null;
+}
