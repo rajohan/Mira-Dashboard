@@ -1,5 +1,4 @@
 import { useAgentsStatus } from "../hooks/useAgents";
-import { useTasks } from "../hooks/useTasks";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { formatDuration } from "../utils/format";
@@ -168,73 +167,6 @@ function AgentCard({
     );
 }
 
-function TaskSidebar() {
-    const { data: tasks } = useTasks();
-    const recentTasks = (tasks || []).slice(0, 5);
-
-    return (
-        <Card className="sticky top-6">
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-primary-300">
-                Latest Tasks
-            </h3>
-            {recentTasks.length === 0 ? (
-                <p className="text-sm text-primary-500 italic">No tasks</p>
-            ) : (
-                <div className="space-y-3">
-                    {recentTasks.map((task) => (
-                        <div key={task.id} className="rounded bg-primary-800/50 p-3">
-                            <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-primary-100 truncate">
-                                        {task.title}
-                                    </p>
-                                    {task.description && (
-                                        <p className="mt-1 text-xs text-primary-400 overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                                            {task.description}
-                                        </p>
-                                    )}
-                                </div>
-                                {task.status && (
-                                    <Badge
-                                        variant={
-                                            task.status === "done"
-                                                ? "success"
-                                                : task.status === "in-progress"
-                                                  ? "warning"
-                                                  : "default"
-                                        }
-                                        className="shrink-0"
-                                    >
-                                        {task.status}
-                                    </Badge>
-                                )}
-                            </div>
-                            {task.labels && task.labels.length > 0 && (
-                                <div className="mt-2 flex flex-wrap gap-1">
-                                    {task.labels.slice(0, 3).map((label: { name?: string; color?: string }) => (
-                                        <span
-                                            key={label.name}
-                                            className="rounded px-1.5 py-0.5 text-xs"
-                                            style={{
-                                                backgroundColor: label.color
-                                                    ? `${label.color}20`
-                                                    : "rgba(255,255,255,0.1)",
-                                                color: label.color || "#fff",
-                                            }}
-                                        >
-                                            {label.name}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </Card>
-    );
-}
-
 export function Agents() {
     const { data, isLoading, error } = useAgentsStatus();
 
@@ -246,111 +178,103 @@ export function Agents() {
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
     return (
-        <div className="flex gap-6">
-            {/* Main content */}
-            <div className="flex-1 space-y-6">
-                {error && (
-                    <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
-                        {error instanceof Error ? error.message : "Failed to load agents"}
-                    </div>
-                )}
+        <div className="p-6 space-y-6">
+            {error && (
+                <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
+                    {error instanceof Error ? error.message : "Failed to load agents"}
+                </div>
+            )}
 
-                {isLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-accent-500" />
-                    </div>
-                ) : (
-                    <>
-                        {/* Active Agents */}
-                        {activeAgents.length > 0 && (
-                            <div>
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
-                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                    Active ({activeAgents.length})
-                                </h2>
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                    {activeAgents.map((agent) => (
-                                        <AgentCard
-                                            key={agent.id}
-                                            id={agent.id}
-                                            status={agent.status}
-                                            model={agent.model}
-                                            currentTask={agent.currentTask}
-                                            currentActivity={agent.currentActivity}
-                                            lastActivity={agent.lastActivity}
-                                            channel={agent.channel}
-                                        />
-                                    ))}
-                                </div>
+            {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-accent-500" />
+                </div>
+            ) : (
+                <>
+                    {/* Active Agents */}
+                    {activeAgents.length > 0 && (
+                        <div>
+                            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                Active ({activeAgents.length})
+                            </h2>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {activeAgents.map((agent) => (
+                                    <AgentCard
+                                        key={agent.id}
+                                        id={agent.id}
+                                        status={agent.status}
+                                        model={agent.model}
+                                        currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
+                                        lastActivity={agent.lastActivity}
+                                        channel={agent.channel}
+                                    />
+                                ))}
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {/* Idle Agents */}
-                        {idleAgents.length > 0 && (
-                            <div>
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
-                                    <span className="h-2 w-2 rounded-full bg-primary-400" />
-                                    Idle ({idleAgents.length})
-                                </h2>
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                    {idleAgents.map((agent) => (
-                                        <AgentCard
-                                            key={agent.id}
-                                            id={agent.id}
-                                            status={agent.status}
-                                            model={agent.model}
-                                            currentTask={agent.currentTask}
-                                            currentActivity={agent.currentActivity}
-                                            lastActivity={agent.lastActivity}
-                                            channel={agent.channel}
-                                        />
-                                    ))}
-                                </div>
+                    {/* Idle Agents */}
+                    {idleAgents.length > 0 && (
+                        <div>
+                            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                                <span className="h-2 w-2 rounded-full bg-primary-400" />
+                                Idle ({idleAgents.length})
+                            </h2>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {idleAgents.map((agent) => (
+                                    <AgentCard
+                                        key={agent.id}
+                                        id={agent.id}
+                                        status={agent.status}
+                                        model={agent.model}
+                                        currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
+                                        lastActivity={agent.lastActivity}
+                                        channel={agent.channel}
+                                    />
+                                ))}
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {/* Offline Agents */}
-                        {offlineAgents.length > 0 && (
-                            <div>
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-400">
-                                    <span className="h-2 w-2 rounded-full bg-primary-600" />
-                                    Offline ({offlineAgents.length})
-                                </h2>
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                    {offlineAgents.map((agent) => (
-                                        <AgentCard
-                                            key={agent.id}
-                                            id={agent.id}
-                                            status={agent.status}
-                                            model={agent.model}
-                                            currentTask={agent.currentTask}
-                                            currentActivity={agent.currentActivity}
-                                            lastActivity={agent.lastActivity}
-                                            channel={agent.channel}
-                                        />
-                                    ))}
-                                </div>
+                    {/* Offline Agents */}
+                    {offlineAgents.length > 0 && (
+                        <div>
+                            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-400">
+                                <span className="h-2 w-2 rounded-full bg-primary-600" />
+                                Offline ({offlineAgents.length})
+                            </h2>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {offlineAgents.map((agent) => (
+                                    <AgentCard
+                                        key={agent.id}
+                                        id={agent.id}
+                                        status={agent.status}
+                                        model={agent.model}
+                                        currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
+                                        lastActivity={agent.lastActivity}
+                                        channel={agent.channel}
+                                    />
+                                ))}
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {agents.length === 0 && !isLoading && (
-                            <Card className="py-8 text-center">
-                                <p className="text-primary-400">
-                                    No agents configured. Check{" "}
-                                    <code className="rounded bg-primary-700 px-1 py-0.5 text-primary-300">
-                                        ~/.openclaw/config/agents.json5
-                                    </code>
-                                </p>
-                            </Card>
-                        )}
-                    </>
-                )}
-            </div>
-
-            {/* Sidebar - Latest Tasks */}
-            <div className="hidden w-80 shrink-0 xl:block">
-                <TaskSidebar />
-            </div>
+                    {agents.length === 0 && !isLoading && (
+                        <Card className="py-8 text-center">
+                            <p className="text-primary-400">
+                                No agents configured. Check{" "}
+                                <code className="rounded bg-primary-700 px-1 py-0.5 text-primary-300">
+                                    ~/.openclaw/config/agents.json5
+                                </code>
+                            </p>
+                        </Card>
+                    )}
+                </>
+            )}
         </div>
     );
 }
