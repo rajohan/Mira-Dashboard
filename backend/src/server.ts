@@ -17,7 +17,7 @@ import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
 import openclawRoutes from "./routes/openclaw.js";
-import quotasRoutes from "./routes/quotas.js";
+import quotasRoutes, { startQuotasMonitor } from "./routes/quotas.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
@@ -112,4 +112,5 @@ server.listen(PORT, () => {
     startQuotaNotificationMonitor();
     startOpenClawNotificationMonitor();
     startWeatherMonitor();
+    startQuotasMonitor();
 });

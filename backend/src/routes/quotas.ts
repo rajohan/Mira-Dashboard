@@ -52,6 +52,7 @@ export interface QuotasResponse {
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
 let cache: { value: QuotasResponse; fetchedAt: number } | null = null;
+let quotasFetchInFlight: Promise<QuotasResponse> | null = null;
 const secretCache = new Map<string, string | null>();
 
 function readSecretFromDoppler(name: string): string | null {
@@ -390,23 +391,53 @@ export async function fetchQuotas(): Promise<QuotasResponse> {
     };
 }
 
+export async function refreshQuotasCache(force = false): Promise<QuotasResponse> {
+    const now = Date.now();
+    if (!force && cache && now - cache.fetchedAt < CACHE_TTL_MS) {
+        return cache.value;
+    }
+
+    if (!quotasFetchInFlight) {
+        quotasFetchInFlight = fetchQuotas()
+            .then((payload) => {
+                cache = { value: payload, fetchedAt: Date.now() };
+                return payload;
+            })
+            .finally(() => {
+                quotasFetchInFlight = null;
+            });
+    }
+
+    return quotasFetchInFlight;
+}
+
+export function startQuotasMonitor(intervalMs = CACHE_TTL_MS): void {
+    const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : CACHE_TTL_MS;
+
+    void refreshQuotasCache(true).catch((error) => {
+        console.error("[Quotas] initial refresh failed", error);
+    });
+
+    setInterval(() => {
+        void refreshQuotasCache(true).catch((error) => {
+            console.error("[Quotas] scheduled refresh failed", error);
+        });
+    }, safeInterval).unref();
+}
+
 export default function quotasRoutes(app: express.Application): void {
     app.get("/api/quotas", (async (_req, res) => {
         try {
+            const payload = await refreshQuotasCache();
             const now = Date.now();
-
-            if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
-                res.json({ ...cache.value, cacheAgeMs: now - cache.fetchedAt } satisfies QuotasResponse);
-                return;
-            }
-
-            const value = await fetchQuotas();
-            cache = { value, fetchedAt: Date.now() };
-            res.json(value);
+            res.json({ ...payload, cacheAgeMs: now - payload.checkedAt } satisfies QuotasResponse);
         } catch (error) {
             if (cache) {
                 const now = Date.now();
-                res.json({ ...cache.value, cacheAgeMs: now - cache.fetchedAt } satisfies QuotasResponse);
+                res.json({
+                    ...cache.value,
+                    cacheAgeMs: now - cache.fetchedAt,
+                } satisfies QuotasResponse);
                 return;
             }
 
