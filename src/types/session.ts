@@ -40,6 +40,7 @@ export interface Agent {
     status: "active" | "thinking" | "idle" | "offline";
     model: string;
     currentTask: string | null;
+    currentActivity: string | null;
     lastActivity: string | null;
     sessionKey: string | null;
     channel: string | null;

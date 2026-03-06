@@ -61,6 +61,7 @@ function AgentCard({
     status,
     model,
     currentTask,
+    currentActivity,
     lastActivity,
     channel,
 }: {
@@ -68,6 +69,7 @@ function AgentCard({
     status: keyof typeof statusColors;
     model: string;
     currentTask: string | null;
+    currentActivity: string | null;
     lastActivity: string | null;
     channel: string | null;
 }) {
@@ -109,16 +111,37 @@ function AgentCard({
             </div>
 
             {/* Current Task */}
-            <div className="mb-3">
-                <div className="text-xs uppercase tracking-wide text-primary-500">
-                    Current Task
+            {currentTask && (
+                <div className="mb-3">
+                    <div className="text-xs uppercase tracking-wide text-primary-500">
+                        Task
+                    </div>
+                    <div className={"mt-1 text-sm " + colors.text}>
+                        {currentTask}
+                    </div>
                 </div>
-                <div className={"mt-1 text-sm " + colors.text}>
-                    {currentTask || (
-                        <span className="text-primary-500 italic">No active task</span>
-                    )}
+            )}
+
+            {/* Current Activity */}
+            {currentActivity && (
+                <div className="mb-3">
+                    <div className="text-xs uppercase tracking-wide text-primary-500">
+                        Activity
+                    </div>
+                    <div className="mt-1 text-sm text-primary-300">
+                        {currentActivity}
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {/* No activity */}
+            {!currentTask && !currentActivity && (
+                <div className="mb-3">
+                    <div className="text-sm italic text-primary-500">
+                        No active task
+                    </div>
+                </div>
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-between text-xs text-primary-400">
@@ -198,6 +221,7 @@ export function Agents() {
                                         status={agent.status}
                                         model={agent.model}
                                         currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
                                         lastActivity={agent.lastActivity}
                                         channel={agent.channel}
                                     />
@@ -221,6 +245,7 @@ export function Agents() {
                                         status={agent.status}
                                         model={agent.model}
                                         currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
                                         lastActivity={agent.lastActivity}
                                         channel={agent.channel}
                                     />
@@ -244,6 +269,7 @@ export function Agents() {
                                         status={agent.status}
                                         model={agent.model}
                                         currentTask={agent.currentTask}
+                                        currentActivity={agent.currentActivity}
                                         lastActivity={agent.lastActivity}
                                         channel={agent.channel}
                                     />

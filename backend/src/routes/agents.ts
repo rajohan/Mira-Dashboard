@@ -9,6 +9,7 @@ const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 // Activity thresholds (in milliseconds)
 const ACTIVE_THRESHOLD = 15_000; // < 15s = active
 const THINKING_THRESHOLD = 45_000; // 15-45s = thinking, 45s+ = idle
+const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 
 interface AgentConfig {
     id: string;
@@ -46,6 +47,7 @@ interface AgentStatus {
     status: "active" | "thinking" | "idle" | "offline";
     model: string;
     currentTask: string | null;
+    currentActivity: string | null;
     lastActivity: string | null;
     sessionKey: string | null;
     channel: string | null;
@@ -81,8 +83,14 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     }
 }
 
-// Get the last few lines from a JSONL session file to find current activity
-function getLatestActivityFromFile(agentId: string): { content: string; modTime: number } | null {
+// Get activity from a JSONL session file
+interface ActivityInfo {
+    task: string | null;      // High-level task (from last user message)
+    activity: string | null;  // Current activity (from last tool use)
+    modTime: number;
+}
+
+function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
     const sessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
     if (!FS.existsSync(sessionsDir)) {
         return null;
@@ -104,18 +112,28 @@ function getLatestActivityFromFile(agentId: string): { content: string; modTime:
         }
 
         const latestFile = files[0];
+        const now = Date.now();
         
-        // Read the file and find last user message
+        // If file hasn't been modified in 5 minutes, agent is idle
+        if (now - latestFile.mtime > STALE_THRESHOLD) {
+            return { task: null, activity: null, modTime: latestFile.mtime };
+        }
+        
+        // Read the file and find last user message and tool use
         const content = FS.readFileSync(latestFile.path, "utf8");
         const lines = content.trim().split("\n");
         
-        // Find the last user message by scanning from the end
+        let lastTask: string | null = null;
+        let lastActivity: string | null = null;
+        
+        // Scan from end to find most recent user message and tool use
         for (let i = lines.length - 1; i >= 0; i--) {
             try {
                 const entry = JSON.parse(lines[i]);
                 const msg = entry.message || entry;
                 
-                if (msg.role === "user" && msg.content) {
+                // First user message from end = current task
+                if (msg.role === "user" && msg.content && !lastTask) {
                     let text = typeof msg.content === "string" 
                         ? msg.content 
                         : Array.isArray(msg.content)
@@ -125,26 +143,44 @@ function getLatestActivityFromFile(agentId: string): { content: string; modTime:
                               .join(" ")
                           : String(msg.content);
                     
-                    // Skip metadata blocks and extract actual message
+                    // Clean metadata and extract actual message
                     text = text
-                        .replace(/```json[\s\S]*?```/g, "") // Remove JSON blocks
-                        .replace(/```[\s\S]*?```/g, "") // Remove other code blocks
-                        .replace(/\[media attached[^\]]*\]/g, "") // Remove media references
-                        .replace(/Conversation info[^\n]*/g, "") // Remove conversation info headers
-                        .replace(/Sender[^\n]*/g, "") // Remove sender headers
-                        .replace(/\n+/g, " ") // Replace newlines
-                        .replace(/\s+/g, " ") // Collapse whitespace
+                        .replace(/```json[\s\S]*?```/g, "")
+                        .replace(/```[\s\S]*?```/g, "")
+                        .replace(/\[media attached[^\]]*\]/g, "")
+                        .replace(/Conversation info[^\n]*/g, "")
+                        .replace(/Sender[^\n]*/g, "")
+                        .replace(/\n+/g, " ")
+                        .replace(/\s+/g, " ")
                         .trim()
                         .slice(0, 100);
                     
-                    return { content: text || "Processing", modTime: latestFile.mtime };
+                    lastTask = text || null;
                 }
+                
+                // First tool use from end = current activity
+                if (msg.role === "assistant" && Array.isArray(msg.content) && !lastActivity) {
+                    const toolCalls = msg.content.filter((c: { type?: string }) => c.type === "toolCall");
+                    if (toolCalls.length > 0) {
+                        const toolCall = toolCalls[0];
+                        const toolName = toolCall.name || "unknown";
+                        const action = toolCall.arguments?.action || toolCall.arguments?.command?.slice(0, 50) || "";
+                        lastActivity = action ? `${toolName}: ${action}` : toolName;
+                    }
+                }
+                
+                // Stop if we found both
+                if (lastTask && lastActivity) break;
             } catch {
                 // Skip malformed lines
             }
         }
 
-        return { content: "Processing", modTime: latestFile.mtime };
+        return { 
+            task: lastTask, 
+            activity: lastActivity, 
+            modTime: latestFile.mtime 
+        };
     } catch (error) {
         return null;
     }
@@ -185,46 +221,6 @@ function getSessionFileModTime(agentId: string): number | null {
     }
 }
 
-function deriveActivityFromSessionKey(sessionKey: string): string {
-    const parts = sessionKey.split(":");
-
-    // Check for hooks
-    if (sessionKey.includes(":hook:")) {
-        const hookIndex = parts.indexOf("hook");
-        if (hookIndex !== -1 && parts[hookIndex + 1]) {
-            const hookName = parts[hookIndex + 1];
-            return `Running ${hookName} hook`;
-        }
-    }
-
-    // Check for cron
-    if (sessionKey.includes(":cron:")) {
-        return "Running scheduled task";
-    }
-
-    // Check for subagent
-    if (sessionKey.includes(":subagent:")) {
-        const agentIndex = parts.indexOf("subagent");
-        if (agentIndex !== -1 && parts[agentIndex + 1]) {
-            return `Subagent: ${parts[agentIndex + 1]}`;
-        }
-        return "Running subagent task";
-    }
-
-    // Check for channel (discord, telegram, etc.)
-    if (parts[0] === "channel") {
-        const channel = parts[1] || "unknown";
-        return `Chatting on ${channel}`;
-    }
-
-    // Default
-    if (parts[0] === "agent") {
-        return "Processing request";
-    }
-
-    return "Working";
-}
-
 function getChannelFromSessionKey(sessionKey: string): string | null {
     const parts = sessionKey.split(":");
     if (parts[0] === "channel") {
@@ -263,25 +259,14 @@ function getAgentStatus(agentId: string): AgentStatus {
         }
     }
 
-    // Get latest activity from JSONL file
+    // Get activity from JSONL file
     const activity = getLatestActivityFromFile(agentId);
     
     // Determine status from file modification time
     const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
     const status = determineStatus(fileModTime);
 
-    // Derive current task from session key or file content
     const sessionKey = latestSession?.key || null;
-    let currentTask: string | null = null;
-    
-    if (activity?.content) {
-        // Use activity from file content
-        currentTask = activity.content;
-    } else if (sessionKey) {
-        // Fallback to session key derivation
-        currentTask = deriveActivityFromSessionKey(sessionKey);
-    }
-
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
     const effectiveModTime = fileModTime || 0;
 
@@ -289,7 +274,8 @@ function getAgentStatus(agentId: string): AgentStatus {
         id: agentId,
         status,
         model: "unknown", // Will be filled from config
-        currentTask,
+        currentTask: activity?.task || null,
+        currentActivity: activity?.activity || null,
         lastActivity: effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
         sessionKey,
         channel,
