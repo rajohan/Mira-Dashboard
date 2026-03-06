@@ -2,6 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import type { FileNode } from "../types/file";
+import { getFileExtension, isJsonFile } from "../utils/fileUtils";
+import { validateJsonString } from "../utils/json";
 import { apiFetch } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
@@ -111,8 +113,21 @@ export function useFileExplorerState() {
         setHasChanges(value !== fileContent?.content);
     };
 
+    const isJsonEditing = !!(fileContent && isJsonFile(fileContent.path) && !jsonPreview);
+    const jsonValidationMode =
+        fileContent && getFileExtension(fileContent.path) === "json5" ? "json5" : "json";
+    const jsonValidation = isJsonEditing
+        ? validateJsonString(editedContent, jsonValidationMode)
+        : { valid: true, error: null };
+
     const handleSave = async () => {
         if (!selectedPath || !fileContent) return;
+
+        if (isJsonEditing && !jsonValidation.valid) {
+            setError(`Invalid JSON: ${jsonValidation.error || "parse error"}`);
+            return;
+        }
+
         try {
             await saveMutation.mutateAsync({
                 path: selectedPath,
@@ -142,6 +157,8 @@ export function useFileExplorerState() {
         markdownPreview,
         jsonPreview,
         codeEditMode,
+        isJsonEditing,
+        jsonValidation,
         error,
         fileContent,
         rootLoading,

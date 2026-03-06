@@ -18,6 +18,8 @@ export function Files() {
         markdownPreview,
         jsonPreview,
         codeEditMode,
+        isJsonEditing,
+        jsonValidation,
         error,
         fileContent,
         rootLoading,
@@ -87,6 +89,8 @@ export function Files() {
                     jsonPreview={jsonPreview}
                     codeEditMode={codeEditMode}
                     syntaxClass={syntaxClass}
+                    isJsonEditing={isJsonEditing}
+                    jsonValidation={jsonValidation}
                     onSave={() => {
                         void handleSave();
                     }}

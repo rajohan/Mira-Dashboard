@@ -25,7 +25,10 @@ export function JsonPreview({ content }: { content: string }) {
                 displayDataTypes={false}
                 displayObjectSize={false}
                 indentWidth={4}
-                style={{ fontSize: "13px" }}
+                style={{
+                    fontSize: "13px",
+                    backgroundColor: "transparent",
+                }}
             />
         </div>
     );

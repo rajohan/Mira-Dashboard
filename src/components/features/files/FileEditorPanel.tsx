@@ -26,6 +26,8 @@ interface FileEditorPanelProps {
     jsonPreview: boolean;
     codeEditMode: boolean;
     syntaxClass: string;
+    isJsonEditing: boolean;
+    jsonValidation: { valid: boolean; error: string | null };
     onSave: () => void;
     onContentChange: (value: string) => void;
     onMarkdownPreviewChange: (value: boolean) => void;
@@ -46,6 +48,8 @@ export function FileEditorPanel({
     jsonPreview,
     codeEditMode,
     syntaxClass,
+    isJsonEditing,
+    jsonValidation,
     onSave,
     onContentChange,
     onMarkdownPreviewChange,
@@ -103,12 +107,33 @@ export function FileEditorPanel({
                                     Unsaved changes
                                 </span>
                             )}
+                            {isJsonEditing && (
+                                <span
+                                    className={
+                                        "text-xs " +
+                                        (jsonValidation.valid
+                                            ? "text-green-400"
+                                            : "text-red-400")
+                                    }
+                                    title={
+                                        jsonValidation.valid
+                                            ? "Valid JSON"
+                                            : `Invalid JSON: ${jsonValidation.error || "parse error"}`
+                                    }
+                                >
+                                    {jsonValidation.valid ? "Valid JSON" : "Invalid JSON"}
+                                </span>
+                            )}
                             {isEditable && (
                                 <Button
                                     variant="primary"
                                     size="sm"
                                     onClick={onSave}
-                                    disabled={savePending || !hasChanges}
+                                    disabled={
+                                        savePending ||
+                                        !hasChanges ||
+                                        (isJsonEditing && !jsonValidation.valid)
+                                    }
                                 >
                                     <Save size={14} className="mr-1" />
                                     {savePending ? "Saving..." : "Save"}
