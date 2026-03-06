@@ -67,7 +67,7 @@ function parseAgentsConfig(): AgentsConfig | null {
 }
 
 function getSessions(): SessionInfo[] {
-    // Get sessions from gateway instead of file
+    // Get sessions from gateway
     try {
         const sessions = gateway.getSessions();
         return sessions.map((s) => ({
@@ -80,6 +80,22 @@ function getSessions(): SessionInfo[] {
         }));
     } catch (error) {
         console.error("[Agents] Failed to get sessions from gateway:", (error as Error).message);
+        return [];
+    }
+}
+
+// Get sessions from agent's sessions.json file
+function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
+    const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
+    try {
+        if (!FS.existsSync(sessionsFile)) {
+            return [];
+        }
+        const content = FS.readFileSync(sessionsFile, "utf8");
+        const sessions = JSON5.parse(content);
+        return Array.isArray(sessions) ? sessions : [];
+    } catch (error) {
+        console.error("[Agents] Failed to read agent sessions.json:", (error as Error).message);
         return [];
     }
 }
@@ -182,8 +198,12 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
 }
 
 function getAgentStatus(agentId: string, sessions: SessionInfo[]): AgentStatus {
+    // Get sessions from both gateway and agent's sessions.json file
+    const fileSessions = getAgentSessionsFromFiles(agentId);
+    const allSessions = [...sessions, ...fileSessions];
+
     // Find sessions for this agent
-    const agentSessions = sessions.filter((s) => {
+    const agentSessions = allSessions.filter((s) => {
         if (!s.key) return false;
         // Match session key pattern: agent:{agentId}:... or agent:{agentId}
         const parts = s.key.split(":");
