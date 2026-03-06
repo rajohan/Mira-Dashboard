@@ -198,17 +198,49 @@ async function checkZai(): Promise<QuotasResponse["zai"]> {
         const fiveHour = limits.find((entry) => entry.unit === 3 && entry.number === 5);
         const weekly = limits.find((entry) => entry.unit === 6 && entry.number === 1);
 
+        // Format reset time
+        const formatReset = (timestamp: number | undefined): string => {
+            if (!timestamp) return "unknown";
+            return new Date(timestamp).toISOString();
+        };
+
+        // Calculate next 5-hour window reset
+        // Z.ai resets every 5 hours from midnight UTC, so windows are: 00:00, 05:00, 10:00, 15:00, 20:00
+        const calculate5hReset = (): string => {
+            if (fiveHour?.nextResetTime) {
+                return formatReset(fiveHour.nextResetTime);
+            }
+            
+            // Calculate next 5-hour window from now
+            const now = new Date();
+            const hours = now.getUTCHours();
+            
+            // Find next 5-hour boundary (00, 05, 10, 15, 20)
+            const currentWindow = Math.floor(hours / 5);
+            const nextWindow = (currentWindow + 1) % 5;
+            const nextWindowHour = nextWindow * 5;
+            
+            const resetTime = new Date(now);
+            resetTime.setUTCHours(nextWindowHour, 0, 0, 0);
+            
+            // If we're past the last window (20:00-00:00), next reset is at 00:00 next day
+            if (hours >= 20) {
+                resetTime.setUTCDate(resetTime.getUTCDate() + 1);
+                resetTime.setUTCHours(0, 0, 0, 0);
+            }
+            
+            return resetTime.toISOString();
+        };
+
         return {
             level: data.data?.level || "unknown",
             fiveHour: {
                 usedPercentage: toNumber(fiveHour?.percentage),
-                resetAt: fiveHour?.nextResetTime
-                    ? new Date(fiveHour.nextResetTime).toISOString()
-                    : "unknown",
+                resetAt: calculate5hReset(),
             },
             weekly: {
                 usedPercentage: toNumber(weekly?.percentage),
-                resetAt: weekly?.nextResetTime ? new Date(weekly.nextResetTime).toISOString() : "unknown",
+                resetAt: formatReset(weekly?.nextResetTime),
             },
         };
     } catch (error) {
