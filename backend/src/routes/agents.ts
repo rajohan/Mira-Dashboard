@@ -198,6 +198,8 @@ interface ActivityInfo {
 }
 
 function summarizeToolActivity(toolName: string, raw: unknown): string {
+    const normalizedTool = toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+
     const parsed =
         typeof raw === "string"
             ? (() => {
@@ -222,50 +224,60 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
             : {};
 
     const path =
-        (args.path || args.file_path || args.filePath || nested.path || nested.file_path || nested.filePath) as
-            | string
-            | undefined;
+        (args.path ||
+            args.file_path ||
+            args.filePath ||
+            (Array.isArray(args.paths) ? args.paths[0] : undefined) ||
+            (args.input && typeof args.input === "object" ? (args.input as Record<string, unknown>).path : undefined) ||
+            nested.path ||
+            nested.file_path ||
+            nested.filePath ||
+            (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as string | undefined;
     const command = (args.command || nested.command) as string | undefined;
     const action = (args.action || nested.action) as string | undefined;
     const url = (args.url || nested.url) as string | undefined;
 
-    // Fallback: parse partialJson if present
+    // Fallback: parse partialJson/raw string if present
     let fallbackPath: string | undefined;
     if (!path && typeof parsed.partialJson === "string") {
         try {
             const pj = JSON.parse(parsed.partialJson) as Record<string, unknown>;
-            fallbackPath = (pj.path || pj.file_path || pj.filePath) as string | undefined;
+            fallbackPath =
+                (pj.path || pj.file_path || pj.filePath || (Array.isArray(pj.paths) ? pj.paths[0] : undefined)) as
+                    | string
+                    | undefined;
         } catch {
-            // ignore
+            const match = parsed.partialJson.match(/"(?:path|file_path|filePath)"\s*:\s*"([^"]+)"/);
+            fallbackPath = match ? match[1] : undefined;
         }
     }
 
     const resolvedPath = path || fallbackPath;
 
-    if (toolName === "read" && resolvedPath) {
+    if (normalizedTool === "read" && resolvedPath) {
         return `read ${resolvedPath}`;
     }
-    if (toolName === "edit" && resolvedPath) {
+    if (normalizedTool === "edit" && resolvedPath) {
         return `edit ${resolvedPath}`;
     }
-    if (toolName === "write" && resolvedPath) {
+    if (normalizedTool === "write" && resolvedPath) {
         return `write ${resolvedPath}`;
     }
-    if (toolName === "exec" && command) {
+    if (normalizedTool === "exec" && command) {
         return `exec ${command.slice(0, 70)}`;
     }
-    if (toolName === "browser" && action) {
+    if (normalizedTool === "browser" && action) {
         return `browser ${action}${url ? ` ${url}` : ""}`.slice(0, 90);
     }
 
     if (action) {
-        return `${toolName} ${action}`.slice(0, 90);
+        return `${normalizedTool} ${action}`.slice(0, 90);
     }
     if (resolvedPath) {
-        return `${toolName} ${resolvedPath}`.slice(0, 90);
+        return `${normalizedTool} ${resolvedPath}`.slice(0, 90);
     }
 
-    return toolName;
+    return normalizedTool;
 }
 
 function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
