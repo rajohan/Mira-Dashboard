@@ -1,4 +1,5 @@
 export interface LogEntry {
+    id: string;
     ts?: string;
     level?: string;
     subsystem?: string;

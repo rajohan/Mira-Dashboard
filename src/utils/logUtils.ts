@@ -5,7 +5,9 @@ export const LINE_OPTIONS = [100, 500, 1000, 2000, 5000] as const;
 
 export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 
-export function parseLogLine(line: string): LogEntry | null {
+let logIdCounter = 0;
+
+export function parseLogLine(line: string, index?: number): LogEntry | null {
     if (!line || !line.trim()) return null;
 
     let jsonStr = line;
@@ -22,6 +24,8 @@ export function parseLogLine(line: string): LogEntry | null {
 
         const level = parsed._meta?.logLevelName || parsed.level || parsed.lvl || "INFO";
         const ts = parsed._meta?.date || parsed.time || parsed.timestamp;
+        // Generate unique ID using timestamp + line index + counter
+        const uniqueId = `${ts || Date.now()}-${index ?? logIdCounter++}-${Math.random().toString(36).slice(2, 8)}`;
 
         let subsystem = "";
         let msg = "";
@@ -72,9 +76,17 @@ export function parseLogLine(line: string): LogEntry | null {
             }
         }
 
-        return { ts, level: level.toLowerCase(), subsystem, msg, raw: line };
+        return {
+            id: uniqueId,
+            ts,
+            level: level.toLowerCase(),
+            subsystem,
+            msg,
+            raw: line,
+        };
     } catch {
-        return { msg: line, raw: line };
+        const errorId = `${Date.now()}-${index ?? logIdCounter++}-${Math.random().toString(36).slice(2, 8)}`;
+        return { id: errorId, msg: line, raw: line };
     }
 }
 

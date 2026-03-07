@@ -78,15 +78,15 @@ export function Logs() {
                 // Clear existing logs first
                 logsCollection.utils.writeBatch(() => {
                     for (const log of logs) {
-                        logsCollection.utils.writeDelete(log.ts || log.raw);
+                        logsCollection.utils.writeDelete(log.id);
                     }
                 });
 
                 // Load new logs
                 const lines = result.data.split("\n").filter((l) => l.trim());
                 logsCollection.utils.writeBatch(() => {
-                    for (const line of lines) {
-                        const parsed = parseLogLine(line);
+                    for (const [i, line] of lines.entries()) {
+                        const parsed = parseLogLine(line, i);
                         if (parsed) {
                             logsCollection.utils.writeInsert(parsed);
                         }
@@ -219,7 +219,7 @@ export function Logs() {
         // Get all current logs and delete them
         logsCollection.utils.writeBatch(() => {
             for (const log of logs) {
-                logsCollection.utils.writeDelete(log.ts || log.raw);
+                logsCollection.utils.writeDelete(log.id);
             }
         });
     };
