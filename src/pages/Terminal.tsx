@@ -31,8 +31,15 @@ export function Terminal() {
     const inputRef = useRef<HTMLInputElement>(null);
 
     const startCommand = useStartTerminalCommand();
-    const { data: jobData } = useTerminalJob(currentJobId);
+    const { data: jobData, refetch } = useTerminalJob(currentJobId);
     const { history, addCommand, updateCommand, clearHistory } = useTerminalHistory();
+
+    // Stop polling when component unmounts
+    useEffect(() => {
+        return () => {
+            setCurrentJobId(null);
+        };
+    }, []);
 
     // Check if user is near bottom (within 30px)
     const checkIsAtBottom = () => {
@@ -250,12 +257,12 @@ export function Terminal() {
                     onScroll={handleScroll}
                     className="relative flex-1 overflow-auto bg-black p-4 font-mono text-sm"
                 >
-                    {/* Scroll to bottom button */}
+                    {/* Scroll to bottom button - sticky to always show when scrolled up */}
                     {!isAtBottom && (
                         <button
                             type="button"
                             onClick={scrollToBottom}
-                            className="absolute right-4 top-4 z-10 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                            className="sticky top-2 float-right z-10 mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
                         >
                             ↓ Follow
                         </button>
@@ -341,7 +348,6 @@ export function Terminal() {
                         </Button>
                         <Button
                             variant="secondary"
-                            size="sm"
                             type="button"
                             onClick={clearHistory}
                             disabled={history.length === 0}
