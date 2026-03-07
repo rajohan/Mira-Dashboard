@@ -268,17 +268,19 @@ export function Terminal() {
                     <span className="flex-shrink-0 font-mono text-accent-400">
                         {promptPrefix}
                     </span>
-                    <Input
-                        ref={inputRef}
-                        type="text"
-                        value={command}
-                        onChange={(e) => setCommand(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder="Enter command..."
-                        className="flex-1 bg-black font-mono"
-                        disabled={startCommand.isPending}
-                        autoFocus
-                    />
+                    <div className="flex-1">
+                        <Input
+                            ref={inputRef}
+                            type="text"
+                            value={command}
+                            onChange={(e) => setCommand(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Enter command..."
+                            className="w-full bg-black font-mono"
+                            disabled={startCommand.isPending}
+                            autoFocus
+                        />
+                    </div>
                     <Button
                         type="submit"
                         disabled={!command.trim() || startCommand.isPending}
