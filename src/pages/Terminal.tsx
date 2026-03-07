@@ -7,6 +7,7 @@ import { Input } from "../components/ui/Input";
 import {
     type CommandHistoryEntry,
     getCompletions,
+    stopTerminalJob,
     useStartTerminalCommand,
     useTerminalHistory,
     useTerminalJob,
@@ -31,7 +32,7 @@ export function Terminal() {
     const inputRef = useRef<HTMLInputElement>(null);
 
     const startCommand = useStartTerminalCommand();
-    const { data: jobData, refetch } = useTerminalJob(currentJobId);
+    const { data: jobData } = useTerminalJob(currentJobId);
     const { history, addCommand, updateCommand, clearHistory } = useTerminalHistory();
 
     // Stop polling when component unmounts
@@ -262,7 +263,7 @@ export function Terminal() {
                         <button
                             type="button"
                             onClick={scrollToBottom}
-                            className="sticky top-2 float-right z-10 mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                            className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
                         >
                             ↓ Follow
                         </button>
@@ -339,13 +340,23 @@ export function Terminal() {
                                 spellCheck="false"
                             />
                         </div>
-                        <Button
-                            type="submit"
-                            disabled={!command.trim() || startCommand.isPending}
-                        >
-                            <Send size={16} />
-                            Run
-                        </Button>
+                        {jobData?.status === "running" && currentJobId ? (
+                            <Button
+                                type="button"
+                                variant="danger"
+                                onClick={() => stopTerminalJob(currentJobId)}
+                            >
+                                ■ Stop
+                            </Button>
+                        ) : (
+                            <Button
+                                type="submit"
+                                disabled={!command.trim() || startCommand.isPending}
+                            >
+                                <Send size={16} />
+                                Run
+                            </Button>
+                        )}
                         <Button
                             variant="secondary"
                             type="button"

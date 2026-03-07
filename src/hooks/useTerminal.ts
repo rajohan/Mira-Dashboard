@@ -79,6 +79,10 @@ export async function getCompletions(
     return apiPost("/terminal/complete", { partial, cwd });
 }
 
+export async function stopTerminalJob(jobId: string): Promise<void> {
+    await apiPost(`/exec/${jobId}/stop`, {});
+}
+
 export function useTerminalHistory() {
     const [history, setHistory] = useState<CommandHistoryEntry[]>([]);
 

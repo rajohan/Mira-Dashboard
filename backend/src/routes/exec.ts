@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import express, { type RequestHandler } from "express";
 
 interface ExecRequest {
@@ -22,6 +22,7 @@ interface ExecJob {
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    process?: ChildProcess;
 }
 
 interface ExecStartResponse {
@@ -50,7 +51,11 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
-function runExecCommand(request: ExecRequest, onUpdate?: (job: ExecJob) => void): Promise<ExecResponse> {
+function runExecCommand(
+    request: ExecRequest,
+    jobId: string,
+    onUpdate?: (job: ExecJob) => void
+): Promise<ExecResponse> {
     const { command, args, cwd } = request;
 
     return new Promise((resolve, reject) => {
@@ -66,10 +71,16 @@ function runExecCommand(request: ExecRequest, onUpdate?: (job: ExecJob) => void)
                       env: process.env,
                   });
 
+        // Store process reference for kill
+        const job = jobs.get(jobId);
+        if (job) {
+            job.process = child;
+        }
+
         let stdout = "";
         let stderr = "";
 
-        child.stdout.on("data", (data) => {
+        child.stdout?.on("data", (data) => {
             stdout = trimOutput(stdout + String(data));
             onUpdate?.({
                 id: "",
@@ -82,7 +93,7 @@ function runExecCommand(request: ExecRequest, onUpdate?: (job: ExecJob) => void)
             });
         });
 
-        child.stderr.on("data", (data) => {
+        child.stderr?.on("data", (data) => {
             stderr = trimOutput(stderr + String(data));
             onUpdate?.({
                 id: "",
@@ -95,9 +106,11 @@ function runExecCommand(request: ExecRequest, onUpdate?: (job: ExecJob) => void)
             });
         });
 
-        child.on("close", (code) => {
+        child.on("close", (code, signal) => {
+            // If killed manually, signal will be set
+            const finalCode = signal ? 130 : code;
             resolve({
-                code,
+                code: finalCode,
                 stdout,
                 stderr,
             });
@@ -119,6 +132,9 @@ function cleanupJobs(): void {
 
     for (let index = 0; index < overflow; index += 1) {
         const job = entries[index];
+        if (job.process && !job.process.killed) {
+            job.process.kill("SIGTERM");
+        }
         jobs.delete(job.id);
     }
 }
@@ -131,7 +147,8 @@ export default function execRoutes(
         const payload = req.body as ExecRequest;
 
         try {
-            const result = await runExecCommand(payload);
+            const tempId = randomUUID();
+            const result = await runExecCommand(payload, tempId);
             res.json({
                 code: result.code,
                 stdout: result.stdout.slice(-10_000),
@@ -157,7 +174,7 @@ export default function execRoutes(
             endedAt: null,
         });
 
-        void runExecCommand(payload, (update) => {
+        void runExecCommand(payload, jobId, (update) => {
             const current = jobs.get(jobId);
             if (!current) {
                 return;
@@ -187,12 +204,45 @@ export default function execRoutes(
 
                 current.status = "done";
                 current.code = 1;
-                current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
+                current.stderr = trimOutput(
+                    `${current.stderr}\n${(error as Error).message}`.trim()
+                );
                 current.endedAt = Date.now();
                 cleanupJobs();
             });
 
         res.json({ jobId } satisfies ExecStartResponse);
+    }) as RequestHandler);
+
+    app.post("/api/exec/:jobId/stop", ((req, res) => {
+        const jobId = String(req.params.jobId || "");
+        const job = jobs.get(jobId);
+
+        if (!job) {
+            res.status(404).json({ error: "Exec job not found" });
+            return;
+        }
+
+        if (job.status !== "running") {
+            res.status(400).json({ error: "Job is not running" });
+            return;
+        }
+
+        if (job.process && !job.process.killed) {
+            // Try SIGTERM first, then SIGKILL after 5 seconds
+            job.process.kill("SIGTERM");
+            
+            // Force kill after 5 seconds if still running
+            setTimeout(() => {
+                if (job.process && !job.process.killed) {
+                    job.process.kill("SIGKILL");
+                }
+            }, 5000);
+
+            res.json({ success: true, message: "Stop signal sent" });
+        } else {
+            res.status(400).json({ error: "Process not available" });
+        }
     }) as RequestHandler);
 
     app.get("/api/exec/:jobId", ((req, res) => {
