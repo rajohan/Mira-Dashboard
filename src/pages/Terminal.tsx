@@ -124,8 +124,8 @@ export function Terminal() {
                     size="sm"
                     onClick={clearHistory}
                     disabled={history.length === 0}
-                    leftIcon={<Trash2 size={16} />}
                 >
+                    <Trash2 size={16} />
                     Clear
                 </Button>
             </div>
@@ -196,8 +196,8 @@ export function Terminal() {
                     <Button
                         type="submit"
                         disabled={!command.trim() || startCommand.isPending}
-                        leftIcon={<Send size={16} />}
                     >
+                        <Send size={16} />
                         Run
                     </Button>
                 </form>
