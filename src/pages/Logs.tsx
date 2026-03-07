@@ -65,6 +65,8 @@ export function Logs() {
 
     // Load log content when file/lineCount changes
     const isLoadingRef = useRef(false);
+    const initialLoadDoneRef = useRef(false);
+    const prevFileRef = useRef<string | null>(null);
 
     const loadLogContent = async () => {
         if (!selectedFile || isLoadingRef.current) return;
@@ -96,10 +98,24 @@ export function Logs() {
     };
 
     useEffect(() => {
-        if (selectedFile && logFiles.length > 0 && !isLoadingRef.current) {
+        // Only load if:
+        // 1. We have a selected file
+        // 2. logFiles are loaded
+        // 3. Not already loading
+        // 4. Either initial load hasn't happened OR file actually changed
+        const fileChanged = selectedFile !== prevFileRef.current;
+
+        if (
+            selectedFile &&
+            logFiles.length > 0 &&
+            !isLoadingRef.current &&
+            (!initialLoadDoneRef.current || fileChanged)
+        ) {
+            initialLoadDoneRef.current = true;
+            prevFileRef.current = selectedFile;
             loadLogContent();
         }
-    }, [selectedFile, lineCount, logFiles.length]);
+    }, [selectedFile, lineCount]);
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
