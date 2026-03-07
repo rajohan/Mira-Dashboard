@@ -98,6 +98,11 @@ export function Terminal() {
                     const resolvedPath = resolvePath(newPath, entry.cwd);
                     setCwd(resolvedPath);
                 }
+
+                // Refocus input when job completes
+                if (jobData.status === "done") {
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                }
             }
         }
     }, [jobData, currentJobId, history, updateCommand]);
@@ -167,6 +172,8 @@ export function Terminal() {
             setCwd(resolvedPath);
             setCommand("");
             setHistoryIndex(-1);
+            // Refocus input after cd
+            setTimeout(() => inputRef.current?.focus(), 0);
             return;
         }
 
@@ -185,6 +192,8 @@ export function Terminal() {
             });
             setCommand("");
             setHistoryIndex(-1);
+            // Refocus input after pwd
+            setTimeout(() => inputRef.current?.focus(), 0);
             return;
         }
 
@@ -214,6 +223,8 @@ export function Terminal() {
                 jobId: result.jobId,
                 status: "running",
             });
+            // Refocus input after command starts
+            setTimeout(() => inputRef.current?.focus(), 0);
         } catch {
             const entryId = addCommand({
                 command: trimmedCommand,
@@ -227,6 +238,8 @@ export function Terminal() {
                 endedAt: Date.now(),
             });
             updateCommand(entryId, { status: "error" });
+            // Refocus input after error
+            setTimeout(() => inputRef.current?.focus(), 0);
         }
     };
 
