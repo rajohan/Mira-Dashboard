@@ -2,6 +2,7 @@ import express, { type RequestHandler } from "express";
 import FS from "fs";
 import JSON5 from "json5";
 import Path from "path";
+import { db } from "../db.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
@@ -10,6 +11,7 @@ const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 const ACTIVE_THRESHOLD = 15_000; // < 15s = active
 const THINKING_THRESHOLD = 45_000; // 15-45s = thinking, 45s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
+const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 interface AgentMetadata {
     currentTask?: string;
@@ -57,6 +59,91 @@ interface AgentStatus {
     lastActivity: string | null;
     sessionKey: string | null;
     channel: string | null;
+}
+
+interface AgentTaskHistoryItem {
+    id: number;
+    agentId: string;
+    task: string;
+    status: string;
+    startedAt: string;
+    completedAt: string | null;
+    lastActivityAt: string;
+}
+
+function nowIso(): string {
+    return new Date().toISOString();
+}
+
+function closeStaleActiveTasks(): void {
+    const cutoff = new Date(Date.now() - TASK_IDLE_TIMEOUT_MS).toISOString();
+    db.prepare(
+        `UPDATE agent_task_history
+         SET status = 'completed_auto', completed_at = ?, last_activity_at = ?
+         WHERE status = 'active' AND last_activity_at < ?`
+    ).run(nowIso(), nowIso(), cutoff);
+}
+
+function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
+    const row = db.prepare(
+        `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
+         FROM agent_task_history
+         WHERE agent_id = ? AND status = 'active'
+         ORDER BY started_at DESC
+         LIMIT 1`
+    ).get(agentId) as
+        | {
+              id: number;
+              agent_id: string;
+              task: string;
+              status: string;
+              started_at: string;
+              completed_at: string | null;
+              last_activity_at: string;
+          }
+        | undefined;
+
+    if (!row) {
+        return null;
+    }
+
+    return {
+        id: row.id,
+        agentId: row.agent_id,
+        task: row.task,
+        status: row.status,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        lastActivityAt: row.last_activity_at,
+    };
+}
+
+function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
+    const rows = db.prepare(
+        `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
+         FROM agent_task_history
+         WHERE status != 'active' AND completed_at IS NOT NULL
+         ORDER BY completed_at DESC
+         LIMIT ?`
+    ).all(limit) as Array<{
+        id: number;
+        agent_id: string;
+        task: string;
+        status: string;
+        started_at: string;
+        completed_at: string | null;
+        last_activity_at: string;
+    }>;
+
+    return rows.map((row) => ({
+        id: row.id,
+        agentId: row.agent_id,
+        task: row.task,
+        status: row.status,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        lastActivityAt: row.last_activity_at,
+    }));
 }
 
 function parseAgentsConfig(): AgentsConfig | null {
@@ -264,9 +351,13 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
 }
 
 function getAgentStatus(agentId: string): AgentStatus {
-    // Get metadata (current task from agent)
+    // Auto-close stale active tasks before reading current state
+    closeStaleActiveTasks();
+
+    // Current task priority: active history task -> metadata -> inferred activity
+    const activeTask = getActiveHistoryTask(agentId);
     const metadata = getAgentMetadata(agentId);
-    
+
     // Get sessions from agent's sessions.json file
     const fileSessions = getAgentSessionsFromFiles(agentId);
 
@@ -293,8 +384,7 @@ function getAgentStatus(agentId: string): AgentStatus {
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
     const effectiveModTime = fileModTime || 0;
 
-    // Use metadata for currentTask if available, otherwise fall back to activity
-    const currentTask = metadata?.currentTask || activity?.task || null;
+    const currentTask = activeTask?.task || metadata?.currentTask || activity?.task || null;
 
     return {
         id: agentId,
@@ -376,6 +466,19 @@ export default function agentsRoutes(app: express.Application): void {
         }
     }) as RequestHandler);
 
+    // Latest completed tasks across agents
+    app.get("/api/agents/tasks/history", (async (req, res) => {
+        try {
+            const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 8));
+            closeStaleActiveTasks();
+            const tasks = getLatestCompletedTasks(limit);
+            res.json({ tasks, timestamp: Date.now() });
+        } catch (error) {
+            console.error("[Agents] Task history error:", (error as Error).message);
+            res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
+
     // Update agent metadata (current task)
     app.put("/api/agents/:id/metadata", (async (req, res) => {
         try {
@@ -405,14 +508,41 @@ export default function agentsRoutes(app: express.Application): void {
                 }
             }
 
-            // Update fields
-            if (currentTask !== undefined) {
-                metadata.currentTask = currentTask.slice(0, 100); // Max 100 chars
+            const safeTask = typeof currentTask === "string" ? currentTask.trim().slice(0, 100) : undefined;
+            const currentActive = getActiveHistoryTask(agentId);
+            const ts = nowIso();
+
+            // Auto history handling on task changes
+            if (safeTask && safeTask.length > 0) {
+                if (!currentActive) {
+                    db.prepare(
+                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                    ).run(agentId, safeTask, ts, ts);
+                } else if (currentActive.task !== safeTask) {
+                    db.prepare(
+                        `UPDATE agent_task_history
+                         SET status = 'completed', completed_at = ?, last_activity_at = ?
+                         WHERE id = ?`
+                    ).run(ts, ts, currentActive.id);
+
+                    db.prepare(
+                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                    ).run(agentId, safeTask, ts, ts);
+                } else {
+                    db.prepare(
+                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                    ).run(ts, currentActive.id);
+                }
+
+                metadata.currentTask = safeTask;
             }
+
             if (status !== undefined) {
                 metadata.status = status as "working" | "waiting" | "completed";
             }
-            metadata.updatedAt = new Date().toISOString();
+            metadata.updatedAt = ts;
 
             // Write back
             FS.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));

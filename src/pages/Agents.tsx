@@ -1,7 +1,7 @@
-import { useAgentsStatus } from "../hooks/useAgents";
+import { useAgentsStatus, useAgentTaskHistory } from "../hooks/useAgents";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
-import { formatDuration } from "../utils/format";
+import { formatDate, formatDuration } from "../utils/format";
 
 const statusColors = {
     active: {
@@ -167,6 +167,37 @@ function AgentCard({
     );
 }
 
+function TaskHistorySidebar() {
+    const { data } = useAgentTaskHistory(8);
+    const tasks = data?.tasks || [];
+
+    return (
+        <Card>
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                Latest Tasks
+            </h3>
+            {tasks.length === 0 ? (
+                <p className="text-sm italic text-primary-500">No completed tasks yet</p>
+            ) : (
+                <div className="space-y-3">
+                    {tasks.map((item) => (
+                        <div key={item.id} className="rounded bg-primary-800/50 p-3">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-primary-200">{item.agentId}</span>
+                                <span className="text-[11px] text-primary-500">
+                                    {item.completedAt ? formatDate(item.completedAt) : "-"}
+                                </span>
+                            </div>
+                            <p className="text-sm text-primary-100">{item.task}</p>
+                            <p className="mt-1 text-[11px] text-primary-500">{item.status}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </Card>
+    );
+}
+
 export function Agents() {
     const { data, isLoading, error } = useAgentsStatus();
 
@@ -178,9 +209,10 @@ export function Agents() {
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
     return (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
-            {/* Main content */}
-            <div className="space-y-6">
+        <div className="space-y-4 p-6">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {/* Main content */}
+                <div className="space-y-6">
                 {error && (
                 <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
                     {error instanceof Error ? error.message : "Failed to load agents"}
@@ -279,16 +311,10 @@ export function Agents() {
             )}
             </div>
 
-            {/* Sidebar - Task History (placeholder) */}
-            <div className="hidden xl:block">
-                <Card className="sticky top-6">
-                    <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-primary-300">
-                        Task History
-                    </h3>
-                    <p className="text-sm text-primary-500 italic">
-                        Task history coming soon
-                    </p>
-                </Card>
+                {/* Sidebar - Latest completed tasks */}
+                <div className="hidden xl:block">
+                    <TaskHistorySidebar />
+                </div>
             </div>
         </div>
     );

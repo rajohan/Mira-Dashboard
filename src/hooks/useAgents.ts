@@ -1,9 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { Agent } from "../types/session";
+import type { Agent, AgentTaskHistoryItem } from "../types/session";
 
 interface AgentsStatusResponse {
     agents: Agent[];
+    timestamp: number;
+}
+
+interface AgentTaskHistoryResponse {
+    tasks: AgentTaskHistoryItem[];
     timestamp: number;
 }
 
@@ -53,6 +58,21 @@ export function useAgentsConfig() {
             return response.json();
         },
         staleTime: 60_000, // Config doesn't change often
+    });
+}
+
+export function useAgentTaskHistory(limit = 8) {
+    return useQuery<AgentTaskHistoryResponse>({
+        queryKey: ["agents", "tasks", "history", limit],
+        queryFn: async () => {
+            const response = await fetch(`/api/agents/tasks/history?limit=${limit}`);
+            if (!response.ok) {
+                throw new Error("Failed to fetch agent task history");
+            }
+            return response.json();
+        },
+        refetchInterval: 5000,
+        staleTime: 4000,
     });
 }
 

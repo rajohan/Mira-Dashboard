@@ -45,3 +45,13 @@ export interface Agent {
     sessionKey: string | null;
     channel: string | null;
 }
+
+export interface AgentTaskHistoryItem {
+    id: number;
+    agentId: string;
+    task: string;
+    status: string;
+    startedAt: string;
+    completedAt: string | null;
+    lastActivityAt: string;
+}
