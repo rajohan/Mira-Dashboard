@@ -310,6 +310,10 @@ export function Terminal() {
                                 className="w-full bg-black font-mono"
                                 disabled={startCommand.isPending}
                                 autoFocus
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck="false"
                             />
                         </div>
                         <Button
