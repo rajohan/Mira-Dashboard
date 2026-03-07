@@ -149,18 +149,17 @@ function TaskHistorySidebar() {
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                     Latest Tasks
                 </h3>
-                <p className="text-xs text-primary-500">Completed agent tasks</p>
             </div>
 
             {tasks.length === 0 ? (
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
-                <div className="relative pl-4">
-                    <div className="absolute bottom-0 left-1.5 top-0 w-px bg-primary-700/70" />
+                <div className="relative pl-5">
+                    <div className="absolute bottom-0 left-[7px] top-0 w-px bg-primary-700/70" />
                     <div className="space-y-3">
                         {tasks.map((item) => (
                             <div key={item.id} className="relative rounded border border-primary-700/80 bg-primary-900/60 p-3">
-                                <span className="absolute -left-[13px] top-4 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
+                                <span className="absolute -left-[14px] top-4 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
                                 <div className="mb-1 flex items-center justify-between gap-2">
                                     <span className="text-xs font-medium text-primary-200">{item.agentId}</span>
                                     <span className="text-[11px] text-primary-500">
