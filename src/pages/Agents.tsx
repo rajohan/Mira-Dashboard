@@ -156,12 +156,12 @@ function TaskHistorySidebar() {
             ) : (
                 <div className="space-y-2">
                     {tasks.map((item, index) => (
-                        <div key={item.id} className="flex gap-3">
-                            <div className="relative flex w-4 justify-center">
-                                {index !== tasks.length - 1 && (
-                                    <span className="absolute left-1/2 top-[18px] bottom-[-16px] w-px -translate-x-1/2 bg-primary-700/70" />
-                                )}
+                        <div key={item.id} className="flex items-stretch gap-3">
+                            <div className="flex w-4 flex-col items-center">
                                 <span className="mt-3 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
+                                {index !== tasks.length - 1 && (
+                                    <span className="mt-1 w-px flex-1 bg-primary-700/70" />
+                                )}
                             </div>
 
                             <div className="flex-1 rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
