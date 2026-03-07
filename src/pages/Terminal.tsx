@@ -189,8 +189,6 @@ export function Terminal() {
         }
     };
 
-    const promptPrefix = `${shortenPath(cwd)}$`;
-
     return (
         <div className="flex h-full flex-col gap-4 p-4">
             <div className="flex items-center justify-between">
@@ -239,9 +237,9 @@ export function Terminal() {
                             <div className="mt-2">
                                 <div className="text-primary-400">
                                     <span className="text-accent-400">
-                                        {promptPrefix}
-                                    </span>{" "}
-                                    {command}
+                                        {shortenPath(cwd)}
+                                    </span>
+                                    <span className="text-primary-500">$</span> {command}
                                 </div>
                                 {jobData.stdout && (
                                     <pre className="mt-1 whitespace-pre-wrap text-primary-100">
@@ -261,34 +259,35 @@ export function Terminal() {
                 </div>
 
                 {/* Command Input */}
-                <form
-                    onSubmit={handleSubmit}
-                    className="flex items-center gap-2 border-t border-primary-700 bg-primary-900 p-3"
-                >
-                    <span className="flex-shrink-0 font-mono text-accent-400">
-                        {promptPrefix}
-                    </span>
-                    <div className="flex-1">
-                        <Input
-                            ref={inputRef}
-                            type="text"
-                            value={command}
-                            onChange={(e) => setCommand(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder="Enter command..."
-                            className="w-full bg-black font-mono"
-                            disabled={startCommand.isPending}
-                            autoFocus
-                        />
+                <div className="border-t border-primary-700 bg-primary-900 p-3">
+                    {/* Current directory display */}
+                    <div className="mb-2 flex items-center gap-2 font-mono text-sm text-accent-400">
+                        <span>{shortenPath(cwd)}</span>
+                        <span className="text-primary-500">$</span>
                     </div>
-                    <Button
-                        type="submit"
-                        disabled={!command.trim() || startCommand.isPending}
-                    >
-                        <Send size={16} />
-                        Run
-                    </Button>
-                </form>
+                    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+                        <div className="flex-1">
+                            <Input
+                                ref={inputRef}
+                                type="text"
+                                value={command}
+                                onChange={(e) => setCommand(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                placeholder="Enter command..."
+                                className="w-full bg-black font-mono"
+                                disabled={startCommand.isPending}
+                                autoFocus
+                            />
+                        </div>
+                        <Button
+                            type="submit"
+                            disabled={!command.trim() || startCommand.isPending}
+                        >
+                            <Send size={16} />
+                            Run
+                        </Button>
+                    </form>
+                </div>
             </Card>
         </div>
     );
