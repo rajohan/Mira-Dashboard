@@ -140,7 +140,7 @@ function AgentCard({
 }
 
 function TaskHistorySidebar() {
-    const { data } = useAgentTaskHistory(8);
+    const { data } = useAgentTaskHistory(6);
     const tasks = data?.tasks || [];
 
     return (
@@ -155,12 +155,12 @@ function TaskHistorySidebar() {
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
                 <div className="relative pl-5">
-                    <div className="absolute bottom-0 left-[7px] top-0 w-px bg-primary-700/70" />
-                    <div className="space-y-3">
+                    <div className="absolute bottom-0 left-2 top-0 w-px -translate-x-1/2 bg-primary-700/70" />
+                    <div className="space-y-2">
                         {tasks.map((item) => (
-                            <div key={item.id} className="relative rounded border border-primary-700/80 bg-primary-900/60 p-3">
-                                <span className="absolute -left-[14px] top-4 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
-                                <div className="mb-1 flex items-center justify-between gap-2">
+                            <div key={item.id} className="relative rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
+                                <span className="absolute left-2 top-3.5 h-2.5 w-2.5 -translate-x-1/2 rounded-full border border-primary-700 bg-primary-300" />
+                                <div className="mb-0.5 flex items-center justify-between gap-2">
                                     <span className="text-xs font-medium text-primary-200">{item.agentId}</span>
                                     <span className="text-[11px] text-primary-500">
                                         {item.completedAt ? formatDate(item.completedAt) : "-"}
