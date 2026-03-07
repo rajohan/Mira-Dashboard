@@ -198,18 +198,31 @@ interface ActivityInfo {
 }
 
 function summarizeToolActivity(toolName: string, args: unknown): string {
-    const parsed = typeof args === "string" ? (() => {
-        try {
-            return JSON.parse(args) as Record<string, unknown>;
-        } catch {
-            return { raw: args } as Record<string, unknown>;
-        }
-    })() : (args && typeof args === "object" ? (args as Record<string, unknown>) : {});
+    const parsed =
+        typeof args === "string"
+            ? (() => {
+                  try {
+                      return JSON.parse(args) as Record<string, unknown>;
+                  } catch {
+                      return { raw: args } as Record<string, unknown>;
+                  }
+              })()
+            : args && typeof args === "object"
+              ? (args as Record<string, unknown>)
+              : {};
 
-    const path = (parsed.path || parsed.file_path || parsed.filePath) as string | undefined;
-    const command = parsed.command as string | undefined;
-    const action = parsed.action as string | undefined;
-    const url = parsed.url as string | undefined;
+    const nested =
+        parsed.parameters && typeof parsed.parameters === "object"
+            ? (parsed.parameters as Record<string, unknown>)
+            : {};
+
+    const path =
+        (parsed.path || parsed.file_path || parsed.filePath || nested.path || nested.file_path || nested.filePath) as
+            | string
+            | undefined;
+    const command = (parsed.command || nested.command) as string | undefined;
+    const action = (parsed.action || nested.action) as string | undefined;
+    const url = (parsed.url || nested.url) as string | undefined;
 
     if (toolName === "read" && path) {
         return `read ${path}`;
