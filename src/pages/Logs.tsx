@@ -75,21 +75,27 @@ export function Logs() {
         try {
             const result = await refetchContent();
             if (result.data) {
-                // Clear existing logs first
-                logsCollection.utils.writeBatch(() => {
-                    for (const log of logs) {
-                        logsCollection.utils.writeDelete(log.id);
-                    }
-                });
-
                 // Load new logs
                 const lines = result.data.split("\n").filter((l) => l.trim());
+                const newLogs = lines
+                    .map((line, i) => parseLogLine(line, i))
+                    .filter(
+                        (parsed): parsed is NonNullable<typeof parsed> => parsed !== null
+                    );
+
+                // Replace all logs in collection (clear + insert in one batch)
                 logsCollection.utils.writeBatch(() => {
-                    for (const [i, line] of lines.entries()) {
-                        const parsed = parseLogLine(line, i);
-                        if (parsed) {
-                            logsCollection.utils.writeInsert(parsed);
+                    // Delete all existing logs first
+                    for (const log of logs) {
+                        try {
+                            logsCollection.utils.writeDelete(log.id);
+                        } catch {
+                            // Ignore errors for already deleted items
                         }
+                    }
+                    // Insert new logs
+                    for (const parsed of newLogs) {
+                        logsCollection.utils.writeInsert(parsed);
                     }
                 });
             }
@@ -219,7 +225,11 @@ export function Logs() {
         // Get all current logs and delete them
         logsCollection.utils.writeBatch(() => {
             for (const log of logs) {
-                logsCollection.utils.writeDelete(log.id);
+                try {
+                    logsCollection.utils.writeDelete(log.id);
+                } catch {
+                    // Ignore errors for already deleted items
+                }
             }
         });
     };
