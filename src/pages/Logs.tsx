@@ -25,6 +25,7 @@ export function Logs() {
     const [search, setSearch] = useState("");
     const logContainerRef = useRef<HTMLDivElement>(null);
     const subscribedConnectionIdRef = useRef<number | null>(null);
+    const isLoadingRef = useRef(false);
 
     // OpenClaw connection (shared WebSocket)
     const { isConnected, connectionId, request } = useOpenClawSocket();
@@ -64,27 +65,30 @@ export function Logs() {
 
     // Load log content when file/lineCount changes
     const loadLogContent = async () => {
-        if (!selectedFile) return;
-        const result = await refetchContent();
-        if (result.data) {
-            const lines = result.data.split("\n").filter((l) => l.trim());
-            const newLogs = lines
-                .map((line, i) => parseLogLine(line, i))
-                .filter((parsed) => parsed !== null);
+        if (!selectedFile || isLoadingRef.current) return;
+        isLoadingRef.current = true;
+        try {
+            const result = await refetchContent();
+            if (result.data) {
+                const lines = result.data.split("\n").filter((l) => l.trim());
+                const newLogs = lines
+                    .map((line, i) => parseLogLine(line, i))
+                    .filter(
+                        (parsed): parsed is NonNullable<typeof parsed> => parsed !== null
+                    );
 
-            // Replace: clear old and insert new
-            logsCollection.utils.writeBatch(() => {
-                // Clear existing
-                for (const log of logs) {
-                    if (log.id) {
+                // Replace: clear old and insert new
+                logsCollection.utils.writeBatch(() => {
+                    for (const log of logs) {
                         logsCollection.utils.writeDelete(log.id);
                     }
-                }
-                // Insert new
-                for (const parsed of newLogs) {
-                    logsCollection.utils.writeInsert(parsed);
-                }
-            });
+                    for (const parsed of newLogs) {
+                        logsCollection.utils.writeInsert(parsed);
+                    }
+                });
+            }
+        } finally {
+            isLoadingRef.current = false;
         }
     };
 

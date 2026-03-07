@@ -11,7 +11,7 @@ export const logsCollection = createCollection(
         queryFn: async () => [],
         queryClient,
         staleTime: Number.POSITIVE_INFINITY,
-        getKey: (item: LogEntry) => item.ts || item.raw,
+        getKey: (item: LogEntry) => item.id,
     })
 );
 
@@ -25,11 +25,9 @@ export function writeLogFromWebSocket(line: string) {
     try {
         const parsed = parseLogLine(line);
         if (parsed) {
-            try {
-                logsCollection.utils.writeInsert(parsed);
-            } catch {
-                // Ignore duplicate key errors (entry already exists)
-            }
+            logsCollection.utils.writeUpsert(
+                parsed as unknown as Partial<Record<string, unknown>>
+            );
         }
     } catch (error) {
         console.error("Error parsing log line:", line, error);
