@@ -70,18 +70,27 @@ export function Terminal() {
         }
     };
 
-    // Update command status when job data changes
+    // Update command status when job data changes - only if actually different
     useEffect(() => {
         if (jobData && currentJobId) {
             const entry = history.find((h) => h.jobId === currentJobId);
             if (entry) {
-                updateCommand(entry.id, {
-                    status: jobData.status,
-                    code: jobData.code,
-                    stdout: jobData.stdout,
-                    stderr: jobData.stderr,
-                    endedAt: jobData.endedAt,
-                });
+                // Only update if data actually changed
+                const hasChanged =
+                    entry.status !== jobData.status ||
+                    entry.stdout !== jobData.stdout ||
+                    entry.stderr !== jobData.stderr ||
+                    entry.code !== jobData.code;
+
+                if (hasChanged) {
+                    updateCommand(entry.id, {
+                        status: jobData.status,
+                        code: jobData.code,
+                        stdout: jobData.stdout,
+                        stderr: jobData.stderr,
+                        endedAt: jobData.endedAt,
+                    });
+                }
 
                 // Update cwd if cd command was successful
                 if (entry.command.startsWith("cd ") && jobData.code === 0) {
