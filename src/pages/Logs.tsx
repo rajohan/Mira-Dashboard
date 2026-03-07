@@ -72,7 +72,14 @@ export function Logs() {
         try {
             const result = await refetchContent();
             if (result.data) {
-                // Clear and load new logs
+                // Clear existing logs first
+                logsCollection.utils.writeBatch(() => {
+                    for (const log of logs) {
+                        logsCollection.utils.writeDelete(log.ts || log.raw);
+                    }
+                });
+
+                // Load new logs
                 const lines = result.data.split("\n").filter((l) => l.trim());
                 logsCollection.utils.writeBatch(() => {
                     for (const line of lines) {
@@ -279,31 +286,34 @@ export function Logs() {
                 </div>
             </div>
 
-            <Card className="relative flex-1 overflow-hidden" variant="bordered">
-                {/* Follow button when scrolled up */}
-                {!autoFollow && filteredLogs.length > 0 && (
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setAutoFollow(true);
-                            if (logContainerRef.current) {
-                                logContainerRef.current.scrollTop =
-                                    logContainerRef.current.scrollHeight;
-                                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
-                                    align: "end",
-                                });
-                            }
-                        }}
-                        className="absolute right-4 top-2 z-10 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
-                    >
-                        ↓ Follow
-                    </button>
-                )}
+            <Card className="flex-1 overflow-hidden" variant="bordered">
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
+                    className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
                 >
+                    {/* Follow button when scrolled up - inside scroll container */}
+                    {!autoFollow && filteredLogs.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setAutoFollow(true);
+                                if (logContainerRef.current) {
+                                    logContainerRef.current.scrollTop =
+                                        logContainerRef.current.scrollHeight;
+                                    rowVirtualizer.scrollToIndex(
+                                        filteredLogs.length - 1,
+                                        {
+                                            align: "end",
+                                        }
+                                    );
+                                }
+                            }}
+                            className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                        >
+                            ↓ Follow
+                        </button>
+                    )}
                     {filteredLogs.length === 0 ? (
                         <div className="py-8 text-center text-primary-400">
                             {logs.length === 0
