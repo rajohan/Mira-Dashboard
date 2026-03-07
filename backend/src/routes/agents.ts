@@ -197,41 +197,59 @@ interface ActivityInfo {
     modTime: number;
 }
 
-function summarizeToolActivity(toolName: string, args: unknown): string {
+function summarizeToolActivity(toolName: string, raw: unknown): string {
     const parsed =
-        typeof args === "string"
+        typeof raw === "string"
             ? (() => {
                   try {
-                      return JSON.parse(args) as Record<string, unknown>;
+                      return JSON.parse(raw) as Record<string, unknown>;
                   } catch {
-                      return { raw: args } as Record<string, unknown>;
+                      return { raw } as Record<string, unknown>;
                   }
               })()
-            : args && typeof args === "object"
-              ? (args as Record<string, unknown>)
+            : raw && typeof raw === "object"
+              ? (raw as Record<string, unknown>)
               : {};
 
+    const args =
+        parsed.arguments && typeof parsed.arguments === "object"
+            ? (parsed.arguments as Record<string, unknown>)
+            : parsed;
+
     const nested =
-        parsed.parameters && typeof parsed.parameters === "object"
-            ? (parsed.parameters as Record<string, unknown>)
+        args.parameters && typeof args.parameters === "object"
+            ? (args.parameters as Record<string, unknown>)
             : {};
 
     const path =
-        (parsed.path || parsed.file_path || parsed.filePath || nested.path || nested.file_path || nested.filePath) as
+        (args.path || args.file_path || args.filePath || nested.path || nested.file_path || nested.filePath) as
             | string
             | undefined;
-    const command = (parsed.command || nested.command) as string | undefined;
-    const action = (parsed.action || nested.action) as string | undefined;
-    const url = (parsed.url || nested.url) as string | undefined;
+    const command = (args.command || nested.command) as string | undefined;
+    const action = (args.action || nested.action) as string | undefined;
+    const url = (args.url || nested.url) as string | undefined;
 
-    if (toolName === "read" && path) {
-        return `read ${path}`;
+    // Fallback: parse partialJson if present
+    let fallbackPath: string | undefined;
+    if (!path && typeof parsed.partialJson === "string") {
+        try {
+            const pj = JSON.parse(parsed.partialJson) as Record<string, unknown>;
+            fallbackPath = (pj.path || pj.file_path || pj.filePath) as string | undefined;
+        } catch {
+            // ignore
+        }
     }
-    if (toolName === "edit" && path) {
-        return `edit ${path}`;
+
+    const resolvedPath = path || fallbackPath;
+
+    if (toolName === "read" && resolvedPath) {
+        return `read ${resolvedPath}`;
     }
-    if (toolName === "write" && path) {
-        return `write ${path}`;
+    if (toolName === "edit" && resolvedPath) {
+        return `edit ${resolvedPath}`;
+    }
+    if (toolName === "write" && resolvedPath) {
+        return `write ${resolvedPath}`;
     }
     if (toolName === "exec" && command) {
         return `exec ${command.slice(0, 70)}`;
@@ -243,8 +261,8 @@ function summarizeToolActivity(toolName: string, args: unknown): string {
     if (action) {
         return `${toolName} ${action}`.slice(0, 90);
     }
-    if (path) {
-        return `${toolName} ${path}`.slice(0, 90);
+    if (resolvedPath) {
+        return `${toolName} ${resolvedPath}`.slice(0, 90);
     }
 
     return toolName;
@@ -325,9 +343,11 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
                         const toolCall = toolCalls[0] as {
                             name?: string;
                             arguments?: unknown;
+                            partialJson?: string;
+                            [key: string]: unknown;
                         };
                         const toolName = toolCall.name || "unknown";
-                        lastActivity = summarizeToolActivity(toolName, toolCall.arguments);
+                        lastActivity = summarizeToolActivity(toolName, toolCall);
                     }
                 }
                 
