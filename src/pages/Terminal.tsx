@@ -1,5 +1,5 @@
 import { Send, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -43,11 +43,11 @@ export function Terminal() {
     }, []);
 
     // Check if user is near bottom (within 30px)
-    const checkIsAtBottom = () => {
+    const checkIsAtBottom = useCallback(() => {
         if (!outputRef.current) return true;
         const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
         return scrollHeight - scrollTop - clientHeight < 30;
-    };
+    }, []);
 
     // Auto-scroll only when user is at bottom
     useEffect(() => {
@@ -57,9 +57,10 @@ export function Terminal() {
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
     // Track scroll position
-    const handleScroll = () => {
-        setIsAtBottom(checkIsAtBottom());
-    };
+    const handleScroll = useCallback(() => {
+        const atBottom = checkIsAtBottom();
+        setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
+    }, [checkIsAtBottom]);
 
     // Scroll to bottom manually
     const scrollToBottom = () => {
