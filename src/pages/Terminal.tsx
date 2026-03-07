@@ -354,7 +354,13 @@ export function Terminal() {
                             <Button
                                 type="button"
                                 variant="danger"
-                                onClick={() => stopTerminalJob(currentJobId)}
+                                onClick={async () => {
+                                    try {
+                                        await stopTerminalJob(currentJobId);
+                                    } catch {
+                                        // Ignore errors - process might already be stopped
+                                    }
+                                }}
                             >
                                 ■ Stop
                             </Button>
