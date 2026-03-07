@@ -67,6 +67,7 @@ export function Logs() {
     const isLoadingRef = useRef(false);
     const initialLoadDoneRef = useRef(false);
     const prevFileRef = useRef<string | null>(null);
+    const prevLineCountRef = useRef<number>(100);
 
     const loadLogContent = async () => {
         if (!selectedFile || isLoadingRef.current) return;
@@ -102,17 +103,19 @@ export function Logs() {
         // 1. We have a selected file
         // 2. logFiles are loaded
         // 3. Not already loading
-        // 4. Either initial load hasn't happened OR file actually changed
+        // 4. Either initial load hasn't happened OR file changed OR lineCount changed
         const fileChanged = selectedFile !== prevFileRef.current;
+        const lineCountChanged = lineCount !== prevLineCountRef.current;
 
         if (
             selectedFile &&
             logFiles.length > 0 &&
             !isLoadingRef.current &&
-            (!initialLoadDoneRef.current || fileChanged)
+            (!initialLoadDoneRef.current || fileChanged || lineCountChanged)
         ) {
             initialLoadDoneRef.current = true;
             prevFileRef.current = selectedFile;
+            prevLineCountRef.current = lineCount;
             loadLogContent();
         }
     }, [selectedFile, lineCount]);
