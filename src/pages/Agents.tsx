@@ -20,7 +20,7 @@ const statusColors = {
         bg: "bg-sky-300",
         text: "text-primary-200",
         border: "border-sky-200/80",
-        glow: "shadow-[0_0_8px_rgba(125,211,252,0.65)]",
+        glow: "",
     },
     offline: {
         bg: "bg-primary-500",
@@ -39,13 +39,16 @@ const statusLabels = {
 
 function StatusIndicator({ status }: { status: keyof typeof statusColors }) {
     const colors = statusColors[status];
+    const pulseClass = status === "active" || status === "thinking" ? " animate-pulse" : "";
+
     return (
         <div
             className={
                 "flex h-4 w-4 items-center justify-center rounded-full border " +
                 colors.border +
                 " " +
-                colors.glow
+                colors.glow +
+                pulseClass
             }
         >
             <div className={"h-2.5 w-2.5 rounded-full " + colors.bg} />
@@ -223,7 +226,7 @@ export function Agents() {
                             {idleAgents.length > 0 && (
                                 <div>
                                     <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
-                                        <span className="h-2 w-2 rounded-full bg-primary-400" />
+                                        <span className="h-2 w-2 rounded-full bg-sky-300" />
                                         Idle ({idleAgents.length})
                                     </h2>
                                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
