@@ -133,6 +133,28 @@ export function Logs() {
         overscan: 15,
     });
 
+    const scrollToBottomExact = () => {
+        if (!logContainerRef.current || filteredLogs.length === 0) return;
+
+        const el = logContainerRef.current;
+        const targetIndex = filteredLogs.length - 1;
+
+        const doScroll = () => {
+            rowVirtualizer.measure();
+            rowVirtualizer.scrollToIndex(targetIndex, { align: "end" });
+            el.scrollTop = el.scrollHeight;
+        };
+
+        // Multi-line rows can change measured height after paint; do multiple passes.
+        requestAnimationFrame(() => {
+            doScroll();
+            requestAnimationFrame(() => {
+                doScroll();
+                setTimeout(doScroll, 60);
+            });
+        });
+    };
+
     const handleScroll = () => {
         if (!logContainerRef.current) return;
 
@@ -148,13 +170,10 @@ export function Logs() {
 
     // Scroll to bottom when logs change (auto-follow) OR file/lineCount changes
     useEffect(() => {
-        if (filteredLogs.length > 0 && logContainerRef.current && autoFollow) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-            rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
-                align: "end",
-            });
+        if (filteredLogs.length > 0 && autoFollow) {
+            scrollToBottomExact();
         }
-    }, [filteredLogs.length, autoFollow, selectedFile, lineCount, rowVirtualizer]);
+    }, [filteredLogs.length, autoFollow, selectedFile, lineCount]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
@@ -259,14 +278,7 @@ export function Logs() {
                             type="button"
                             onClick={() => {
                                 setAutoFollow(true);
-                                if (logContainerRef.current) {
-                                    logContainerRef.current.scrollTop =
-                                        logContainerRef.current.scrollHeight;
-                                    rowVirtualizer.scrollToIndex(
-                                        filteredLogs.length - 1,
-                                        { align: "end" }
-                                    );
-                                }
+                                scrollToBottomExact();
                             }}
                             className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
                         >
