@@ -5,27 +5,27 @@ import { formatDate, formatDuration } from "../utils/format";
 
 const statusColors = {
     active: {
-        bg: "bg-emerald-500/20",
+        bg: "bg-emerald-400",
         text: "text-emerald-300",
-        border: "border-emerald-500/50",
-        glow: "animate-pulse shadow-emerald-500/50 shadow-lg",
+        border: "border-emerald-300/80",
+        glow: "shadow-[0_0_10px_rgba(52,211,153,0.8)]",
     },
     thinking: {
-        bg: "bg-amber-500/20",
+        bg: "bg-amber-300",
         text: "text-amber-300",
-        border: "border-amber-500/50",
-        glow: "animate-pulse shadow-amber-500/50 shadow-md",
+        border: "border-amber-200/80",
+        glow: "shadow-[0_0_10px_rgba(252,211,77,0.75)]",
     },
     idle: {
-        bg: "bg-primary-600/50",
-        text: "text-primary-300",
-        border: "border-primary-500/50",
-        glow: "",
+        bg: "bg-sky-300",
+        text: "text-primary-200",
+        border: "border-sky-200/80",
+        glow: "shadow-[0_0_8px_rgba(125,211,252,0.65)]",
     },
     offline: {
-        bg: "bg-primary-800/50",
+        bg: "bg-primary-500",
         text: "text-primary-500",
-        border: "border-primary-700/50",
+        border: "border-primary-400/80",
         glow: "",
     },
 } as const;
@@ -42,15 +42,13 @@ function StatusIndicator({ status }: { status: keyof typeof statusColors }) {
     return (
         <div
             className={
-                "flex h-3 w-3 items-center justify-center rounded-full " +
-                colors.bg +
-                " " +
+                "flex h-4 w-4 items-center justify-center rounded-full border " +
                 colors.border +
                 " " +
                 colors.glow
             }
         >
-            <div className={"h-2 w-2 rounded-full " + colors.bg} />
+            <div className={"h-2.5 w-2.5 rounded-full " + colors.bg} />
         </div>
     );
 }
@@ -76,10 +74,7 @@ function AgentCard({
     const modelShort = model.split("/").pop() || model;
 
     return (
-        <Card className="relative flex h-full flex-col overflow-hidden">
-            {status === "active" && (
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-transparent to-emerald-500/5" />
-            )}
+        <Card className="relative flex h-full flex-col overflow-hidden border border-primary-600 bg-primary-800/60">
 
             <div className="mb-4 flex items-start justify-between">
                 <div className="flex items-center gap-3">
