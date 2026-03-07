@@ -15,7 +15,6 @@ const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 interface AgentMetadata {
     currentTask?: string;
-    status?: "working" | "waiting" | "completed";
     updatedAt?: string;
 }
 
@@ -572,10 +571,10 @@ export default function agentsRoutes(app: express.Application): void {
     app.put("/api/agents/:id/metadata", (async (req, res) => {
         try {
             const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-            const { currentTask, status } = req.body as { currentTask?: string; status?: string };
+            const { currentTask } = req.body as { currentTask?: string };
 
-            if (!currentTask && !status) {
-                res.status(400).json({ error: "Provide currentTask or status" });
+            if (!currentTask || currentTask.trim().length === 0) {
+                res.status(400).json({ error: "Provide currentTask" });
                 return;
             }
 
@@ -628,9 +627,6 @@ export default function agentsRoutes(app: express.Application): void {
                 metadata.currentTask = safeTask;
             }
 
-            if (status !== undefined) {
-                metadata.status = status as "working" | "waiting" | "completed";
-            }
             metadata.updatedAt = ts;
 
             // Write back
