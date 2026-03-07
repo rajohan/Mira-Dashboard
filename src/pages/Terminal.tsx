@@ -1,4 +1,4 @@
-import { Send, Terminal as TerminalIcon, Trash2 } from "lucide-react";
+import { Send, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
@@ -34,11 +34,11 @@ export function Terminal() {
     const { data: jobData } = useTerminalJob(currentJobId);
     const { history, addCommand, updateCommand, clearHistory } = useTerminalHistory();
 
-    // Check if user is near bottom (within 100px)
+    // Check if user is near bottom (within 30px)
     const checkIsAtBottom = () => {
         if (!outputRef.current) return true;
         const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
-        return scrollHeight - scrollTop - clientHeight < 100;
+        return scrollHeight - scrollTop - clientHeight < 30;
     };
 
     // Auto-scroll only when user is at bottom
@@ -242,23 +242,7 @@ export function Terminal() {
     };
 
     return (
-        <div className="flex h-full flex-col gap-4 p-4">
-            <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-xl font-semibold">
-                    <TerminalIcon size={24} />
-                    Terminal
-                </h2>
-                <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={clearHistory}
-                    disabled={history.length === 0}
-                >
-                    <Trash2 size={16} />
-                    Clear
-                </Button>
-            </div>
-
+        <div className="flex h-full flex-col p-4">
             <Card className="flex flex-1 flex-col overflow-hidden">
                 {/* Terminal Output */}
                 <div
@@ -354,6 +338,16 @@ export function Terminal() {
                         >
                             <Send size={16} />
                             Run
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            type="button"
+                            onClick={clearHistory}
+                            disabled={history.length === 0}
+                        >
+                            <Trash2 size={16} />
+                            Clear
                         </Button>
                     </form>
                 </div>
