@@ -27,7 +27,7 @@ export function LogLine({ log }: LogLineProps) {
                     [{log.subsystem}]
                 </span>
             )}
-            <span className="flex-1 whitespace-pre-wrap break-all text-primary-200">
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-primary-200">
                 {log.msg}
             </span>
         </div>
