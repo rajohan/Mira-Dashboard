@@ -1,9 +1,6 @@
-import { useLiveQuery } from "@tanstack/react-db";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { logsCollection } from "../collections/logs";
 import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -11,7 +8,8 @@ import { Checkbox } from "../components/ui/Checkbox";
 import { Input } from "../components/ui/Input";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
-import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
+import { useLogContent, useLogFiles } from "../hooks";
+import type { LogEntry } from "../types/log";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
@@ -23,25 +21,19 @@ export function Logs() {
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const subscribedConnectionIdRef = useRef<number | null>(null);
-    const isLoadingRef = useRef(false);
+    const requestSeqRef = useRef(0);
 
-    // OpenClaw connection (shared WebSocket)
-    const { isConnected, connectionId, request } = useOpenClawSocket();
-
-    // Logs from collection using live query
-    const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
-
-    // Queries
     const { data: logFiles = [] } = useLogFiles();
-    const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
+    const { refetch: refetchContent } = useLogContent(
         selectedFile || null,
         lineCount,
         false
     );
 
-    // Auto-select today's file
     useEffect(() => {
         if (logFiles.length > 0 && !selectedFile) {
             const sorted = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
@@ -51,53 +43,64 @@ export function Logs() {
         }
     }, [logFiles, selectedFile]);
 
-    // Subscribe to log stream once per connection
-    useEffect(() => {
-        if (!isConnected) return;
-        if (subscribedConnectionIdRef.current === connectionId) return;
+    const scrollToBottomExact = () => {
+        const el = logContainerRef.current;
+        if (!el) return;
 
-        subscribedConnectionIdRef.current = connectionId;
-        request("subscribe", { channel: "logs" }).catch((error_) => {
-            console.error("Failed to subscribe to logs:", error_);
-            subscribedConnectionIdRef.current = null;
+        const doScroll = () => {
+            el.scrollTop = el.scrollHeight;
+        };
+
+        requestAnimationFrame(() => {
+            doScroll();
+            requestAnimationFrame(() => {
+                doScroll();
+                setTimeout(doScroll, 60);
+            });
         });
-    }, [isConnected, connectionId, request]);
+    };
 
-    // Load log content when file/lineCount changes
     const loadLogContent = async () => {
-        if (!selectedFile || isLoadingRef.current) return;
-        isLoadingRef.current = true;
+        if (!selectedFile) return;
+        const seq = ++requestSeqRef.current;
+        setIsLoading(true);
         try {
             const result = await refetchContent();
-            if (result.data) {
-                const lines = result.data.split("\n").filter((l) => l.trim());
-                const newLogs = lines
-                    .map((line, i) => parseLogLine(line, i))
-                    .filter(
-                        (parsed): parsed is NonNullable<typeof parsed> => parsed !== null
-                    );
+            if (seq !== requestSeqRef.current) return;
 
-                // Replace: clear old and insert new
-                logsCollection.utils.writeBatch(() => {
-                    for (const log of logs) {
-                        logsCollection.utils.writeDelete(log.id);
-                    }
-                    for (const parsed of newLogs) {
-                        logsCollection.utils.writeInsert(parsed);
-                    }
-                });
-            }
+            const content = result.data || "";
+            const lines = content.split("\n").filter((l) => l.trim());
+            const parsed = lines
+                .map((line, i) => parseLogLine(line, i))
+                .filter((entry): entry is LogEntry => entry !== null);
+
+            setLogs(parsed);
         } finally {
-            isLoadingRef.current = false;
+            if (seq === requestSeqRef.current) {
+                setIsLoading(false);
+            }
         }
     };
 
-    // Load on mount or when file/lineCount changes
     useEffect(() => {
         if (selectedFile && logFiles.length > 0) {
-            loadLogContent();
+            void loadLogContent();
         }
-    }, [selectedFile, lineCount]);
+    }, [selectedFile, lineCount, logFiles.length]);
+
+    useEffect(() => {
+        if (autoFollow && logs.length > 0) {
+            scrollToBottomExact();
+        }
+    }, [autoFollow, logs.length, selectedFile, lineCount]);
+
+    const handleScroll = () => {
+        const el = logContainerRef.current;
+        if (!el) return;
+        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+        if (isAtBottom && !autoFollow) setAutoFollow(true);
+        else if (!isAtBottom && autoFollow) setAutoFollow(false);
+    };
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
@@ -106,13 +109,10 @@ export function Logs() {
     });
 
     const toggleLevel = (level: string) => {
-        const newFilter = new Set(levelFilter);
-        if (newFilter.has(level)) {
-            newFilter.delete(level);
-        } else {
-            newFilter.add(level);
-        }
-        setLevelFilter(newFilter);
+        const next = new Set(levelFilter);
+        if (next.has(level)) next.delete(level);
+        else next.add(level);
+        setLevelFilter(next);
     };
 
     const handleExport = () => {
@@ -126,66 +126,11 @@ export function Logs() {
         URL.revokeObjectURL(url);
     };
 
-    const rowVirtualizer = useVirtualizer({
-        count: filteredLogs.length,
-        getScrollElement: () => logContainerRef.current,
-        estimateSize: () => 22,
-        overscan: 15,
-    });
-
-    const scrollToBottomExact = () => {
-        if (!logContainerRef.current || filteredLogs.length === 0) return;
-
-        const el = logContainerRef.current;
-        const targetIndex = filteredLogs.length - 1;
-
-        const doScroll = () => {
-            rowVirtualizer.measure();
-            rowVirtualizer.scrollToIndex(targetIndex, { align: "end" });
-            el.scrollTop = el.scrollHeight;
-        };
-
-        // Multi-line rows can change measured height after paint; do multiple passes.
-        requestAnimationFrame(() => {
-            doScroll();
-            requestAnimationFrame(() => {
-                doScroll();
-                setTimeout(doScroll, 60);
-            });
-        });
+    const clearLogs = () => {
+        setLogs([]);
     };
-
-    const handleScroll = () => {
-        if (!logContainerRef.current) return;
-
-        const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < 30;
-
-        if (isAtBottom && !autoFollow) {
-            setAutoFollow(true);
-        } else if (!isAtBottom && autoFollow) {
-            setAutoFollow(false);
-        }
-    };
-
-    // Scroll to bottom when logs change (auto-follow) OR file/lineCount changes
-    useEffect(() => {
-        if (filteredLogs.length > 0 && autoFollow) {
-            scrollToBottomExact();
-        }
-    }, [filteredLogs.length, autoFollow, selectedFile, lineCount]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
-
-    const clearLogs = () => {
-        logsCollection.utils.writeBatch(() => {
-            for (const log of logs) {
-                if (log.id) {
-                    logsCollection.utils.writeDelete(log.id);
-                }
-            }
-        });
-    };
 
     return (
         <div className="flex h-full min-h-0 flex-col p-6">
@@ -228,7 +173,7 @@ export function Logs() {
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-primary-400">
-                    {isLoadingContent
+                    {isLoading
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
@@ -242,8 +187,8 @@ export function Logs() {
 
                     <div className="flex items-center gap-2">
                         <RefreshButton
-                            onClick={loadLogContent}
-                            isLoading={isLoadingContent}
+                            onClick={() => void loadLogContent()}
+                            isLoading={isLoading}
                         />
                         <Button
                             variant="secondary"
@@ -272,7 +217,6 @@ export function Logs() {
                     onScroll={handleScroll}
                     className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
                 >
-                    {/* Follow button when scrolled up */}
                     {!autoFollow && filteredLogs.length > 0 && (
                         <button
                             type="button"
@@ -285,6 +229,7 @@ export function Logs() {
                             ↓ Follow
                         </button>
                     )}
+
                     {filteredLogs.length === 0 ? (
                         <div className="py-8 text-center text-primary-400">
                             {logs.length === 0
@@ -292,32 +237,10 @@ export function Logs() {
                                 : "No logs match your filter."}
                         </div>
                     ) : (
-                        <div
-                            style={{
-                                height: `${rowVirtualizer.getTotalSize()}px`,
-                                width: "100%",
-                                position: "relative",
-                            }}
-                        >
-                            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                                const log = filteredLogs[virtualRow.index];
-                                return (
-                                    <div
-                                        key={virtualRow.key}
-                                        data-index={virtualRow.index}
-                                        ref={rowVirtualizer.measureElement}
-                                        style={{
-                                            position: "absolute",
-                                            top: 0,
-                                            left: 0,
-                                            width: "100%",
-                                            transform: `translateY(${virtualRow.start}px)`,
-                                        }}
-                                    >
-                                        <LogLine log={log} />
-                                    </div>
-                                );
-                            })}
+                        <div className="space-y-0">
+                            {filteredLogs.map((log) => (
+                                <LogLine key={log.id} log={log} />
+                            ))}
                         </div>
                     )}
                 </div>
