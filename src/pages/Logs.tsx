@@ -279,7 +279,26 @@ export function Logs() {
                 </div>
             </div>
 
-            <Card className="flex-1 overflow-hidden" variant="bordered">
+            <Card className="relative flex-1 overflow-hidden" variant="bordered">
+                {/* Follow button when scrolled up */}
+                {!autoFollow && filteredLogs.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setAutoFollow(true);
+                            if (logContainerRef.current) {
+                                logContainerRef.current.scrollTop =
+                                    logContainerRef.current.scrollHeight;
+                                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
+                                    align: "end",
+                                });
+                            }
+                        }}
+                        className="absolute right-4 top-2 z-10 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                    >
+                        ↓ Follow
+                    </button>
+                )}
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
