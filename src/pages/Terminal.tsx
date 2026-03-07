@@ -26,6 +26,7 @@ export function Terminal() {
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
     const [cwd, setCwd] = useState(HOME_DIR);
+    const [isAtBottom, setIsAtBottom] = useState(true);
     const outputRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,12 +34,32 @@ export function Terminal() {
     const { data: jobData } = useTerminalJob(currentJobId);
     const { history, addCommand, updateCommand, clearHistory } = useTerminalHistory();
 
-    // Auto-scroll to bottom when output changes
+    // Check if user is near bottom (within 100px)
+    const checkIsAtBottom = () => {
+        if (!outputRef.current) return true;
+        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+        return scrollHeight - scrollTop - clientHeight < 100;
+    };
+
+    // Auto-scroll only when user is at bottom
     useEffect(() => {
-        if (outputRef.current) {
+        if (outputRef.current && isAtBottom) {
             outputRef.current.scrollTop = outputRef.current.scrollHeight;
         }
-    }, [history, jobData?.stdout, jobData?.stderr]);
+    }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
+
+    // Track scroll position
+    const handleScroll = () => {
+        setIsAtBottom(checkIsAtBottom());
+    };
+
+    // Scroll to bottom manually
+    const scrollToBottom = () => {
+        if (outputRef.current) {
+            outputRef.current.scrollTop = outputRef.current.scrollHeight;
+            setIsAtBottom(true);
+        }
+    };
 
     // Update command status when job data changes
     useEffect(() => {
@@ -242,8 +263,19 @@ export function Terminal() {
                 {/* Terminal Output */}
                 <div
                     ref={outputRef}
-                    className="flex-1 overflow-auto bg-black p-4 font-mono text-sm"
+                    onScroll={handleScroll}
+                    className="relative flex-1 overflow-auto bg-black p-4 font-mono text-sm"
                 >
+                    {/* Scroll to bottom button */}
+                    {!isAtBottom && (
+                        <button
+                            type="button"
+                            onClick={scrollToBottom}
+                            className="absolute right-4 top-4 z-10 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                        >
+                            ↓ Follow
+                        </button>
+                    )}
                     {history.length === 0 ? (
                         <div className="text-primary-400">
                             Welcome to Mira Dashboard Terminal.
