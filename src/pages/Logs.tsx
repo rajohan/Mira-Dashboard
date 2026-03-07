@@ -1,9 +1,7 @@
-import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { logsCollection } from "../collections/logs";
 import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -12,6 +10,7 @@ import { Input } from "../components/ui/Input";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
+import { type LogEntry } from "../types/log";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
@@ -23,19 +22,17 @@ export function Logs() {
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const isAutoScrollingRef = useRef(false);
     const subscribedConnectionIdRef = useRef<number | null>(null);
 
     // OpenClaw connection (shared WebSocket)
     const { isConnected, connectionId, request } = useOpenClawSocket();
 
-    // Logs from collection using live query
-    const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
-
     // Queries
     const { data: logFiles = [] } = useLogFiles();
-    const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
+    const { refetch: refetchContent } = useLogContent(
         selectedFile || null,
         lineCount,
         false
@@ -63,81 +60,30 @@ export function Logs() {
         });
     }, [isConnected, connectionId, request]);
 
-    // Load log content when file/lineCount changes
-    const isLoadingRef = useRef(false);
-    const initialLoadDoneRef = useRef(false);
-    const prevFileRef = useRef<string | null>(null);
-    const prevLineCountRef = useRef<number>(100);
-
+    // Load log content
     const loadLogContent = async () => {
-        if (!selectedFile || isLoadingRef.current) return;
-        isLoadingRef.current = true;
+        if (!selectedFile) return;
+        setIsLoading(true);
         try {
-            // Get existing log IDs at the start
-            const existingLogIds = logs.map((log) => log.id);
-
             const result = await refetchContent();
             if (result.data) {
-                // Load new logs
                 const lines = result.data.split("\n").filter((l) => l.trim());
                 const newLogs = lines
                     .map((line, i) => parseLogLine(line, i))
-                    .filter(
-                        (parsed): parsed is NonNullable<typeof parsed> => parsed !== null
-                    );
-
-                // Insert new logs first
-                logsCollection.utils.writeBatch(() => {
-                    for (const parsed of newLogs) {
-                        logsCollection.utils.writeInsert(parsed);
-                    }
-                });
-
-                // Delete old logs in a separate batch after a small delay
-                if (existingLogIds.length > 0) {
-                    setTimeout(() => {
-                        try {
-                            logsCollection.utils.writeBatch(() => {
-                                for (const id of existingLogIds) {
-                                    try {
-                                        logsCollection.utils.writeDelete(id);
-                                    } catch {
-                                        // Ignore delete errors
-                                    }
-                                }
-                            });
-                        } catch {
-                            // Ignore batch errors
-                        }
-                    }, 100);
-                }
+                    .filter((parsed): parsed is LogEntry => parsed !== null);
+                setLogs(newLogs);
             }
         } finally {
-            isLoadingRef.current = false;
+            setIsLoading(false);
         }
     };
 
+    // Load when file or lineCount changes
     useEffect(() => {
-        // Only load if:
-        // 1. We have a selected file
-        // 2. logFiles are loaded
-        // 3. Not already loading
-        // 4. Either initial load hasn't happened OR file changed OR lineCount changed
-        const fileChanged = selectedFile !== prevFileRef.current;
-        const lineCountChanged = lineCount !== prevLineCountRef.current;
-
-        if (
-            selectedFile &&
-            logFiles.length > 0 &&
-            !isLoadingRef.current &&
-            (!initialLoadDoneRef.current || fileChanged || lineCountChanged)
-        ) {
-            initialLoadDoneRef.current = true;
-            prevFileRef.current = selectedFile;
-            prevLineCountRef.current = lineCount;
+        if (selectedFile && logFiles.length > 0) {
             loadLogContent();
         }
-    }, [selectedFile, lineCount]);
+    }, [selectedFile, lineCount, logFiles.length]);
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
@@ -174,7 +120,7 @@ export function Logs() {
     });
 
     const handleScroll = () => {
-        if (!logContainerRef.current || isAutoScrollingRef.current) return;
+        if (!logContainerRef.current) return;
 
         const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 30;
@@ -189,8 +135,6 @@ export function Logs() {
     // Auto-scroll when new logs arrive
     useEffect(() => {
         if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
-            isAutoScrollingRef.current = true;
-
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
                     logContainerRef.current.scrollTop =
@@ -201,21 +145,13 @@ export function Logs() {
                 });
             };
 
-            requestAnimationFrame(() => {
-                scrollToBottom();
-                setTimeout(() => {
-                    scrollToBottom();
-                    isAutoScrollingRef.current = false;
-                }, 150);
-            });
+            requestAnimationFrame(scrollToBottom);
         }
     }, [filteredLogs.length, autoFollow, rowVirtualizer]);
 
-    // Scroll to bottom on file/lineCount change
+    // Scroll to bottom when file or lineCount changes
     useEffect(() => {
-        if (filteredLogs.length > 0 && autoFollow && logContainerRef.current) {
-            isAutoScrollingRef.current = true;
-
+        if (filteredLogs.length > 0 && logContainerRef.current) {
             const scrollToBottom = () => {
                 if (logContainerRef.current) {
                     logContainerRef.current.scrollTop =
@@ -226,29 +162,14 @@ export function Logs() {
                 });
             };
 
-            requestAnimationFrame(() => {
-                scrollToBottom();
-                setTimeout(() => {
-                    scrollToBottom();
-                    isAutoScrollingRef.current = false;
-                }, 150);
-            });
+            requestAnimationFrame(scrollToBottom);
         }
-    }, [selectedFile, lineCount, autoFollow, rowVirtualizer]);
+    }, [selectedFile, lineCount]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
     const clearLogs = () => {
-        // Get all current logs and delete them
-        logsCollection.utils.writeBatch(() => {
-            for (const log of logs) {
-                try {
-                    logsCollection.utils.writeDelete(log.id);
-                } catch {
-                    // Ignore errors
-                }
-            }
-        });
+        setLogs([]);
     };
 
     return (
@@ -292,7 +213,7 @@ export function Logs() {
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-primary-400">
-                    {isLoadingContent
+                    {isLoading
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
@@ -305,12 +226,7 @@ export function Logs() {
                     />
 
                     <div className="flex items-center gap-2">
-                        <RefreshButton
-                            onClick={() => {
-                                void loadLogContent();
-                            }}
-                            isLoading={isLoadingContent}
-                        />
+                        <RefreshButton onClick={loadLogContent} isLoading={isLoading} />
                         <Button
                             variant="secondary"
                             size="sm"
@@ -338,7 +254,7 @@ export function Logs() {
                     onScroll={handleScroll}
                     className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
                 >
-                    {/* Follow button when scrolled up - inside scroll container */}
+                    {/* Follow button when scrolled up */}
                     {!autoFollow && filteredLogs.length > 0 && (
                         <button
                             type="button"
