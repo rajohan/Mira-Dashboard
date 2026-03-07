@@ -25,7 +25,11 @@ export function writeLogFromWebSocket(line: string) {
     try {
         const parsed = parseLogLine(line);
         if (parsed) {
-            logsCollection.utils.writeInsert(parsed);
+            try {
+                logsCollection.utils.writeInsert(parsed);
+            } catch {
+                // Ignore duplicate key errors (entry already exists)
+            }
         }
     } catch (error) {
         console.error("Error parsing log line:", line, error);

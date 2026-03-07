@@ -1,7 +1,9 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { logsCollection } from "../collections/logs";
 import { LevelFilter, LogLine } from "../components/features/logs";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -10,7 +12,6 @@ import { Input } from "../components/ui/Input";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
-import { type LogEntry } from "../types/log";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
@@ -22,17 +23,18 @@ export function Logs() {
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
     );
     const [search, setSearch] = useState("");
-    const [logs, setLogs] = useState<LogEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
     const subscribedConnectionIdRef = useRef<number | null>(null);
 
     // OpenClaw connection (shared WebSocket)
     const { isConnected, connectionId, request } = useOpenClawSocket();
 
+    // Logs from collection using live query
+    const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
+
     // Queries
     const { data: logFiles = [] } = useLogFiles();
-    const { refetch: refetchContent } = useLogContent(
+    const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
         lineCount,
         false
@@ -60,30 +62,38 @@ export function Logs() {
         });
     }, [isConnected, connectionId, request]);
 
-    // Load log content
+    // Load log content when file/lineCount changes
     const loadLogContent = async () => {
         if (!selectedFile) return;
-        setIsLoading(true);
-        try {
-            const result = await refetchContent();
-            if (result.data) {
-                const lines = result.data.split("\n").filter((l) => l.trim());
-                const newLogs = lines
-                    .map((line, i) => parseLogLine(line, i))
-                    .filter((parsed): parsed is LogEntry => parsed !== null);
-                setLogs(newLogs);
-            }
-        } finally {
-            setIsLoading(false);
+        const result = await refetchContent();
+        if (result.data) {
+            const lines = result.data.split("\n").filter((l) => l.trim());
+            const newLogs = lines
+                .map((line, i) => parseLogLine(line, i))
+                .filter((parsed) => parsed !== null);
+
+            // Replace: clear old and insert new
+            logsCollection.utils.writeBatch(() => {
+                // Clear existing
+                for (const log of logs) {
+                    if (log.id) {
+                        logsCollection.utils.writeDelete(log.id);
+                    }
+                }
+                // Insert new
+                for (const parsed of newLogs) {
+                    logsCollection.utils.writeInsert(parsed);
+                }
+            });
         }
     };
 
-    // Load when file or lineCount changes
+    // Load on mount or when file/lineCount changes
     useEffect(() => {
         if (selectedFile && logFiles.length > 0) {
             loadLogContent();
         }
-    }, [selectedFile, lineCount, logFiles.length]);
+    }, [selectedFile, lineCount]);
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
@@ -132,44 +142,26 @@ export function Logs() {
         }
     };
 
-    // Auto-scroll when new logs arrive
+    // Scroll to bottom when logs change (auto-follow) OR file/lineCount changes
     useEffect(() => {
-        if (autoFollow && filteredLogs.length > 0 && logContainerRef.current) {
-            const scrollToBottom = () => {
-                if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop =
-                        logContainerRef.current.scrollHeight;
-                }
-                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
-                    align: "end",
-                });
-            };
-
-            requestAnimationFrame(scrollToBottom);
+        if (filteredLogs.length > 0 && logContainerRef.current && autoFollow) {
+            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+            rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
+                align: "end",
+            });
         }
-    }, [filteredLogs.length, autoFollow, rowVirtualizer]);
-
-    // Scroll to bottom when file or lineCount changes
-    useEffect(() => {
-        if (filteredLogs.length > 0 && logContainerRef.current) {
-            const scrollToBottom = () => {
-                if (logContainerRef.current) {
-                    logContainerRef.current.scrollTop =
-                        logContainerRef.current.scrollHeight;
-                }
-                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
-                    align: "end",
-                });
-            };
-
-            requestAnimationFrame(scrollToBottom);
-        }
-    }, [selectedFile, lineCount]);
+    }, [filteredLogs.length, autoFollow, selectedFile, lineCount, rowVirtualizer]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
     const clearLogs = () => {
-        setLogs([]);
+        logsCollection.utils.writeBatch(() => {
+            for (const log of logs) {
+                if (log.id) {
+                    logsCollection.utils.writeDelete(log.id);
+                }
+            }
+        });
     };
 
     return (
@@ -213,7 +205,7 @@ export function Logs() {
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-primary-400">
-                    {isLoading
+                    {isLoadingContent
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
@@ -226,7 +218,10 @@ export function Logs() {
                     />
 
                     <div className="flex items-center gap-2">
-                        <RefreshButton onClick={loadLogContent} isLoading={isLoading} />
+                        <RefreshButton
+                            onClick={loadLogContent}
+                            isLoading={isLoadingContent}
+                        />
                         <Button
                             variant="secondary"
                             size="sm"
