@@ -155,24 +155,25 @@ function TaskHistorySidebar() {
             {tasks.length === 0 ? (
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
-                <div className="space-y-2">
-                    {tasks.map((item) => (
-                        <div key={item.id} className="rounded border border-primary-700/80 bg-primary-900/60 p-3">
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                                <span className="inline-flex items-center gap-1 text-xs font-medium text-primary-200">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-primary-400" />
-                                    {item.agentId}
-                                </span>
-                                <span className="text-[11px] text-primary-500">
-                                    {item.completedAt ? formatDate(item.completedAt) : "-"}
-                                </span>
+                <div className="relative pl-4">
+                    <div className="absolute bottom-0 left-1.5 top-0 w-px bg-primary-700/70" />
+                    <div className="space-y-3">
+                        {tasks.map((item) => (
+                            <div key={item.id} className="relative rounded border border-primary-700/80 bg-primary-900/60 p-3">
+                                <span className="absolute -left-[13px] top-4 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-primary-200">{item.agentId}</span>
+                                    <span className="text-[11px] text-primary-500">
+                                        {item.completedAt ? formatDate(item.completedAt) : "-"}
+                                    </span>
+                                </div>
+                                <p className="text-sm text-primary-100">{item.task}</p>
+                                <p className="mt-1 text-[11px] uppercase tracking-wide text-primary-500">
+                                    {item.status}
+                                </p>
                             </div>
-                            <p className="text-sm text-primary-100">{item.task}</p>
-                            <p className="mt-1 text-[11px] uppercase tracking-wide text-primary-500">
-                                {item.status}
-                            </p>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
             )}
         </div>
