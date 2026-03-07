@@ -159,7 +159,7 @@ function TaskHistorySidebar() {
                         <div key={item.id} className="flex gap-3">
                             <div className="relative flex w-4 justify-center">
                                 {index !== tasks.length - 1 && (
-                                    <span className="absolute left-1/2 top-4 bottom-[-10px] w-px -translate-x-1/2 bg-primary-700/70" />
+                                    <span className="absolute left-1/2 top-[18px] bottom-[-16px] w-px -translate-x-1/2 bg-primary-700/70" />
                                 )}
                                 <span className="mt-3 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
                             </div>
