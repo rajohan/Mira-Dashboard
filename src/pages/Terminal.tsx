@@ -12,10 +12,19 @@ import {
 } from "../hooks/useTerminal";
 import { cn } from "../utils/cn";
 
+const HOME_DIR = "/home/ubuntu";
+
+function shortenPath(path: string): string {
+    if (path === HOME_DIR) return "~";
+    if (path.startsWith(HOME_DIR + "/")) return "~" + path.slice(HOME_DIR.length);
+    return path;
+}
+
 export function Terminal() {
     const [command, setCommand] = useState("");
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+    const [cwd, setCwd] = useState(HOME_DIR);
     const outputRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -42,9 +51,35 @@ export function Terminal() {
                     stderr: jobData.stderr,
                     endedAt: jobData.endedAt,
                 });
+
+                // Update cwd if cd command was successful
+                if (entry.command.startsWith("cd ") && jobData.code === 0) {
+                    const newPath = entry.command.slice(3).trim();
+                    const resolvedPath = resolvePath(newPath, entry.cwd);
+                    setCwd(resolvedPath);
+                }
             }
         }
     }, [jobData, currentJobId, history, updateCommand]);
+
+    function resolvePath(path: string, currentDir: string): string {
+        if (path.startsWith("/")) return path;
+        if (path.startsWith("~/")) return HOME_DIR + path.slice(1);
+        if (path === "~") return HOME_DIR;
+
+        const parts = path.split("/").filter(Boolean);
+        const currentParts = currentDir.split("/").filter(Boolean);
+
+        for (const part of parts) {
+            if (part === "..") {
+                currentParts.pop();
+            } else if (part !== ".") {
+                currentParts.push(part);
+            }
+        }
+
+        return "/" + currentParts.join("/");
+    }
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -52,10 +87,52 @@ export function Terminal() {
 
         const trimmedCommand = command.trim();
 
+        // Handle cd command locally (no need to execute via backend)
+        if (trimmedCommand.startsWith("cd ") || trimmedCommand === "cd") {
+            const newPath =
+                trimmedCommand === "cd" ? HOME_DIR : trimmedCommand.slice(3).trim();
+            const resolvedPath = resolvePath(newPath, cwd);
+
+            addCommand({
+                command: trimmedCommand,
+                cwd: shortenPath(cwd),
+                jobId: null,
+                status: "done",
+                code: 0,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: Date.now(),
+            });
+
+            setCwd(resolvedPath);
+            setCommand("");
+            setHistoryIndex(-1);
+            return;
+        }
+
+        // Handle pwd command locally
+        if (trimmedCommand === "pwd") {
+            addCommand({
+                command: trimmedCommand,
+                cwd: shortenPath(cwd),
+                jobId: null,
+                status: "done",
+                code: 0,
+                stdout: cwd,
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: Date.now(),
+            });
+            setCommand("");
+            setHistoryIndex(-1);
+            return;
+        }
+
         try {
             const entryId = addCommand({
                 command: trimmedCommand,
-                cwd: "~",
+                cwd: shortenPath(cwd),
                 jobId: null,
                 status: "pending",
                 code: null,
@@ -70,7 +147,7 @@ export function Terminal() {
 
             const result = await startCommand.mutateAsync({
                 command: trimmedCommand,
-                cwd: "/home/ubuntu",
+                cwd,
             });
 
             setCurrentJobId(result.jobId);
@@ -81,7 +158,7 @@ export function Terminal() {
         } catch {
             const entryId = addCommand({
                 command: trimmedCommand,
-                cwd: "~",
+                cwd: shortenPath(cwd),
                 jobId: null,
                 status: "error",
                 code: 1,
@@ -111,6 +188,8 @@ export function Terminal() {
             setCommand(newIndex >= 0 ? commands[newIndex] || "" : "");
         }
     };
+
+    const promptPrefix = `${shortenPath(cwd)}$`;
 
     return (
         <div className="flex h-full flex-col gap-4 p-4">
@@ -142,6 +221,8 @@ export function Terminal() {
                             <br />
                             Type a command and press Enter to execute.
                             <br />
+                            Use cd to change directory, pwd to show current path.
+                            <br />
                             <br />
                             Use ↑/↓ arrows to navigate command history.
                         </div>
@@ -157,7 +238,10 @@ export function Terminal() {
                         !history.some((h) => h.jobId === currentJobId) && (
                             <div className="mt-2">
                                 <div className="text-primary-400">
-                                    <span className="text-accent-400">$</span> {command}
+                                    <span className="text-accent-400">
+                                        {promptPrefix}
+                                    </span>{" "}
+                                    {command}
                                 </div>
                                 {jobData.stdout && (
                                     <pre className="mt-1 whitespace-pre-wrap text-primary-100">
@@ -181,7 +265,9 @@ export function Terminal() {
                     onSubmit={handleSubmit}
                     className="flex items-center gap-2 border-t border-primary-700 bg-primary-900 p-3"
                 >
-                    <span className="flex-shrink-0 font-mono text-accent-400">$</span>
+                    <span className="flex-shrink-0 font-mono text-accent-400">
+                        {promptPrefix}
+                    </span>
                     <Input
                         ref={inputRef}
                         type="text"
@@ -213,15 +299,12 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
         <div className={cn("mb-4", entry.status === "running" && "opacity-80")}>
             {/* Command line */}
             <div className="flex items-center gap-2 text-primary-400">
-                <span className="text-accent-400">$</span>
+                <span className="text-accent-400">{entry.cwd}$</span>
                 <span>{entry.command}</span>
                 {entry.status === "running" && (
                     <span className="animate-pulse text-accent-400">●</span>
                 )}
             </div>
-
-            {/* Working directory */}
-            <div className="text-xs text-primary-600">{entry.cwd}</div>
 
             {/* stdout */}
             {entry.stdout && (
