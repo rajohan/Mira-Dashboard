@@ -64,28 +64,35 @@ export function Logs() {
     }, [isConnected, connectionId, request]);
 
     // Load log content when file/lineCount changes
+    const isLoadingRef = useRef(false);
+
     const loadLogContent = async () => {
-        if (!selectedFile) return;
-        const result = await refetchContent();
-        if (result.data) {
-            // Clear and load new logs
-            const lines = result.data.split("\n").filter((l) => l.trim());
-            logsCollection.utils.writeBatch(() => {
-                for (const line of lines) {
-                    const parsed = parseLogLine(line);
-                    if (parsed) {
-                        logsCollection.utils.writeInsert(parsed);
+        if (!selectedFile || isLoadingRef.current) return;
+        isLoadingRef.current = true;
+        try {
+            const result = await refetchContent();
+            if (result.data) {
+                // Clear and load new logs
+                const lines = result.data.split("\n").filter((l) => l.trim());
+                logsCollection.utils.writeBatch(() => {
+                    for (const line of lines) {
+                        const parsed = parseLogLine(line);
+                        if (parsed) {
+                            logsCollection.utils.writeInsert(parsed);
+                        }
                     }
-                }
-            });
+                });
+            }
+        } finally {
+            isLoadingRef.current = false;
         }
     };
 
     useEffect(() => {
-        if (selectedFile && logFiles.length > 0) {
+        if (selectedFile && logFiles.length > 0 && !isLoadingRef.current) {
             loadLogContent();
         }
-    }, [selectedFile, lineCount]);
+    }, [selectedFile, lineCount, logFiles.length]);
 
     const filteredLogs = logs.filter((log) => {
         if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
