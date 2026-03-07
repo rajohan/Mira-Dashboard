@@ -8,13 +8,13 @@ const statusColors = {
         bg: "bg-emerald-400",
         text: "text-emerald-300",
         border: "border-emerald-300/80",
-        glow: "shadow-[0_0_10px_rgba(52,211,153,0.8)]",
+        glow: "shadow-[0_0_6px_rgba(52,211,153,0.75)]",
     },
     thinking: {
         bg: "bg-amber-300",
         text: "text-amber-300",
         border: "border-amber-200/80",
-        glow: "shadow-[0_0_10px_rgba(252,211,77,0.75)]",
+        glow: "shadow-[0_0_6px_rgba(252,211,77,0.7)]",
     },
     idle: {
         bg: "bg-sky-300",
@@ -44,7 +44,7 @@ function StatusIndicator({ status }: { status: keyof typeof statusColors }) {
     return (
         <div
             className={
-                "flex h-4 w-4 items-center justify-center rounded-full border " +
+                "flex h-4 w-4 items-center justify-center rounded-full border ring-1 ring-primary-900/80 " +
                 colors.border +
                 " " +
                 colors.glow +
@@ -155,9 +155,9 @@ function TaskHistorySidebar() {
             {tasks.length === 0 ? (
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
-                <div className="space-y-3">
+                <div className="divide-y divide-primary-700/80 rounded border border-primary-700/80 bg-primary-900/40">
                     {tasks.map((item) => (
-                        <div key={item.id} className="rounded bg-primary-800/50 p-3">
+                        <div key={item.id} className="p-3">
                             <div className="mb-1 flex items-center justify-between gap-2">
                                 <span className="text-xs font-medium text-primary-200">
                                     {item.agentId}

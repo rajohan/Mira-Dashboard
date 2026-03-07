@@ -192,9 +192,49 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
 
 // Get activity from a JSONL session file
 interface ActivityInfo {
-    task: string | null;      // High-level task (from last user message)
-    activity: string | null;  // Current activity (from last tool use)
+    task: string | null; // High-level task (from last user message)
+    activity: string | null; // Current activity (from last tool use)
     modTime: number;
+}
+
+function summarizeToolActivity(toolName: string, args: unknown): string {
+    const parsed = typeof args === "string" ? (() => {
+        try {
+            return JSON.parse(args) as Record<string, unknown>;
+        } catch {
+            return { raw: args } as Record<string, unknown>;
+        }
+    })() : (args && typeof args === "object" ? (args as Record<string, unknown>) : {});
+
+    const path = (parsed.path || parsed.file_path || parsed.filePath) as string | undefined;
+    const command = parsed.command as string | undefined;
+    const action = parsed.action as string | undefined;
+    const url = parsed.url as string | undefined;
+
+    if (toolName === "read" && path) {
+        return `read ${path}`;
+    }
+    if (toolName === "edit" && path) {
+        return `edit ${path}`;
+    }
+    if (toolName === "write" && path) {
+        return `write ${path}`;
+    }
+    if (toolName === "exec" && command) {
+        return `exec ${command.slice(0, 70)}`;
+    }
+    if (toolName === "browser" && action) {
+        return `browser ${action}${url ? ` ${url}` : ""}`.slice(0, 90);
+    }
+
+    if (action) {
+        return `${toolName} ${action}`.slice(0, 90);
+    }
+    if (path) {
+        return `${toolName} ${path}`.slice(0, 90);
+    }
+
+    return toolName;
 }
 
 function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
@@ -269,10 +309,12 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
                 if (msg.role === "assistant" && Array.isArray(msg.content) && !lastActivity) {
                     const toolCalls = msg.content.filter((c: { type?: string }) => c.type === "toolCall");
                     if (toolCalls.length > 0) {
-                        const toolCall = toolCalls[0];
+                        const toolCall = toolCalls[0] as {
+                            name?: string;
+                            arguments?: unknown;
+                        };
                         const toolName = toolCall.name || "unknown";
-                        const action = toolCall.arguments?.action || toolCall.arguments?.command?.slice(0, 50) || "";
-                        lastActivity = action ? `${toolName}: ${action}` : toolName;
+                        lastActivity = summarizeToolActivity(toolName, toolCall.arguments);
                     }
                 }
                 
