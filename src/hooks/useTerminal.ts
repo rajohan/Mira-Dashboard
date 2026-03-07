@@ -61,13 +61,13 @@ export interface CommandHistoryEntry {
     endedAt: number | null;
 }
 
-export interface CompletionItem {
+interface CompletionItem {
     completion: string;
     type: "file" | "directory" | "executable";
     display: string;
 }
 
-export interface CompletionResponse {
+interface CompletionResponse {
     completions: CompletionItem[];
     commonPrefix: string;
 }
