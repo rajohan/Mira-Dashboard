@@ -399,6 +399,8 @@ function getAgentStatus(agentId: string): AgentStatus {
 }
 
 export default function agentsRoutes(app: express.Application): void {
+    app.use("/api/agents/:id/metadata", express.json());
+
     // Get agent configuration
     app.get("/api/agents/config", (async (_req, res) => {
         try {
