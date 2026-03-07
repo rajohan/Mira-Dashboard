@@ -178,8 +178,10 @@ export function Agents() {
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
     return (
-        <div className="p-6 space-y-6">
-            {error && (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
+            {/* Main content */}
+            <div className="space-y-6">
+                {error && (
                 <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
                     {error instanceof Error ? error.message : "Failed to load agents"}
                 </div>
@@ -275,6 +277,19 @@ export function Agents() {
                     )}
                 </>
             )}
+            </div>
+
+            {/* Sidebar - Task History (placeholder) */}
+            <div className="hidden xl:block">
+                <Card className="sticky top-6">
+                    <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                        Task History
+                    </h3>
+                    <p className="text-sm text-primary-500 italic">
+                        Task history coming soon
+                    </p>
+                </Card>
+            </div>
         </div>
     );
 }
