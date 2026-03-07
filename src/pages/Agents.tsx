@@ -155,11 +155,12 @@ function TaskHistorySidebar() {
             {tasks.length === 0 ? (
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
-                <div className="divide-y divide-primary-700/80 rounded border border-primary-700/80 bg-primary-900/40">
+                <div className="space-y-2">
                     {tasks.map((item) => (
-                        <div key={item.id} className="p-3">
+                        <div key={item.id} className="rounded border border-primary-700/80 bg-primary-900/60 p-3">
                             <div className="mb-1 flex items-center justify-between gap-2">
-                                <span className="text-xs font-medium text-primary-200">
+                                <span className="inline-flex items-center gap-1 text-xs font-medium text-primary-200">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-primary-400" />
                                     {item.agentId}
                                 </span>
                                 <span className="text-[11px] text-primary-500">
@@ -167,7 +168,9 @@ function TaskHistorySidebar() {
                                 </span>
                             </div>
                             <p className="text-sm text-primary-100">{item.task}</p>
-                            <p className="mt-1 text-[11px] text-primary-500">{item.status}</p>
+                            <p className="mt-1 text-[11px] uppercase tracking-wide text-primary-500">
+                                {item.status}
+                            </p>
                         </div>
                     ))}
                 </div>
