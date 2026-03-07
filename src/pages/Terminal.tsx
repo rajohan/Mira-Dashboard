@@ -5,6 +5,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import {
+    changeDirectory,
     type CommandHistoryEntry,
     getCompletions,
     stopTerminalJob,
@@ -92,13 +93,6 @@ export function Terminal() {
                     });
                 }
 
-                // Update cwd if cd command was successful
-                if (entry.command.startsWith("cd ") && jobData.code === 0) {
-                    const newPath = entry.command.slice(3).trim();
-                    const resolvedPath = resolvePath(newPath, entry.cwd);
-                    setCwd(resolvedPath);
-                }
-
                 // Refocus input when job completes
                 if (jobData.status === "done") {
                     setTimeout(() => inputRef.current?.focus(), 0);
@@ -106,25 +100,6 @@ export function Terminal() {
             }
         }
     }, [jobData, currentJobId, history, updateCommand]);
-
-    function resolvePath(path: string, currentDir: string): string {
-        if (path.startsWith("/")) return path;
-        if (path.startsWith("~/")) return HOME_DIR + path.slice(1);
-        if (path === "~") return HOME_DIR;
-
-        const parts = path.split("/").filter(Boolean);
-        const currentParts = currentDir.split("/").filter(Boolean);
-
-        for (const part of parts) {
-            if (part === "..") {
-                currentParts.pop();
-            } else if (part !== ".") {
-                currentParts.push(part);
-            }
-        }
-
-        return "/" + currentParts.join("/");
-    }
 
     async function handleTabCompletion() {
         if (!command.trim()) return;
@@ -151,28 +126,56 @@ export function Terminal() {
 
         const trimmedCommand = command.trim();
 
-        // Handle cd command locally
+        // Handle cd command with validation
         if (trimmedCommand.startsWith("cd ") || trimmedCommand === "cd") {
-            const newPath =
+            const targetPath =
                 trimmedCommand === "cd" ? HOME_DIR : trimmedCommand.slice(3).trim();
-            const resolvedPath = resolvePath(newPath, cwd);
 
-            addCommand({
-                command: trimmedCommand,
-                cwd: shortenPath(cwd),
-                jobId: null,
-                status: "done",
-                code: 0,
-                stdout: "",
-                stderr: "",
-                startedAt: Date.now(),
-                endedAt: Date.now(),
-            });
+            try {
+                const result = await changeDirectory(targetPath, cwd);
 
-            setCwd(resolvedPath);
+                if (result.success) {
+                    addCommand({
+                        command: trimmedCommand,
+                        cwd: shortenPath(cwd),
+                        jobId: null,
+                        status: "done",
+                        code: 0,
+                        stdout: "",
+                        stderr: "",
+                        startedAt: Date.now(),
+                        endedAt: Date.now(),
+                    });
+                    setCwd(result.newCwd);
+                } else {
+                    addCommand({
+                        command: trimmedCommand,
+                        cwd: shortenPath(cwd),
+                        jobId: null,
+                        status: "done",
+                        code: 1,
+                        stdout: "",
+                        stderr: result.error || "cd failed",
+                        startedAt: Date.now(),
+                        endedAt: Date.now(),
+                    });
+                }
+            } catch {
+                addCommand({
+                    command: trimmedCommand,
+                    cwd: shortenPath(cwd),
+                    jobId: null,
+                    status: "error",
+                    code: 1,
+                    stdout: "",
+                    stderr: "Failed to change directory",
+                    startedAt: Date.now(),
+                    endedAt: Date.now(),
+                });
+            }
+
             setCommand("");
             setHistoryIndex(-1);
-            // Refocus input after cd
             setTimeout(() => inputRef.current?.focus(), 0);
             return;
         }

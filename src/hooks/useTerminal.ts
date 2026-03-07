@@ -79,6 +79,16 @@ export async function getCompletions(
     return apiPost("/terminal/complete", { partial, cwd });
 }
 
+export interface CdResponse {
+    success: boolean;
+    newCwd: string;
+    error?: string;
+}
+
+export async function changeDirectory(path: string, cwd: string): Promise<CdResponse> {
+    return apiPost("/terminal/cd", { path, cwd });
+}
+
 export async function stopTerminalJob(jobId: string): Promise<void> {
     await apiPost(`/exec/${jobId}/stop`, {});
 }

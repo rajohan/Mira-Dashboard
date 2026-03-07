@@ -7,6 +7,17 @@ interface CompletionRequest {
     cwd: string;
 }
 
+interface CdRequest {
+    path: string;
+    cwd: string;
+}
+
+interface CdResponse {
+    success: boolean;
+    newCwd: string;
+    error?: string;
+}
+
 interface CompletionItem {
     completion: string;
     type: "file" | "directory" | "executable";
@@ -129,5 +140,59 @@ export default function terminalRoutes(app: express.Application): void {
         const resolvedCwd = cwd || HOME_DIR;
         const result = await getCompletions(partial, resolvedCwd);
         res.json(result);
+    });
+
+    app.post("/api/terminal/cd", express.json(), async (req, res) => {
+        const { path: targetPath, cwd } = req.body as CdRequest;
+        
+        if (!targetPath || typeof targetPath !== "string") {
+            res.status(400).json({ error: "Missing or invalid path" } satisfies CdResponse);
+            return;
+        }
+
+        const resolvedCwd = cwd || HOME_DIR;
+        let newPath: string;
+
+        if (targetPath === "~") {
+            newPath = HOME_DIR;
+        } else if (targetPath.startsWith("~/")) {
+            newPath = HOME_DIR + targetPath.slice(1);
+        } else if (targetPath.startsWith("/")) {
+            newPath = targetPath;
+        } else {
+            newPath = join(resolvedCwd, targetPath);
+        }
+
+        // Resolve .. and .
+        const parts = newPath.split("/").filter(Boolean);
+        const resolvedParts: string[] = [];
+        for (const part of parts) {
+            if (part === "..") {
+                resolvedParts.pop();
+            } else if (part !== ".") {
+                resolvedParts.push(part);
+            }
+        }
+        newPath = "/" + resolvedParts.join("/");
+
+        // Check if directory exists
+        try {
+            const stats = await stat(newPath);
+            if (!stats.isDirectory()) {
+                res.status(400).json({ 
+                    success: false, 
+                    newCwd: resolvedCwd,
+                    error: `Not a directory: ${targetPath}` 
+                } satisfies CdResponse);
+                return;
+            }
+            res.json({ success: true, newCwd: newPath } satisfies CdResponse);
+        } catch {
+            res.status(400).json({ 
+                success: false, 
+                newCwd: resolvedCwd,
+                error: `No such file or directory: ${targetPath}` 
+            } satisfies CdResponse);
+        }
     });
 }
