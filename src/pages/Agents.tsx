@@ -1,14 +1,16 @@
-import { useAgentsStatus } from "../hooks/useAgents";
-import { Card } from "../components/ui/Card";
-import { LoadingState } from "../components/ui/LoadingState";
 import { AgentCard } from "../components/features/agents/AgentCard";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
+import { Card } from "../components/ui/Card";
+import { LoadingState } from "../components/ui/LoadingState";
+import { useAgentsStatus } from "../hooks/useAgents";
 
 export function Agents() {
     const { data, isLoading, error } = useAgentsStatus();
 
     const agents = data?.agents || [];
-    const activeAgents = agents.filter((a) => a.status === "active" || a.status === "thinking");
+    const activeAgents = agents.filter(
+        (a) => a.status === "active" || a.status === "thinking"
+    );
     const idleAgents = agents.filter((a) => a.status === "idle");
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
@@ -18,7 +20,9 @@ export function Agents() {
                 <Card className="space-y-6">
                     {error && (
                         <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
-                            {error instanceof Error ? error.message : "Failed to load agents"}
+                            {error instanceof Error
+                                ? error.message
+                                : "Failed to load agents"}
                         </div>
                     )}
 

@@ -18,6 +18,7 @@ import { Moltbook } from "./pages/Moltbook";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Tasks } from "./pages/Tasks";
+import { Terminal } from "./pages/Terminal";
 
 const rootRoute = createRootRoute({
     component: () => <Outlet />,
@@ -106,6 +107,12 @@ const settingsRoute = createRoute({
     component: Settings,
 });
 
+const terminalRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/terminal",
+    component: Terminal,
+});
+
 const routeTree = rootRoute.addChildren([
     loginRoute,
     authenticatedRoute.addChildren([
@@ -118,6 +125,7 @@ const routeTree = rootRoute.addChildren([
         filesRoute,
         metricsRoute,
         moltbookRoute,
+        terminalRoute,
         settingsRoute,
     ]),
 ]);

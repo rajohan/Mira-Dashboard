@@ -26,9 +26,13 @@ export function TaskHistorySidebar() {
 
                             <div className="flex-1 rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
                                 <div className="mb-0.5 flex items-center justify-between gap-2">
-                                    <span className="text-xs font-medium text-primary-200">{item.agentId}</span>
+                                    <span className="text-xs font-medium text-primary-200">
+                                        {item.agentId}
+                                    </span>
                                     <span className="text-[11px] text-primary-500">
-                                        {item.completedAt ? formatDate(item.completedAt) : "-"}
+                                        {item.completedAt
+                                            ? formatDate(item.completedAt)
+                                            : "-"}
                                     </span>
                                 </div>
                                 <p className="text-sm text-primary-100">{item.task}</p>

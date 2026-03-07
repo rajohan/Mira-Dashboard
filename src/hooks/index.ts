@@ -77,6 +77,17 @@ export {
     useUpdateTask,
     useUpdateTaskUpdate,
 } from "./useTasks";
+export type {
+    CommandHistoryEntry,
+    TerminalCommand,
+    TerminalJobResponse,
+} from "./useTerminal";
+export {
+    terminalKeys,
+    useStartTerminalCommand,
+    useTerminalHistory,
+    useTerminalJob,
+} from "./useTerminal";
 export { useWeather } from "./useWeather";
 
 // WebSocket hook (for connection management)

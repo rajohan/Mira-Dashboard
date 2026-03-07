@@ -1,6 +1,6 @@
+import { formatDuration } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
-import { formatDuration } from "../../../utils/format";
 import { agentStatusColors, agentStatusLabels } from "./status";
 import { StatusIndicator } from "./StatusIndicator";
 
@@ -49,14 +49,18 @@ export function AgentCard({
 
             {currentTask && (
                 <div className="mb-3">
-                    <div className="text-xs uppercase tracking-wide text-primary-500">Task</div>
+                    <div className="text-xs uppercase tracking-wide text-primary-500">
+                        Task
+                    </div>
                     <div className={"mt-1 text-sm " + colors.text}>{currentTask}</div>
                 </div>
             )}
 
             {currentActivity && (
                 <div className="mb-3">
-                    <div className="text-xs uppercase tracking-wide text-primary-500">Activity</div>
+                    <div className="text-xs uppercase tracking-wide text-primary-500">
+                        Activity
+                    </div>
                     <div className="mt-1 text-sm text-primary-300">{currentActivity}</div>
                 </div>
             )}
@@ -71,12 +75,17 @@ export function AgentCard({
                 <div className="flex items-center gap-1">
                     {channel && (
                         <>
-                            <span className="rounded bg-primary-700 px-1.5 py-0.5">{channel}</span>
+                            <span className="rounded bg-primary-700 px-1.5 py-0.5">
+                                {channel}
+                            </span>
                             <span className="text-primary-600">•</span>
                         </>
                     )}
                     <span>
-                        Last active {lastActivity ? formatDuration(new Date(lastActivity).getTime()) : "N/A"}
+                        Last active{" "}
+                        {lastActivity
+                            ? formatDuration(new Date(lastActivity).getTime())
+                            : "N/A"}
                     </span>
                 </div>
             </div>

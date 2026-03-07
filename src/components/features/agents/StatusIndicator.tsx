@@ -1,12 +1,9 @@
 import { agentStatusColors } from "./status";
 
-export function StatusIndicator({
-    status,
-}: {
-    status: keyof typeof agentStatusColors;
-}) {
+export function StatusIndicator({ status }: { status: keyof typeof agentStatusColors }) {
     const colors = agentStatusColors[status];
-    const pulseClass = status === "active" || status === "thinking" ? " animate-pulse" : "";
+    const pulseClass =
+        status === "active" || status === "thinking" ? " animate-pulse" : "";
 
     return (
         <div

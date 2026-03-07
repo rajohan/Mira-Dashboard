@@ -8,6 +8,7 @@ import {
     Home,
     MessageSquare,
     Settings,
+    Terminal,
     Users,
 } from "lucide-react";
 import { type ReactNode } from "react";
@@ -25,6 +26,7 @@ const navItems = [
     { to: "/files", icon: FolderOpen, label: "Files" },
     { to: "/metrics", icon: Activity, label: "Metrics" },
     { to: "/moltbook", icon: MessageSquare, label: "Moltbook" },
+    { to: "/terminal", icon: Terminal, label: "Terminal" },
     { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
