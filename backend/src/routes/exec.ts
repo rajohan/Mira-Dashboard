@@ -64,11 +64,13 @@ function runExecCommand(
                 ? spawn(command, args, {
                       cwd: cwd || process.cwd(),
                       env: process.env,
+                      detached: true,
                   })
                 : spawn(command, {
                       shell: true,
                       cwd: cwd || process.cwd(),
                       env: process.env,
+                      detached: true,
                   });
 
         // Store process reference for kill
@@ -229,15 +231,24 @@ export default function execRoutes(
         }
 
         if (job.process && !job.process.killed) {
-            // Try SIGTERM first, then SIGKILL after 5 seconds
-            job.process.kill("SIGTERM");
-            
-            // Force kill after 5 seconds if still running
+            try {
+                // Kill the entire process group (negative PID)
+                process.kill(-job.process.pid!, "SIGTERM");
+            } catch {
+                // Fallback to killing just the process if process group fails
+                job.process.kill("SIGTERM");
+            }
+
+            // Force kill after 3 seconds if still running
             setTimeout(() => {
-                if (job.process && !job.process.killed) {
-                    job.process.kill("SIGKILL");
+                try {
+                    if (job.process && !job.process.killed) {
+                        process.kill(-job.process.pid!, "SIGKILL");
+                    }
+                } catch {
+                    // Ignore errors - process might already be gone
                 }
-            }, 5000);
+            }, 3000);
 
             res.json({ success: true, message: "Stop signal sent" });
         } else {
