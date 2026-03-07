@@ -77,7 +77,7 @@ function AgentCard({
     const modelShort = model.split("/").pop() || model;
 
     return (
-        <Card className="relative flex h-full flex-col overflow-hidden border border-primary-600 bg-primary-800/60">
+        <Card className="relative flex h-full flex-col overflow-hidden border border-primary-700 bg-primary-900">
 
             <div className="mb-4 flex items-start justify-between">
                 <div className="flex items-center gap-3">
@@ -131,7 +131,7 @@ function AgentCard({
                     <span>
                         Last active {lastActivity
                             ? formatDuration(new Date(lastActivity).getTime())
-                            : "Never"}
+                            : "N/A"}
                     </span>
                 </div>
             </div>
