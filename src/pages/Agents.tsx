@@ -154,14 +154,12 @@ function TaskHistorySidebar() {
             {tasks.length === 0 ? (
                 <p className="text-sm italic text-primary-500">No completed tasks yet</p>
             ) : (
-                <div className="space-y-2">
-                    {tasks.map((item, index) => (
-                        <div key={item.id} className="flex items-stretch gap-3">
-                            <div className="flex w-4 flex-col items-center">
-                                <span className="mt-3 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
-                                {index !== tasks.length - 1 && (
-                                    <span className="mt-1 w-px flex-1 bg-primary-700/70" />
-                                )}
+                <div className="relative space-y-2 pl-5">
+                    <span className="absolute bottom-0 left-2.5 top-0 w-px -translate-x-1/2 bg-primary-700/70" />
+                    {tasks.map((item) => (
+                        <div key={item.id} className="relative flex gap-3">
+                            <div className="relative w-0">
+                                <span className="absolute left-[-10px] top-3 h-2.5 w-2.5 rounded-full border border-primary-700 bg-primary-300" />
                             </div>
 
                             <div className="flex-1 rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
