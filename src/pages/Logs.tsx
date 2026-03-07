@@ -73,6 +73,9 @@ export function Logs() {
         if (!selectedFile || isLoadingRef.current) return;
         isLoadingRef.current = true;
         try {
+            // Get existing log IDs at the start
+            const existingLogIds = logs.map((log) => log.id);
+
             const result = await refetchContent();
             if (result.data) {
                 // Load new logs
@@ -83,21 +86,31 @@ export function Logs() {
                         (parsed): parsed is NonNullable<typeof parsed> => parsed !== null
                     );
 
-                // Replace all logs in collection (clear + insert in one batch)
+                // Insert new logs first
                 logsCollection.utils.writeBatch(() => {
-                    // Delete all existing logs first
-                    for (const log of logs) {
-                        try {
-                            logsCollection.utils.writeDelete(log.id);
-                        } catch {
-                            // Ignore errors for already deleted items
-                        }
-                    }
-                    // Insert new logs
                     for (const parsed of newLogs) {
                         logsCollection.utils.writeInsert(parsed);
                     }
                 });
+
+                // Delete old logs in a separate batch after a small delay
+                if (existingLogIds.length > 0) {
+                    setTimeout(() => {
+                        try {
+                            logsCollection.utils.writeBatch(() => {
+                                for (const id of existingLogIds) {
+                                    try {
+                                        logsCollection.utils.writeDelete(id);
+                                    } catch {
+                                        // Ignore delete errors
+                                    }
+                                }
+                            });
+                        } catch {
+                            // Ignore batch errors
+                        }
+                    }, 100);
+                }
             }
         } finally {
             isLoadingRef.current = false;
@@ -183,7 +196,9 @@ export function Logs() {
                     logContainerRef.current.scrollTop =
                         logContainerRef.current.scrollHeight;
                 }
-                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
+                    align: "end",
+                });
             };
 
             requestAnimationFrame(() => {
@@ -194,7 +209,7 @@ export function Logs() {
                 }, 150);
             });
         }
-    }, [filteredLogs.length, autoFollow]);
+    }, [filteredLogs.length, autoFollow, rowVirtualizer]);
 
     // Scroll to bottom on file/lineCount change
     useEffect(() => {
@@ -206,7 +221,9 @@ export function Logs() {
                     logContainerRef.current.scrollTop =
                         logContainerRef.current.scrollHeight;
                 }
-                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+                rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
+                    align: "end",
+                });
             };
 
             requestAnimationFrame(() => {
@@ -217,7 +234,7 @@ export function Logs() {
                 }, 150);
             });
         }
-    }, [selectedFile, lineCount]);
+    }, [selectedFile, lineCount, autoFollow, rowVirtualizer]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
@@ -228,7 +245,7 @@ export function Logs() {
                 try {
                     logsCollection.utils.writeDelete(log.id);
                 } catch {
-                    // Ignore errors for already deleted items
+                    // Ignore errors
                 }
             }
         });
@@ -332,9 +349,7 @@ export function Logs() {
                                         logContainerRef.current.scrollHeight;
                                     rowVirtualizer.scrollToIndex(
                                         filteredLogs.length - 1,
-                                        {
-                                            align: "end",
-                                        }
+                                        { align: "end" }
                                     );
                                 }
                             }}
@@ -383,3 +398,5 @@ export function Logs() {
         </div>
     );
 }
+
+export default Logs;
