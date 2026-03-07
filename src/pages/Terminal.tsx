@@ -6,6 +6,8 @@ import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import {
     type CommandHistoryEntry,
+    type CompletionItem,
+    getCompletions,
     useStartTerminalCommand,
     useTerminalHistory,
     useTerminalJob,
@@ -25,8 +27,12 @@ export function Terminal() {
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
     const [cwd, setCwd] = useState(HOME_DIR);
+    const [completions, setCompletions] = useState<CompletionItem[]>([]);
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [showCompletions, setShowCompletions] = useState(false);
     const outputRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const completionsRef = useRef<HTMLDivElement>(null);
 
     const startCommand = useStartTerminalCommand();
     const { data: jobData } = useTerminalJob(currentJobId);
@@ -62,6 +68,21 @@ export function Terminal() {
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
+    // Close completions on click outside
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (
+                completionsRef.current &&
+                !completionsRef.current.contains(event.target as Node) &&
+                !inputRef.current?.contains(event.target as Node)
+            ) {
+                setShowCompletions(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     function resolvePath(path: string, currentDir: string): string {
         if (path.startsWith("/")) return path;
         if (path.startsWith("~/")) return HOME_DIR + path.slice(1);
@@ -81,13 +102,46 @@ export function Terminal() {
         return "/" + currentParts.join("/");
     }
 
+    async function handleTabCompletion() {
+        if (!command.trim()) return;
+
+        try {
+            const result = await getCompletions(command, cwd);
+
+            if (result.completions.length === 1) {
+                // Single match - complete immediately
+                setCommand(result.completions[0].completion);
+                setShowCompletions(false);
+            } else if (result.completions.length > 1) {
+                // Multiple matches - show dropdown
+                setCompletions(result.completions);
+                setSelectedIndex(0);
+                setShowCompletions(true);
+
+                // If there's a common prefix longer than current, complete to that
+                if (result.commonPrefix && result.commonPrefix !== command) {
+                    setCommand(result.commonPrefix);
+                }
+            }
+        } catch {
+            setShowCompletions(false);
+        }
+    }
+
+    function acceptCompletion(item: CompletionItem) {
+        setCommand(item.completion);
+        setShowCompletions(false);
+        inputRef.current?.focus();
+    }
+
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!command.trim() || startCommand.isPending) return;
 
+        setShowCompletions(false);
         const trimmedCommand = command.trim();
 
-        // Handle cd command locally (no need to execute via backend)
+        // Handle cd command locally
         if (trimmedCommand.startsWith("cd ") || trimmedCommand === "cd") {
             const newPath =
                 trimmedCommand === "cd" ? HOME_DIR : trimmedCommand.slice(3).trim();
@@ -172,7 +226,43 @@ export function Terminal() {
     };
 
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === "ArrowUp") {
+        // Handle completion navigation
+        if (showCompletions) {
+            if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setSelectedIndex((prev) =>
+                    prev < completions.length - 1 ? prev + 1 : prev
+                );
+                return;
+            }
+            if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+                return;
+            }
+            if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                if (completions[selectedIndex]) {
+                    acceptCompletion(completions[selectedIndex]);
+                }
+                return;
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                setShowCompletions(false);
+                return;
+            }
+        }
+
+        // Handle Tab for completion
+        if (event.key === "Tab") {
+            event.preventDefault();
+            void handleTabCompletion();
+            return;
+        }
+
+        // Handle command history navigation
+        if (event.key === "ArrowUp" && !showCompletions) {
             event.preventDefault();
             const commands = history.map((h) => h.command).reverse();
             if (commands.length > 0) {
@@ -180,12 +270,15 @@ export function Terminal() {
                 setHistoryIndex(newIndex);
                 setCommand(commands[newIndex] || "");
             }
-        } else if (event.key === "ArrowDown") {
+            return;
+        }
+        if (event.key === "ArrowDown" && !showCompletions) {
             event.preventDefault();
             const commands = history.map((h) => h.command).reverse();
             const newIndex = Math.max(historyIndex - 1, -1);
             setHistoryIndex(newIndex);
             setCommand(newIndex >= 0 ? commands[newIndex] || "" : "");
+            return;
         }
     };
 
@@ -221,6 +314,8 @@ export function Terminal() {
                             <br />
                             Use cd to change directory, pwd to show current path.
                             <br />
+                            Press Tab for file/directory completion.
+                            <br />
                             <br />
                             Use ↑/↓ arrows to navigate command history.
                         </div>
@@ -230,7 +325,7 @@ export function Terminal() {
                         ))
                     )}
 
-                    {/* Current running job output (if not yet in history) */}
+                    {/* Current running job output */}
                     {jobData &&
                         currentJobId &&
                         !history.some((h) => h.jobId === currentJobId) && (
@@ -258,20 +353,63 @@ export function Terminal() {
                         )}
                 </div>
 
-                {/* Command Input */}
-                <div className="border-t border-primary-700 bg-primary-900 p-3">
+                {/* Command Input with Completions */}
+                <div className="relative border-t border-primary-700 bg-primary-900 p-3">
                     {/* Current directory display */}
                     <div className="mb-2 flex items-center gap-2 font-mono text-sm text-accent-400">
                         <span>{shortenPath(cwd)}</span>
                         <span className="text-primary-500">$</span>
                     </div>
+
+                    {/* Completions dropdown */}
+                    {showCompletions && completions.length > 0 && (
+                        <div
+                            ref={completionsRef}
+                            className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-48 overflow-y-auto rounded-lg border border-primary-600 bg-primary-800 shadow-lg"
+                        >
+                            {completions.map((item, index) => (
+                                <button
+                                    key={item.completion}
+                                    type="button"
+                                    onClick={() => acceptCompletion(item)}
+                                    className={cn(
+                                        "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+                                        "hover:bg-primary-700",
+                                        index === selectedIndex && "bg-accent-500/20"
+                                    )}
+                                >
+                                    <span
+                                        className={cn(
+                                            "text-xs",
+                                            item.type === "directory" &&
+                                                "text-accent-400",
+                                            item.type === "executable" &&
+                                                "text-green-400",
+                                            item.type === "file" && "text-primary-400"
+                                        )}
+                                    >
+                                        {item.type === "directory" && "📁"}
+                                        {item.type === "executable" && "⚡"}
+                                        {item.type === "file" && "📄"}
+                                    </span>
+                                    <span className="flex-1 text-primary-100">
+                                        {item.display}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <div className="flex-1">
                             <Input
                                 ref={inputRef}
                                 type="text"
                                 value={command}
-                                onChange={(e) => setCommand(e.target.value)}
+                                onChange={(e) => {
+                                    setCommand(e.target.value);
+                                    setShowCompletions(false);
+                                }}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Enter command..."
                                 className="w-full bg-black font-mono"

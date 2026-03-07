@@ -61,6 +61,24 @@ export interface CommandHistoryEntry {
     endedAt: number | null;
 }
 
+export interface CompletionItem {
+    completion: string;
+    type: "file" | "directory" | "executable";
+    display: string;
+}
+
+export interface CompletionResponse {
+    completions: CompletionItem[];
+    commonPrefix: string;
+}
+
+export async function getCompletions(
+    partial: string,
+    cwd: string
+): Promise<CompletionResponse> {
+    return apiPost("/terminal/complete", { partial, cwd });
+}
+
 export function useTerminalHistory() {
     const [history, setHistory] = useState<CommandHistoryEntry[]>([]);
 
