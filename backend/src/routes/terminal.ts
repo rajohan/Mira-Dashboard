@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
-import { join, resolve, basename, dirname } from "node:path";
+import { join } from "node:path";
 import express from "express";
 
 interface CompletionRequest {
@@ -38,10 +38,11 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
     // Determine directory to search in
     let searchDir: string;
     let searchPrefix: string;
+    let dirPart = "";
     
     if (pathPart.includes("/")) {
         const lastSlashIndex = pathPart.lastIndexOf("/");
-        const dirPart = pathPart.slice(0, lastSlashIndex + 1);
+        dirPart = pathPart.slice(0, lastSlashIndex + 1);
         searchPrefix = pathPart.slice(lastSlashIndex + 1);
         searchDir = expandPath(dirPart, cwd);
     } else {
