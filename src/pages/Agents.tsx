@@ -76,7 +76,7 @@ function AgentCard({
     const modelShort = model.split("/").pop() || model;
 
     return (
-        <Card className="relative overflow-hidden">
+        <Card className="relative flex h-full flex-col overflow-hidden">
             {status === "active" && (
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-transparent to-emerald-500/5" />
             )}
@@ -122,7 +122,7 @@ function AgentCard({
                 </div>
             )}
 
-            <div className="flex items-center justify-between text-xs text-primary-400">
+            <div className="mt-auto flex items-center justify-between text-xs text-primary-400">
                 <div className="flex items-center gap-1">
                     {channel && (
                         <>
@@ -131,14 +131,11 @@ function AgentCard({
                         </>
                     )}
                     <span>
-                        {lastActivity
+                        Last active {lastActivity
                             ? formatDuration(new Date(lastActivity).getTime())
                             : "Never"}
                     </span>
                 </div>
-                <span className="text-primary-500">
-                    {modelShort.includes(":") ? modelShort.split(":")[0] : modelShort}
-                </span>
             </div>
         </Card>
     );
@@ -149,36 +146,34 @@ function TaskHistorySidebar() {
     const tasks = data?.tasks || [];
 
     return (
-        <div className="space-y-2 border-l border-primary-700 pl-4">
-            <div className="px-1">
+        <div className="space-y-2">
+            <div>
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                     Latest Tasks
                 </h3>
                 <p className="text-xs text-primary-500">Completed agent tasks</p>
             </div>
 
-            <Card>
-                {tasks.length === 0 ? (
-                    <p className="text-sm italic text-primary-500">No completed tasks yet</p>
-                ) : (
-                    <div className="space-y-3">
-                        {tasks.map((item) => (
-                            <div key={item.id} className="rounded bg-primary-800/50 p-3">
-                                <div className="mb-1 flex items-center justify-between gap-2">
-                                    <span className="text-xs font-medium text-primary-200">
-                                        {item.agentId}
-                                    </span>
-                                    <span className="text-[11px] text-primary-500">
-                                        {item.completedAt ? formatDate(item.completedAt) : "-"}
-                                    </span>
-                                </div>
-                                <p className="text-sm text-primary-100">{item.task}</p>
-                                <p className="mt-1 text-[11px] text-primary-500">{item.status}</p>
+            {tasks.length === 0 ? (
+                <p className="text-sm italic text-primary-500">No completed tasks yet</p>
+            ) : (
+                <div className="space-y-3">
+                    {tasks.map((item) => (
+                        <div key={item.id} className="rounded bg-primary-800/50 p-3">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-primary-200">
+                                    {item.agentId}
+                                </span>
+                                <span className="text-[11px] text-primary-500">
+                                    {item.completedAt ? formatDate(item.completedAt) : "-"}
+                                </span>
                             </div>
-                        ))}
-                    </div>
-                )}
-            </Card>
+                            <p className="text-sm text-primary-100">{item.task}</p>
+                            <p className="mt-1 text-[11px] text-primary-500">{item.status}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
@@ -194,7 +189,7 @@ export function Agents() {
     return (
         <div className="space-y-4 p-6">
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="space-y-6">
+                <Card className="space-y-6">
                     {error && (
                         <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
                             {error instanceof Error ? error.message : "Failed to load agents"}
@@ -288,11 +283,11 @@ export function Agents() {
                             )}
                         </>
                     )}
-                </div>
+                </Card>
 
-                <div className="hidden xl:block">
+                <Card className="hidden xl:block">
                     <TaskHistorySidebar />
-                </div>
+                </Card>
             </div>
         </div>
     );
