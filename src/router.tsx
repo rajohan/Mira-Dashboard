@@ -15,6 +15,7 @@ import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Metrics } from "./pages/Metrics";
 import { Moltbook } from "./pages/Moltbook";
+import { OrgChart } from "./pages/OrgChart";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Tasks } from "./pages/Tasks";
@@ -95,6 +96,12 @@ const metricsRoute = createRoute({
     component: Metrics,
 });
 
+const orgChartRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/org-chart",
+    component: OrgChart,
+});
+
 const moltbookRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/moltbook",
@@ -124,6 +131,7 @@ const routeTree = rootRoute.addChildren([
         cronRoute,
         filesRoute,
         metricsRoute,
+        orgChartRoute,
         moltbookRoute,
         terminalRoute,
         settingsRoute,
