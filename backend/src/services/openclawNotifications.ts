@@ -1,8 +1,8 @@
 import { db } from "../db.js";
-import { fetchOpenClawVersion } from "../routes/openclaw.js";
+import { getOpenClawVersionCached } from "../routes/openclaw.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
-const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 
 interface AlertState {
     is_armed: number;
@@ -68,7 +68,7 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
     running = true;
 
     try {
-        const version = await fetchOpenClawVersion();
+        const version = await getOpenClawVersionCached();
         const state = getState();
 
         if (version.updateAvailable && version.latest) {

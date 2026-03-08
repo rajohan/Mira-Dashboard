@@ -8,6 +8,10 @@ export interface VersionResponse {
     checkedAt: number;
 }
 
+const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
+let versionCache: VersionResponse | null = null;
+let versionCacheExpiresAt = 0;
+
 function runCommand(command: string): string | null {
     try {
         return execSync(command, {
@@ -61,12 +65,28 @@ export async function fetchOpenClawVersion(): Promise<VersionResponse> {
     };
 }
 
+export async function getOpenClawVersionCached(
+    options: { forceRefresh?: boolean } = {}
+): Promise<VersionResponse> {
+    const now = Date.now();
+
+    if (!options.forceRefresh && versionCache && now < versionCacheExpiresAt) {
+        return versionCache;
+    }
+
+    const fresh = await fetchOpenClawVersion();
+    versionCache = fresh;
+    versionCacheExpiresAt = now + VERSION_CACHE_TTL_MS;
+
+    return fresh;
+}
+
 export default function openclawRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
     app.get("/api/openclaw/version", (async (_req, res) => {
-        const version = await fetchOpenClawVersion();
+        const version = await getOpenClawVersionCached();
         res.json(version);
     }) as RequestHandler);
 }

@@ -65,7 +65,7 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     },
     {
         id: "system_update",
-        label: "System update",
+        label: "Update system",
         description: "apt update + upgrade",
         command: "sudo apt-get update && sudo apt-get upgrade -y",
         confirmLabel: "Run system update",
@@ -83,15 +83,6 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
         scope: "openclaw",
     },
     {
-        id: "openclaw_update",
-        label: "Update OpenClaw",
-        description: "Update to latest OpenClaw version",
-        command: "$HOME/.local/bin/openclaw update --yes",
-        confirmLabel: "Update OpenClaw",
-        confirmMessage: "Update OpenClaw to latest version now?",
-        scope: "openclaw",
-    },
-    {
         id: "openclaw_cleanup",
         label: "Cleanup OpenClaw",
         description: "Clean old OpenClaw data",
@@ -100,6 +91,15 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
         confirmLabel: "Run OpenClaw cleanup",
         confirmMessage:
             "Run OpenClaw cleanup now? This removes old OpenClaw session/media/log/queue/temp artifacts.",
+        scope: "openclaw",
+    },
+    {
+        id: "openclaw_update",
+        label: "Update OpenClaw",
+        description: "Update to latest OpenClaw version",
+        command: "$HOME/.local/bin/openclaw update --yes",
+        confirmLabel: "Update OpenClaw",
+        confirmMessage: "Update OpenClaw to latest version now?",
         scope: "openclaw",
     },
 ];
