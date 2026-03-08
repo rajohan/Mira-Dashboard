@@ -8,8 +8,8 @@ const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
 // Activity thresholds (in milliseconds)
-const ACTIVE_THRESHOLD = 15_000; // < 15s = active
-const THINKING_THRESHOLD = 45_000; // 15-45s = thinking, 45s+ = idle
+const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
+const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
