@@ -5,7 +5,7 @@ import { Card, CardTitle } from "../ui/Card";
 
 interface ExpandableCardProps {
     title: string;
-    icon: React.ElementType;
+    icon: React.ComponentType<{ size?: number; className?: string }>;
     children: React.ReactNode;
     defaultExpanded?: boolean;
 }

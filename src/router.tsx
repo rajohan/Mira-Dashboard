@@ -15,6 +15,7 @@ import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Metrics } from "./pages/Metrics";
 import { Moltbook } from "./pages/Moltbook";
+import { Office3D } from "./pages/Office3D";
 import { OrgChart } from "./pages/OrgChart";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
@@ -102,6 +103,12 @@ const orgChartRoute = createRoute({
     component: OrgChart,
 });
 
+const office3DRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/office-3d",
+    component: Office3D,
+});
+
 const moltbookRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/moltbook",
@@ -132,6 +139,7 @@ const routeTree = rootRoute.addChildren([
         filesRoute,
         metricsRoute,
         orgChartRoute,
+        office3DRoute,
         moltbookRoute,
         terminalRoute,
         settingsRoute,
