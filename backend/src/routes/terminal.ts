@@ -145,12 +145,16 @@ export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/cd", express.json(), async (req, res) => {
         const { path: targetPath, cwd } = req.body as CdRequest;
         
+        const resolvedCwd = cwd || HOME_DIR;
+
         if (!targetPath || typeof targetPath !== "string") {
-            res.status(400).json({ error: "Missing or invalid path" } satisfies CdResponse);
+            res.status(400).json({
+                success: false,
+                newCwd: resolvedCwd,
+                error: "Missing or invalid path",
+            } satisfies CdResponse);
             return;
         }
-
-        const resolvedCwd = cwd || HOME_DIR;
         let newPath: string;
 
         if (targetPath === "~") {
