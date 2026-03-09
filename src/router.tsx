@@ -8,6 +8,7 @@ import {
 
 import { Layout } from "./components/layout/Layout";
 import { Agents } from "./pages/Agents";
+import { Chat } from "./pages/Chat";
 import { Cron } from "./pages/Cron";
 import { Dashboard } from "./pages/Dashboard";
 import { Files } from "./pages/Files";
@@ -73,6 +74,12 @@ const sessionsRoute = createRoute({
     component: Sessions,
 });
 
+const chatRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/chat",
+    component: Chat,
+});
+
 const logsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/logs",
@@ -134,6 +141,7 @@ const routeTree = rootRoute.addChildren([
         tasksRoute,
         agentsRoute,
         sessionsRoute,
+        chatRoute,
         logsRoute,
         cronRoute,
         filesRoute,

@@ -23,6 +23,7 @@ interface OpenClawSocketContextValue {
         method: string,
         params?: Record<string, unknown>
     ) => Promise<T>;
+    subscribe: (listener: (data: unknown) => void) => () => void;
 }
 
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
@@ -30,6 +31,7 @@ const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(n
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const token = useAuthToken();
     const clientRef = useRef<SocketClient | null>(null);
+    const listenersRef = useRef(new Set<(data: unknown) => void>());
 
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,9 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                         const connectionState = handleSocketMessage(data);
                         if (connectionState !== null) {
                             setIsConnected(connectionState);
+                        }
+                        for (const listener of listenersRef.current) {
+                            listener(data);
                         }
                     } catch (error_) {
                         console.error("[WebSocket] Failed to process message:", error_);
@@ -122,6 +127,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
+    const subscribe = (listener: (data: unknown) => void) => {
+        listenersRef.current.add(listener);
+        return () => {
+            listenersRef.current.delete(listener);
+        };
+    };
+
     return createElement(
         OpenClawSocketContext.Provider,
         {
@@ -132,6 +144,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 connect,
                 disconnect,
                 request,
+                subscribe,
             },
         },
         children

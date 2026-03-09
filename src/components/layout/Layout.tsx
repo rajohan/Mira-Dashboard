@@ -23,6 +23,7 @@ const navItems = [
     { to: "/tasks", icon: CheckSquare, label: "Tasks" },
     { to: "/agents", icon: Users, label: "Agents" },
     { to: "/sessions", icon: MessageSquare, label: "Sessions" },
+    { to: "/chat", icon: MessageSquare, label: "Chat" },
     { to: "/logs", icon: FileText, label: "Logs" },
     { to: "/cron", icon: Clock3, label: "Cron" },
     { to: "/files", icon: FolderOpen, label: "Files" },

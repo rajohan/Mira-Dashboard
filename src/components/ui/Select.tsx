@@ -17,6 +17,7 @@ interface SelectProps {
     icon?: React.ReactNode;
     className?: string;
     width?: string;
+    menuWidth?: string;
 }
 
 export function Select({
@@ -27,11 +28,15 @@ export function Select({
     icon,
     className,
     width = "min-w-[180px]",
+    menuWidth,
 }: SelectProps) {
     const selectedOption = options.find((opt) => opt.value === value);
 
     return (
-        <Menu as="div">
+        <Menu
+            as="div"
+            className={cn("relative inline-block", width === "w-full" && "block w-full")}
+        >
             <MenuButton
                 className={cn(
                     "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm transition-colors",
@@ -47,10 +52,10 @@ export function Select({
                 <ChevronDown className="h-4 w-4 flex-shrink-0 text-primary-400 transition-transform data-[open]:rotate-180" />
             </MenuButton>
             <MenuItems
-                anchor="bottom start"
+                anchor={{ to: "bottom start", gap: 8 }}
                 className={cn(
-                    "z-10 max-h-60 overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg",
-                    width
+                    "z-10 max-h-60 min-w-[var(--button-width)] max-w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg",
+                    menuWidth || "w-max"
                 )}
             >
                 {options.map((option) => (
