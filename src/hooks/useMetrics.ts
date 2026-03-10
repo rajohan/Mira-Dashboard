@@ -29,6 +29,10 @@ export interface Metrics {
         platform: string;
         hostname: string;
     };
+    network: {
+        downloadMbps: number;
+        uploadMbps: number;
+    };
     tokens: {
         total: number;
         byModel: Record<string, number>;

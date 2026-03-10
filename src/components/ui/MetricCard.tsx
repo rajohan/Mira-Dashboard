@@ -2,9 +2,11 @@ import { Card } from "./Card";
 
 interface MetricCardProps {
     title: string;
-    value: string | number;
+    value?: string | number;
     subtitle?: string;
     percent?: number;
+    showValue?: boolean;
+    showPercentLabel?: boolean;
     color?: "green" | "blue" | "purple" | "orange" | "red";
     icon?: React.ReactNode;
 }
@@ -30,6 +32,8 @@ export function MetricCard({
     value,
     subtitle,
     percent,
+    showValue = true,
+    showPercentLabel = true,
     color = "blue",
     icon,
 }: MetricCardProps) {
@@ -54,12 +58,14 @@ export function MetricCard({
             </div>
             <div className="flex items-end justify-between">
                 <div>
-                    <div className="text-2xl font-bold">{value}</div>
-                    {subtitle && (
-                        <div className="mt-1 text-xs text-primary-400">{subtitle}</div>
-                    )}
+                    {showValue ? <div className="text-2xl font-bold">{value}</div> : null}
+                    {subtitle ? (
+                        <div className={showValue ? "mt-1 text-xs text-primary-400" : "text-sm text-primary-300"}>
+                            {subtitle}
+                        </div>
+                    ) : null}
                 </div>
-                {percent !== undefined && (
+                {percent !== undefined && showPercentLabel && (
                     <div className="text-lg font-semibold text-primary-300">
                         {percent}%
                     </div>

@@ -1,5 +1,6 @@
 import { execSync } from "child_process";
 import express, { type RequestHandler } from "express";
+import { readFileSync, readdirSync } from "fs";
 import os from "os";
 
 import gateway from "../gateway.js";
@@ -34,11 +35,17 @@ interface SystemMetrics {
     hostname: string;
 }
 
+interface NetworkMetrics {
+    downloadMbps: number;
+    uploadMbps: number;
+}
+
 interface SystemMetricsResponse {
     cpu: CpuMetrics;
     memory: MemoryMetrics;
     disk: DiskMetrics;
     system: SystemMetrics;
+    network: NetworkMetrics;
     timestamp: number;
 }
 
@@ -56,6 +63,77 @@ interface TokenMetrics {
 
 interface MetricsResponse extends SystemMetricsResponse {
     tokens: TokenMetrics;
+}
+
+let previousNetworkSample:
+    | { timestamp: number; downloadBytes: number; uploadBytes: number }
+    | null = null;
+
+function getNetworkMetrics(): NetworkMetrics {
+    let downloadBytes = 0;
+    let uploadBytes = 0;
+
+    try {
+        const preferredInterface = "enp0s6";
+        const availableInterfaces = readdirSync("/sys/class/net");
+        const interfaces = availableInterfaces.includes(preferredInterface)
+            ? [preferredInterface]
+            : availableInterfaces.filter((name) => name !== "lo");
+
+        for (const name of interfaces) {
+            const basePath = `/sys/class/net/${name}/statistics`;
+            const rxBytes = Number.parseInt(
+                readFileSync(`${basePath}/rx_bytes`, "utf8").trim(),
+                10
+            );
+            const txBytes = Number.parseInt(
+                readFileSync(`${basePath}/tx_bytes`, "utf8").trim(),
+                10
+            );
+
+            if (!Number.isNaN(rxBytes)) {
+                downloadBytes += rxBytes;
+            }
+
+            if (!Number.isNaN(txBytes)) {
+                uploadBytes += txBytes;
+            }
+        }
+    } catch (error) {
+        console.error("[Metrics] network error:", (error as Error).message);
+    }
+
+    const timestamp = Date.now();
+
+    if (!previousNetworkSample) {
+        previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
+        return {
+            downloadMbps: 0,
+            uploadMbps: 0,
+        };
+    }
+
+    const elapsedSeconds = (timestamp - previousNetworkSample.timestamp) / 1000;
+
+    if (elapsedSeconds <= 0) {
+        return {
+            downloadMbps: 0,
+            uploadMbps: 0,
+        };
+    }
+
+    const downloadDelta = Math.max(
+        0,
+        downloadBytes - previousNetworkSample.downloadBytes
+    );
+    const uploadDelta = Math.max(0, uploadBytes - previousNetworkSample.uploadBytes);
+
+    previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
+
+    return {
+        downloadMbps: Math.round(((downloadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
+        uploadMbps: Math.round(((uploadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
+    };
 }
 
 function getSystemMetrics(): SystemMetricsResponse {
@@ -88,6 +166,7 @@ function getSystemMetrics(): SystemMetricsResponse {
 
     // Uptime
     const uptime = os.uptime();
+    const network = getNetworkMetrics();
 
     return {
         cpu: {
@@ -116,6 +195,7 @@ function getSystemMetrics(): SystemMetricsResponse {
             platform: os.platform(),
             hostname: os.hostname(),
         },
+        network,
         timestamp: Date.now(),
     };
 }

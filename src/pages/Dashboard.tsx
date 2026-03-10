@@ -1,5 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import {
+    ArrowDown,
+    ArrowUp,
     Clock,
     Cloud,
     CloudDrizzle,
@@ -174,44 +176,69 @@ export function Dashboard() {
         <div className="space-y-6 p-6">
             {error && <Alert variant="error">{error}</Alert>}
 
-            <div className="max-w-sm">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
                 <WeatherTimeCard />
-            </div>
 
-            <h2 className="text-lg font-semibold text-primary-100">System Health</h2>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <MetricCard
-                    title="CPU"
-                    value={metrics ? metrics.cpu.loadPercent + "%" : "—"}
-                    subtitle={metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."}
-                    percent={metrics?.cpu.loadPercent}
-                    icon={<Cpu className="h-5 w-5" />}
-                />
-                <MetricCard
-                    title="Memory"
-                    value={metrics ? metrics.memory.usedGB + " GB" : "—"}
-                    subtitle={
-                        metrics ? "of " + metrics.memory.totalGB + " GB" : "Loading..."
-                    }
-                    percent={metrics?.memory.percent}
-                    icon={<MemoryStick className="h-5 w-5" />}
-                />
-                <MetricCard
-                    title="Disk"
-                    value={metrics ? metrics.disk.usedGB + " GB" : "—"}
-                    subtitle={
-                        metrics ? "of " + metrics.disk.totalGB + " GB" : "Loading..."
-                    }
-                    percent={metrics?.disk.percent}
-                    icon={<HardDrive className="h-5 w-5" />}
-                />
-                <MetricCard
-                    title="Uptime"
-                    value={metrics ? formatUptime(metrics.system.uptime) : "—"}
-                    subtitle={metrics ? metrics.system.hostname : "Loading..."}
-                    color="green"
-                    icon={<Clock className="h-5 w-5" />}
-                />
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div className="grid gap-4">
+                        <MetricCard
+                            title="CPU"
+                            subtitle={metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."}
+                            percent={metrics?.cpu.loadPercent}
+                            showValue={false}
+                            icon={<Cpu className="h-5 w-5" />}
+                        />
+                        <MetricCard
+                            title="Memory"
+                            subtitle={
+                                metrics
+                                    ? metrics.memory.usedGB + " GB of " + metrics.memory.totalGB + " GB"
+                                    : "Loading..."
+                            }
+                            percent={metrics?.memory.percent}
+                            showValue={false}
+                            icon={<MemoryStick className="h-5 w-5" />}
+                        />
+                    </div>
+
+                    <div className="grid gap-4">
+                        <MetricCard
+                            title="Disk"
+                            subtitle={
+                                metrics
+                                    ? metrics.disk.usedGB + " GB of " + metrics.disk.totalGB + " GB"
+                                    : "Loading..."
+                            }
+                            percent={metrics?.disk.percent}
+                            showValue={false}
+                            icon={<HardDrive className="h-5 w-5" />}
+                        />
+                        <MetricCard
+                            title="Uptime"
+                            value={metrics ? formatUptime(metrics.system.uptime) : "—"}
+                            subtitle={metrics ? metrics.system.hostname : "Loading..."}
+                            color="green"
+                            icon={<Clock className="h-5 w-5" />}
+                        />
+                    </div>
+
+                    <div className="grid gap-4">
+                        <MetricCard
+                            title="Download"
+                            value={metrics?.network ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s` : "—"}
+                            subtitle="Current throughput"
+                            color="blue"
+                            icon={<ArrowDown className="h-5 w-5" />}
+                        />
+                        <MetricCard
+                            title="Upload"
+                            value={metrics?.network ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s` : "—"}
+                            subtitle="Current throughput"
+                            color="blue"
+                            icon={<ArrowUp className="h-5 w-5" />}
+                        />
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
