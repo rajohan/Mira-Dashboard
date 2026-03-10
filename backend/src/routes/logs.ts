@@ -33,7 +33,8 @@ function startLogWatcher(): void {
 
             if (logFile !== lastLogFile) {
                 lastLogFile = logFile;
-                lastLogSize = 0;
+                lastLogSize = stat.size;
+                return;
             }
 
             if (stat.size > lastLogSize) {
