@@ -7,8 +7,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
+import { getAuthUserFromRequest, getPersistedGatewayToken, requireAuth } from "./auth.js";
 import gateway from "./gateway.js";
 import agentsRoutes from "./routes/agents.js";
+import authRoutes from "./routes/auth.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
 import cronRoutes from "./routes/cron.js";
@@ -69,8 +71,24 @@ const healthHandler: express.RequestHandler = (_req, res) => {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-app.get("/api/sessions", (_req, res) => {
-    res.json(gateway.getSessions());
+app.get("/api/sessions", (request, response) => {
+    const user = getAuthUserFromRequest(request);
+    if (!user) {
+        response.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+
+    response.json(gateway.getSessions());
+});
+
+authRoutes(app);
+app.use("/api", (request, response, next) => {
+    if (request.path.startsWith("/auth")) {
+        next();
+        return;
+    }
+
+    requireAuth(request, response, next);
 });
 
 // Route modules
@@ -97,7 +115,13 @@ staticRoutes(app, frontendPath);
 // =====================
 // WebSocket
 // =====================
-wss.on("connection", (ws: WebSocket) => {
+wss.on("connection", (ws: WebSocket, request) => {
+    const user = getAuthUserFromRequest(request);
+    if (!user) {
+        ws.close(4401, "Unauthorized");
+        return;
+    }
+
     gateway.handleClient(ws);
 });
 
@@ -106,12 +130,11 @@ wss.on("connection", (ws: WebSocket) => {
 // =====================
 const PORT = process.env.PORT || 3100;
 server.listen(PORT, () => {
-    const token = process.env.OPENCLAW_TOKEN;
+    const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
     if (token) {
         gateway.init(token);
     } else {
-        console.error("[Backend] OPENCLAW_TOKEN required");
-        throw new Error("OPENCLAW_TOKEN required");
+        console.warn("[Backend] No gateway token configured yet; waiting for bootstrap registration");
     }
 
     startQuotaNotificationMonitor();

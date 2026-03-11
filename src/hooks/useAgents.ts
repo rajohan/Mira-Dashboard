@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { Agent, AgentTaskHistoryItem } from "../types/session";
+import { apiFetch } from "./useApi";
 
 interface AgentsStatusResponse {
     agents: Agent[];
@@ -35,14 +36,8 @@ interface AgentsConfigResponse {
 export function useAgentsStatus() {
     return useQuery<AgentsStatusResponse>({
         queryKey: ["agents", "status"],
-        queryFn: async () => {
-            const response = await fetch("/api/agents/status");
-            if (!response.ok) {
-                throw new Error("Failed to fetch agents status");
-            }
-            return response.json();
-        },
-        refetchInterval: 5000, // Poll every 5 seconds
+        queryFn: () => apiFetch<AgentsStatusResponse>("/agents/status"),
+        refetchInterval: 5000,
         staleTime: 4000,
     });
 }
@@ -50,27 +45,15 @@ export function useAgentsStatus() {
 export function useAgentsConfig() {
     return useQuery<AgentsConfigResponse>({
         queryKey: ["agents", "config"],
-        queryFn: async () => {
-            const response = await fetch("/api/agents/config");
-            if (!response.ok) {
-                throw new Error("Failed to fetch agents config");
-            }
-            return response.json();
-        },
-        staleTime: 60_000, // Config doesn't change often
+        queryFn: () => apiFetch<AgentsConfigResponse>("/agents/config"),
+        staleTime: 60_000,
     });
 }
 
 export function useAgentTaskHistory(limit = 8) {
     return useQuery<AgentTaskHistoryResponse>({
         queryKey: ["agents", "tasks", "history", limit],
-        queryFn: async () => {
-            const response = await fetch(`/api/agents/tasks/history?limit=${limit}`);
-            if (!response.ok) {
-                throw new Error("Failed to fetch agent task history");
-            }
-            return response.json();
-        },
+        queryFn: () => apiFetch<AgentTaskHistoryResponse>(`/agents/tasks/history?limit=${limit}`),
         refetchInterval: 5000,
         staleTime: 4000,
     });
@@ -79,13 +62,7 @@ export function useAgentTaskHistory(limit = 8) {
 export function useAgentStatus(agentId: string) {
     return useQuery<Agent>({
         queryKey: ["agents", "status", agentId],
-        queryFn: async () => {
-            const response = await fetch(`/api/agents/${agentId}/status`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch agent ${agentId} status`);
-            }
-            return response.json();
-        },
+        queryFn: () => apiFetch<Agent>(`/agents/${agentId}/status`),
         refetchInterval: 5000,
         staleTime: 4000,
     });

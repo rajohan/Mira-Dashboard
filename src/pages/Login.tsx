@@ -1,24 +1,89 @@
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
-import { useAuthStore } from "../stores/authStore";
+import { authActions } from "../stores/authStore";
+
+interface BootstrapResponse {
+    bootstrapRequired: boolean;
+    hasGatewayToken: boolean;
+}
 
 export function Login() {
     const navigate = useNavigate();
-    const { login } = useAuthStore();
+    const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        void fetch("/api/auth/bootstrap", { credentials: "include" })
+            .then(async (response) => {
+                if (!response.ok) {
+                    throw new Error("Failed to load auth state");
+                }
+                return response.json() as Promise<BootstrapResponse>;
+            })
+            .then(setBootstrapState)
+            .catch((error_) => {
+                setError(
+                    error_ instanceof Error ? error_.message : "Failed to load auth state"
+                );
+            });
+    }, []);
 
     const form = useForm({
-        defaultValues: { token: "" },
-        onSubmit: ({ value }) => {
-            if (value.token.trim()) {
-                login(value.token.trim());
-                navigate({ to: "/" });
+        defaultValues: { username: "", password: "", gatewayToken: "" },
+        onSubmit: async ({ value }) => {
+            const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
+            setError(null);
+            setIsSubmitting(true);
+
+            try {
+                const endpoint = bootstrapRequired
+                    ? "/api/auth/register-first-user"
+                    : "/api/auth/login";
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        username: value.username.trim(),
+                        password: value.password,
+                        ...(bootstrapRequired
+                            ? { gatewayToken: value.gatewayToken.trim() }
+                            : {}),
+                    }),
+                });
+
+                if (!response.ok) {
+                    const payload = await response
+                        .json()
+                        .catch(() => ({ error: "Authentication failed" }));
+                    throw new Error(payload.error || "Authentication failed");
+                }
+
+                await authActions.refreshSession();
+                await navigate({ to: "/" });
+            } catch (error_) {
+                setError(
+                    error_ instanceof Error ? error_.message : "Authentication failed"
+                );
+                await authActions.refreshSession().catch(() => undefined);
+                const nextBootstrap = await fetch("/api/auth/bootstrap", {
+                    credentials: "include",
+                }).then((response) => response.json() as Promise<BootstrapResponse>);
+                setBootstrapState(nextBootstrap);
+            } finally {
+                setIsSubmitting(false);
             }
         },
     });
+
+    const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-primary-900 p-4">
@@ -27,39 +92,85 @@ export function Login() {
                     <div className="mb-2 text-4xl">👩‍💻</div>
                     <CardTitle className="text-center">Mira Dashboard</CardTitle>
                     <p className="mt-2 text-primary-400">
-                        Enter your OpenClaw token to continue
+                        {bootstrapRequired
+                            ? "Create the first dashboard user and save the gateway token server-side"
+                            : "Log in with your dashboard username and password"}
                     </p>
                 </div>
+
+                {error ? (
+                    <Alert className="mb-2" variant="error">
+                        {error}
+                    </Alert>
+                ) : null}
 
                 <form
                     onSubmit={(e) => {
                         e.preventDefault();
-                        form.handleSubmit();
+                        void form.handleSubmit();
                     }}
                     className="space-y-4"
                 >
-                    <form.Field name="token">
+                    <form.Field name="username">
                         {(field) => (
                             <Input
-                                type="password"
-                                label="OpenClaw Token"
+                                type="text"
+                                label="Username"
                                 value={field.state.value}
                                 onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder="Enter your token..."
+                                placeholder="Enter your username"
+                                autoComplete="username"
                             />
                         )}
                     </form.Field>
-                    <Button
-                        type="submit"
-                        className="w-full"
-                        disabled={!form.state.values.token.trim()}
-                    >
-                        Connect
+
+                    <form.Field name="password">
+                        {(field) => (
+                            <Input
+                                type="password"
+                                label="Password"
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="Enter your password"
+                                autoComplete={
+                                    bootstrapRequired
+                                        ? "new-password"
+                                        : "current-password"
+                                }
+                            />
+                        )}
+                    </form.Field>
+
+                    {bootstrapRequired ? (
+                        <form.Field name="gatewayToken">
+                            {(field) => (
+                                <Input
+                                    type="password"
+                                    label="Gateway Token"
+                                    value={field.state.value}
+                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    placeholder="Enter your OpenClaw gateway token"
+                                    autoComplete="off"
+                                />
+                            )}
+                        </form.Field>
+                    ) : null}
+
+                    <Button type="submit" className="w-full" disabled={isSubmitting}>
+                        {isSubmitting
+                            ? bootstrapRequired
+                                ? "Creating account..."
+                                : "Logging in..."
+                            : bootstrapRequired
+                              ? "Create first user"
+                              : "Log in"}
                     </Button>
                 </form>
 
                 <p className="mt-4 text-center text-xs text-primary-500">
-                    Token can be found in your OpenClaw gateway URL
+                    {bootstrapRequired
+                        ? "The gateway token is only required once during first-user setup."
+                        : "Gateway access stays server-side after bootstrap."}
                 </p>
             </Card>
         </div>

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
+import { authStore, authActions } from "./stores/authStore";
 import { Agents } from "./pages/Agents";
 import { Chat } from "./pages/Chat";
 import { Cron } from "./pages/Cron";
@@ -30,16 +31,21 @@ const rootRoute = createRootRoute({
 const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
+    beforeLoad: async () => {
+        await authActions.initialize();
+        if (authStore.state.isAuthenticated) {
+            throw redirect({ to: "/" });
+        }
+    },
     component: Login,
 });
 
 const authenticatedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "authenticated",
-    beforeLoad: () => {
-        const token =
-            typeof window === "undefined" ? null : localStorage.getItem("openclaw_token");
-        if (!token) {
+    beforeLoad: async () => {
+        await authActions.initialize();
+        if (!authStore.state.isAuthenticated) {
             throw redirect({ to: "/login" });
         }
     },

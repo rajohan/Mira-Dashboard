@@ -1,49 +1,105 @@
 import { Store, useStore } from "@tanstack/react-store";
 
+export interface AuthUser {
+    id: number;
+    username: string;
+}
+
 interface AuthState {
-    token: string | null;
+    user: AuthUser | null;
     isAuthenticated: boolean;
+    isInitialized: boolean;
+    bootstrapRequired: boolean;
+}
+
+interface SessionResponse {
+    authenticated: boolean;
+    bootstrapRequired: boolean;
+    user: AuthUser | null;
 }
 
 interface AuthActions {
-    login: (token: string) => void;
-    logout: () => void;
+    initialize: () => Promise<void>;
+    refreshSession: () => Promise<SessionResponse>;
+    setSession: (payload: SessionResponse) => void;
+    clearSession: () => void;
+    logout: () => Promise<void>;
 }
 
-// Load initial state from localStorage
-const getInitialState = (): AuthState => {
-    if (typeof window === "undefined") {
-        return { token: null, isAuthenticated: false };
+const initialState: AuthState = {
+    user: null,
+    isAuthenticated: false,
+    isInitialized: false,
+    bootstrapRequired: false,
+};
+
+export const authStore = new Store<AuthState>(initialState);
+
+let initializePromise: Promise<void> | null = null;
+
+async function fetchSession(): Promise<SessionResponse> {
+    const response = await fetch("/api/auth/session", {
+        credentials: "include",
+    });
+
+    if (!response.ok) {
+        throw new Error("Failed to fetch auth session");
     }
-    const token = localStorage.getItem("openclaw_token");
-    return {
-        token,
-        isAuthenticated: !!token,
-    };
-};
 
-// Create the store
-export const authStore = new Store<AuthState>(getInitialState());
+    return response.json() as Promise<SessionResponse>;
+}
 
-// Actions
 export const authActions: AuthActions = {
-    login: (token: string) => {
-        localStorage.setItem("openclaw_token", token);
+    async initialize() {
+        if (!initializePromise) {
+            initializePromise = authActions
+                .refreshSession()
+                .catch(() => {
+                    authStore.setState(() => ({
+                        ...initialState,
+                        isInitialized: true,
+                    }));
+                })
+                .then(() => undefined)
+                .finally(() => {
+                    initializePromise = null;
+                });
+        }
+
+        return initializePromise;
+    },
+
+    async refreshSession() {
+        const session = await fetchSession();
+        authActions.setSession(session);
+        return session;
+    },
+
+    setSession(payload) {
         authStore.setState(() => ({
-            token,
-            isAuthenticated: true,
+            user: payload.user,
+            isAuthenticated: payload.authenticated,
+            isInitialized: true,
+            bootstrapRequired: payload.bootstrapRequired,
         }));
     },
-    logout: () => {
-        localStorage.removeItem("openclaw_token");
+
+    clearSession() {
         authStore.setState(() => ({
-            token: null,
-            isAuthenticated: false,
+            ...initialState,
+            isInitialized: true,
         }));
+    },
+
+    async logout() {
+        await fetch("/api/auth/logout", {
+            method: "POST",
+            credentials: "include",
+        }).catch(() => undefined);
+        authActions.clearSession();
     },
 };
 
-// Hook for reading auth state with actions
 export function useAuthStore(): AuthState & AuthActions {
     const state = useStore(authStore, (s) => s);
     return {
@@ -52,12 +108,10 @@ export function useAuthStore(): AuthState & AuthActions {
     };
 }
 
-// Hook for just the token (optimized - won't re-render on isAuthenticated change)
-export function useAuthToken(): string | null {
-    return useStore(authStore, (state) => state.token);
+export function useAuthUser(): AuthUser | null {
+    return useStore(authStore, (state) => state.user);
 }
 
-// Hook for just the auth status
 export function useIsAuthenticated(): boolean {
     return useStore(authStore, (state) => state.isAuthenticated);
 }

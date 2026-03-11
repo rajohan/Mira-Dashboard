@@ -1,5 +1,9 @@
+import { useNavigate } from "@tanstack/react-router";
+
 import { useHealth } from "../../hooks";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
+import { Button } from "../ui/Button";
+import { authActions } from "../../stores/authStore";
 import { NotificationBell } from "./NotificationBell";
 
 interface AppHeaderProps {
@@ -7,6 +11,7 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({ title }: AppHeaderProps) {
+    const navigate = useNavigate();
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();
 
@@ -63,6 +68,15 @@ export function AppHeader({ title }: AppHeaderProps) {
                             <span>{isBackendConnected ? "●" : "○"}</span>
                         </span>
                     </div>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                            void authActions.logout().then(() => navigate({ to: "/login" }));
+                        }}
+                    >
+                        Log out
+                    </Button>
                     <NotificationBell />
                 </div>
             </div>

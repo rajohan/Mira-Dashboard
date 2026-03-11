@@ -54,7 +54,7 @@ export function Alert({ variant = "info", title, children, className }: AlertPro
                 className
             )}
         >
-            <span className="flex-shrink-0">{icon}</span>
+            <span className="mt-0.5 flex-shrink-0">{icon}</span>
             <div className="flex-1">
                 {title && <p className="font-medium">{title}</p>}
                 <div className={title ? "text-sm opacity-90" : ""}>{children}</div>

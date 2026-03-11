@@ -9,32 +9,21 @@ export class UnauthorizedError extends Error {
     }
 }
 
-// Get token from localStorage or URL params
-function getToken(): string | null {
-    const stored = localStorage.getItem("openclaw_token");
-    if (stored) {
-        return stored;
-    }
-
-    return new URLSearchParams(window.location.search).get("token");
-}
-
 function handleUnauthorized() {
-    authActions.logout();
+    authActions.clearSession();
     window.dispatchEvent(new CustomEvent("openclaw:unauthorized"));
 }
 
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const token = getToken();
     const headers: HeadersInit = {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options?.headers,
     };
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
+        credentials: "include",
     });
 
     if (response.status === 401) {
@@ -47,7 +36,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
         throw new Error(error.error || `HTTP ${response.status}`);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
 }
 
 export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {

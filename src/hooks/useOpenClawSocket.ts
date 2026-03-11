@@ -10,7 +10,7 @@ import {
 
 import { createSocketClient, type SocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
-import { useAuthToken } from "../stores/authStore";
+import { useIsAuthenticated } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
 
 interface OpenClawSocketContextValue {
@@ -29,7 +29,7 @@ interface OpenClawSocketContextValue {
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
 
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
-    const token = useAuthToken();
+    const isAuthenticated = useIsAuthenticated();
     const clientRef = useRef<SocketClient | null>(null);
     const listenersRef = useRef(new Set<(data: unknown) => void>());
 
@@ -38,8 +38,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [connectionId, setConnectionId] = useState(0);
 
     const connect = () => {
-        if (!token) {
-            setError("No token provided");
+        if (!isAuthenticated) {
+            setError("Not authenticated");
             return;
         }
 
@@ -95,13 +95,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     };
 
     useEffect(() => {
-        if (token) {
+        if (isAuthenticated) {
             connect();
         } else {
             disconnect();
             setError(null);
         }
-    }, [token]);
+    }, [isAuthenticated]);
 
     useEffect(() => {
         if (!isConnected) {
