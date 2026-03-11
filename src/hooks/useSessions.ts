@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 
 import { sessionsCollection } from "../collections/sessions";
-import { apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 // Types
 interface SessionHistoryResponse {
@@ -39,11 +39,7 @@ async function sessionAction(
 }
 
 async function deleteSessionRequest(key: string): Promise<void> {
-    await apiPost("/sessions/delete", {
-        key,
-        deleteTranscript: true,
-        emitLifecycleHooks: false,
-    });
+    await apiDelete(`/sessions/${encodeURIComponent(key)}`);
 }
 
 export function useSessionHistory(key: string | null, limit = 50) {

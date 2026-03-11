@@ -114,6 +114,45 @@ export default function sessionsRoutes(app: express.Application): void {
         }
     }) as RequestHandler);
 
+    app.post("/api/sessions/:id/action", (async (req, res) => {
+        const sessionKeyParam = req.params.id;
+        const sessionKey = Array.isArray(sessionKeyParam)
+            ? sessionKeyParam[0] || ""
+            : sessionKeyParam || "";
+        const action = String(req.body?.action || "").trim().toLowerCase();
+
+        try {
+            console.log("[Sessions] action request", { sessionKey, action });
+
+            if (!sessionKey) {
+                res.status(400).json({ error: "Session id required" });
+                return;
+            }
+
+            if (action === "stop") {
+                await gateway.abortSessionRun(sessionKey);
+                res.json({ success: true, action });
+                return;
+            }
+
+            if (action === "compact") {
+                await gateway.sendSessionMessage(sessionKey, "/compact");
+                res.json({ success: true, action });
+                return;
+            }
+
+            if (action === "reset") {
+                await gateway.sendSessionMessage(sessionKey, "/reset");
+                res.json({ success: true, action });
+                return;
+            }
+
+            res.status(400).json({ error: `Unsupported action: ${action}` });
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
+
     // Kill a session
     app.delete("/api/sessions/:id", (async (_req, res) => {
         try {

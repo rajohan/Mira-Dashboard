@@ -40,7 +40,7 @@ export function Select({
             <MenuButton
                 className={cn(
                     "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm transition-colors",
-                    "data-hover:border-indigo-500 data-focus:outline-none data-focus:ring-2 data-focus:ring-indigo-500",
+                    "hover:border-indigo-500 hover:bg-primary-700 data-[focus]:outline-none data-[focus]:ring-2 data-[focus]:ring-indigo-500",
                     width,
                     className
                 )}
@@ -63,8 +63,8 @@ export function Select({
                         <button
                             onClick={() => onChange(option.value)}
                             className={cn(
-                                "flex w-full flex-col px-3 py-2 text-left text-sm",
-                                "data-focus:bg-primary-700",
+                                "flex w-full flex-col px-3 py-2 text-left text-sm transition-colors",
+                                "hover:bg-primary-700 data-[focus]:bg-primary-700",
                                 value === option.value && "text-indigo-400"
                             )}
                         >

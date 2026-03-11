@@ -437,6 +437,12 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
     });
 }
 
+async function abortSessionRun(sessionKey: string): Promise<void> {
+    await sendRequestAsync("chat.abort", {
+        sessionKey,
+    });
+}
+
 async function request(method: string, params: Record<string, unknown>): Promise<unknown> {
     return sendRequestAsync(method, params);
 }
@@ -495,6 +501,7 @@ export default {
     getGatewayWs,
     getSessionHistory,
     sendSessionMessage,
+    abortSessionRun,
     request,
 };
 

@@ -1,9 +1,8 @@
-import { Database, MoreVertical, RotateCcw, Square, Trash2 } from "lucide-react";
+import { Database, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 
 import { Dropdown, type DropdownItem } from "../../ui/Dropdown";
 
 interface SessionActionsDropdownProps {
-    onStop: () => void;
     onCompact: () => void;
     onReset: () => void;
     onDelete?: () => void;
@@ -11,18 +10,12 @@ interface SessionActionsDropdownProps {
 }
 
 export function SessionActionsDropdown({
-    onStop,
     onCompact,
     onReset,
     onDelete,
     showDelete = true,
 }: SessionActionsDropdownProps) {
     const items: DropdownItem[] = [
-        {
-            label: "Stop",
-            icon: <Square className="h-4 w-4 text-primary-400" />,
-            onClick: onStop,
-        },
         {
             label: "Compact",
             icon: <Database className="h-4 w-4 text-primary-400" />,

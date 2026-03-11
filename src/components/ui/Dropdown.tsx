@@ -71,11 +71,11 @@ export function Dropdown({
                                 type="button"
                                 onClick={item.onClick}
                                 className={cn(
-                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                                    "data-focus:bg-primary-700 data-focus:text-primary-100",
-                                    "data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                                    "hover:bg-primary-700 hover:text-primary-100 data-[focus]:bg-primary-700 data-[focus]:text-primary-100",
+                                    "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
                                     item.variant === "danger"
-                                        ? "data-focus:bg-red-500/20 text-red-400"
+                                        ? "text-red-400 hover:bg-red-500/20 data-[focus]:bg-red-500/20"
                                         : "text-primary-300"
                                 )}
                             >

@@ -23,7 +23,6 @@ const columnHelper = createColumnHelper<Session>();
 interface SessionsTableProps {
     sessions: Session[];
     onSelectSession: (session: Session) => void;
-    onStop: (key: string) => void;
     onCompact: (key: string) => void;
     onReset: (key: string) => void;
     onDelete: (session: Session) => void;
@@ -32,7 +31,6 @@ interface SessionsTableProps {
 export function SessionsTable({
     sessions,
     onSelectSession,
-    onStop,
     onCompact,
     onReset,
     onDelete,
@@ -103,7 +101,6 @@ export function SessionsTable({
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <SessionActionsDropdown
-                        onStop={() => onStop(row.original.key)}
                         onCompact={() => onCompact(row.original.key)}
                         onReset={() => onReset(row.original.key)}
                         onDelete={() => onDelete(row.original)}

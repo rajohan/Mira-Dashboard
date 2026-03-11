@@ -14,7 +14,6 @@ interface SessionDetailsProps {
     session: Session | null;
     onClose: () => void;
     onDelete: () => void;
-    onStop: () => void;
     onCompact: () => void;
     onReset: () => void;
 }
@@ -23,7 +22,6 @@ export function SessionDetails({
     session,
     onClose,
     onDelete,
-    onStop,
     onCompact,
     onReset,
 }: SessionDetailsProps) {
@@ -60,7 +58,6 @@ export function SessionDetails({
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
                         <SessionActionsDropdown
-                            onStop={onStop}
                             onCompact={onCompact}
                             onReset={onReset}
                             onDelete={onDelete}

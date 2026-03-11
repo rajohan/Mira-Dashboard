@@ -14,7 +14,6 @@ import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
-import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { type FeedItem, useLiveFeed } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
@@ -25,9 +24,8 @@ import { formatDate } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 export function Sessions() {
-    const { isConnected, error, request } = useOpenClawSocket();
+    const { isConnected, error } = useOpenClawSocket();
     const sessionActions = useSessionActions();
-    const [isLoading, setIsLoading] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
@@ -141,15 +139,6 @@ export function Sessions() {
         })),
     ];
 
-    const handleRefresh = async () => {
-        setIsLoading(true);
-        try {
-            await request("sessions.list", {});
-        } finally {
-            setTimeout(() => setIsLoading(false), 300);
-        }
-    };
-
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key) return;
         try {
@@ -164,14 +153,6 @@ export function Sessions() {
 
     return (
         <div className="p-6">
-            <div className="mb-6 flex justify-end">
-                <RefreshButton
-                    onClick={handleRefresh}
-                    isLoading={isLoading}
-                    disabled={!isConnected}
-                />
-            </div>
-
             <Card className="mb-4">
                 <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
@@ -267,7 +248,6 @@ export function Sessions() {
                 <SessionsTable
                     sessions={filteredSessions}
                     onSelectSession={setSelectedSession}
-                    onStop={(sessionKey: string) => sessionActions.stop(sessionKey)}
                     onCompact={(sessionKey: string) => sessionActions.compact(sessionKey)}
                     onReset={(sessionKey: string) => sessionActions.reset(sessionKey)}
                     onDelete={setDeleteTarget}
@@ -296,12 +276,6 @@ export function Sessions() {
                 onDelete={() => {
                     if (selectedSession) {
                         setDeleteTarget(selectedSession);
-                        setSelectedSession(null);
-                    }
-                }}
-                onStop={() => {
-                    if (selectedSession) {
-                        sessionActions.stop(selectedSession.key);
                         setSelectedSession(null);
                     }
                 }}
