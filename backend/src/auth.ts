@@ -21,6 +21,11 @@ export interface AuthUser {
     username: string;
 }
 
+const LOOPBACK_USER: AuthUser = {
+    id: 0,
+    username: "mira-local",
+};
+
 function parseCookies(cookieHeader?: string): Record<string, string> {
     if (!cookieHeader) {
         return {};
@@ -61,6 +66,23 @@ function isProduction(request?: IncomingMessage): boolean {
         return forwardedProto.split(",")[0]?.trim() === "https";
     }
     return process.env.NODE_ENV === "production";
+}
+
+function isLoopbackAddress(address?: string | null): boolean {
+    if (!address) {
+        return false;
+    }
+
+    return (
+        address === "127.0.0.1" ||
+        address === "::1" ||
+        address === "::ffff:127.0.0.1"
+    );
+}
+
+export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
+    const remoteAddress = request.socket?.remoteAddress;
+    return isLoopbackAddress(remoteAddress);
 }
 
 export function hashPassword(password: string): string {
@@ -177,6 +199,10 @@ export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
 }
 
 export function getAuthUserFromRequest(request: express.Request | IncomingMessage): AuthUser | null {
+    if (isLoopbackRequest(request)) {
+        return LOOPBACK_USER;
+    }
+
     const sessionId = getSessionIdFromCookieHeader(request.headers.cookie);
     if (!sessionId) {
         return null;
