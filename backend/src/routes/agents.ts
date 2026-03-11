@@ -2,6 +2,7 @@ import express, { type RequestHandler } from "express";
 import FS from "fs";
 import JSON5 from "json5";
 import Path from "path";
+import gateway from "../gateway.js";
 import { db } from "../db.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
@@ -36,6 +37,7 @@ interface AgentsConfig {
             primary?: string;
             fallbacks?: string[];
         };
+        models?: Record<string, { alias?: string }>;
     };
     list: AgentConfig[];
 }
@@ -68,6 +70,74 @@ interface AgentTaskHistoryItem {
     startedAt: string;
     completedAt: string | null;
     lastActivityAt: string;
+}
+
+interface GatewaySessionSummary {
+    key: string;
+    model: string;
+    updatedAt?: number | null;
+}
+
+function toDisplayModelName(model: string): string {
+    if (!model) {
+        return "unknown";
+    }
+
+    const slashIndex = model.indexOf("/");
+    return slashIndex === -1 ? model : model.slice(slashIndex + 1);
+}
+
+function resolveConfiguredModelName(
+    configuredModel: string | undefined,
+    config: AgentsConfig
+): string {
+    if (!configuredModel) {
+        return "unknown";
+    }
+
+    const configured = configuredModel.trim();
+    if (!configured) {
+        return "unknown";
+    }
+
+    const aliases = config.defaults?.models || {};
+    const matchedEntry = Object.entries(aliases).find(
+        ([, value]) => value?.alias === configured
+    );
+
+    if (matchedEntry) {
+        return toDisplayModelName(matchedEntry[0]);
+    }
+
+    return toDisplayModelName(configured);
+}
+
+async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
+    const cached = gateway.getSessions().map((session) => ({
+        key: session.key,
+        model: session.model,
+        updatedAt: session.updatedAt,
+    }));
+
+    try {
+        const result = (await gateway.request("sessions.list", {})) as {
+            sessions?: Array<{ key?: string; model?: string; updatedAt?: number | null }>;
+        };
+
+        if (Array.isArray(result.sessions) && result.sessions.length > 0) {
+            return result.sessions
+                .filter((session) => typeof session.key === "string" && session.key.length > 0)
+                .map((session) => ({
+                    key: session.key || "",
+                    model: session.model || "Unknown",
+                    updatedAt: session.updatedAt,
+                }));
+        }
+    } catch {
+        // Fall back to cached sessions below
+    }
+
+    return cached;
 }
 
 function nowIso(): string {
@@ -436,6 +506,33 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
     return "idle";
 }
 
+function findBestSessionForAgent(
+    agentId: string,
+    sessions: GatewaySessionSummary[]
+): GatewaySessionSummary | undefined {
+    const prefix = `agent:${agentId}:`;
+    const matches = sessions.filter((session) => session.key.startsWith(prefix));
+
+    if (matches.length === 0) {
+        return undefined;
+    }
+
+    const preferredKinds = [":main", ":discord:", ":telegram:", ":signal:", ":whatsapp:", ":slack:", ":imessage:", ":line:", ":irc:", ":googlechat:", ":channel:"];
+
+    return matches.sort((a, b) => {
+        const timeA = a.updatedAt || 0;
+        const timeB = b.updatedAt || 0;
+        const preferredA = preferredKinds.some((part) => a.key.includes(part)) ? 1 : 0;
+        const preferredB = preferredKinds.some((part) => b.key.includes(part)) ? 1 : 0;
+
+        if (preferredA !== preferredB) {
+            return preferredB - preferredA;
+        }
+
+        return timeB - timeA;
+    })[0];
+}
+
 function getAgentStatus(agentId: string): AgentStatus {
     // Auto-close stale active tasks before reading current state
     closeStaleActiveTasks();
@@ -513,10 +610,21 @@ export default function agentsRoutes(app: express.Application): void {
             }
 
             const defaultModel = config.defaults?.model?.primary || "unknown";
+            const sessions = await getGatewaySessionsForAgents();
 
             const agents: AgentStatus[] = config.list.map((agent) => {
                 const status = getAgentStatus(agent.id);
-                status.model = agent.model?.primary || defaultModel;
+                const configuredModel = resolveConfiguredModelName(
+                    agent.model?.primary || defaultModel,
+                    config
+                );
+                const matchingSession = status.sessionKey
+                    ? sessions.find((session) => session.key === status.sessionKey)
+                    : findBestSessionForAgent(agent.id, sessions);
+                status.model =
+                    matchingSession?.model && matchingSession.model !== configuredModel
+                        ? matchingSession.model
+                        : configuredModel;
                 return status;
             });
 
@@ -545,7 +653,18 @@ export default function agentsRoutes(app: express.Application): void {
             }
 
             const status = getAgentStatus(agentId);
-            status.model = agentConfig.model?.primary || config.defaults?.model?.primary || "unknown";
+            const sessions = await getGatewaySessionsForAgents();
+            const configuredModel = resolveConfiguredModelName(
+                agentConfig.model?.primary || config.defaults?.model?.primary,
+                config
+            );
+            const matchingSession = status.sessionKey
+                ? sessions.find((session) => session.key === status.sessionKey)
+                : findBestSessionForAgent(agentId, sessions);
+            status.model =
+                matchingSession?.model && matchingSession.model !== configuredModel
+                    ? matchingSession.model
+                    : configuredModel;
 
             res.json(status);
         } catch (error) {
