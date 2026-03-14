@@ -24,11 +24,11 @@ export function writeLogFromWebSocket(line: string) {
 
     try {
         const parsed = parseLogLine(line);
-        if (parsed) {
-            logsCollection.utils.writeUpsert(
-                parsed as unknown as Partial<Record<string, unknown>>
-            );
+        if (!parsed) {
+            return;
         }
+
+        logsCollection.utils.writeUpsert(parsed as unknown as Partial<Record<string, unknown>>);
     } catch (error) {
         console.error("Error parsing log line:", line, error);
     }

@@ -7,6 +7,137 @@ export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] a
 
 let logIdCounter = 0;
 
+function safeJsonParse(value: string): unknown {
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
+function stringifyCompact(value: unknown): string {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function normalizeSubsystemCandidate(value: string): string {
+    return value.replace(/^agent\//, "");
+}
+
+function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: string } {
+    const bracketMatch = msg.match(/^\[([^\]]+)\]\s*/);
+    if (bracketMatch) {
+        return {
+            subsystem: normalizeSubsystemCandidate(bracketMatch[1] || ""),
+            msg: msg.slice(bracketMatch[0].length),
+        };
+    }
+
+    const colonMatch = msg.match(/^([a-zA-Z][\w/-]*):\s*/);
+    if (colonMatch) {
+        return {
+            subsystem: normalizeSubsystemCandidate(colonMatch[1] || ""),
+            msg: msg.slice(colonMatch[0].length),
+        };
+    }
+
+    return { subsystem: "", msg };
+}
+
+function normalizeStructuredMessage(parsed: Record<string, unknown>): {
+    msg: string;
+    subsystem: string;
+} | null {
+    const positionalZero = parsed[0] ?? parsed["0"];
+    const positionalOne = parsed[1] ?? parsed["1"];
+    const positionalTwo = parsed[2] ?? parsed["2"];
+
+    let subsystem = "";
+    let msg = "";
+
+    if (typeof positionalZero === "string") {
+        const trimmed = positionalZero.trim();
+
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            const nested = safeJsonParse(trimmed);
+            if (nested && typeof nested === "object") {
+                const nestedRecord = nested as Record<string, unknown>;
+                subsystem =
+                    typeof nestedRecord.subsystem === "string"
+                        ? nestedRecord.subsystem
+                        : typeof nestedRecord.module === "string"
+                          ? nestedRecord.module
+                          : "";
+
+                const nestedMessage =
+                    nestedRecord.msg ?? nestedRecord.message ?? nestedRecord[0] ?? nestedRecord["0"];
+                if (typeof nestedMessage === "string" && nestedMessage.trim()) {
+                    msg = nestedMessage;
+                } else if (nestedMessage != null && String(nestedMessage).trim()) {
+                    msg = stringifyCompact(nestedMessage);
+                } else if (!subsystem) {
+                    msg = positionalZero;
+                }
+            } else {
+                msg = positionalZero;
+            }
+        } else {
+            msg = positionalZero;
+        }
+    } else if (positionalZero != null && positionalZero !== "") {
+        msg = stringifyCompact(positionalZero);
+    }
+
+    if (!msg && typeof positionalOne === "string") {
+        msg = positionalOne;
+    } else if (!msg && positionalOne != null) {
+        msg = stringifyCompact(positionalOne);
+    }
+
+    if (!msg && typeof positionalTwo === "string") {
+        msg = positionalTwo;
+    }
+
+    if (!msg) {
+        const fallback = parsed.msg ?? parsed.message;
+        if (typeof fallback === "string") {
+            msg = fallback;
+        } else if (fallback != null) {
+            msg = stringifyCompact(fallback);
+        }
+    }
+
+    if (!msg.trim()) {
+        msg = stringifyCompact(parsed);
+    }
+
+    if (!subsystem) {
+        const extracted = extractSubsystemAndMessage(msg);
+        subsystem = extracted.subsystem;
+        msg = extracted.msg;
+    }
+
+    return { subsystem, msg };
+}
+
+function buildDedupeKey(entry: {
+    ts?: string;
+    level?: string;
+    subsystem?: string;
+    msg: string;
+}): string {
+    return [entry.ts || "", (entry.level || "").toLowerCase(), entry.subsystem || "", entry.msg]
+        .join("|")
+        .trim();
+}
+
 export function parseLogLine(line: string, index?: number): LogEntry | null {
     if (!line || !line.trim()) return null;
 
@@ -20,73 +151,54 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
     }
 
     try {
-        const parsed = JSON.parse(jsonStr);
+        const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+        const level =
+            typeof parsed._meta === "object" && parsed._meta && "logLevelName" in parsed._meta
+                ? String((parsed._meta as Record<string, unknown>).logLevelName || "INFO")
+                : String(parsed.level || parsed.lvl || "INFO");
+        const ts =
+            typeof parsed._meta === "object" && parsed._meta && "date" in parsed._meta
+                ? String((parsed._meta as Record<string, unknown>).date || "")
+                : String(parsed.time || parsed.timestamp || "");
 
-        const level = parsed._meta?.logLevelName || parsed.level || parsed.lvl || "INFO";
-        const ts = parsed._meta?.date || parsed.time || parsed.timestamp;
-        // Generate unique ID using timestamp + line index + counter
-        const uniqueId = `${ts || Date.now()}-${index ?? logIdCounter++}-${Math.random().toString(36).slice(2, 8)}`;
-
-        let subsystem = "";
-        let msg = "";
-
-        if (parsed[0]) {
-            if (typeof parsed[0] === "string" && parsed[0].startsWith("{")) {
-                try {
-                    const subParsed = JSON.parse(parsed[0]);
-                    subsystem = subParsed.subsystem || subParsed.module || "";
-                } catch {
-                    msg = String(parsed[0]);
-                }
-            } else if (typeof parsed[0] === "string") {
-                msg = parsed[0];
-            }
+        const normalized = normalizeStructuredMessage(parsed);
+        if (!normalized) {
+            return null;
         }
 
-        if (parsed[1] && !msg) {
-            if (typeof parsed[1] === "string") {
-                msg = parsed[1];
-            } else if (parsed[2] && typeof parsed[2] === "string") {
-                msg = parsed[2];
-            } else if (typeof parsed[1] === "object") {
-                msg = JSON.stringify(parsed[1]);
-            }
-        }
-
-        if (!msg) {
-            msg = parsed.msg || parsed.message || line;
-        }
-
-        // Ensure msg is always a string
-        if (typeof msg !== "string") {
-            msg = JSON.stringify(msg);
-        }
-
-        if (!subsystem && msg) {
-            const bracketMatch = msg.match(/^\[(\w+)\]\s*/);
-            if (bracketMatch) {
-                subsystem = bracketMatch[1];
-                msg = msg.slice(bracketMatch[0].length);
-            } else {
-                const colonMatch = msg.match(/^(\w+):\s*/);
-                if (colonMatch) {
-                    subsystem = colonMatch[1];
-                    msg = msg.slice(colonMatch[0].length);
-                }
-            }
-        }
+        const dedupeKey = buildDedupeKey({
+            ts,
+            level,
+            subsystem: normalized.subsystem,
+            msg: normalized.msg,
+        });
+        const uniqueId = `${dedupeKey || ts || Date.now()}-${index ?? logIdCounter++}`;
 
         return {
             id: uniqueId,
+            dedupeKey,
             ts,
             level: level.toLowerCase(),
-            subsystem,
-            msg,
+            subsystem: normalized.subsystem,
+            msg: normalized.msg,
             raw: line,
         };
     } catch {
-        const errorId = `${Date.now()}-${index ?? logIdCounter++}-${Math.random().toString(36).slice(2, 8)}`;
-        return { id: errorId, msg: line, raw: line };
+        const extracted = extractSubsystemAndMessage(line);
+        const msg = extracted.msg || line;
+        const dedupeKey = buildDedupeKey({
+            level: undefined,
+            subsystem: extracted.subsystem,
+            msg,
+        });
+        const errorId = `${dedupeKey || Date.now()}-${index ?? logIdCounter++}`;
+        return {
+            id: errorId,
+            dedupeKey,
+            subsystem: extracted.subsystem,
+            msg,
+            raw: line,
+        };
     }
 }
 

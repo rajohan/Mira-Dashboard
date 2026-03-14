@@ -1,6 +1,47 @@
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 
 import WebSocket from "ws";
+
+const require = createRequire(import.meta.url);
+
+type OpenClawGatewayClientOptions = {
+    url?: string;
+    token?: string;
+    role?: string;
+    scopes?: string[];
+    caps?: string[];
+    clientName?: string;
+    clientDisplayName?: string;
+    mode?: string;
+    platform?: string;
+    deviceFamily?: string;
+    deviceIdentity?: unknown;
+    onHelloOk?: () => void;
+    onEvent?: (evt: { event?: string; payload?: unknown }) => void;
+    onConnectError?: (err: Error) => void;
+    onClose?: (code: number, reason: string) => void;
+};
+
+type OpenClawGatewayClientInstance = {
+    start: () => void;
+    stop: () => void;
+    request: (method: string, params?: unknown) => Promise<unknown>;
+};
+
+type OpenClawGatewayClientCtor = new (
+    opts: OpenClawGatewayClientOptions
+) => OpenClawGatewayClientInstance;
+
+const openclawGatewayRuntime = require(
+    "/home/ubuntu/.npm-global/lib/node_modules/openclaw/dist/reply-Bm8VrLQh.js"
+) as {
+    zs: OpenClawGatewayClientCtor;
+    Pl: () => unknown;
+};
+
+const OpenClawGatewayClient = openclawGatewayRuntime.zs;
+const loadOrCreateDeviceIdentity = openclawGatewayRuntime.Pl;
 
 import {
     subscribeToLogs as logsSubscribe,
@@ -42,29 +83,21 @@ interface PendingRequest {
     clientWs: WebSocket;
     clientId: string;
     method?: string;
-    resolve?: (value: unknown) => void;
-    reject?: (reason: unknown) => void;
 }
 
-interface GatewayMessage {
-    type: string;
-    id: string;
-    method?: string;
-    ok?: boolean;
-    payload?: { sessions?: GatewaySession[] };
-    error?: string;
-    event?: string;
-    params?: Record<string, unknown>;
+interface HistoryMessage {
+    role?: string;
+    content?: string | Array<{ type?: string; text?: string }>;
+    timestamp?: string | number;
 }
 
-let gatewayWs: WebSocket | null = null;
+let gatewayClient: OpenClawGatewayClientInstance | null = null;
 const subscribers = new Set<WebSocket>();
 let sessionList: Session[] = [];
 let isGatewayConnected = false;
-let reconnectTimer: NodeJS.Timeout | null = null;
-let connectionAttempts = 0;
 let requestId = 1000;
 const pendingRequests = new Map<string, PendingRequest>();
+let currentToken: string | null = null;
 
 function transformSession(session: GatewaySession): Session {
     let type = "UNKNOWN";
@@ -104,9 +137,9 @@ function transformSession(session: GatewaySession): Session {
     return {
         id: session.sessionId || session.key || "unknown",
         key: session.key || "",
-        type: type,
-        agentType: agentType,
-        hookName: hookName,
+        type,
+        agentType,
+        hookName,
         kind: session.kind,
         model: session.model || "Unknown",
         tokenCount: session.totalTokens || 0,
@@ -115,7 +148,7 @@ function transformSession(session: GatewaySession): Session {
         updatedAt: session.updatedAt,
         displayName: session.displayName || "",
         label: session.label || "",
-        displayLabel: displayLabel,
+        displayLabel,
         channel: session.channel || "unknown",
     };
 }
@@ -131,182 +164,122 @@ function broadcast(msg: unknown): void {
     }
 }
 
-function connect(token: string): void {
-    if (
-        gatewayWs &&
-        (gatewayWs.readyState === WebSocket.OPEN ||
-            gatewayWs.readyState === WebSocket.CONNECTING)
-    ) {
+async function refreshSessions(): Promise<void> {
+    if (!gatewayClient || !isGatewayConnected) {
         return;
     }
 
-    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
+    const payload = (await gatewayClient.request("sessions.list", {})) as {
+        sessions?: GatewaySession[];
+    };
 
-    try {
-        const ws = new WebSocket(gatewayUrl + "?token=" + encodeURIComponent(token));
-        gatewayWs = ws;
-        connectionAttempts++;
+    sessionList = (payload.sessions || []).map(transformSession);
+    broadcast({ type: "sessions", sessions: sessionList });
+}
 
-        ws.on("open", () => {
-            ws.send(
-                JSON.stringify({
-                    type: "req",
-                    id: "connect-1",
-                    method: "connect",
-                    params: {
-                        minProtocol: 3,
-                        maxProtocol: 3,
-                        client: {
-                            id: "cli",
-                            version: "1.0.0",
-                            platform: "node",
-                            mode: "backend",
-                        },
-                        role: "operator",
-                        scopes: ["operator.read", "operator.write", "operator.admin"],
-                        caps: ["tool-events"],
-                        auth: { token },
-                    },
-                })
-            );
-        });
-
-        ws.on("message", (data: Buffer) => {
-            try {
-                const msg = JSON.parse(data.toString()) as GatewayMessage;
-
-                if (msg.type === "res" && msg.id === "connect-1") {
-                    if (msg.ok) {
-                        isGatewayConnected = true;
-                        connectionAttempts = 0;
-                        broadcast({ type: "connected", gatewayConnected: true });
-                        ws.send(
-                            JSON.stringify({
-                                type: "req",
-                                id: "sessions-init",
-                                method: "sessions.list",
-                                params: {},
-                            })
-                        );
-                    } else {
-                        console.error("[Gateway] Connect failed:", msg.error);
-                    }
-                    return;
-                }
-
-                if (
-                    msg.type === "res" &&
-                    (msg.id === "sessions-init" || msg.id === "sessions-refresh")
-                ) {
-                    if (msg.ok && msg.payload?.sessions) {
-                        sessionList = msg.payload.sessions.map(transformSession);
-                        broadcast({ type: "sessions", sessions: sessionList });
-                    }
-                    return;
-                }
-
-                if (
-                    msg.type === "res" &&
-                    msg.method === "sessions.list" &&
-                    msg.ok &&
-                    msg.payload?.sessions
-                ) {
-                    sessionList = msg.payload.sessions.map(transformSession);
-                    broadcast({ type: "sessions", sessions: sessionList });
-                    return;
-                }
-
-                if (msg.type === "res" && pendingRequests.has(msg.id)) {
-                    const pending = pendingRequests.get(msg.id);
-                    pendingRequests.delete(msg.id);
-
-                    // Handle async requests with resolve/reject
-                    if (pending?.resolve || pending?.reject) {
-                        if (msg.ok) {
-                            pending.resolve?.(msg.payload);
-                        } else {
-                            pending.reject?.(msg.error || "Request failed");
-                        }
-                        return;
-                    }
-
-                    if (
-                        pending?.clientWs &&
-                        pending.clientWs.readyState === WebSocket.OPEN
-                    ) {
-                        pending.clientWs.send(
-                            JSON.stringify({
-                                type: "res",
-                                id: pending.clientId,
-                                ok: msg.ok,
-                                payload: msg.payload,
-                                error: msg.error,
-                            })
-                        );
-                    }
-
-                    if (pending?.method && pending.method.startsWith("sessions.")) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "req",
-                                id: "sessions-refresh",
-                                method: "sessions.list",
-                                params: {},
-                            })
-                        );
-                    }
-                    return;
-                }
-
-                if (msg.type === "event") {
-                    broadcast({ type: "event", event: msg.event, payload: msg.payload });
-                }
-            } catch (error) {
-                console.error("[Gateway] Parse error:", (error as Error).message);
-            }
-        });
-
-        ws.on("close", (_code: number) => {
-            gatewayWs = null;
-            isGatewayConnected = false;
-            broadcast({ type: "disconnected" });
-            scheduleReconnect(token);
-        });
-
-        ws.on("error", (err: Error) => {
-            console.error("[Gateway] Error:", err.message);
-        });
-    } catch (error) {
-        console.error("[Gateway] Connect error:", (error as Error).message);
-        scheduleReconnect(token);
+function init(token: string): void {
+    if (currentToken === token && gatewayClient) {
+        return;
     }
+
+    currentToken = token;
+    gatewayClient?.stop();
+    gatewayClient = new OpenClawGatewayClient({
+        url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
+        token,
+        role: "operator",
+        scopes: ["operator.read", "operator.write", "operator.admin"],
+        caps: ["tool-events"],
+        clientName: "gateway-client",
+        clientDisplayName: "Mira Dashboard Backend",
+        mode: "backend",
+        platform: "node",
+        deviceFamily: "server",
+        deviceIdentity: loadOrCreateDeviceIdentity(),
+        onHelloOk: () => {
+            isGatewayConnected = true;
+            broadcast({ type: "connected", gatewayConnected: true });
+            void refreshSessions().catch((error) => {
+                console.error("[Gateway] Failed to refresh sessions:", (error as Error).message);
+            });
+        },
+        onEvent: (evt) => {
+            broadcast({ type: "event", event: evt.event, payload: evt.payload });
+            if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
+                void refreshSessions().catch((error) => {
+                    console.error("[Gateway] Failed to refresh sessions:", (error as Error).message);
+                });
+            }
+        },
+        onConnectError: (err) => {
+            console.error("[Gateway] Connect failed:", err.message);
+        },
+        onClose: () => {
+            isGatewayConnected = false;
+            broadcast({ type: "disconnected", gatewayConnected: false });
+        },
+    });
+
+    gatewayClient.start();
 }
 
-function scheduleReconnect(token: string): void {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    const delay = Math.min(5000 * Math.pow(1.5, connectionAttempts), 60000);
-    reconnectTimer = setTimeout(() => connect(token), delay);
-}
-
-function sendRequest(
+async function forwardRequest(
     method: string,
     params: Record<string, unknown>,
     clientWs?: WebSocket,
     clientId?: string
-): boolean {
-    if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+): Promise<boolean> {
+    if (!gatewayClient || !isGatewayConnected) {
         return false;
     }
 
-    const id = String(++requestId);
-    const req = { type: "req", id, method, params };
-
     if (clientWs && clientId) {
+        const id = String(++requestId);
         pendingRequests.set(id, { clientWs, clientId, method });
+
+        try {
+            const payload = await gatewayClient.request(method, params);
+            const pending = pendingRequests.get(id);
+            pendingRequests.delete(id);
+            if (pending?.clientWs.readyState === WebSocket.OPEN) {
+                pending.clientWs.send(
+                    JSON.stringify({
+                        type: "res",
+                        id: pending.clientId,
+                        ok: true,
+                        payload,
+                    })
+                );
+            }
+            if (method.startsWith("sessions.")) {
+                await refreshSessions();
+            }
+        } catch (error) {
+            const pending = pendingRequests.get(id);
+            pendingRequests.delete(id);
+            if (pending?.clientWs.readyState === WebSocket.OPEN) {
+                pending.clientWs.send(
+                    JSON.stringify({
+                        type: "res",
+                        id: pending.clientId,
+                        ok: false,
+                        error: error instanceof Error ? error.message : String(error),
+                    })
+                );
+            }
+        }
+        return true;
     }
 
-    gatewayWs.send(JSON.stringify(req));
-    return true;
+    try {
+        await gatewayClient.request(method, params);
+        if (method.startsWith("sessions.")) {
+            await refreshSessions();
+        }
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function handleClient(ws: WebSocket): void {
@@ -320,51 +293,61 @@ function handleClient(ws: WebSocket): void {
     );
 
     ws.on("message", (data: Buffer) => {
-        try {
-            const msg = JSON.parse(data.toString());
+        void (async () => {
+            try {
+                const msg = JSON.parse(data.toString());
 
-            // Handle log subscribe/unsubscribe
-            if (msg.type === "subscribe" && msg.channel === "logs") {
-                logsSubscribe(ws);
-                return;
-            }
-
-            if (msg.type === "unsubscribe" && msg.channel === "logs") {
-                logsUnsubscribe(ws);
-                return;
-            }
-
-            if (
-                (msg.type === "request" || msg.type === "req") &&
-                msg.method === "subscribe" &&
-                msg.params?.channel === "logs"
-            ) {
-                logsSubscribe(ws);
-                if (msg.id) {
-                    ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                if (msg.type === "subscribe" && msg.channel === "logs") {
+                    logsSubscribe(ws);
+                    return;
                 }
-                return;
-            }
 
-            if (
-                (msg.type === "request" || msg.type === "req") &&
-                msg.method === "unsubscribe" &&
-                msg.params?.channel === "logs"
-            ) {
-                logsUnsubscribe(ws);
-                if (msg.id) {
-                    ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                if (msg.type === "unsubscribe" && msg.channel === "logs") {
+                    logsUnsubscribe(ws);
+                    return;
                 }
-                return;
-            }
 
-            // Handle gateway requests
-            if ((msg.type === "request" || msg.type === "req") && msg.method) {
-                sendRequest(msg.method, msg.params || {}, ws, msg.id);
+                if (
+                    (msg.type === "request" || msg.type === "req") &&
+                    msg.method === "subscribe" &&
+                    msg.params?.channel === "logs"
+                ) {
+                    logsSubscribe(ws);
+                    if (msg.id) {
+                        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                    }
+                    return;
+                }
+
+                if (
+                    (msg.type === "request" || msg.type === "req") &&
+                    msg.method === "unsubscribe" &&
+                    msg.params?.channel === "logs"
+                ) {
+                    logsUnsubscribe(ws);
+                    if (msg.id) {
+                        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+                    }
+                    return;
+                }
+
+                if ((msg.type === "request" || msg.type === "req") && msg.method) {
+                    const ok = await forwardRequest(msg.method, msg.params || {}, ws, msg.id);
+                    if (!ok && msg.id && ws.readyState === WebSocket.OPEN) {
+                        ws.send(
+                            JSON.stringify({
+                                type: "res",
+                                id: msg.id,
+                                ok: false,
+                                error: "Gateway not connected",
+                            })
+                        );
+                    }
+                }
+            } catch (error) {
+                console.error("[Gateway] Client message error:", (error as Error).message);
             }
-        } catch (error) {
-            console.error("[Gateway] Client message error:", (error as Error).message);
-        }
+        })();
     });
 
     ws.on("close", () => {
@@ -388,44 +371,19 @@ function isConnected(): boolean {
     return isGatewayConnected;
 }
 
-function getGatewayWs(): WebSocket | null {
-    return gatewayWs;
+function getGatewayWs(): null {
+    return null;
 }
 
-function sendRequestAsync(
+async function sendRequestAsync(
     method: string,
     params: Record<string, unknown>
 ): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-        if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
-            reject(new Error("Gateway not connected"));
-            return;
-        }
+    if (!gatewayClient || !isGatewayConnected) {
+        throw new Error("Gateway not connected");
+    }
 
-        const id = String(++requestId);
-        const req = { type: "req", id, method, params };
-
-        const timeout = setTimeout(() => {
-            pendingRequests.delete(id);
-            reject(new Error("Request timeout"));
-        }, 30000);
-
-        pendingRequests.set(id, {
-            clientWs: {} as WebSocket,
-            clientId: "",
-            method: "",
-            resolve: (value) => {
-                clearTimeout(timeout);
-                resolve(value);
-            },
-            reject: (reason) => {
-                clearTimeout(timeout);
-                reject(reason);
-            },
-        });
-
-        gatewayWs!.send(JSON.stringify(req));
-    });
+    return gatewayClient.request(method, params);
 }
 
 async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
@@ -455,45 +413,32 @@ async function getSessionHistory(
     messages: Array<{ role: string; content: string; timestamp?: string }>;
     total: number;
 }> {
-    try {
-        const fetchLimit = 500;
-        const result = (await sendRequestAsync("chat.history", {
-            sessionKey,
-            limit: fetchLimit,
-        })) as {
-            messages?: Array<{ role?: string; content?: string; timestamp?: string }>;
-            sessionKey?: string;
-            sessionId?: string;
-        };
+    const result = (await sendRequestAsync("chat.history", {
+        sessionKey,
+        limit: Math.max(limit + offset, 200),
+    })) as {
+        messages?: HistoryMessage[];
+    };
 
-        const allMessages = (result.messages || [])
-            .map((msg) => ({
-                role: msg.role || "unknown",
-                content: msg.content || "",
-                timestamp: msg.timestamp,
-            }))
-            .sort((a, b) => {
-                // Sort descending by timestamp (newest first)
-                const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-                const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-                return timeB - timeA;
-            });
+    const allMessages = (result.messages || []).map((msg) => ({
+        role: msg.role || "unknown",
+        content: Array.isArray(msg.content)
+            ? msg.content.map((block) => block?.text || "").join("")
+            : String(msg.content || ""),
+        timestamp:
+            typeof msg.timestamp === "number"
+                ? new Date(msg.timestamp).toISOString()
+                : msg.timestamp,
+    }));
 
-        const total = allMessages.length;
-        const messages = allMessages.slice(offset, offset + limit);
-
-        return {
-            messages,
-            total,
-        };
-    } catch (error) {
-        console.error("[Gateway] Failed to get session history:", error);
-        return { messages: [], total: 0 };
-    }
+    return {
+        messages: allMessages.slice(offset, offset + limit),
+        total: allMessages.length,
+    };
 }
 
 export default {
-    init: connect,
+    init,
     handleClient,
     getStatus,
     getSessions,
