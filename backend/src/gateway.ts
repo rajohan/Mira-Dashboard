@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import Path from "node:path";
 import { createRequire } from "node:module";
 
 import WebSocket from "ws";
@@ -42,6 +44,29 @@ const openclawGatewayRuntime = require(
 
 const OpenClawGatewayClient = openclawGatewayRuntime.zs;
 const loadOrCreateDeviceIdentity = openclawGatewayRuntime.Pl;
+
+const DASHBOARD_OPENCLAW_HOME =
+    process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
+    Path.join(process.cwd(), "data", "openclaw-client");
+
+function loadOrCreateDashboardDeviceIdentity(): unknown {
+    const previousHome = process.env.HOME;
+
+    fs.mkdirSync(Path.join(DASHBOARD_OPENCLAW_HOME, ".openclaw", "identity"), {
+        recursive: true,
+    });
+
+    try {
+        process.env.HOME = DASHBOARD_OPENCLAW_HOME;
+        return loadOrCreateDeviceIdentity();
+    } finally {
+        if (typeof previousHome === "string") {
+            process.env.HOME = previousHome;
+        } else {
+            delete process.env.HOME;
+        }
+    }
+}
 
 import {
     subscribeToLogs as logsSubscribe,
@@ -195,7 +220,7 @@ function init(token: string): void {
         mode: "backend",
         platform: "node",
         deviceFamily: "server",
-        deviceIdentity: loadOrCreateDeviceIdentity(),
+        deviceIdentity: loadOrCreateDashboardDeviceIdentity(),
         onHelloOk: () => {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
