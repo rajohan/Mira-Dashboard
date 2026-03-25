@@ -35,15 +35,59 @@ type OpenClawGatewayClientCtor = new (
     opts: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
 
-const openclawGatewayRuntime = require(
-    "/home/ubuntu/.npm-global/lib/node_modules/openclaw/dist/reply-Bm8VrLQh.js"
-) as {
-    zs: OpenClawGatewayClientCtor;
-    Pl: () => unknown;
-};
+function loadOpenClawGatewayRuntime(): {
+    GatewayClient?: OpenClawGatewayClientCtor;
+    loadOrCreateDeviceIdentity?: () => unknown;
+    u?: OpenClawGatewayClientCtor;
+    dn?: () => unknown;
+    zs?: OpenClawGatewayClientCtor;
+    Pl?: () => unknown;
+} {
+    const distDir = "/home/ubuntu/.npm-global/lib/node_modules/openclaw/dist";
+    const entries = fs.readdirSync(distDir);
 
-const OpenClawGatewayClient = openclawGatewayRuntime.zs;
-const loadOrCreateDeviceIdentity = openclawGatewayRuntime.Pl;
+    const candidates = [
+        ...entries.filter((entry) => entry.startsWith("method-scopes-") && entry.endsWith(".js")),
+        ...entries.filter((entry) => entry.startsWith("reply-") && entry.endsWith(".js")),
+    ];
+
+    for (const entry of candidates) {
+        const runtime = require(Path.join(distDir, entry)) as {
+            GatewayClient?: OpenClawGatewayClientCtor;
+            loadOrCreateDeviceIdentity?: () => unknown;
+            u?: OpenClawGatewayClientCtor;
+            dn?: () => unknown;
+            zs?: OpenClawGatewayClientCtor;
+            Pl?: () => unknown;
+        };
+
+        if (
+            (typeof runtime.u === "function" || typeof runtime.GatewayClient === "function" || typeof runtime.zs === "function") &&
+            (typeof runtime.dn === "function" || typeof runtime.loadOrCreateDeviceIdentity === "function" || typeof runtime.Pl === "function")
+        ) {
+            return runtime;
+        }
+    }
+
+    throw new Error("Could not locate compatible OpenClaw gateway runtime in dist/");
+}
+
+const openclawGatewayRuntime = loadOpenClawGatewayRuntime();
+const resolvedGatewayClientCtor =
+    openclawGatewayRuntime.GatewayClient ||
+    openclawGatewayRuntime.u ||
+    openclawGatewayRuntime.zs;
+const resolvedLoadOrCreateDeviceIdentity =
+    openclawGatewayRuntime.loadOrCreateDeviceIdentity ||
+    openclawGatewayRuntime.dn ||
+    openclawGatewayRuntime.Pl;
+
+if (!resolvedGatewayClientCtor || !resolvedLoadOrCreateDeviceIdentity) {
+    throw new Error("Failed to resolve OpenClaw gateway runtime exports");
+}
+
+const OpenClawGatewayClient: OpenClawGatewayClientCtor = resolvedGatewayClientCtor;
+const loadOrCreateDeviceIdentity: () => unknown = resolvedLoadOrCreateDeviceIdentity;
 
 const DASHBOARD_OPENCLAW_HOME =
     process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
