@@ -93,16 +93,33 @@ const DASHBOARD_OPENCLAW_HOME =
     process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
     Path.join(process.cwd(), "data", "openclaw-client");
 
-function loadOrCreateDashboardDeviceIdentity(): unknown {
+function loadOrCreateDashboardDeviceIdentity(): unknown | undefined {
     const previousHome = process.env.HOME;
+    const identityDir = Path.join(DASHBOARD_OPENCLAW_HOME, ".openclaw", "identity");
 
-    fs.mkdirSync(Path.join(DASHBOARD_OPENCLAW_HOME, ".openclaw", "identity"), {
+    fs.mkdirSync(identityDir, {
         recursive: true,
     });
 
     try {
         process.env.HOME = DASHBOARD_OPENCLAW_HOME;
-        return loadOrCreateDeviceIdentity();
+
+        try {
+            return loadOrCreateDeviceIdentity();
+        } catch (firstError) {
+            fs.rmSync(identityDir, { recursive: true, force: true });
+            fs.mkdirSync(identityDir, { recursive: true });
+
+            try {
+                return loadOrCreateDeviceIdentity();
+            } catch (secondError) {
+                console.warn(
+                    "[Gateway] Failed to load dashboard device identity, continuing without explicit identity:",
+                    secondError instanceof Error ? secondError.message : String(secondError)
+                );
+                return undefined;
+            }
+        }
     } finally {
         if (typeof previousHome === "string") {
             process.env.HOME = previousHome;
