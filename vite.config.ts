@@ -52,7 +52,5 @@ export default defineConfig({
                 },
             },
         },
-        // Add version to bust browser cache
-        watch: {},
     },
 });
