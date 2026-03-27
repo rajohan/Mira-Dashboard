@@ -11,6 +11,7 @@ import { authStore, authActions } from "./stores/authStore";
 import { Agents } from "./pages/Agents";
 import { Chat } from "./pages/Chat";
 import { Cron } from "./pages/Cron";
+import { Database } from "./pages/Database";
 import { Dashboard } from "./pages/Dashboard";
 import { Docker } from "./pages/Docker";
 import { Files } from "./pages/Files";
@@ -111,6 +112,12 @@ const dockerRoute = createRoute({
     component: Docker,
 });
 
+const databaseRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/database",
+    component: Database,
+});
+
 const metricsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/metrics",
@@ -159,6 +166,7 @@ const routeTree = rootRoute.addChildren([
         cronRoute,
         filesRoute,
         dockerRoute,
+        databaseRoute,
         metricsRoute,
         orgChartRoute,
         office3DRoute,
