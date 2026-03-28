@@ -59,6 +59,7 @@ export function Docker() {
         | { type: "volume"; id: string; label: string }
     >(null);
     const [actionOutput, setActionOutput] = useState<string>("");
+    const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
 
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
@@ -202,6 +203,7 @@ export function Docker() {
             <div className="grid gap-6 xl:grid-cols-2">
                 <DockerImagesTable
                     images={images}
+                    isPruning={pruningTarget === "images" && dockerPrune.isPending}
                     onDelete={(imageId, label) =>
                         setDangerousDelete({
                             type: "image",
@@ -210,14 +212,18 @@ export function Docker() {
                         })
                     }
                     onPruneUnused={() => {
+                        setPruningTarget("images");
                         void dockerPrune.mutateAsync("images").then((result) => {
                             setActionOutput(result.output || "Unused images removed");
+                        }).finally(() => {
+                            setPruningTarget(null);
                         });
                     }}
                 />
 
                 <DockerVolumesTable
                     volumes={volumes}
+                    isPruning={pruningTarget === "volumes" && dockerPrune.isPending}
                     onDelete={(volumeName) =>
                         setDangerousDelete({
                             type: "volume",
@@ -226,8 +232,11 @@ export function Docker() {
                         })
                     }
                     onPruneUnused={() => {
+                        setPruningTarget("volumes");
                         void dockerPrune.mutateAsync("volumes").then((result) => {
                             setActionOutput(result.output || "Unused volumes removed");
+                        }).finally(() => {
+                            setPruningTarget(null);
                         });
                     }}
                 />

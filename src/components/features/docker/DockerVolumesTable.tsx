@@ -30,9 +30,10 @@ interface DockerVolumesTableProps {
     volumes: DockerVolume[];
     onDelete: (volumeName: string) => void;
     onPruneUnused: () => void;
+    isPruning?: boolean;
 }
 
-export function DockerVolumesTable({ volumes, onDelete, onPruneUnused }: DockerVolumesTableProps) {
+export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning = false }: DockerVolumesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = useMemo(
@@ -113,8 +114,8 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused }: DockerV
         <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Volumes</div>
-                <Button size="sm" variant="secondary" onClick={onPruneUnused}>
-                    Remove unused ({unusedCount})
+                <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
+                    {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
             <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">

@@ -37,9 +37,10 @@ interface DockerImagesTableProps {
     images: DockerImage[];
     onDelete: (imageId: string, label: string) => void;
     onPruneUnused: () => void;
+    isPruning?: boolean;
 }
 
-export function DockerImagesTable({ images, onDelete, onPruneUnused }: DockerImagesTableProps) {
+export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning = false }: DockerImagesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = useMemo(
@@ -120,8 +121,8 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused }: DockerIma
         <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Images</div>
-                <Button size="sm" variant="secondary" onClick={onPruneUnused}>
-                    Remove unused ({unusedCount})
+                <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
+                    {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
             <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
