@@ -184,6 +184,7 @@ async function getDatabaseOverview() {
                 )::text AS cache_hit_ratio
             FROM pg_stat_database
             WHERE datname IS NOT NULL
+              AND datname NOT IN ('template0', 'template1', 'postgres')
             ORDER BY pg_database_size(datname) DESC;
         `)
     ) as PostgresDatabaseRow[];
