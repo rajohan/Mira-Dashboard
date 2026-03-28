@@ -213,7 +213,7 @@ export function DockerContainersTable({
                 cell: (info) => {
                     const container = info.row.original;
                     return (
-                        <div className="text-xs text-primary-300 break-words">
+                        <div className="text-xs break-words text-primary-300">
                             {container.ports.length > 0 ? container.ports.join(", ") : "—"}
                         </div>
                     );
@@ -226,9 +226,6 @@ export function DockerContainersTable({
                     const container = info.row.original;
                     return (
                         <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-                            <Button size="sm" variant="secondary" onClick={() => onDetails(container.id)}>
-                                Details
-                            </Button>
                             <Button size="sm" variant="secondary" onClick={() => onLogs(container.id)}>
                                 Logs
                             </Button>
@@ -248,7 +245,7 @@ export function DockerContainersTable({
                 },
             }),
         ],
-        [onConsole, onDetails, onLogs, onRestart, onUpdate]
+        [onConsole, onLogs, onRestart, onUpdate]
     );
 
     const table = useReactTable({
@@ -259,6 +256,8 @@ export function DockerContainersTable({
         getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
     });
+
+    const leafColumnCount = table.getAllLeafColumns().length || 1;
 
     if (containers.length === 0) {
         return (
@@ -284,13 +283,18 @@ export function DockerContainersTable({
                     </Button>
                 </div>
             </div>
-            <div className="max-h-[520px] overflow-auto">
-                <table className="min-w-full text-sm">
-                    <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
+
+            <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
+                <table className="min-w-full table-fixed text-sm">
+                    <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
-                                    <th key={header.id} className="px-4 py-3 align-top">
+                                    <th
+                                        key={header.id}
+                                        className="px-4 py-3 align-top"
+                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                    >
                                         {header.column.getCanSort() ? (
                                             <button
                                                 type="button"
@@ -316,11 +320,24 @@ export function DockerContainersTable({
                             </tr>
                         ))}
                     </thead>
+                </table>
+            </div>
+
+            <div className="max-h-[520px] overflow-y-auto overflow-x-auto">
+                <table className="min-w-full table-fixed text-sm">
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr key={row.id} className="border-t border-primary-800 align-top hover:bg-primary-900/40">
+                            <tr
+                                key={row.id}
+                                className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
+                                onClick={() => onDetails(row.original.id)}
+                            >
                                 {row.getVisibleCells().map((cell) => (
-                                    <td key={cell.id} className="px-4 py-3">
+                                    <td
+                                        key={cell.id}
+                                        className="px-4 py-3 align-top"
+                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                    >
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                     </td>
                                 ))}

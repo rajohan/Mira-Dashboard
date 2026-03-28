@@ -82,7 +82,10 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused }: DockerIma
                             size="sm"
                             variant="danger"
                             disabled={image.inUseBy.length > 0}
-                            onClick={() => onDelete(image.id, `${image.repository}:${image.tag || "<none>"}`)}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onDelete(image.id, `${image.repository}:${image.tag || "<none>"}`);
+                            }}
                         >
                             Delete
                         </Button>
@@ -121,9 +124,9 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused }: DockerIma
                     Remove unused ({unusedCount})
                 </Button>
             </div>
-            <div className="max-h-[420px] overflow-auto">
+            <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
                 <table className="min-w-full text-sm">
-                    <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
+                    <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
@@ -154,9 +157,13 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused }: DockerIma
                             </tr>
                         ))}
                     </thead>
+                </table>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
+                <table className="min-w-full text-sm">
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr key={row.id} className="border-t border-primary-800 align-top hover:bg-primary-900/40">
+                            <tr key={row.id} className="border-b border-primary-700/50 align-top hover:bg-primary-700/30">
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
