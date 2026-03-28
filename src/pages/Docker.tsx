@@ -94,7 +94,7 @@ export function Docker() {
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
     const [consoleContainerId, setConsoleContainerId] = useState<string | null>(null);
     const [logsTail, setLogsTail] = useState(200);
-    const [consoleCommand, setConsoleCommand] = useState("sh");
+    const [consoleCommand, setConsoleCommand] = useState("");
     const [consoleJobId, setConsoleJobId] = useState<string | null>(null);
     const [dangerousDelete, setDangerousDelete] = useState<
         | null
@@ -108,7 +108,11 @@ export function Docker() {
     const imagesQuery = useDockerImages();
     const volumesQuery = useDockerVolumes();
     const containerDetailsQuery = useDockerContainer(selectedContainerId);
-    const logsQuery = useDockerContainerLogs(logsContainerId, logsTail, Boolean(logsContainerId));
+    const logsQuery = useDockerContainerLogs(
+        logsContainerId,
+        logsTail,
+        Boolean(logsContainerId)
+    );
     const execJobQuery = useDockerExecJob(consoleJobId);
 
     const dockerAction = useDockerAction();
@@ -123,20 +127,25 @@ export function Docker() {
     const isInitialLoading =
         containersQuery.isLoading || imagesQuery.isLoading || volumesQuery.isLoading;
 
-
-    const selectedContainer = containers.find((container) => container.id === selectedContainerId) || null;
-    const selectedLogsContainer = containers.find((container) => container.id === logsContainerId) || null;
+    const selectedContainer =
+        containers.find((container) => container.id === selectedContainerId) || null;
+    const selectedLogsContainer =
+        containers.find((container) => container.id === logsContainerId) || null;
     const selectedConsoleContainer =
         containers.find((container) => container.id === consoleContainerId) || null;
 
     const summary = {
         running: containers.filter((container) => container.state === "running").length,
-        unhealthy: containers.filter((container) => container.health === "unhealthy").length,
+        unhealthy: containers.filter((container) => container.health === "unhealthy")
+            .length,
         composeManaged: containers.filter((container) => container.service).length,
         totalImageSize: images.reduce((sum, image) => sum + image.size, 0),
     };
 
-    async function handleContainerAction(containerId: string, action: "start" | "stop" | "restart" | "update") {
+    async function handleContainerAction(
+        containerId: string,
+        action: "start" | "stop" | "restart" | "update"
+    ) {
         const result = await dockerAction.mutateAsync({ containerId, action });
         setActionOutput(result.output || "Done");
     }
@@ -170,7 +179,9 @@ export function Docker() {
                 </Card>
                 <Card className="p-4">
                     <div className="text-sm text-primary-400">Compose managed</div>
-                    <div className="mt-2 text-3xl font-semibold">{summary.composeManaged}</div>
+                    <div className="mt-2 text-3xl font-semibold">
+                        {summary.composeManaged}
+                    </div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-sm text-primary-400">Images size</div>
@@ -249,11 +260,14 @@ export function Docker() {
                     }
                     onPruneUnused={() => {
                         setPruningTarget("images");
-                        void dockerPrune.mutateAsync("images").then((result) => {
-                            setActionOutput(result.output || "Unused images removed");
-                        }).finally(() => {
-                            setPruningTarget(null);
-                        });
+                        void dockerPrune
+                            .mutateAsync("images")
+                            .then((result) => {
+                                setActionOutput(result.output || "Unused images removed");
+                            })
+                            .finally(() => {
+                                setPruningTarget(null);
+                            });
                     }}
                 />
 
@@ -269,11 +283,16 @@ export function Docker() {
                     }
                     onPruneUnused={() => {
                         setPruningTarget("volumes");
-                        void dockerPrune.mutateAsync("volumes").then((result) => {
-                            setActionOutput(result.output || "Unused volumes removed");
-                        }).finally(() => {
-                            setPruningTarget(null);
-                        });
+                        void dockerPrune
+                            .mutateAsync("volumes")
+                            .then((result) => {
+                                setActionOutput(
+                                    result.output || "Unused volumes removed"
+                                );
+                            })
+                            .finally(() => {
+                                setPruningTarget(null);
+                            });
                     }}
                 />
             </div>
@@ -292,16 +311,34 @@ export function Docker() {
                             <Card className="p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
                                 <div>Created: {containerDetailsQuery.data.createdAt}</div>
-                                <div>Started: {containerDetailsQuery.data.startedAt || "—"}</div>
-                                <div>Finished: {containerDetailsQuery.data.finishedAt || "—"}</div>
+                                <div>
+                                    Started: {containerDetailsQuery.data.startedAt || "—"}
+                                </div>
+                                <div>
+                                    Finished:{" "}
+                                    {containerDetailsQuery.data.finishedAt || "—"}
+                                </div>
                                 <div>Status: {containerDetailsQuery.data.status}</div>
                             </Card>
                             <Card className="p-4">
                                 <div className="mb-2 font-semibold">Resources</div>
-                                <div>CPU: {containerDetailsQuery.data.stats?.cpu || "—"}</div>
-                                <div>Memory: {formatDockerMemory(containerDetailsQuery.data.stats?.memory)}</div>
-                                <div>Net I/O: {containerDetailsQuery.data.stats?.netIO || "—"}</div>
-                                <div>Block I/O: {containerDetailsQuery.data.stats?.blockIO || "—"}</div>
+                                <div>
+                                    CPU: {containerDetailsQuery.data.stats?.cpu || "—"}
+                                </div>
+                                <div>
+                                    Memory:{" "}
+                                    {formatDockerMemory(
+                                        containerDetailsQuery.data.stats?.memory
+                                    )}
+                                </div>
+                                <div>
+                                    Net I/O:{" "}
+                                    {containerDetailsQuery.data.stats?.netIO || "—"}
+                                </div>
+                                <div>
+                                    Block I/O:{" "}
+                                    {containerDetailsQuery.data.stats?.blockIO || "—"}
+                                </div>
                             </Card>
                         </div>
 
@@ -309,8 +346,13 @@ export function Docker() {
                             <div className="mb-2 font-semibold">Networks</div>
                             <div className="space-y-2 text-xs text-primary-300">
                                 {containerDetailsQuery.data.networks.map((network) => (
-                                    <div key={network.name} className="rounded bg-primary-900/50 p-2">
-                                        <div className="font-medium text-primary-100">{network.name}</div>
+                                    <div
+                                        key={network.name}
+                                        className="rounded bg-primary-900/50 p-2"
+                                    >
+                                        <div className="font-medium text-primary-100">
+                                            {network.name}
+                                        </div>
                                         <div>IP: {network.ipAddress || "—"}</div>
                                         <div>Gateway: {network.gateway || "—"}</div>
                                         <div>MAC: {network.macAddress || "—"}</div>
@@ -323,11 +365,17 @@ export function Docker() {
                             <div className="mb-2 font-semibold">Mounts</div>
                             <div className="space-y-2 text-xs text-primary-300">
                                 {containerDetailsQuery.data.mounts.map((mount) => (
-                                    <div key={`${mount.source}:${mount.destination}`} className="rounded bg-primary-900/50 p-2">
+                                    <div
+                                        key={`${mount.source}:${mount.destination}`}
+                                        className="rounded bg-primary-900/50 p-2"
+                                    >
                                         <div>{mount.source}</div>
-                                        <div className="text-primary-500">→ {mount.destination}</div>
+                                        <div className="text-primary-500">
+                                            → {mount.destination}
+                                        </div>
                                         <div>
-                                            {mount.type} · {mount.mode || "default"} · {mount.readOnly ? "ro" : "rw"}
+                                            {mount.type} · {mount.mode || "default"} ·{" "}
+                                            {mount.readOnly ? "ro" : "rw"}
                                         </div>
                                     </div>
                                 ))}
@@ -342,7 +390,11 @@ export function Docker() {
             <Modal
                 isOpen={Boolean(logsContainerId)}
                 onClose={() => setLogsContainerId(null)}
-                title={selectedLogsContainer ? `${selectedLogsContainer.name} logs` : "Container logs"}
+                title={
+                    selectedLogsContainer
+                        ? `${selectedLogsContainer.name} logs`
+                        : "Container logs"
+                }
                 size="3xl"
             >
                 <div className="mb-4 flex items-center gap-3">
@@ -356,7 +408,10 @@ export function Docker() {
                             { value: "1000", label: "1000 lines" },
                         ]}
                     />
-                    <RefreshButton onClick={() => void logsQuery.refetch()} isLoading={logsQuery.isFetching} />
+                    <RefreshButton
+                        onClick={() => void logsQuery.refetch()}
+                        isLoading={logsQuery.isFetching}
+                    />
                 </div>
                 <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-4 text-xs text-primary-100">
                     {logsQuery.data || "No logs"}
@@ -369,7 +424,11 @@ export function Docker() {
                     setConsoleContainerId(null);
                     setConsoleJobId(null);
                 }}
-                title={selectedConsoleContainer ? `${selectedConsoleContainer.name} console` : "Container console"}
+                title={
+                    selectedConsoleContainer
+                        ? `${selectedConsoleContainer.name} console`
+                        : "Container console"
+                }
                 size="3xl"
             >
                 <div className="mb-4 flex items-center gap-3">
@@ -390,7 +449,10 @@ export function Docker() {
                         Run
                     </Button>
                     {consoleJobId && execJobQuery.data?.status === "running" ? (
-                        <Button variant="danger" onClick={() => void stopDockerExec(consoleJobId)}>
+                        <Button
+                            variant="danger"
+                            onClick={() => void stopDockerExec(consoleJobId)}
+                        >
                             Stop
                         </Button>
                     ) : null}
@@ -410,14 +472,24 @@ export function Docker() {
                     }
                     setDangerousDelete(null);
                 }}
-                title={dangerousDelete?.type === "image" ? "Delete image" : "Delete volume"}
+                title={
+                    dangerousDelete?.type === "image" ? "Delete image" : "Delete volume"
+                }
                 message={`Delete ${dangerousDelete?.label}? This cannot be undone.`}
                 confirmLabel="Delete"
-                confirmLoadingLabel={dangerousDelete?.type === "image" ? "Deleting image..." : "Deleting volume..."}
+                confirmLoadingLabel={
+                    dangerousDelete?.type === "image"
+                        ? "Deleting image..."
+                        : "Deleting volume..."
+                }
                 loading={deleteImage.isPending || deleteVolume.isPending}
                 danger
                 onConfirm={() => {
-                    if (!dangerousDelete || deleteImage.isPending || deleteVolume.isPending) {
+                    if (
+                        !dangerousDelete ||
+                        deleteImage.isPending ||
+                        deleteVolume.isPending
+                    ) {
                         return;
                     }
 
