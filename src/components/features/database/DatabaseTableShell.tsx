@@ -17,6 +17,7 @@ interface Props<T extends object> {
     columns: ColumnDef<T, any>[];
     emptyMessage?: string;
     maxHeight?: string;
+    onRowClick?: (row: T) => void;
 }
 
 export function DatabaseTableShell<T extends object>({
@@ -24,6 +25,7 @@ export function DatabaseTableShell<T extends object>({
     columns,
     emptyMessage = "No data available.",
     maxHeight = "420px",
+    onRowClick,
 }: Props<T>) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -73,7 +75,14 @@ export function DatabaseTableShell<T extends object>({
                         </thead>
                         <tbody>
                             {table.getRowModel().rows.map((row) => (
-                                <tr key={row.id} className="border-b border-primary-700/50 hover:bg-primary-700/30">
+                                <tr
+                                    key={row.id}
+                                    className={[
+                                        "border-b border-primary-700/50 hover:bg-primary-700/30",
+                                        onRowClick ? "cursor-pointer" : "",
+                                    ].join(" ")}
+                                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                                >
                                     {row.getVisibleCells().map((cell) => (
                                         <td key={cell.id} className="px-4 py-3">
                                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
