@@ -578,8 +578,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.get("/api/docker/containers/:containerId/logs", (async (req, res) => {
         const containerId = String(req.params.containerId || "");
         const tail = Math.max(50, Number.parseInt(String(req.query.tail || "200"), 10) || 200);
-        const stdout = await runDocker(["logs", "--tail", String(tail), containerId]);
-        res.json({ content: stdout });
+        const { stdout, stderr } = await execFileAsync("docker", ["logs", "--tail", String(tail), containerId], {
+            cwd: DOCKER_ROOT,
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+        });
+        const content = [String(stdout), String(stderr)].filter(Boolean).join("\n").trim();
+        res.json({ content });
     }) as RequestHandler);
 
     app.post("/api/docker/containers/:containerId/action", express.json(), (async (req, res) => {
