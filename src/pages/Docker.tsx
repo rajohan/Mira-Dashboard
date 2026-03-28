@@ -239,7 +239,9 @@ export function Docker() {
                 title={selectedContainer?.name || "Container details"}
                 size="3xl"
             >
-                {containerDetailsQuery.data ? (
+                {containerDetailsQuery.isLoading ? (
+                    <LoadingState message="Loading container details..." size="md" />
+                ) : containerDetailsQuery.data ? (
                     <div className="space-y-4 text-sm">
                         <div className="grid gap-4 md:grid-cols-2">
                             <Card className="p-4">
@@ -287,7 +289,9 @@ export function Docker() {
                             </div>
                         </Card>
                     </div>
-                ) : null}
+                ) : (
+                    <EmptyState message="Failed to load container details." />
+                )}
             </Modal>
 
             <Modal
