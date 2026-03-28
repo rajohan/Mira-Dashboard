@@ -6,7 +6,7 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, ScanSearch, Trash2 } from "lucide-react";
+import { ChevronDown, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerVolume } from "../../../hooks/useDocker";
@@ -115,7 +115,7 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Volumes</div>
                 <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
-                    <ScanSearch className="mr-2 h-4 w-4" />
+                    <Trash2 className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
