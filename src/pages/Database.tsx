@@ -1,6 +1,7 @@
+import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
 import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
-import { MaintenanceTable } from "../components/features/database/AutovacuumHealthTable";
+import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
 import { TopQueriesTable } from "../components/features/database/TopQueriesTable";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
@@ -37,7 +38,10 @@ export function Database() {
                     Maintenance
                 </h2>
             </div>
-            <MaintenanceTable deadTuples={data.deadTuples} pgbouncerStats={data.pgbouncerStats} />
+            <div className="grid gap-6 xl:grid-cols-2">
+                <AutovacuumHealthTable data={data.deadTuples} />
+                <PgBouncerStatsTable data={data.pgbouncerStats} />
+            </div>
 
             <div className="border-b border-primary-700 pb-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">

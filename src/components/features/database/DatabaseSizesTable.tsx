@@ -9,14 +9,14 @@ interface DatabaseRow {
     size_bytes: string;
     numbackends: string;
     cache_hit_ratio: string;
-    xact_commit: string;
-    xact_rollback: string;
-    cl_active: number;
-    cl_waiting: number;
-    sv_active: number;
-    sv_idle: number;
-    sv_used: number;
-    maxwait: number;
+    user: string;
+    cl_active: string;
+    cl_waiting: string;
+    sv_active: string;
+    sv_idle: string;
+    sv_used: string;
+    maxwait: string;
+    pool_mode: string;
 }
 
 function mergeWithPoolData(
@@ -32,12 +32,14 @@ function mergeWithPoolData(
         const pool = poolMap.get(db.datname);
         return {
             ...db,
-            cl_active: Number(pool?.cl_active ?? 0),
-            cl_waiting: Number(pool?.cl_waiting ?? 0),
-            sv_active: Number(pool?.sv_active ?? 0),
-            sv_idle: Number(pool?.sv_idle ?? 0),
-            sv_used: Number(pool?.sv_used ?? 0),
-            maxwait: Number(pool?.maxwait ?? 0),
+            user: pool?.user ?? "—",
+            cl_active: pool?.cl_active ?? "—",
+            cl_waiting: pool?.cl_waiting ?? "—",
+            sv_active: pool?.sv_active ?? "—",
+            sv_idle: pool?.sv_idle ?? "—",
+            sv_used: pool?.sv_used ?? "—",
+            maxwait: pool?.maxwait ?? "—",
+            pool_mode: pool?.pool_mode ?? "—",
         };
     });
 }
@@ -52,35 +54,33 @@ const columns = [
         cell: (info) => info.row.original.size_pretty,
     }),
     columnHelper.accessor((row) => Number(row.numbackends), {
-        id: "backends",
-        header: "Backends",
+        id: "connections",
+        header: "Connections",
     }),
     columnHelper.accessor((row) => Number(row.cache_hit_ratio), {
         id: "cacheHit",
         header: "Cache hit",
         cell: (info) => `${info.row.original.cache_hit_ratio}%`,
     }),
-    columnHelper.accessor((row) => row.cl_active + row.cl_waiting, {
+    columnHelper.accessor("user", { header: "User" }),
+    columnHelper.accessor((row) => Number(row.cl_active), {
         id: "clients",
         header: "Clients",
-        cell: (info) => {
-            const row = info.row.original;
-            return row.cl_active + row.cl_waiting > 0
-                ? `${row.cl_active} / ${row.cl_waiting}w`
-                : "—";
-        },
     }),
-    columnHelper.accessor((row) => row.sv_active + row.sv_idle + row.sv_used, {
-        id: "servers",
-        header: "Servers",
+    columnHelper.accessor((row) => Number(row.cl_waiting), {
+        id: "waiting",
+        header: "Waiting",
     }),
-    columnHelper.accessor((row) => Number(row.xact_commit), {
-        id: "commits",
-        header: "Commits",
-    }),
-    columnHelper.accessor((row) => Number(row.xact_rollback), {
-        id: "rollbacks",
-        header: "Rollbacks",
+    columnHelper.accessor(
+        (row) => Number(row.sv_active) + Number(row.sv_idle) + Number(row.sv_used),
+        {
+            id: "servers",
+            header: "Servers",
+        }
+    ),
+    columnHelper.accessor((row) => Number(row.maxwait), {
+        id: "maxwait",
+        header: "Maxwait",
     }),
 ];
 
