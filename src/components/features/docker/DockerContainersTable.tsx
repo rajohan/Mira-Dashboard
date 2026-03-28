@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown, Play, RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
 import { Badge } from "../../ui/Badge";
@@ -139,8 +139,7 @@ export function DockerContainersTable({
 }: DockerContainersTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
-    const columns = useMemo(
-        () => [
+    const columns = [
             columnHelper.accessor("name", {
                 header: "Container",
                 cell: (info) => {
@@ -244,9 +243,7 @@ export function DockerContainersTable({
                     );
                 },
             }),
-        ],
-        [onConsole, onLogs, onRestart, onUpdate]
-    );
+    ];
 
     const table = useReactTable({
         data: containers,

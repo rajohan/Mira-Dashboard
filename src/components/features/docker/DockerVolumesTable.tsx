@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { DockerVolume } from "../../../hooks/useDocker";
 import { Button } from "../../ui/Button";
@@ -36,8 +36,7 @@ interface DockerVolumesTableProps {
 export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning = false }: DockerVolumesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
-    const columns = useMemo(
-        () => [
+    const columns = [
             columnHelper.accessor("name", {
                 header: "Volume",
                 cell: (info) => {
@@ -86,9 +85,7 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
                     );
                 },
             }),
-        ],
-        [onDelete]
-    );
+    ];
 
     const table = useReactTable({
         data: volumes,

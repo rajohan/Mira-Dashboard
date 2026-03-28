@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { DockerImage } from "../../../hooks/useDocker";
 import { Button } from "../../ui/Button";
@@ -43,8 +43,7 @@ interface DockerImagesTableProps {
 export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning = false }: DockerImagesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
-    const columns = useMemo(
-        () => [
+    const columns = [
             columnHelper.accessor("repository", {
                 header: "Image",
                 cell: (info) => {
@@ -93,9 +92,7 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
                     );
                 },
             }),
-        ],
-        [onDelete]
-    );
+    ];
 
     const table = useReactTable({
         data: images,

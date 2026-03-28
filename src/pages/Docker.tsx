@@ -1,5 +1,5 @@
 import { Boxes } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
@@ -86,19 +86,12 @@ export function Docker() {
     const selectedConsoleContainer =
         containers.find((container) => container.id === consoleContainerId) || null;
 
-    const summary = useMemo(() => {
-        const running = containers.filter((container) => container.state === "running").length;
-        const unhealthy = containers.filter((container) => container.health === "unhealthy").length;
-        const composeManaged = containers.filter((container) => container.service).length;
-        const totalImageSize = images.reduce((sum, image) => sum + image.size, 0);
-
-        return {
-            running,
-            unhealthy,
-            composeManaged,
-            totalImageSize,
-        };
-    }, [containers, images]);
+    const summary = {
+        running: containers.filter((container) => container.state === "running").length,
+        unhealthy: containers.filter((container) => container.health === "unhealthy").length,
+        composeManaged: containers.filter((container) => container.service).length,
+        totalImageSize: images.reduce((sum, image) => sum + image.size, 0),
+    };
 
     async function handleContainerAction(containerId: string, action: "start" | "stop" | "restart" | "update") {
         const result = await dockerAction.mutateAsync({ containerId, action });
