@@ -39,5 +39,5 @@ const columns = [
 ];
 
 export function PgBouncerPoolsTable({ data }: { data: DatabaseOverviewResponse["pgbouncerPools"] }) {
-    return <DatabaseTableShell title="PgBouncer pools" data={data} columns={columns} />;
+    return <DatabaseTableShell data={data} columns={columns} />;
 }

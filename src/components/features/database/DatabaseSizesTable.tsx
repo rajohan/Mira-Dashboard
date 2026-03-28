@@ -25,5 +25,5 @@ const columns = [
 ];
 
 export function DatabaseSizesTable({ data }: { data: DatabaseOverviewResponse["databases"] }) {
-    return <DatabaseTableShell title="Database sizes" data={data} columns={columns} />;
+    return <DatabaseTableShell data={data} columns={columns} />;
 }

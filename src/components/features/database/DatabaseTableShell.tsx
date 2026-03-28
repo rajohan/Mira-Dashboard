@@ -13,7 +13,6 @@ import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
 interface Props<T extends object> {
-    title: string;
     data: T[];
     columns: ColumnDef<T, any>[];
     emptyMessage?: string;
@@ -21,7 +20,6 @@ interface Props<T extends object> {
 }
 
 export function DatabaseTableShell<T extends object>({
-    title,
     data,
     columns,
     emptyMessage = "No data available.",
@@ -40,7 +38,6 @@ export function DatabaseTableShell<T extends object>({
 
     return (
         <Card className="overflow-hidden">
-            <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">{title}</div>
             {data.length === 0 ? (
                 <EmptyState message={emptyMessage} />
             ) : (

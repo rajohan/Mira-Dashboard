@@ -27,16 +27,31 @@ export function Database() {
         <div className="space-y-6 p-6">
             <DatabaseOverviewCards overview={data.overview} />
 
+            <div className="border-b border-primary-700 pb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    Databases
+                </h2>
+            </div>
             <div className="grid gap-6 xl:grid-cols-2">
                 <DatabaseSizesTable data={data.databases} />
                 <PgBouncerPoolsTable data={data.pgbouncerPools} />
             </div>
 
+            <div className="border-b border-primary-700 pb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    Maintenance
+                </h2>
+            </div>
             <div className="grid gap-6 xl:grid-cols-2">
                 <AutovacuumHealthTable data={data.deadTuples} />
                 <PgBouncerStatsTable data={data.pgbouncerStats} />
             </div>
 
+            <div className="border-b border-primary-700 pb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    Query performance
+                </h2>
+            </div>
             <TopQueriesTable enabled={data.overview.pgStatStatementsEnabled} data={data.topQueries} />
         </div>
     );

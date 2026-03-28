@@ -30,7 +30,6 @@ const columns = [
 export function AutovacuumHealthTable({ data }: { data: DatabaseOverviewResponse["deadTuples"] }) {
     return (
         <DatabaseTableShell
-            title="Autovacuum health"
             data={data}
             columns={columns}
             emptyMessage="No autovacuum/dead tuple issues found right now."

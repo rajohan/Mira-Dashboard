@@ -45,11 +45,10 @@ export function TopQueriesTable({
     if (!enabled) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">Top queries</div>
                 <EmptyState message="pg_stat_statements is not enabled." />
             </Card>
         );
     }
 
-    return <DatabaseTableShell title="Top queries" data={data} columns={columns} maxHeight="520px" />;
+    return <DatabaseTableShell data={data} columns={columns} maxHeight="520px" />;
 }

@@ -25,5 +25,5 @@ const columns = [
 ];
 
 export function PgBouncerStatsTable({ data }: { data: DatabaseOverviewResponse["pgbouncerStats"] }) {
-    return <DatabaseTableShell title="PgBouncer stats" data={data} columns={columns} />;
+    return <DatabaseTableShell data={data} columns={columns} />;
 }
