@@ -193,6 +193,7 @@ async function getDatabaseOverview() {
         await queryPostgres(`
             SELECT COALESCE(state, 'unknown') AS state, COUNT(*)::text AS count
             FROM pg_stat_activity
+            WHERE datname NOT IN ('template0', 'template1', 'postgres')
             GROUP BY COALESCE(state, 'unknown')
             ORDER BY COUNT(*) DESC;
         `)
