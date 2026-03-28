@@ -1,3 +1,7 @@
+export function formatNumber(n: number): string {
+    return n.toLocaleString("en-US");
+}
+
 export function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";

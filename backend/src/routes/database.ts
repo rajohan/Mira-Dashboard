@@ -141,7 +141,24 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
     return results;
 }
 
+async function getTorrentCounts() {
+    const cometCount = parseTable<{ count: string }>(
+        await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet")
+    )[0]?.count ?? "0";
+
+    const bitmagnetCount = parseTable<{ count: string }>(
+        await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet")
+    )[0]?.count ?? "0";
+
+    return {
+        comet: Number(cometCount),
+        bitmagnet: Number(bitmagnetCount),
+    };
+}
+
 async function getDatabaseOverview() {
+    const [torrentCounts] = await Promise.all([getTorrentCounts()]);
+
     const databaseRows = parseTable<PostgresDatabaseRow>(
         await queryPostgres(`
             SELECT
@@ -250,6 +267,7 @@ async function getDatabaseOverview() {
             averageCacheHitRatio,
             connections,
             pgStatStatementsEnabled,
+            torrentCounts,
             pgbouncer: {
                 clientConnections,
                 serverConnections,

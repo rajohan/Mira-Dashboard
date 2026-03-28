@@ -9,6 +9,10 @@ export interface DatabaseOverviewResponse {
         averageCacheHitRatio: number;
         connections: Record<string, number>;
         pgStatStatementsEnabled: boolean;
+        torrentCounts: {
+            comet: number;
+            bitmagnet: number;
+        };
         pgbouncer: {
             clientConnections: number;
             serverConnections: number;
