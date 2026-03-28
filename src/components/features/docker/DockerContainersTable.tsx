@@ -6,7 +6,7 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, Play, RotateCcw } from "lucide-react";
+import { ChevronDown, Download, FileText, Play, RotateCcw, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
@@ -225,18 +225,41 @@ export function DockerContainersTable({
                     const container = info.row.original;
                     return (
                         <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-                            <Button size="sm" variant="secondary" onClick={() => onLogs(container.id)}>
-                                Logs
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                title="Logs"
+                                aria-label="Logs"
+                                onClick={() => onLogs(container.id)}
+                            >
+                                <FileText className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => onConsole(container.id)}>
-                                Console
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                title="Console"
+                                aria-label="Console"
+                                onClick={() => onConsole(container.id)}
+                            >
+                                <SquareTerminal className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => onRestart(container.id)}>
-                                Restart
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                title="Restart"
+                                aria-label="Restart"
+                                onClick={() => onRestart(container.id)}
+                            >
+                                <RotateCcw className="h-4 w-4" />
                             </Button>
                             {container.service ? (
-                                <Button size="sm" onClick={() => onUpdate(container.id)}>
-                                    Update
+                                <Button
+                                    size="sm"
+                                    title="Update"
+                                    aria-label="Update"
+                                    onClick={() => onUpdate(container.id)}
+                                >
+                                    <Download className="h-4 w-4" />
                                 </Button>
                             ) : null}
                         </div>
