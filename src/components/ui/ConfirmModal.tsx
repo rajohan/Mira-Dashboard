@@ -6,6 +6,8 @@ interface ConfirmModalProps {
     title: string;
     message: string;
     confirmLabel?: string;
+    confirmLoadingLabel?: string;
+    loading?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
     danger?: boolean;
@@ -16,6 +18,8 @@ export function ConfirmModal({
     title,
     message,
     confirmLabel = "Confirm",
+    confirmLoadingLabel,
+    loading = false,
     onConfirm,
     onCancel,
     danger = false,
@@ -25,11 +29,15 @@ export function ConfirmModal({
             <div className="space-y-4">
                 <p className="text-sm text-primary-300">{message}</p>
                 <div className="flex justify-end gap-2">
-                    <Button variant="secondary" onClick={onCancel}>
+                    <Button variant="secondary" onClick={onCancel} disabled={loading}>
                         Cancel
                     </Button>
-                    <Button variant={danger ? "danger" : "primary"} onClick={onConfirm}>
-                        {confirmLabel}
+                    <Button
+                        variant={danger ? "danger" : "primary"}
+                        onClick={onConfirm}
+                        disabled={loading}
+                    >
+                        {loading ? (confirmLoadingLabel || `${confirmLabel}...`) : confirmLabel}
                     </Button>
                 </div>
             </div>

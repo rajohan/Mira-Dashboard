@@ -359,13 +359,20 @@ export function Docker() {
 
             <ConfirmModal
                 isOpen={Boolean(dangerousDelete)}
-                onCancel={() => setDangerousDelete(null)}
+                onCancel={() => {
+                    if (deleteImage.isPending || deleteVolume.isPending) {
+                        return;
+                    }
+                    setDangerousDelete(null);
+                }}
                 title={dangerousDelete?.type === "image" ? "Delete image" : "Delete volume"}
                 message={`Delete ${dangerousDelete?.label}? This cannot be undone.`}
                 confirmLabel="Delete"
+                confirmLoadingLabel={dangerousDelete?.type === "image" ? "Deleting image..." : "Deleting volume..."}
+                loading={deleteImage.isPending || deleteVolume.isPending}
                 danger
                 onConfirm={() => {
-                    if (!dangerousDelete) {
+                    if (!dangerousDelete || deleteImage.isPending || deleteVolume.isPending) {
                         return;
                     }
 
