@@ -141,7 +141,14 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
     return results;
 }
 
+const TORRENT_COUNT_TTL = 60 * 60 * 1000; // 1 hour
+let torrentCountCache: { data: { comet: number; bitmagnet: number }; timestamp: number } | null = null;
+
 async function getTorrentCounts() {
+    if (torrentCountCache && Date.now() - torrentCountCache.timestamp < TORRENT_COUNT_TTL) {
+        return torrentCountCache.data;
+    }
+
     const cometCount = parseTable<{ count: string }>(
         await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet")
     )[0]?.count ?? "0";
@@ -150,10 +157,9 @@ async function getTorrentCounts() {
         await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet")
     )[0]?.count ?? "0";
 
-    return {
-        comet: Number(cometCount),
-        bitmagnet: Number(bitmagnetCount),
-    };
+    const data = { comet: Number(cometCount), bitmagnet: Number(bitmagnetCount) };
+    torrentCountCache = { data, timestamp: Date.now() };
+    return data;
 }
 
 async function getDatabaseOverview() {
