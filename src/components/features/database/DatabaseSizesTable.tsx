@@ -66,10 +66,10 @@ const columns = [
         cell: (info) => `${info.row.original.cache_hit_ratio}%`,
     }),
     columnHelper.accessor(
-        (row) => `${row.cl_active} / ${row.sv_active + row.sv_idle + row.sv_used}`,
+        (row) => `${row.cl_active} / ${row.sv_idle} / ${row.sv_active}`,
         {
             id: "pool",
-            header: "Clients / Servers",
+            header: "Clients / Idle / Active",
         }
     ),
     columnHelper.accessor((row) => row.avg_query_time, {
