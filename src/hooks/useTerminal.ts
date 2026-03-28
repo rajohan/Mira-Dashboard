@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 
 import { apiFetch, apiPost } from "./useApi";
 
@@ -96,24 +96,21 @@ export async function stopTerminalJob(jobId: string): Promise<void> {
 export function useTerminalHistory() {
     const [history, setHistory] = useState<CommandHistoryEntry[]>([]);
 
-    const addCommand = useCallback((entry: Omit<CommandHistoryEntry, "id">) => {
+    const addCommand = (entry: Omit<CommandHistoryEntry, "id">) => {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         setHistory((prev) => [...prev, { ...entry, id }]);
         return id;
-    }, []);
+    };
 
-    const updateCommand = useCallback(
-        (id: string, updates: Partial<CommandHistoryEntry>) => {
-            setHistory((prev) =>
-                prev.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
-            );
-        },
-        []
-    );
+    const updateCommand = (id: string, updates: Partial<CommandHistoryEntry>) => {
+        setHistory((prev) =>
+            prev.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
+        );
+    };
 
-    const clearHistory = useCallback(() => {
+    const clearHistory = () => {
         setHistory([]);
-    }, []);
+    };
 
     return {
         history,

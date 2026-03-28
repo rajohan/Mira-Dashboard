@@ -1,5 +1,5 @@
 import { AlertTriangle, Loader2, Play, Terminal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ExecResponse, OpsActionDefinition } from "../../../hooks";
 import {
@@ -71,16 +71,9 @@ export function ServiceActionsCard() {
         }
     }
 
-    const liveLogs = useMemo(() => {
-        if (!execJob.data) {
-            return null;
-        }
-
-        return [execJob.data.stdout, execJob.data.stderr]
-            .filter(Boolean)
-            .join("\n")
-            .trim();
-    }, [execJob.data]);
+    const liveLogs = execJob.data
+        ? [execJob.data.stdout, execJob.data.stderr].filter(Boolean).join("\n").trim()
+        : null;
 
     const finishedLogs = result
         ? [result.response.stdout, result.response.stderr]
