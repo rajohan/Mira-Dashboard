@@ -46,6 +46,49 @@ function formatBytes(bytes: number): string {
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function formatDockerMemory(value: string | undefined): string {
+    if (!value) {
+        return "—";
+    }
+
+    const [usedRaw, totalRaw] = value.split("/").map((part) => part.trim());
+    if (!usedRaw || !totalRaw) {
+        return value;
+    }
+
+    const parsePart = (part: string): number | null => {
+        const match = part.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]i?B|B)$/i);
+        if (!match) {
+            return null;
+        }
+
+        const amount = Number.parseFloat(match[1] || "0");
+        const unit = (match[2] || "B").toUpperCase();
+        const factors: Record<string, number> = {
+            B: 1,
+            KIB: 1024,
+            KB: 1024,
+            MIB: 1024 ** 2,
+            MB: 1024 ** 2,
+            GIB: 1024 ** 3,
+            GB: 1024 ** 3,
+            TIB: 1024 ** 4,
+            TB: 1024 ** 4,
+        };
+
+        return amount * (factors[unit] || 1);
+    };
+
+    const usedBytes = parsePart(usedRaw);
+    const totalBytes = parsePart(totalRaw);
+
+    if (!usedBytes || !totalBytes) {
+        return value;
+    }
+
+    return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
+}
+
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -256,7 +299,7 @@ export function Docker() {
                             <Card className="p-4">
                                 <div className="mb-2 font-semibold">Resources</div>
                                 <div>CPU: {containerDetailsQuery.data.stats?.cpu || "—"}</div>
-                                <div>Memory: {containerDetailsQuery.data.stats?.memory || "—"}</div>
+                                <div>Memory: {formatDockerMemory(containerDetailsQuery.data.stats?.memory)}</div>
                                 <div>Net I/O: {containerDetailsQuery.data.stats?.netIO || "—"}</div>
                                 <div>Block I/O: {containerDetailsQuery.data.stats?.blockIO || "—"}</div>
                             </Card>
