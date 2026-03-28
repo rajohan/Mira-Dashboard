@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -38,62 +38,92 @@ export function DatabaseTableShell<T extends object>({
         getSortedRowModel: getSortedRowModel(),
     });
 
+    const leafColumnCount = useMemo(
+        () => table.getAllLeafColumns().length || 1,
+        [table]
+    );
+
+    if (data.length === 0) {
+        return (
+            <Card className="overflow-hidden">
+                <EmptyState message={emptyMessage} />
+            </Card>
+        );
+    }
+
     return (
         <Card className="overflow-hidden">
-            {data.length === 0 ? (
-                <EmptyState message={emptyMessage} />
-            ) : (
-                <div className="overflow-auto" style={{ maxHeight }}>
-                    <table className="min-w-full text-sm">
-                        <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
-                            {table.getHeaderGroups().map((headerGroup) => (
-                                <tr key={headerGroup.id}>
-                                    {headerGroup.headers.map((header) => (
-                                        <th key={header.id} className="px-4 py-3 align-top">
-                                            {header.column.getCanSort() ? (
-                                                <button
-                                                    type="button"
-                                                    className="flex items-center gap-1 select-none hover:text-primary-100"
-                                                    onClick={header.column.getToggleSortingHandler()}
-                                                >
-                                                    {flexRender(header.column.columnDef.header, header.getContext())}
-                                                    <span className="text-primary-500">
-                                                        {header.column.getIsSorted() === "asc" ? (
-                                                            <ChevronDown className="h-3 w-3" />
-                                                        ) : header.column.getIsSorted() === "desc" ? (
-                                                            <ChevronDown className="h-3 w-3 rotate-180" />
-                                                        ) : null}
-                                                    </span>
-                                                </button>
-                                            ) : (
-                                                <div>{flexRender(header.column.columnDef.header, header.getContext())}</div>
-                                            )}
-                                        </th>
-                                    ))}
-                                </tr>
-                            ))}
-                        </thead>
-                        <tbody>
-                            {table.getRowModel().rows.map((row) => (
-                                <tr
-                                    key={row.id}
-                                    className={[
-                                        "border-b border-primary-700/50 hover:bg-primary-700/30",
-                                        onRowClick ? "cursor-pointer" : "",
-                                    ].join(" ")}
-                                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                                >
-                                    {row.getVisibleCells().map((cell) => (
-                                        <td key={cell.id} className="px-4 py-3">
-                                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
+            <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
+                <table className="min-w-full table-fixed text-sm">
+                    <thead className="text-left text-primary-300">
+                        {table.getHeaderGroups().map((headerGroup) => (
+                            <tr key={headerGroup.id}>
+                                {headerGroup.headers.map((header) => (
+                                    <th
+                                        key={header.id}
+                                        className="px-4 py-3 align-top"
+                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                    >
+                                        {header.column.getCanSort() ? (
+                                            <button
+                                                type="button"
+                                                className="flex items-center gap-1 select-none hover:text-primary-100"
+                                                onClick={header.column.getToggleSortingHandler()}
+                                            >
+                                                {flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                                <span className="text-primary-500">
+                                                    {header.column.getIsSorted() === "asc" ? (
+                                                        <ChevronDown className="h-3 w-3" />
+                                                    ) : header.column.getIsSorted() === "desc" ? (
+                                                        <ChevronDown className="h-3 w-3 rotate-180" />
+                                                    ) : null}
+                                                </span>
+                                            </button>
+                                        ) : (
+                                            <div>
+                                                {flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                            </div>
+                                        )}
+                                    </th>
+                                ))}
+                            </tr>
+                        ))}
+                    </thead>
+                </table>
+            </div>
+
+            <div className="overflow-y-auto overflow-x-auto" style={{ maxHeight }}>
+                <table className="min-w-full table-fixed text-sm">
+                    <tbody>
+                        {table.getRowModel().rows.map((row) => (
+                            <tr
+                                key={row.id}
+                                className={[
+                                    "border-b border-primary-700/50 hover:bg-primary-700/30",
+                                    onRowClick ? "cursor-pointer" : "",
+                                ].join(" ")}
+                                onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                            >
+                                {row.getVisibleCells().map((cell) => (
+                                    <td
+                                        key={cell.id}
+                                        className="px-4 py-3 align-top"
+                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                    >
+                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </Card>
     );
 }
