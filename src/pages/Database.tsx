@@ -1,8 +1,6 @@
-import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
 import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
-import { DatabaseSizesTable } from "../components/features/database/DatabaseSizesTable";
-import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
-import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
+import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
+import { MaintenanceTable } from "../components/features/database/AutovacuumHealthTable";
 import { TopQueriesTable } from "../components/features/database/TopQueriesTable";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
@@ -29,15 +27,17 @@ export function Database() {
 
             <div className="border-b border-primary-700 pb-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
-                    Databases & Maintenance
+                    Databases
                 </h2>
             </div>
-            <div className="grid gap-6 xl:grid-cols-2">
-                <DatabaseSizesTable data={data.databases} />
-                <PgBouncerPoolsTable data={data.pgbouncerPools} />
-                <AutovacuumHealthTable data={data.deadTuples} />
-                <PgBouncerStatsTable data={data.pgbouncerStats} />
+            <DatabasesTable databases={data.databases} pools={data.pgbouncerPools} />
+
+            <div className="border-b border-primary-700 pb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    Maintenance
+                </h2>
             </div>
+            <MaintenanceTable deadTuples={data.deadTuples} pgbouncerStats={data.pgbouncerStats} />
 
             <div className="border-b border-primary-700 pb-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
