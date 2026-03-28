@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -29,7 +29,9 @@ export function DatabaseTableShell<T extends object>({
 }: Props<T>) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const [scrollbarWidth, setScrollbarWidth] = useState(0);
+    const [columnWidths, setColumnWidths] = useState<number[]>([]);
     const bodyRef = useRef<HTMLDivElement | null>(null);
+    const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
     const table = useReactTable({
         data,
@@ -40,18 +42,21 @@ export function DatabaseTableShell<T extends object>({
         getSortedRowModel: getSortedRowModel(),
     });
 
-    const leafColumnCount = useMemo(() => table.getAllLeafColumns().length || 1, [table]);
-
-    useEffect(() => {
-        const updateScrollbarWidth = () => {
+    useLayoutEffect(() => {
+        const measure = () => {
             if (!bodyRef.current) return;
             setScrollbarWidth(bodyRef.current.offsetWidth - bodyRef.current.clientWidth);
+
+            const cells = firstRowRef.current ? Array.from(firstRowRef.current.children) as HTMLElement[] : [];
+            if (cells.length > 0) {
+                setColumnWidths(cells.map((cell) => cell.getBoundingClientRect().width));
+            }
         };
 
-        updateScrollbarWidth();
-        window.addEventListener("resize", updateScrollbarWidth);
-        return () => window.removeEventListener("resize", updateScrollbarWidth);
-    }, [data.length, maxHeight, columns.length]);
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+    }, [data, columns, sorting, maxHeight]);
 
     if (data.length === 0) {
         return (
@@ -67,15 +72,15 @@ export function DatabaseTableShell<T extends object>({
                 className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur"
                 style={{ paddingRight: scrollbarWidth }}
             >
-                <table className="min-w-full table-fixed text-sm">
+                <table className="min-w-full text-sm">
                     <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
-                                {headerGroup.headers.map((header) => (
+                                {headerGroup.headers.map((header, index) => (
                                     <th
                                         key={header.id}
                                         className="px-4 py-3 align-top"
-                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                        style={columnWidths[index] ? { width: columnWidths[index] } : undefined}
                                     >
                                         {header.column.getCanSort() ? (
                                             <button
@@ -83,10 +88,7 @@ export function DatabaseTableShell<T extends object>({
                                                 className="flex items-center gap-1 select-none hover:text-primary-100"
                                                 onClick={header.column.getToggleSortingHandler()}
                                             >
-                                                {flexRender(
-                                                    header.column.columnDef.header,
-                                                    header.getContext()
-                                                )}
+                                                {flexRender(header.column.columnDef.header, header.getContext())}
                                                 <span className="text-primary-500">
                                                     {header.column.getIsSorted() === "asc" ? (
                                                         <ChevronDown className="h-3 w-3" />
@@ -96,12 +98,7 @@ export function DatabaseTableShell<T extends object>({
                                                 </span>
                                             </button>
                                         ) : (
-                                            <div>
-                                                {flexRender(
-                                                    header.column.columnDef.header,
-                                                    header.getContext()
-                                                )}
-                                            </div>
+                                            <div>{flexRender(header.column.columnDef.header, header.getContext())}</div>
                                         )}
                                     </th>
                                 ))}
@@ -112,22 +109,23 @@ export function DatabaseTableShell<T extends object>({
             </div>
 
             <div ref={bodyRef} className="overflow-y-auto overflow-x-auto" style={{ maxHeight }}>
-                <table className="min-w-full table-fixed text-sm">
+                <table className="min-w-full text-sm">
                     <tbody>
-                        {table.getRowModel().rows.map((row) => (
+                        {table.getRowModel().rows.map((row, rowIndex) => (
                             <tr
                                 key={row.id}
+                                ref={rowIndex === 0 ? firstRowRef : undefined}
                                 className={[
                                     "border-b border-primary-700/50 hover:bg-primary-700/30",
                                     onRowClick ? "cursor-pointer" : "",
                                 ].join(" ")}
                                 onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                             >
-                                {row.getVisibleCells().map((cell) => (
+                                {row.getVisibleCells().map((cell, cellIndex) => (
                                     <td
                                         key={cell.id}
                                         className="px-4 py-3 align-top"
-                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                        style={columnWidths[cellIndex] ? { width: columnWidths[cellIndex] } : undefined}
                                     >
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                     </td>

@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown, Play, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
 import { Badge } from "../../ui/Badge";
@@ -139,7 +139,9 @@ export function DockerContainersTable({
 }: DockerContainersTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const [scrollbarWidth, setScrollbarWidth] = useState(0);
+    const [columnWidths, setColumnWidths] = useState<number[]>([]);
     const bodyRef = useRef<HTMLDivElement | null>(null);
+    const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
     const columns = useMemo(
         () => [
@@ -259,18 +261,21 @@ export function DockerContainersTable({
         getSortedRowModel: getSortedRowModel(),
     });
 
-    const leafColumnCount = table.getAllLeafColumns().length || 1;
-
-    useEffect(() => {
-        const updateScrollbarWidth = () => {
+    useLayoutEffect(() => {
+        const measure = () => {
             if (!bodyRef.current) return;
             setScrollbarWidth(bodyRef.current.offsetWidth - bodyRef.current.clientWidth);
+
+            const cells = firstRowRef.current ? Array.from(firstRowRef.current.children) as HTMLElement[] : [];
+            if (cells.length > 0) {
+                setColumnWidths(cells.map((cell) => cell.getBoundingClientRect().width));
+            }
         };
 
-        updateScrollbarWidth();
-        window.addEventListener("resize", updateScrollbarWidth);
-        return () => window.removeEventListener("resize", updateScrollbarWidth);
-    }, [containers.length]);
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+    }, [containers, sorting]);
 
     if (containers.length === 0) {
         return (
@@ -301,15 +306,15 @@ export function DockerContainersTable({
                 className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur"
                 style={{ paddingRight: scrollbarWidth }}
             >
-                <table className="min-w-full table-fixed text-sm">
+                <table className="min-w-full text-sm">
                     <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
-                                {headerGroup.headers.map((header) => (
+                                {headerGroup.headers.map((header, index) => (
                                     <th
                                         key={header.id}
                                         className="px-4 py-3 align-top"
-                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                        style={columnWidths[index] ? { width: columnWidths[index] } : undefined}
                                     >
                                         {header.column.getCanSort() ? (
                                             <button
@@ -340,19 +345,20 @@ export function DockerContainersTable({
             </div>
 
             <div ref={bodyRef} className="max-h-[520px] overflow-y-auto overflow-x-auto">
-                <table className="min-w-full table-fixed text-sm">
+                <table className="min-w-full text-sm">
                     <tbody>
-                        {table.getRowModel().rows.map((row) => (
+                        {table.getRowModel().rows.map((row, rowIndex) => (
                             <tr
                                 key={row.id}
+                                ref={rowIndex === 0 ? firstRowRef : undefined}
                                 className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
                                 onClick={() => onDetails(row.original.id)}
                             >
-                                {row.getVisibleCells().map((cell) => (
+                                {row.getVisibleCells().map((cell, cellIndex) => (
                                     <td
                                         key={cell.id}
                                         className="px-4 py-3 align-top"
-                                        style={{ width: `${100 / leafColumnCount}%` }}
+                                        style={columnWidths[cellIndex] ? { width: columnWidths[cellIndex] } : undefined}
                                     >
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                     </td>
