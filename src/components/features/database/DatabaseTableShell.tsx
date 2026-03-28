@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -28,6 +28,8 @@ export function DatabaseTableShell<T extends object>({
     onRowClick,
 }: Props<T>) {
     const [sorting, setSorting] = useState<SortingState>([]);
+    const [scrollbarWidth, setScrollbarWidth] = useState(0);
+    const bodyRef = useRef<HTMLDivElement | null>(null);
 
     const table = useReactTable({
         data,
@@ -38,10 +40,18 @@ export function DatabaseTableShell<T extends object>({
         getSortedRowModel: getSortedRowModel(),
     });
 
-    const leafColumnCount = useMemo(
-        () => table.getAllLeafColumns().length || 1,
-        [table]
-    );
+    const leafColumnCount = useMemo(() => table.getAllLeafColumns().length || 1, [table]);
+
+    useEffect(() => {
+        const updateScrollbarWidth = () => {
+            if (!bodyRef.current) return;
+            setScrollbarWidth(bodyRef.current.offsetWidth - bodyRef.current.clientWidth);
+        };
+
+        updateScrollbarWidth();
+        window.addEventListener("resize", updateScrollbarWidth);
+        return () => window.removeEventListener("resize", updateScrollbarWidth);
+    }, [data.length, maxHeight, columns.length]);
 
     if (data.length === 0) {
         return (
@@ -53,7 +63,10 @@ export function DatabaseTableShell<T extends object>({
 
     return (
         <Card className="overflow-hidden">
-            <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
+            <div
+                className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur"
+                style={{ paddingRight: scrollbarWidth }}
+            >
                 <table className="min-w-full table-fixed text-sm">
                     <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
@@ -98,7 +111,7 @@ export function DatabaseTableShell<T extends object>({
                 </table>
             </div>
 
-            <div className="overflow-y-auto overflow-x-auto" style={{ maxHeight }}>
+            <div ref={bodyRef} className="overflow-y-auto overflow-x-auto" style={{ maxHeight }}>
                 <table className="min-w-full table-fixed text-sm">
                     <tbody>
                         {table.getRowModel().rows.map((row) => (

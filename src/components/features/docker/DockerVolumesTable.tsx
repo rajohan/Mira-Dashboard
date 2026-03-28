@@ -7,7 +7,7 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DockerVolume } from "../../../hooks/useDocker";
 import { Button } from "../../ui/Button";
@@ -35,6 +35,8 @@ interface DockerVolumesTableProps {
 
 export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning = false }: DockerVolumesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
+    const [scrollbarWidth, setScrollbarWidth] = useState(0);
+    const bodyRef = useRef<HTMLDivElement | null>(null);
 
     const columns = useMemo(
         () => [
@@ -101,6 +103,17 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
 
     const unusedCount = volumes.filter((volume) => volume.usedBy.length === 0).length;
 
+    useEffect(() => {
+        const updateScrollbarWidth = () => {
+            if (!bodyRef.current) return;
+            setScrollbarWidth(bodyRef.current.offsetWidth - bodyRef.current.clientWidth);
+        };
+
+        updateScrollbarWidth();
+        window.addEventListener("resize", updateScrollbarWidth);
+        return () => window.removeEventListener("resize", updateScrollbarWidth);
+    }, [volumes.length]);
+
     if (volumes.length === 0) {
         return (
             <Card className="overflow-hidden">
@@ -118,7 +131,10 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
-            <div className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur">
+            <div
+                className="border-b border-primary-700/50 bg-primary-900/95 backdrop-blur"
+                style={{ paddingRight: scrollbarWidth }}
+            >
                 <table className="min-w-full text-sm">
                     <thead className="text-left text-primary-300">
                         {table.getHeaderGroups().map((headerGroup) => (
@@ -153,7 +169,7 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
                     </thead>
                 </table>
             </div>
-            <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
+            <div ref={bodyRef} className="max-h-[420px] overflow-y-auto overflow-x-auto">
                 <table className="min-w-full text-sm">
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
