@@ -73,7 +73,7 @@ export function DatabaseTableShell<T extends object>({
                         </thead>
                         <tbody>
                             {table.getRowModel().rows.map((row) => (
-                                <tr key={row.id} className="border-t border-primary-800 align-top">
+                                <tr key={row.id} className="border-b border-primary-700/50 hover:bg-primary-700/30">
                                     {row.getVisibleCells().map((cell) => (
                                         <td key={cell.id} className="px-4 py-3">
                                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
