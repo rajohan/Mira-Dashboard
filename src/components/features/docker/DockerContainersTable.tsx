@@ -6,7 +6,7 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, Download, FileText, Play, RotateCcw, SquareTerminal } from "lucide-react";
+import { ChevronDown, Download, FileText, RefreshCw, RotateCcw, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
@@ -296,8 +296,8 @@ export function DockerContainersTable({
                         Restart stack
                     </Button>
                     <Button size="sm" onClick={onUpdateStack}>
-                        <Play className="mr-2 h-4 w-4" />
-                        Pull + update
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Update stack
                     </Button>
                 </div>
             </div>

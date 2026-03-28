@@ -6,7 +6,7 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ScanSearch, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerImage } from "../../../hooks/useDocker";
@@ -81,13 +81,15 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
                         <Button
                             size="sm"
                             variant="danger"
+                            title="Delete"
+                            aria-label="Delete"
                             disabled={image.inUseBy.length > 0}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onDelete(image.id, `${image.repository}:${image.tag || "<none>"}`);
                             }}
                         >
-                            Delete
+                            <Trash2 className="h-4 w-4" />
                         </Button>
                     );
                 },
@@ -120,6 +122,7 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Images</div>
                 <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
+                    <ScanSearch className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
