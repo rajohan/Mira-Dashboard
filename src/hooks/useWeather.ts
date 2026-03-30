@@ -1,6 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { apiFetch } from "./useApi";
+import { useCacheEntry } from "./useCache";
 
 export interface WeatherData {
     location: string;
@@ -20,15 +18,11 @@ export interface WeatherData {
     fetchedAt: number;
 }
 
-function fetchWeather(): Promise<WeatherData> {
-    return apiFetch<WeatherData>("/weather");
-}
-
 export function useWeather(refreshInterval: number | false = false) {
-    return useQuery({
-        queryKey: ["weather"],
-        queryFn: fetchWeather,
-        refetchInterval: refreshInterval,
-        staleTime: 120000,
-    });
+    const query = useCacheEntry<WeatherData>("weather.spydeberg", refreshInterval);
+
+    return {
+        ...query,
+        data: query.data?.data,
+    };
 }

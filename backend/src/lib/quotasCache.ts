@@ -1,11 +1,4 @@
-import { useCacheEntry } from "./useCache";
-
-type QuotaStatus = "not_configured" | "error";
-
-interface QuotaError {
-    status: QuotaStatus;
-    note?: string;
-}
+import { getCacheEntry, parseJsonField } from "./cacheStore.js";
 
 export interface OpenRouterQuota {
     usage: number;
@@ -75,6 +68,11 @@ export interface SyntheticQuota {
     };
 }
 
+export interface QuotaError {
+    status: "not_configured" | "error";
+    note?: string;
+}
+
 export interface QuotasResponse {
     openrouter: OpenRouterQuota | QuotaError;
     elevenlabs: ElevenLabsQuota | QuotaError;
@@ -85,15 +83,6 @@ export interface QuotasResponse {
     cacheAgeMs: number;
 }
 
-export function useQuotas(refreshInterval: number | false = false) {
-    const query = useCacheEntry<QuotasResponse>("quotas.summary", refreshInterval);
-
-    return {
-        ...query,
-        data: query.data?.data,
-    };
-}
-
 export function hasQuotaStatus(value: unknown): value is QuotaError {
     return (
         typeof value === "object" &&
@@ -101,4 +90,21 @@ export function hasQuotaStatus(value: unknown): value is QuotaError {
         "status" in value &&
         (value.status === "not_configured" || value.status === "error")
     );
+}
+
+export async function fetchCachedQuotas(): Promise<QuotasResponse> {
+    const row = await getCacheEntry("quotas.summary");
+    if (!row || row.status !== "fresh") {
+        throw new Error("Quota cache entry not found or not fresh");
+    }
+
+    const data = parseJsonField<QuotasResponse>(row.data);
+    if (!data) {
+        throw new Error("Quota cache payload is invalid");
+    }
+
+    return {
+        ...data,
+        cacheAgeMs: Math.max(Date.now() - data.checkedAt, 0),
+    };
 }

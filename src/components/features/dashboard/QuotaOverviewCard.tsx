@@ -149,6 +149,24 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
             resetAt: null,
         },
         {
+            key: "synthetic",
+            label: "Synthetic.new",
+            icon: <Zap className="h-4 w-4" />,
+            line1: hasQuotaStatus(quotas.synthetic)
+                ? quotas.synthetic.status.replaceAll("_", " ")
+                : `5h ${Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0)}% left · weekly ${quotas.synthetic.weeklyTokenLimit.percentRemaining}% left`,
+            line2: hasQuotaStatus(quotas.synthetic)
+                ? quotas.synthetic.note || ""
+                : `Resets: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
+            percent: hasQuotaStatus(quotas.synthetic)
+                ? null
+                : Math.max(
+                      quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
+                      100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
+                  ),
+            resetAt: null,
+        },
+        {
             key: "openai",
             label: "OpenAI / Codex",
             icon: <DollarSign className="h-4 w-4" />,

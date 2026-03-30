@@ -11,6 +11,7 @@ import { getAuthUserFromRequest, getPersistedGatewayToken, requireAuth } from ".
 import gateway from "./gateway.js";
 import agentsRoutes from "./routes/agents.js";
 import authRoutes from "./routes/auth.js";
+import cacheRoutes from "./routes/cache.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
 import cronRoutes from "./routes/cron.js";
@@ -22,13 +23,11 @@ import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
 import openclawRoutes from "./routes/openclaw.js";
-import quotasRoutes, { startQuotasMonitor } from "./routes/quotas.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
 import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
-import weatherRoutes, { startWeatherMonitor } from "./routes/weather.js";
 import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
@@ -96,6 +95,7 @@ app.use("/api", (request, response, next) => {
 // Route modules
 filesRoutes(app, express);
 configFilesRoutes(app, express);
+cacheRoutes(app);
 agentsRoutes(app);
 logsRoutes(app);
 cronRoutes(app);
@@ -107,8 +107,6 @@ moltbookRoutes(app);
 settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
 tasksRoutes(app, express);
-weatherRoutes(app);
-quotasRoutes(app);
 notificationsRoutes(app);
 openclawRoutes(app, express);
 terminalRoutes(app);
@@ -143,6 +141,4 @@ server.listen(PORT, () => {
 
     startQuotaNotificationMonitor();
     startOpenClawNotificationMonitor();
-    startWeatherMonitor();
-    startQuotasMonitor();
 });

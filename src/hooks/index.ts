@@ -57,6 +57,7 @@ export {
     useOpenClawVersion,
     useStartOpsAction,
 } from "./useOpsActions";
+export { useCacheEntry } from "./useCache";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export {
     sessionKeys,

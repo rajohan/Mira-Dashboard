@@ -1,14 +1,14 @@
 import { db } from "../db.js";
-import { fetchQuotas, hasQuotaStatus } from "../routes/quotas.js";
+import { fetchCachedQuotas, hasQuotaStatus } from "../lib/quotasCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
-type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "openai";
+type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "synthetic" | "openai";
 
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
-function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<typeof fetchQuotas>>): number | null {
+function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>): number | null {
     if (provider === "openrouter") {
         return hasQuotaStatus(quotas.openrouter) ? null : quotas.openrouter.percentUsed;
     }
@@ -23,13 +23,22 @@ function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<ty
             : Math.max(quotas.zai.fiveHour.usedPercentage, quotas.zai.weekly.usedPercentage);
     }
 
+    if (provider === "synthetic") {
+        return hasQuotaStatus(quotas.synthetic)
+            ? null
+            : Math.max(
+                  quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
+                  100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
+              );
+    }
+
     return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;
 }
 
 function getNotificationPayload(
     provider: ProviderKey,
     bucket: number,
-    quotas: Awaited<ReturnType<typeof fetchQuotas>>
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
 ) {
     if (provider === "openrouter" && !hasQuotaStatus(quotas.openrouter)) {
         return {
@@ -49,6 +58,13 @@ function getNotificationPayload(
         return {
             title: `Z.ai usage high (${bucket}%)`,
             description: `5h ${quotas.zai.fiveHour.usedPercentage}% · weekly ${quotas.zai.weekly.usedPercentage}%`,
+        };
+    }
+
+    if (provider === "synthetic" && !hasQuotaStatus(quotas.synthetic)) {
+        return {
+            title: `Synthetic.new usage high (${bucket}%)`,
+            description: `5h ${Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0)}% left · weekly ${quotas.synthetic.weeklyTokenLimit.percentRemaining}% left`,
         };
     }
 
@@ -132,9 +148,9 @@ export async function runQuotaNotificationCheck(): Promise<void> {
     running = true;
 
     try {
-        const quotas = await fetchQuotas();
+        const quotas = await fetchCachedQuotas();
         const occurredAt = new Date(quotas.checkedAt).toISOString();
-        const providers: ProviderKey[] = ["openrouter", "elevenlabs", "zai", "openai"];
+        const providers: ProviderKey[] = ["openrouter", "elevenlabs", "zai", "synthetic", "openai"];
 
         for (const provider of providers) {
             const percent = getProviderPercent(provider, quotas);
