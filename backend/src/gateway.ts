@@ -1,131 +1,35 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import Path from "node:path";
-import { createRequire } from "node:module";
 
 import WebSocket from "ws";
 
-const require = createRequire(import.meta.url);
-
-type OpenClawGatewayClientOptions = {
-    url?: string;
-    token?: string;
-    role?: string;
-    scopes?: string[];
-    caps?: string[];
-    clientName?: string;
-    clientDisplayName?: string;
-    mode?: string;
-    platform?: string;
-    deviceFamily?: string;
-    deviceIdentity?: unknown;
-    onHelloOk?: () => void;
-    onEvent?: (evt: { event?: string; payload?: unknown }) => void;
-    onConnectError?: (err: Error) => void;
-    onClose?: (code: number, reason: string) => void;
-};
-
-type OpenClawGatewayClientInstance = {
-    start: () => void;
-    stop: () => void;
-    request: (method: string, params?: unknown) => Promise<unknown>;
-};
-
-type OpenClawGatewayClientCtor = new (
-    opts: OpenClawGatewayClientOptions
-) => OpenClawGatewayClientInstance;
-
-function loadOpenClawGatewayRuntime(): {
-    GatewayClient?: OpenClawGatewayClientCtor;
-    loadOrCreateDeviceIdentity?: () => unknown;
-    u?: OpenClawGatewayClientCtor;
-    dn?: () => unknown;
-    zs?: OpenClawGatewayClientCtor;
-    Pl?: () => unknown;
-} {
-    const distDir = "/home/ubuntu/.npm-global/lib/node_modules/openclaw/dist";
-    const entries = fs.readdirSync(distDir);
-
-    const candidates = [
-        ...entries.filter((entry) => entry.startsWith("method-scopes-") && entry.endsWith(".js")),
-        ...entries.filter((entry) => entry.startsWith("reply-") && entry.endsWith(".js")),
-    ];
-
-    for (const entry of candidates) {
-        const runtime = require(Path.join(distDir, entry)) as {
-            GatewayClient?: OpenClawGatewayClientCtor;
-            loadOrCreateDeviceIdentity?: () => unknown;
-            u?: OpenClawGatewayClientCtor;
-            dn?: () => unknown;
-            zs?: OpenClawGatewayClientCtor;
-            Pl?: () => unknown;
-        };
-
-        if (
-            (typeof runtime.u === "function" || typeof runtime.GatewayClient === "function" || typeof runtime.zs === "function") &&
-            (typeof runtime.dn === "function" || typeof runtime.loadOrCreateDeviceIdentity === "function" || typeof runtime.Pl === "function")
-        ) {
-            return runtime;
-        }
-    }
-
-    throw new Error("Could not locate compatible OpenClaw gateway runtime in dist/");
-}
-
-const openclawGatewayRuntime = loadOpenClawGatewayRuntime();
-const resolvedGatewayClientCtor =
-    openclawGatewayRuntime.GatewayClient ||
-    openclawGatewayRuntime.u ||
-    openclawGatewayRuntime.zs;
-const resolvedLoadOrCreateDeviceIdentity =
-    openclawGatewayRuntime.loadOrCreateDeviceIdentity ||
-    openclawGatewayRuntime.dn ||
-    openclawGatewayRuntime.Pl;
-
-if (!resolvedGatewayClientCtor || !resolvedLoadOrCreateDeviceIdentity) {
-    throw new Error("Failed to resolve OpenClaw gateway runtime exports");
-}
-
-const OpenClawGatewayClient: OpenClawGatewayClientCtor = resolvedGatewayClientCtor;
-const loadOrCreateDeviceIdentity: () => unknown = resolvedLoadOrCreateDeviceIdentity;
+import {
+    OpenClawGatewayClient,
+    type DeviceIdentity,
+    type OpenClawGatewayClientInstance,
+    loadOrCreateDeviceIdentity,
+} from "./lib/openclawGatewayClient.js";
 
 const DASHBOARD_OPENCLAW_HOME =
     process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
     Path.join(process.cwd(), "data", "openclaw-client");
 
-function loadOrCreateDashboardDeviceIdentity(): unknown | undefined {
-    const previousHome = process.env.HOME;
-    const identityDir = Path.join(DASHBOARD_OPENCLAW_HOME, ".openclaw", "identity");
-
-    fs.mkdirSync(identityDir, {
-        recursive: true,
-    });
+function loadOrCreateDashboardDeviceIdentity(): DeviceIdentity | undefined {
+    const identityPath = Path.join(
+        DASHBOARD_OPENCLAW_HOME,
+        ".openclaw",
+        "identity",
+        "device.json"
+    );
 
     try {
-        process.env.HOME = DASHBOARD_OPENCLAW_HOME;
-
-        try {
-            return loadOrCreateDeviceIdentity();
-        } catch (firstError) {
-            fs.rmSync(identityDir, { recursive: true, force: true });
-            fs.mkdirSync(identityDir, { recursive: true });
-
-            try {
-                return loadOrCreateDeviceIdentity();
-            } catch (secondError) {
-                console.warn(
-                    "[Gateway] Failed to load dashboard device identity, continuing without explicit identity:",
-                    secondError instanceof Error ? secondError.message : String(secondError)
-                );
-                return undefined;
-            }
-        }
-    } finally {
-        if (typeof previousHome === "string") {
-            process.env.HOME = previousHome;
-        } else {
-            delete process.env.HOME;
-        }
+        return loadOrCreateDeviceIdentity(identityPath);
+    } catch (error) {
+        console.warn(
+            "[Gateway] Failed to load dashboard device identity, continuing without explicit identity:",
+            error instanceof Error ? error.message : String(error)
+        );
+        return undefined;
     }
 }
 
@@ -381,7 +285,13 @@ function handleClient(ws: WebSocket): void {
     ws.on("message", (data: Buffer) => {
         void (async () => {
             try {
-                const msg = JSON.parse(data.toString());
+                const msg = JSON.parse(data.toString()) as {
+                    type?: string;
+                    channel?: string;
+                    method?: string;
+                    params?: Record<string, unknown>;
+                    id?: string;
+                };
 
                 if (msg.type === "subscribe" && msg.channel === "logs") {
                     logsSubscribe(ws);
