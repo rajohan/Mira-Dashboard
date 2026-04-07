@@ -1,9 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-
 import type { MiraComment, MiraContent, MiraPost, MiraProfile } from "../types/moltbook";
-import { apiFetch } from "./useApi";
+import { useCacheEntry } from "./useCache";
 
-// Types
 export interface MoltbookPost {
     id: string;
     title: string;
@@ -19,24 +16,24 @@ export interface MoltbookPost {
 }
 
 export interface MoltbookHome {
-    your_account: {
-        name: string;
-        karma: number;
-        unread_notification_count: string;
-    };
-    notifications: unknown[];
-    activity_on_your_posts: unknown[];
-    your_direct_messages: {
-        pending_request_count: string;
-        unread_message_count: string;
-    };
-    posts_from_accounts_you_follow: {
-        posts: MoltbookPost[];
-        total_following: number;
-    };
+    pendingRequestCount: number;
+    unreadMessageCount: number;
+    activityOnYourPostsCount: number;
+    activityOnYourPosts: unknown[];
+    latestAnnouncement: {
+        postId: string | null;
+        title: string | null;
+        authorName: string | null;
+        createdAt: string | null;
+        preview: string | null;
+    } | null;
+    postsFromAccountsYouFollowCount: number | null;
+    exploreCount: number | null;
+    nextActions: string[];
+    fetchedAt: string;
 }
 
-interface ProfileResponse {
+interface MoltbookProfileCache {
     agent?: MiraProfile;
 }
 
@@ -45,7 +42,10 @@ interface MyContentResponse {
     comments: MiraComment[];
 }
 
-// Query keys
+interface MoltbookFeedResponse {
+    posts?: Record<string, unknown>[];
+}
+
 export const moltbookKeys = {
     home: (): ["moltbook", "home"] => ["moltbook", "home"],
     feed: (sort: "hot" | "new"): ["moltbook", "feed", string] => [
@@ -57,7 +57,6 @@ export const moltbookKeys = {
     myContent: (): ["moltbook", "myContent"] => ["moltbook", "myContent"],
 };
 
-// Transform API post format to our format
 function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
     return {
         id: (apiPost.post_id || apiPost.id) as string,
@@ -84,64 +83,22 @@ function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
     };
 }
 
-// Fetchers
-async function fetchHome(): Promise<MoltbookHome> {
-    return apiFetch<MoltbookHome>("/moltbook/home");
-}
-
-async function fetchFeed(sort?: "hot" | "new"): Promise<MoltbookPost[]> {
-    const url = sort ? `/moltbook/feed?sort=${sort}` : "/moltbook/feed";
-    const data = await apiFetch<
-        Record<string, unknown>[] | { posts?: Record<string, unknown>[] }
-    >(url);
-    const rawPosts = Array.isArray(data) ? data : data.posts || [];
-    return rawPosts.map(transformPost);
-}
-
-async function fetchProfile(): Promise<MiraProfile | null> {
-    const data = await apiFetch<ProfileResponse>("/moltbook/profile");
-    return data.agent || null;
-}
-
-async function fetchMyContent(): Promise<MiraContent | null> {
-    const data = await apiFetch<MyContentResponse>("/moltbook/my-posts");
-    return { posts: data.posts || [], comments: data.comments || [] };
-}
-
-// Hooks
 export function useMoltbookHome() {
-    return useQuery({
-        queryKey: moltbookKeys.home(),
-        queryFn: fetchHome,
-        staleTime: 60_000,
-    });
+    return useCacheEntry<MoltbookHome>("moltbook.home", 60_000);
 }
 
 export function useMoltbookFeed(sort: "hot" | "new" = "hot") {
-    return useQuery({
-        queryKey: moltbookKeys.feed(sort),
-        queryFn: () => fetchFeed(sort),
-        staleTime: 30_000,
-    });
+    return useCacheEntry<MoltbookFeedResponse>(`moltbook.feed.${sort}`, 60_000);
 }
 
 export function useMoltbookProfile() {
-    return useQuery({
-        queryKey: moltbookKeys.profile(),
-        queryFn: fetchProfile,
-        staleTime: 300_000,
-    });
+    return useCacheEntry<MoltbookProfileCache>("moltbook.profile", 60_000);
 }
 
 export function useMoltbookMyContent() {
-    return useQuery({
-        queryKey: moltbookKeys.myContent(),
-        queryFn: fetchMyContent,
-        staleTime: 60_000,
-    });
+    return useCacheEntry<MyContentResponse>("moltbook.my-content", 60_000);
 }
 
-// Combined hook for Moltbook page
 export function useMoltbookData(sort: "hot" | "new" = "hot") {
     const home = useMoltbookHome();
     const feed = useMoltbookFeed(sort);
@@ -153,10 +110,14 @@ export function useMoltbookData(sort: "hot" | "new" = "hot") {
     const error = home.error || feed.error || profile.error || myContent.error;
 
     return {
-        home: home.data,
-        posts: feed.data || [],
-        profile: profile.data,
-        myContent: myContent.data,
+        home: home.data?.data,
+        homeCache: home.data,
+        posts: (feed.data?.data.posts || []).map(transformPost),
+        profile: profile.data?.data.agent || null,
+        myContent: {
+            posts: myContent.data?.data.posts || [],
+            comments: myContent.data?.data.comments || [],
+        } as MiraContent,
         isLoading,
         error: error?.message || null,
         refetch: () => {

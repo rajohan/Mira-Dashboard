@@ -1,5 +1,6 @@
-import { execSync } from "node:child_process";
 import express, { type RequestHandler } from "express";
+
+import { fetchCachedSystemOpenClaw } from "../lib/systemCache.js";
 
 export interface VersionResponse {
     current: string;
@@ -8,77 +9,13 @@ export interface VersionResponse {
     checkedAt: number;
 }
 
-const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
-let versionCache: VersionResponse | null = null;
-let versionCacheExpiresAt = 0;
-
-function runCommand(command: string): string | null {
-    try {
-        return execSync(command, {
-            stdio: ["ignore", "pipe", "ignore"],
-            encoding: "utf8",
-            timeout: 8000,
-        }).trim();
-    } catch {
-        return null;
-    }
-}
-
-function runFirst(commands: string[]): string | null {
-    for (const command of commands) {
-        const value = runCommand(command);
-        if (value) {
-            return value;
-        }
+export async function getOpenClawVersionCached(): Promise<VersionResponse> {
+    const cached = await fetchCachedSystemOpenClaw();
+    if (!cached.data.version) {
+        throw new Error("OpenClaw version missing from system cache");
     }
 
-    return null;
-}
-
-function normalizeVersion(value: string | null): string | null {
-    if (!value) {
-        return null;
-    }
-
-    const match = value.match(/(\d+\.\d+\.\d+)/);
-    return match?.[1] || value;
-}
-
-export async function fetchOpenClawVersion(): Promise<VersionResponse> {
-    const currentRaw = runFirst([
-        "openclaw --version",
-        "/home/ubuntu/.npm-global/bin/openclaw --version",
-    ]);
-    const latestRaw = runFirst([
-        "npm view openclaw version",
-        "/usr/bin/npm view openclaw version",
-    ]);
-
-    const current = normalizeVersion(currentRaw) || "unknown";
-    const latest = normalizeVersion(latestRaw);
-
-    return {
-        current,
-        latest,
-        updateAvailable: current !== "unknown" && latest !== null && current !== latest,
-        checkedAt: Date.now(),
-    };
-}
-
-export async function getOpenClawVersionCached(
-    options: { forceRefresh?: boolean } = {}
-): Promise<VersionResponse> {
-    const now = Date.now();
-
-    if (!options.forceRefresh && versionCache && now < versionCacheExpiresAt) {
-        return versionCache;
-    }
-
-    const fresh = await fetchOpenClawVersion();
-    versionCache = fresh;
-    versionCacheExpiresAt = now + VERSION_CACHE_TTL_MS;
-
-    return fresh;
+    return cached.data.version;
 }
 
 export default function openclawRoutes(
@@ -86,7 +23,13 @@ export default function openclawRoutes(
     _express: typeof express
 ): void {
     app.get("/api/openclaw/version", (async (_req, res) => {
-        const version = await getOpenClawVersionCached();
-        res.json(version);
+        try {
+            const version = await getOpenClawVersionCached();
+            res.json(version);
+        } catch (error) {
+            res.status(503).json({
+                error: error instanceof Error ? error.message : "OpenClaw version cache unavailable",
+            });
+        }
     }) as RequestHandler);
 }

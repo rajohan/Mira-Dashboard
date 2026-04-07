@@ -187,9 +187,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                     Usage Limits
                 </h3>
-                <span className="text-xs text-primary-500">
-                    Updated {formatDate(new Date(quotas.checkedAt))}
-                </span>
             </div>
 
             <div className="space-y-2">

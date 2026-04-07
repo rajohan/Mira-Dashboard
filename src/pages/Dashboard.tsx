@@ -23,6 +23,7 @@ import { sessionsCollection } from "../collections/sessions";
 import {
     ActiveSessionsCard,
     CronOverviewCard,
+    GitOverviewCard,
     QuotaOverviewCard,
     ServiceActionsCard,
 } from "../components/features/dashboard";
@@ -242,12 +243,13 @@ export function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <ActiveSessionsCard sessions={sortedSessions} />
                 <QuotaOverviewCard quotas={quotas} />
+                <GitOverviewCard />
                 <CronOverviewCard />
             </div>
 
-            <div className="max-w-2xl">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <ActiveSessionsCard sessions={sortedSessions} />
                 <ServiceActionsCard />
             </div>
         </div>

@@ -13,10 +13,10 @@ interface ActiveSessionsCardProps {
 
 export function ActiveSessionsCard({ sessions }: ActiveSessionsCardProps) {
     return (
-        <Card variant="bordered">
+        <Card variant="bordered" className="h-full">
             <CardTitle className="mb-4">Active Sessions</CardTitle>
             {sessions.length > 0 ? (
-                <div className="max-h-64 space-y-2 overflow-y-auto pr-2">
+                <div className="max-h-[28rem] min-h-[22rem] space-y-2 overflow-y-auto pr-2">
                     {sessions.map((session) => {
                         const tokenPercent = getTokenPercent(
                             session.tokenCount || 0,
@@ -71,7 +71,9 @@ export function ActiveSessionsCard({ sessions }: ActiveSessionsCardProps) {
                     })}
                 </div>
             ) : (
-                <p className="text-primary-400">No active sessions</p>
+                <div className="flex min-h-[22rem] items-center justify-center text-primary-400">
+                    No active sessions
+                </div>
             )}
         </Card>
     );

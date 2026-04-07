@@ -33,9 +33,7 @@ export function Moltbook() {
     const { home, posts, profile, myContent, isLoading, error, refetch } =
         useMoltbookData(sort);
 
-    const unreadCount = home?.your_account?.unread_notification_count
-        ? Number.parseInt(home.your_account.unread_notification_count)
-        : 0;
+    const unreadCount = home?.unreadMessageCount ?? 0;
 
     if (isLoading) {
         return <LoadingState size="lg" />;
