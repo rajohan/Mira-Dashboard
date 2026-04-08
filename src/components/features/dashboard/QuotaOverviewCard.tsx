@@ -160,10 +160,10 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `Resets: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
-                : Math.max(
+                : Math.round(Math.max(
                       quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
                       100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
-                  ),
+                  )),
             resetAt: null,
         },
         {
