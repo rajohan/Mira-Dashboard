@@ -301,22 +301,6 @@ export function useDockerAction() {
     });
 }
 
-export function useDockerStackAction() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: ({ action, service }: { action: string; service?: string }) =>
-            apiPost<{ output: string }>("/docker/stack/action", { action, service }),
-        onSuccess: async () => {
-            await Promise.all([
-                queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
-                queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
-                queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
-            ]);
-        },
-    });
-}
-
 export function useDockerManualUpdate() {
     const queryClient = useQueryClient();
 

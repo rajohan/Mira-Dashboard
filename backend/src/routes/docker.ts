@@ -162,11 +162,11 @@ interface DockerVolumeSummary {
 }
 
 interface DockerActionRequest {
-    action: "start" | "stop" | "restart" | "update";
+    action: "start" | "stop" | "restart";
 }
 
 interface DockerStackActionRequest {
-    action: "restart" | "update";
+    action: "restart";
     service?: string;
 }
 
@@ -775,53 +775,18 @@ async function runContainerAction(containerId: string, action: DockerActionReque
         throw new Error("Container not found");
     }
 
-    if (action === "update") {
-        if (!details.service) {
-            throw new Error("Container is not managed by docker compose");
-        }
-
-        const pullResult = await runCompose(["pull", details.service]);
-        const upResult = await runCompose(["up", "-d", details.service]);
-
-        return {
-            output: [pullResult.stdout, pullResult.stderr, upResult.stdout, upResult.stderr]
-                .filter(Boolean)
-                .join("\n")
-                .trim(),
-        };
-    }
-
     await runDocker([action, details.id]);
     return { output: `${action} sent to ${details.name}` };
 }
 
 async function runStackAction(request: DockerStackActionRequest) {
-    if (request.action === "restart") {
-        const args = ["restart"];
-        if (request.service) {
-            args.push(request.service);
-        }
-        const result = await runCompose(args);
-        return {
-            output: [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
-        };
-    }
-
-    const pullArgs = ["pull"];
-    const upArgs = ["up", "-d"];
+    const args = ["restart"];
     if (request.service) {
-        pullArgs.push(request.service);
-        upArgs.push(request.service);
+        args.push(request.service);
     }
-
-    const pullResult = await runCompose(pullArgs);
-    const upResult = await runCompose(upArgs);
-
+    const result = await runCompose(args);
     return {
-        output: [pullResult.stdout, pullResult.stderr, upResult.stdout, upResult.stderr]
-            .filter(Boolean)
-            .join("\n")
-            .trim(),
+        output: [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
     };
 }
 

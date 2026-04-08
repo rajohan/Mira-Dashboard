@@ -6,7 +6,7 @@ import {
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, Download, FileText, RotateCcw, SquareTerminal } from "lucide-react";
+import { ChevronDown, FileText, RotateCcw, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
@@ -122,9 +122,7 @@ interface DockerContainersTableProps {
     onLogs: (containerId: string) => void;
     onConsole: (containerId: string) => void;
     onRestart: (containerId: string) => void;
-    onUpdate: (containerId: string) => void;
     onRestartStack: () => void;
-    onUpdateStack: () => void;
 }
 
 export function DockerContainersTable({
@@ -133,9 +131,7 @@ export function DockerContainersTable({
     onLogs,
     onConsole,
     onRestart,
-    onUpdate,
     onRestartStack,
-    onUpdateStack,
 }: DockerContainersTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -224,7 +220,7 @@ export function DockerContainersTable({
                 cell: (info) => {
                     const container = info.row.original;
                     return (
-                        <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex flex-nowrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
                             <Button
                                 size="sm"
                                 variant="secondary"
@@ -252,16 +248,6 @@ export function DockerContainersTable({
                             >
                                 <RotateCcw className="h-4 w-4" />
                             </Button>
-                            {container.service ? (
-                                <Button
-                                    size="sm"
-                                    title="Update"
-                                    aria-label="Update"
-                                    onClick={() => onUpdate(container.id)}
-                                >
-                                    <Download className="h-4 w-4" />
-                                </Button>
-                            ) : null}
                         </div>
                     );
                 },
@@ -294,10 +280,6 @@ export function DockerContainersTable({
                     <Button size="sm" variant="secondary" onClick={onRestartStack}>
                         <RotateCcw className="mr-2 h-4 w-4" />
                         Restart stack
-                    </Button>
-                    <Button size="sm" onClick={onUpdateStack}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Update stack
                     </Button>
                 </div>
             </div>

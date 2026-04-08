@@ -26,7 +26,6 @@ import {
     useDockerImages,
     useDockerManualUpdate,
     useDockerPrune,
-    useDockerStackAction,
     useDockerUpdaterEvents,
     useDockerUpdaterServices,
     useDockerVolumes,
@@ -128,6 +127,22 @@ function formatVersionDisplay(tag: string | null, digest: string | null): string
     return "—";
 }
 
+function formatFullVersionDisplay(tag: string | null, digest: string | null): string {
+    if (tag && digest) {
+        return `${tag} (${digest})`;
+    }
+
+    if (tag) {
+        return tag;
+    }
+
+    if (digest) {
+        return digest;
+    }
+
+    return "—";
+}
+
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -161,7 +176,6 @@ export function Docker() {
     const updaterEventsQuery = useDockerUpdaterEvents(25);
 
     const dockerAction = useDockerAction();
-    const dockerStackAction = useDockerStackAction();
     const deleteImage = useDeleteDockerImage();
     const deleteVolume = useDeleteDockerVolume();
     const dockerPrune = useDockerPrune();
@@ -204,8 +218,18 @@ export function Docker() {
         setActionOutput(result.output || "Done");
     }
 
-    async function handleStackAction(action: "restart" | "update", service?: string) {
-        const result = await dockerStackAction.mutateAsync({ action, service });
+    async function handleStackRestart(service?: string) {
+        const response = await fetch("/api/docker/stack/action", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "restart", service }),
+        });
+        const result = (await response.json()) as { output?: string; error?: string };
+        if (!response.ok) {
+            throw new Error(result.error || "Failed to restart stack");
+        }
         setActionOutput(result.output || "Done");
     }
 
@@ -264,25 +288,10 @@ export function Docker() {
             ) : null}
 
             <Card className="overflow-hidden">
-                <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
-                    <div>
-                        <div className="text-lg font-semibold">Updater overview</div>
-                        <div className="text-xs text-primary-400">
-                            Registry poll state from n8n, plus recent updater history.
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <RefreshButton
-                            onClick={() =>
-                                void Promise.all([
-                                    updaterServicesQuery.refetch(),
-                                    updaterEventsQuery.refetch(),
-                                ])
-                            }
-                            isLoading={
-                                updaterServicesQuery.isFetching || updaterEventsQuery.isFetching
-                            }
-                        />
+                <div className="border-b border-primary-700 px-4 py-3">
+                    <div className="text-lg font-semibold">Updater overview</div>
+                    <div className="text-xs text-primary-400">
+                        Registry poll state from n8n, plus recent updater history.
                     </div>
                 </div>
                 <div className="grid gap-4 border-b border-primary-700 px-4 py-4 md:grid-cols-2 xl:grid-cols-5">
@@ -335,7 +344,7 @@ export function Docker() {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div>
                                                     <div className="font-medium text-primary-50">
-                                                        {service.appSlug}/{service.serviceName}
+                                                        {service.serviceName}
                                                     </div>
                                                     <div className="mt-1 text-xs text-primary-400">
                                                         {service.imageRepo}
@@ -350,7 +359,7 @@ export function Docker() {
                                                         onClick={() =>
                                                             setManualUpdateTarget({
                                                                 id: service.id,
-                                                                label: `${service.appSlug}/${service.serviceName}`,
+                                                                label: service.serviceName,
                                                             })
                                                         }
                                                         disabled={dockerManualUpdate.isPending}
@@ -360,10 +369,10 @@ export function Docker() {
                                                 </div>
                                             </div>
                                             <div className="mt-3 grid gap-2 text-xs text-primary-300 md:grid-cols-2">
-                                                <div>
+                                                <div title={formatFullVersionDisplay(service.currentTag, service.currentDigest)}>
                                                     Current: {formatVersionDisplay(service.currentTag, service.currentDigest)}
                                                 </div>
-                                                <div>
+                                                <div title={formatFullVersionDisplay(service.latestTag, service.latestDigest)}>
                                                     Candidate: {formatVersionDisplay(service.latestTag, service.latestDigest)}
                                                 </div>
                                                 <div>Last checked: {formatTimestamp(service.lastCheckedAt)}</div>
@@ -391,7 +400,7 @@ export function Docker() {
                                         <Card key={event.id} className="p-4">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="font-medium text-primary-50">
-                                                    {event.appSlug}/{event.serviceName}
+                                                    {event.serviceName}
                                                 </div>
                                                 <div className="text-xs text-primary-500">
                                                     {formatTimestamp(event.createdAt)}
@@ -400,7 +409,10 @@ export function Docker() {
                                             <div className="mt-1 text-xs uppercase tracking-wide text-primary-400">
                                                 {event.eventType}
                                             </div>
-                                            <div className="mt-2 text-xs text-primary-300 font-mono">
+                                            <div
+                                                className="mt-2 text-xs text-primary-300 font-mono"
+                                                title={`${formatFullVersionDisplay(event.fromTag, event.fromDigest)} → ${formatFullVersionDisplay(event.toTag, event.toDigest)}`}
+                                            >
                                                 {formatUpdaterTransition(event)}
                                             </div>
                                         </Card>
@@ -448,14 +460,8 @@ export function Docker() {
                     onRestart={(containerId) => {
                         void handleContainerAction(containerId, "restart");
                     }}
-                    onUpdate={(containerId) => {
-                        void handleContainerAction(containerId, "update");
-                    }}
                     onRestartStack={() => {
-                        void handleStackAction("restart");
-                    }}
-                    onUpdateStack={() => {
-                        void handleStackAction("update");
+                        void handleStackRestart();
                     }}
                 />
             )}
