@@ -1,5 +1,5 @@
 import { Boxes, History, RefreshCw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
@@ -205,10 +205,7 @@ export function Docker() {
     const updaterServices = updaterServicesQuery.data?.services || [];
     const updaterSummary = updaterServicesQuery.data?.summary;
     const updaterEvents = updaterEventsQuery.data || [];
-    const servicesWithUpdates = useMemo(
-        () => updaterServices.filter((service) => service.updateAvailable),
-        [updaterServices]
-    );
+    const servicesWithUpdates = updaterServices.filter((service) => service.updateAvailable);
 
     async function handleContainerAction(
         containerId: string,

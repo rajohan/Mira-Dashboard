@@ -154,7 +154,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
             icon: <Zap className="h-4 w-4" />,
             line1: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.status.replaceAll("_", " ")
-                : `5h ${Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0)}% left · weekly ${quotas.synthetic.weeklyTokenLimit.percentRemaining}% left`,
+                : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${Math.round(quotas.synthetic.weeklyTokenLimit.percentRemaining)}% left`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
                 : `Resets: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
