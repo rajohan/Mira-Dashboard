@@ -1,5 +1,5 @@
-import { Boxes } from "lucide-react";
-import { useState } from "react";
+import { Boxes, History, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
@@ -24,8 +24,11 @@ import {
     useDockerContainers,
     useDockerExecJob,
     useDockerImages,
+    useDockerManualUpdate,
     useDockerPrune,
     useDockerStackAction,
+    useDockerUpdaterEvents,
+    useDockerUpdaterServices,
     useDockerVolumes,
 } from "../hooks/useDocker";
 
@@ -89,6 +92,42 @@ function formatDockerMemory(value: string | undefined): string {
     return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
 }
 
+function formatTimestamp(value: string | null | undefined): string {
+    if (!value) {
+        return "—";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return date.toLocaleString();
+}
+
+function formatUpdaterTransition(event: {
+    fromTag: string | null;
+    toTag: string | null;
+    fromDigest: string | null;
+    toDigest: string | null;
+}): string {
+    const from = formatVersionDisplay(event.fromTag, event.fromDigest);
+    const to = formatVersionDisplay(event.toTag, event.toDigest);
+    return `${from} → ${to}`;
+}
+
+function formatVersionDisplay(tag: string | null, digest: string | null): string {
+    if (tag) {
+        return tag;
+    }
+
+    if (digest) {
+        return digest.slice(0, 12);
+    }
+
+    return "—";
+}
+
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -101,6 +140,10 @@ export function Docker() {
         | { type: "image"; id: string; label: string }
         | { type: "volume"; id: string; label: string }
     >(null);
+    const [manualUpdateTarget, setManualUpdateTarget] = useState<{
+        id: number;
+        label: string;
+    } | null>(null);
     const [actionOutput, setActionOutput] = useState<string>("");
     const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
 
@@ -114,12 +157,15 @@ export function Docker() {
         Boolean(logsContainerId)
     );
     const execJobQuery = useDockerExecJob(consoleJobId);
+    const updaterServicesQuery = useDockerUpdaterServices();
+    const updaterEventsQuery = useDockerUpdaterEvents(25);
 
     const dockerAction = useDockerAction();
     const dockerStackAction = useDockerStackAction();
     const deleteImage = useDeleteDockerImage();
     const deleteVolume = useDeleteDockerVolume();
     const dockerPrune = useDockerPrune();
+    const dockerManualUpdate = useDockerManualUpdate();
 
     const containers = containersQuery.data || [];
     const images = imagesQuery.data || [];
@@ -142,6 +188,14 @@ export function Docker() {
         totalImageSize: images.reduce((sum, image) => sum + image.size, 0),
     };
 
+    const updaterServices = updaterServicesQuery.data?.services || [];
+    const updaterSummary = updaterServicesQuery.data?.summary;
+    const updaterEvents = updaterEventsQuery.data || [];
+    const servicesWithUpdates = useMemo(
+        () => updaterServices.filter((service) => service.updateAvailable),
+        [updaterServices]
+    );
+
     async function handleContainerAction(
         containerId: string,
         action: "start" | "stop" | "restart" | "update"
@@ -153,6 +207,16 @@ export function Docker() {
     async function handleStackAction(action: "restart" | "update", service?: string) {
         const result = await dockerStackAction.mutateAsync({ action, service });
         setActionOutput(result.output || "Done");
+    }
+
+    async function handleManualUpdate(serviceId: number) {
+        const result = await dockerManualUpdate.mutateAsync(serviceId);
+        const updatedCount = result.result?.summary?.updated ?? 0;
+        const failedCount = result.result?.summary?.failed ?? 0;
+        setActionOutput(
+            `Manual updater run finished. updated=${updatedCount} failed=${failedCount}` +
+                (result.stderr ? `\n\n${result.stderr}` : "")
+        );
     }
 
     async function handleStartConsole(containerId: string) {
@@ -198,6 +262,155 @@ export function Docker() {
                     </pre>
                 </Card>
             ) : null}
+
+            <Card className="overflow-hidden">
+                <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
+                    <div>
+                        <div className="text-lg font-semibold">Updater overview</div>
+                        <div className="text-xs text-primary-400">
+                            Registry poll state from n8n, plus recent updater history.
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <RefreshButton
+                            onClick={() =>
+                                void Promise.all([
+                                    updaterServicesQuery.refetch(),
+                                    updaterEventsQuery.refetch(),
+                                ])
+                            }
+                            isLoading={
+                                updaterServicesQuery.isFetching || updaterEventsQuery.isFetching
+                            }
+                        />
+                    </div>
+                </div>
+                <div className="grid gap-4 border-b border-primary-700 px-4 py-4 md:grid-cols-2 xl:grid-cols-5">
+                    <Card className="p-4">
+                        <div className="text-sm text-primary-400">Tracked services</div>
+                        <div className="mt-2 text-2xl font-semibold">
+                            {updaterSummary?.total ?? "—"}
+                        </div>
+                    </Card>
+                    <Card className="p-4">
+                        <div className="text-sm text-primary-400">Updates available</div>
+                        <div className="mt-2 text-2xl font-semibold text-amber-300">
+                            {updaterSummary?.updateAvailable ?? "—"}
+                        </div>
+                    </Card>
+                    <Card className="p-4">
+                        <div className="text-sm text-primary-400">Auto policy</div>
+                        <div className="mt-2 text-2xl font-semibold">
+                            {updaterSummary?.autoPolicy ?? "—"}
+                        </div>
+                    </Card>
+                    <Card className="p-4">
+                        <div className="text-sm text-primary-400">Notify policy</div>
+                        <div className="mt-2 text-2xl font-semibold">
+                            {updaterSummary?.notifyPolicy ?? "—"}
+                        </div>
+                    </Card>
+                    <Card className="p-4">
+                        <div className="text-sm text-primary-400">Recent failures</div>
+                        <div className="mt-2 text-2xl font-semibold text-red-400">
+                            {updaterSummary?.failed ?? "—"}
+                        </div>
+                    </Card>
+                </div>
+                <div className="grid gap-6 px-4 py-4 xl:grid-cols-[1.3fr_1fr]">
+                    <div>
+                        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary-100">
+                            <RefreshCw className="h-4 w-4 text-accent-400" />
+                            Pending or newer candidates
+                        </div>
+                        <div className="max-h-[400px] overflow-y-auto pr-2">
+                            {updaterServicesQuery.isLoading ? (
+                                <LoadingState message="Loading updater services..." size="md" />
+                            ) : servicesWithUpdates.length === 0 ? (
+                                <EmptyState message="No pending updater candidates right now." />
+                            ) : (
+                                <div className="space-y-3">
+                                    {servicesWithUpdates.map((service) => (
+                                        <Card key={service.id} className="p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <div className="font-medium text-primary-50">
+                                                        {service.appSlug}/{service.serviceName}
+                                                    </div>
+                                                    <div className="mt-1 text-xs text-primary-400">
+                                                        {service.imageRepo}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300">
+                                                        {service.policy}
+                                                    </div>
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            setManualUpdateTarget({
+                                                                id: service.id,
+                                                                label: `${service.appSlug}/${service.serviceName}`,
+                                                            })
+                                                        }
+                                                        disabled={dockerManualUpdate.isPending}
+                                                    >
+                                                        Update now
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div className="mt-3 grid gap-2 text-xs text-primary-300 md:grid-cols-2">
+                                                <div>
+                                                    Current: {formatVersionDisplay(service.currentTag, service.currentDigest)}
+                                                </div>
+                                                <div>
+                                                    Candidate: {formatVersionDisplay(service.latestTag, service.latestDigest)}
+                                                </div>
+                                                <div>Last checked: {formatTimestamp(service.lastCheckedAt)}</div>
+                                                <div>Status: {service.lastStatus || "—"}</div>
+                                            </div>
+                                        </Card>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary-100">
+                            <History className="h-4 w-4 text-accent-400" />
+                            Recent updater events
+                        </div>
+                        <div className="max-h-[400px] overflow-y-auto pr-2">
+                            {updaterEventsQuery.isLoading ? (
+                                <LoadingState message="Loading updater history..." size="md" />
+                            ) : updaterEvents.length === 0 ? (
+                                <EmptyState message="No updater events yet." />
+                            ) : (
+                                <div className="space-y-3">
+                                    {updaterEvents.slice(0, 20).map((event) => (
+                                        <Card key={event.id} className="p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="font-medium text-primary-50">
+                                                    {event.appSlug}/{event.serviceName}
+                                                </div>
+                                                <div className="text-xs text-primary-500">
+                                                    {formatTimestamp(event.createdAt)}
+                                                </div>
+                                            </div>
+                                            <div className="mt-1 text-xs uppercase tracking-wide text-primary-400">
+                                                {event.eventType}
+                                            </div>
+                                            <div className="mt-2 text-xs text-primary-300 font-mono">
+                                                {formatUpdaterTransition(event)}
+                                            </div>
+                                        </Card>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </Card>
 
             {containersQuery.isError && containers.length === 0 ? (
                 <Card className="overflow-hidden">
@@ -500,6 +713,29 @@ export function Docker() {
 
                     void mutation.then(() => {
                         setDangerousDelete(null);
+                    });
+                }}
+            />
+            <ConfirmModal
+                isOpen={Boolean(manualUpdateTarget)}
+                onCancel={() => {
+                    if (dockerManualUpdate.isPending) {
+                        return;
+                    }
+                    setManualUpdateTarget(null);
+                }}
+                title="Run manual update"
+                message={`Update ${manualUpdateTarget?.label}? This will update the compose image reference and run docker compose up -d for that service.`}
+                confirmLabel="Update now"
+                confirmLoadingLabel="Updating..."
+                loading={dockerManualUpdate.isPending}
+                onConfirm={() => {
+                    if (!manualUpdateTarget || dockerManualUpdate.isPending) {
+                        return;
+                    }
+
+                    void handleManualUpdate(manualUpdateTarget.id).finally(() => {
+                        setManualUpdateTarget(null);
                     });
                 }}
             />

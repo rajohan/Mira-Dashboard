@@ -82,6 +82,68 @@ export interface DockerExecJob {
     endedAt: number | null;
 }
 
+export interface DockerUpdaterService {
+    id: number;
+    appSlug: string;
+    serviceName: string;
+    composeImageRef: string | null;
+    imageRepo: string;
+    currentTag: string | null;
+    currentDigest: string | null;
+    latestTag: string | null;
+    latestDigest: string | null;
+    policy: string;
+    pinMode: string;
+    enabled: boolean;
+    lastCheckedAt: string | null;
+    lastUpdatedAt: string | null;
+    lastStatus: string | null;
+    updateAvailable: boolean;
+    metadata: Record<string, unknown>;
+}
+
+export interface DockerUpdaterEvent {
+    id: number;
+    managedServiceId: number;
+    appSlug: string;
+    serviceName: string;
+    eventType: string;
+    fromTag: string | null;
+    toTag: string | null;
+    fromDigest: string | null;
+    toDigest: string | null;
+    message: string | null;
+    details: Record<string, unknown>;
+    createdAt: string;
+}
+
+export interface DockerUpdaterSummary {
+    total: number;
+    enabled: number;
+    updateAvailable: number;
+    autoPolicy: number;
+    notifyPolicy: number;
+    failed: number;
+}
+
+export interface DockerManualUpdateResult {
+    success: boolean;
+    service: DockerUpdaterService;
+    result: {
+        ok: boolean;
+        workflow: string;
+        mode: string;
+        summary: {
+            eligible: number;
+            updated: number;
+            failed: number;
+        };
+        updated: Array<{ eventId: number; appSlug: string; serviceName: string; targetImageRef: string }>;
+        failed: Array<{ appSlug: string; serviceName: string; targetImageRef: string; error: string }>;
+    };
+    stderr: string;
+}
+
 export const dockerKeys = {
     containers: ["docker", "containers"] as const,
     container: (containerId: string) => ["docker", "container", containerId] as const,
@@ -90,6 +152,8 @@ export const dockerKeys = {
     images: ["docker", "images"] as const,
     volumes: ["docker", "volumes"] as const,
     execJob: (jobId: string | null) => ["docker", "exec", jobId] as const,
+    updaterServices: ["docker", "updater", "services"] as const,
+    updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
 };
 
 async function fetchContainers(): Promise<DockerContainer[]> {
@@ -120,6 +184,20 @@ async function fetchVolumes(): Promise<DockerVolume[]> {
 
 async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
     return apiFetch<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
+}
+
+async function fetchDockerUpdaterServices(): Promise<{
+    services: DockerUpdaterService[];
+    summary: DockerUpdaterSummary;
+}> {
+    return apiFetch<{ services: DockerUpdaterService[]; summary: DockerUpdaterSummary }>(
+        "/docker/updater/services"
+    );
+}
+
+async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
+    const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(`/docker/updater/events?limit=${limit}`);
+    return data.events || [];
 }
 
 export function useDockerContainers() {
@@ -185,6 +263,26 @@ export function useDockerExecJob(jobId: string | null) {
     });
 }
 
+export function useDockerUpdaterServices() {
+    return useQuery({
+        queryKey: dockerKeys.updaterServices,
+        queryFn: fetchDockerUpdaterServices,
+        refetchInterval: 30_000,
+        staleTime: 10_000,
+        refetchOnWindowFocus: false,
+    });
+}
+
+export function useDockerUpdaterEvents(limit = 50) {
+    return useQuery({
+        queryKey: dockerKeys.updaterEvents(limit),
+        queryFn: () => fetchDockerUpdaterEvents(limit),
+        refetchInterval: 30_000,
+        staleTime: 10_000,
+        refetchOnWindowFocus: false,
+    });
+}
+
 export function useDockerAction() {
     const queryClient = useQueryClient();
 
@@ -214,6 +312,24 @@ export function useDockerStackAction() {
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
+            ]);
+        },
+    });
+}
+
+export function useDockerManualUpdate() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (serviceId: number) =>
+            apiPost<DockerManualUpdateResult>(`/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.updaterServices }),
+                queryClient.invalidateQueries({ queryKey: ["docker", "updater", "events"] }),
             ]);
         },
     });

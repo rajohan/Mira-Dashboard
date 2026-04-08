@@ -3,12 +3,38 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import express, { type RequestHandler } from "express";
 import { promisify } from "node:util";
 
+import { parseTable } from "../lib/cacheStore.js";
+
 const execFileAsync = promisify(execFile);
 
 const DOCKER_COMPOSE_WRAPPER = "/opt/docker/bin/docker-compose-doppler";
 const DOCKER_ROOT = "/opt/docker";
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
+const N8N_DATABASE = "n8n";
+
+interface DockerUpdaterServiceRow {
+    id: string;
+    app_slug: string;
+    service_name: string;
+    compose_image_ref: string;
+    image_repo: string;
+    current_tag: string;
+    current_digest: string;
+    latest_tag: string;
+    latest_digest: string;
+    policy: string;
+    pin_mode: string;
+    enabled: string;
+    last_checked_at: string;
+    last_updated_at: string;
+    last_status: string;
+    metadata: string;
+}
+
+interface DockerManualUpdateRequest {
+    serviceId?: number;
+}
 
 interface DockerPsRow {
     Command: string;
@@ -181,6 +207,122 @@ function parseJsonLines<T>(input: string): T[] {
         .map((line) => line.trim())
         .filter(Boolean)
         .map((line) => JSON.parse(line) as T);
+}
+
+function parseJsonField<T>(value: string | undefined): T | null {
+    if (!value) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(value) as T;
+    } catch {
+        return null;
+    }
+}
+
+function buildPostgresUri(database = N8N_DATABASE) {
+    const username = process.env.DATABASE_USERNAME || "postgres";
+    const password = process.env.DATABASE_PASSWORD || "postgres";
+    const host = process.env.DATABASE_HOST || "postgres";
+    const port = process.env.DATABASE_PORT || "5432";
+    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+}
+
+async function queryN8n(sql: string): Promise<string> {
+    const { stdout } = await execFileAsync(
+        "docker",
+        [
+            "exec",
+            "postgres",
+            "psql",
+            buildPostgresUri(),
+            "-P",
+            "footer=off",
+            "-F",
+            "\t",
+            "--no-align",
+            "-c",
+            sql,
+        ],
+        {
+            cwd: DOCKER_ROOT,
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+        }
+    );
+
+    return String(stdout);
+}
+
+async function queryN8nTsvRows<T extends object>(sql: string, columns: string[]): Promise<T[]> {
+    // Simple approach: use tab-separated output without header
+    const tempFile = `/tmp/updater-events-${Date.now()}.tsv`;
+    const copySql = `COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\\t', NULL '');`;
+
+    await execFileAsync(
+        "docker",
+        ["exec", "postgres", "psql", buildPostgresUri(), "-qAt", "-c", copySql],
+        {
+            cwd: DOCKER_ROOT,
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+        }
+    );
+
+    try {
+        const { stdout } = await execFileAsync(
+            "docker",
+            ["exec", "postgres", "cat", tempFile],
+            {
+                cwd: DOCKER_ROOT,
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+            }
+        );
+
+        const lines = String(stdout)
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+
+        return lines.map((line) => {
+            const cells = line.split("\t");
+            return Object.fromEntries(columns.map((col, i) => [col, cells[i] ?? ""])) as T;
+        });
+    } finally {
+        try {
+            await execFileAsync(
+                "docker",
+                ["exec", "postgres", "rm", "-f", tempFile],
+                {
+                    cwd: DOCKER_ROOT,
+                    env: process.env,
+                }
+            );
+        } catch {
+            // ignore cleanup errors
+        }
+    }
+}
+
+function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
+    if (service.pin_mode === "digest") {
+        return Boolean(
+            service.current_digest &&
+                service.latest_digest &&
+                service.current_digest !== service.latest_digest
+        );
+    }
+
+    return Boolean(service.current_tag && service.latest_tag && service.current_tag !== service.latest_tag);
+}
+
+function extractTrailingJson(input: string) {
+    const trimmed = input.trim();
+    const start = trimmed.lastIndexOf("\n{");
+    const candidate = start === -1 ? trimmed : trimmed.slice(start + 1);
+    return JSON.parse(candidate);
 }
 
 function parseLabels(labelsRaw: string | undefined): Record<string, string> {
@@ -440,6 +582,192 @@ async function getVolumes(): Promise<DockerVolumeSummary[]> {
     }));
 }
 
+async function getDockerUpdaterServices() {
+    const rows = parseTable<DockerUpdaterServiceRow>(await queryN8n(`
+        SELECT
+            id::text AS id,
+            app_slug,
+            service_name,
+            COALESCE(compose_image_ref, '') AS compose_image_ref,
+            image_repo,
+            COALESCE(current_tag, '') AS current_tag,
+            COALESCE(current_digest, '') AS current_digest,
+            COALESCE(latest_tag, '') AS latest_tag,
+            COALESCE(latest_digest, '') AS latest_digest,
+            policy,
+            pin_mode,
+            CASE WHEN enabled THEN 'true' ELSE 'false' END AS enabled,
+            COALESCE(last_checked_at::text, '') AS last_checked_at,
+            COALESCE(last_updated_at::text, '') AS last_updated_at,
+            COALESCE(last_status, '') AS last_status,
+            metadata::text AS metadata
+        FROM docker_managed_services
+        ORDER BY app_slug, service_name;
+    `));
+
+    return rows.map((row) => ({
+        id: Number(row.id),
+        appSlug: row.app_slug,
+        serviceName: row.service_name,
+        composeImageRef: row.compose_image_ref || null,
+        imageRepo: row.image_repo,
+        currentTag: row.current_tag || null,
+        currentDigest: row.current_digest || null,
+        latestTag: row.latest_tag || null,
+        latestDigest: row.latest_digest || null,
+        policy: row.policy,
+        pinMode: row.pin_mode,
+        enabled: row.enabled === "true",
+        lastCheckedAt: row.last_checked_at || null,
+        lastUpdatedAt: row.last_updated_at || null,
+        lastStatus: row.last_status || null,
+        updateAvailable: hasUpdaterCandidate(row),
+        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
+    }));
+}
+
+async function getDockerUpdaterServiceById(serviceId: number) {
+    const rows = parseTable<DockerUpdaterServiceRow>(await queryN8n(`
+        SELECT
+            id::text AS id,
+            app_slug,
+            service_name,
+            COALESCE(compose_image_ref, '') AS compose_image_ref,
+            image_repo,
+            COALESCE(current_tag, '') AS current_tag,
+            COALESCE(current_digest, '') AS current_digest,
+            COALESCE(latest_tag, '') AS latest_tag,
+            COALESCE(latest_digest, '') AS latest_digest,
+            policy,
+            pin_mode,
+            CASE WHEN enabled THEN 'true' ELSE 'false' END AS enabled,
+            COALESCE(last_checked_at::text, '') AS last_checked_at,
+            COALESCE(last_updated_at::text, '') AS last_updated_at,
+            COALESCE(last_status, '') AS last_status,
+            metadata::text AS metadata
+        FROM docker_managed_services
+        WHERE id = ${Math.floor(serviceId)}
+        LIMIT 1;
+    `));
+
+    const row = rows[0];
+    if (!row) {
+        return null;
+    }
+
+    return {
+        id: Number(row.id),
+        appSlug: row.app_slug,
+        serviceName: row.service_name,
+        composeImageRef: row.compose_image_ref || null,
+        imageRepo: row.image_repo,
+        currentTag: row.current_tag || null,
+        currentDigest: row.current_digest || null,
+        latestTag: row.latest_tag || null,
+        latestDigest: row.latest_digest || null,
+        policy: row.policy,
+        pinMode: row.pin_mode,
+        enabled: row.enabled === "true",
+        lastCheckedAt: row.last_checked_at || null,
+        lastUpdatedAt: row.last_updated_at || null,
+        lastStatus: row.last_status || null,
+        updateAvailable: hasUpdaterCandidate(row),
+        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
+    };
+}
+
+async function runManualUpdaterForService(serviceId: number) {
+    const env = {
+        ...process.env,
+        DB_POSTGRESDB_HOST: "127.0.0.1",
+        DB_POSTGRESDB_PORT: "6432",
+        DB_POSTGRESDB_DATABASE: N8N_DATABASE,
+        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
+        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+    };
+
+    const { stdout, stderr } = await execFileAsync(
+        "node",
+        [
+            "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+            "--mode",
+            "manual",
+            "--service-id",
+            String(serviceId),
+        ],
+        {
+            cwd: "/home/ubuntu/projects/n8n",
+            env,
+            maxBuffer: 10 * 1024 * 1024,
+        }
+    );
+
+    return {
+        output: extractTrailingJson(String(stdout || "{}")),
+        stderr: String(stderr || ""),
+    };
+}
+
+interface DockerUpdaterEventRow {
+    id: string;
+    managed_service_id: string;
+    app_slug: string;
+    service_name: string;
+    event_type: string;
+    from_tag: string;
+    to_tag: string;
+    from_digest: string;
+    to_digest: string;
+    created_at: string;
+}
+
+async function getDockerUpdaterEvents(limit: number) {
+    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    const columns = [
+        "id",
+        "managed_service_id",
+        "app_slug",
+        "service_name",
+        "event_type",
+        "from_tag",
+        "to_tag",
+        "from_digest",
+        "to_digest",
+        "created_at",
+    ];
+    const rows = await queryN8nTsvRows<DockerUpdaterEventRow>(`
+        SELECT
+            e.id::text,
+            e.managed_service_id::text,
+            s.app_slug,
+            s.service_name,
+            e.event_type,
+            COALESCE(e.from_tag, ''),
+            COALESCE(e.to_tag, ''),
+            COALESCE(e.from_digest, ''),
+            COALESCE(e.to_digest, ''),
+            e.created_at::text
+        FROM docker_update_events e
+        JOIN docker_managed_services s ON s.id = e.managed_service_id
+        ORDER BY e.created_at DESC
+        LIMIT ${boundedLimit}
+    `, columns);
+
+    return rows.map((row) => ({
+        id: Number(row.id),
+        managedServiceId: Number(row.managed_service_id),
+        appSlug: row.app_slug,
+        serviceName: row.service_name,
+        eventType: row.event_type,
+        fromTag: row.from_tag || null,
+        toTag: row.to_tag || null,
+        fromDigest: row.from_digest || null,
+        toDigest: row.to_digest || null,
+        message: null, // Message excluded from list view due to newlines
+        createdAt: row.created_at,
+    }));
+}
+
 async function runContainerAction(containerId: string, action: DockerActionRequest["action"]) {
     const details = await getContainerDetails(containerId);
 
@@ -560,6 +888,61 @@ function cleanupDockerExecJobs() {
 }
 
 export default function dockerRoutes(app: express.Application): void {
+    app.get("/api/docker/updater/services", (async (_req, res) => {
+        const services = await getDockerUpdaterServices();
+        const summary = {
+            total: services.length,
+            enabled: services.filter((service) => service.enabled).length,
+            updateAvailable: services.filter((service) => service.updateAvailable).length,
+            autoPolicy: services.filter((service) => service.policy === "auto").length,
+            notifyPolicy: services.filter((service) => service.policy === "notify").length,
+            failed: services.filter((service) => service.lastStatus === "auto_update_failed").length,
+        };
+        res.json({ services, summary });
+    }) as RequestHandler);
+
+    app.get("/api/docker/updater/events", (async (req, res) => {
+        const limitValue = Number(req.query.limit);
+        const limit = Number.isFinite(limitValue) ? limitValue : 50;
+        const events = await getDockerUpdaterEvents(limit);
+        res.json({ events });
+    }) as RequestHandler);
+
+    app.post("/api/docker/updater/services/:serviceId/update", express.json(), (async (req, res) => {
+        const payload = req.body as DockerManualUpdateRequest;
+        const routeServiceId = Number.parseInt(String(req.params.serviceId || ""), 10);
+        const serviceId = Number.isFinite(routeServiceId) ? routeServiceId : Number(payload.serviceId || 0);
+
+        if (!Number.isFinite(serviceId) || serviceId <= 0) {
+            res.status(400).json({ error: "Invalid service id" });
+            return;
+        }
+
+        const service = await getDockerUpdaterServiceById(serviceId);
+        if (!service) {
+            res.status(404).json({ error: "Updater service not found" });
+            return;
+        }
+
+        if (!service.enabled) {
+            res.status(400).json({ error: "Updater service is disabled" });
+            return;
+        }
+
+        if (!service.updateAvailable) {
+            res.status(400).json({ error: "No update available for this service" });
+            return;
+        }
+
+        const result = await runManualUpdaterForService(serviceId);
+        res.json({
+            success: true,
+            service,
+            result: result.output,
+            stderr: result.stderr,
+        });
+    }) as RequestHandler);
+
     app.get("/api/docker/containers", (async (_req, res) => {
         const containers = await getContainers();
         res.json({ containers });
