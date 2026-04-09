@@ -1,5 +1,6 @@
 import express, { type RequestHandler } from "express";
 
+import { refreshCacheKey } from "./cache.js";
 import { fetchCachedSystemOpenClaw } from "../lib/systemCache.js";
 
 export interface VersionResponse {
@@ -29,6 +30,18 @@ export default function openclawRoutes(
         } catch (error) {
             res.status(503).json({
                 error: error instanceof Error ? error.message : "OpenClaw version cache unavailable",
+            });
+        }
+    }) as RequestHandler);
+
+    app.post("/api/openclaw/version/refresh", (async (_req, res) => {
+        try {
+            await refreshCacheKey("system.openclaw");
+            const version = await getOpenClawVersionCached();
+            res.json({ ok: true, version });
+        } catch (error) {
+            res.status(500).json({
+                error: error instanceof Error ? error.message : "OpenClaw version refresh failed",
             });
         }
     }) as RequestHandler);

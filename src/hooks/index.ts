@@ -55,9 +55,10 @@ export {
     OPS_ACTIONS,
     useExecJob,
     useOpenClawVersion,
+    useRefreshOpenClawVersion,
     useStartOpsAction,
 } from "./useOpsActions";
-export { useCacheEntry } from "./useCache";
+export { cacheKeys, useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./useCache";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export {
     sessionKeys,

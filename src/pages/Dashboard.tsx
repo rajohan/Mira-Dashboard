@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { sessionsCollection } from "../collections/sessions";
 import {
     ActiveSessionsCard,
+    CacheStatusCard,
     CronOverviewCard,
     GitOverviewCard,
     QuotaOverviewCard,
@@ -242,10 +243,30 @@ export function Dashboard() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
                 <QuotaOverviewCard quotas={quotas} />
                 <GitOverviewCard />
                 <CronOverviewCard />
+                <CacheStatusCard
+                    title="Cache controls"
+                    items={[
+                        {
+                            key: "weather.spydeberg",
+                            label: "Weather",
+                            description: "Weather cache producer",
+                        },
+                        {
+                            key: "quotas.summary",
+                            label: "Quotas",
+                            description: "Provider quota snapshot",
+                        },
+                        {
+                            key: "system.openclaw",
+                            label: "OpenClaw version",
+                            description: "Version + update availability",
+                        },
+                    ]}
+                />
             </div>
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">

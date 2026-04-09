@@ -1,6 +1,7 @@
 import { Boxes, History, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
+import { CacheStatusCard } from "../components/features/dashboard";
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
 import { DockerVolumesTable } from "../components/features/docker/DockerVolumesTable";
@@ -283,6 +284,44 @@ export function Docker() {
                     </pre>
                 </Card>
             ) : null}
+
+            <div className="grid gap-6 xl:grid-cols-2">
+                <CacheStatusCard
+                    title="Automation cache"
+                    items={[
+                        {
+                            key: "git.workspace",
+                            label: "Git workspace",
+                            description: "Dirty repo + push state snapshot",
+                        },
+                        {
+                            key: "system.openclaw",
+                            label: "OpenClaw",
+                            description: "Version + update availability",
+                        },
+                        {
+                            key: "system.host",
+                            label: "Host",
+                            description: "Disk, memory and host warnings",
+                        },
+                    ]}
+                />
+                <CacheStatusCard
+                    title="External cache"
+                    items={[
+                        {
+                            key: "weather.spydeberg",
+                            label: "Weather",
+                            description: "Spydeberg weather cache",
+                        },
+                        {
+                            key: "quotas.summary",
+                            label: "Quotas",
+                            description: "Provider quota snapshot",
+                        },
+                    ]}
+                />
+            </div>
 
             <Card className="overflow-hidden">
                 <div className="border-b border-primary-700 px-4 py-3">

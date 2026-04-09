@@ -1,0 +1,105 @@
+import { Loader2, RefreshCw } from "lucide-react";
+
+import { useCacheHeartbeat, useRefreshCacheEntry } from "../../../hooks";
+import { formatDate } from "../../../utils/format";
+import { Badge } from "../../ui/Badge";
+import { Card } from "../../ui/Card";
+
+interface CacheStatusCardItem {
+    key: string;
+    label: string;
+    description?: string;
+}
+
+interface CacheStatusCardProps {
+    title: string;
+    items: CacheStatusCardItem[];
+}
+
+function getVariant(status?: string): "success" | "warning" | "error" | "default" {
+    if (status === "fresh") return "success";
+    if (status === "stale") return "warning";
+    if (status === "error") return "error";
+    return "default";
+}
+
+export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
+    const { data } = useCacheHeartbeat(30_000);
+    const refreshCache = useRefreshCacheEntry();
+
+    const entries = items.map((item) => ({
+        item,
+        entry: data?.entries.find((entry) => entry.key === item.key),
+    }));
+
+    return (
+        <Card>
+            <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    {title}
+                </h3>
+                <span className="text-xs text-primary-500">
+                    {data?.generatedAt ? formatDate(new Date(data.generatedAt)) : "Loading..."}
+                </span>
+            </div>
+
+            <div className="space-y-3">
+                {entries.map(({ item, entry }) => {
+                    const isRefreshing = refreshCache.isPending && refreshCache.variables === item.key;
+
+                    return (
+                        <div
+                            key={item.key}
+                            className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-medium text-primary-100">
+                                        {item.label}
+                                    </div>
+                                    <div className="mt-1 text-xs text-primary-400">
+                                        {item.description || item.key}
+                                    </div>
+                                </div>
+                                <Badge variant={getVariant(entry?.status)}>
+                                    {entry?.status || "missing"}
+                                </Badge>
+                            </div>
+
+                            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-primary-300">
+                                <div className="min-w-0">
+                                    <div>
+                                        Last update:{" "}
+                                        <span className="text-primary-100">
+                                            {entry?.updatedAt
+                                                ? formatDate(new Date(entry.updatedAt))
+                                                : "Never"}
+                                        </span>
+                                    </div>
+                                    {entry?.errorMessage ? (
+                                        <div className="mt-1 truncate text-rose-300" title={entry.errorMessage}>
+                                            {entry.errorMessage}
+                                        </div>
+                                    ) : null}
+                                </div>
+                                <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                    disabled={isRefreshing}
+                                    onClick={() => refreshCache.mutate(item.key)}
+                                >
+                                    {isRefreshing ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                    )}
+                                    Force update
+                                </button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </Card>
+    );
+}

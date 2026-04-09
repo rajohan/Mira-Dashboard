@@ -6,6 +6,7 @@ import {
     OPS_ACTIONS,
     useExecJob,
     useOpenClawVersion,
+    useRefreshOpenClawVersion,
     useStartOpsAction,
 } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
@@ -15,6 +16,7 @@ import { ConfirmModal } from "../../ui/ConfirmModal";
 
 export function ServiceActionsCard() {
     const startAction = useStartOpsAction();
+    const refreshOpenClawVersion = useRefreshOpenClawVersion();
     const { data: versionInfo } = useOpenClawVersion();
 
     const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
@@ -36,6 +38,8 @@ export function ServiceActionsCard() {
             return;
         }
 
+        const completedActionId = runningActionId;
+
         setResult({
             action: runningActionLabel,
             response: {
@@ -49,7 +53,11 @@ export function ServiceActionsCard() {
         setRunningActionId(null);
         setRunningActionLabel(null);
         setRunningJobId(null);
-    }, [execJob.data, runningActionLabel]);
+
+        if (completedActionId === "openclaw_update") {
+            void refreshOpenClawVersion.mutateAsync().catch(() => undefined);
+        }
+    }, [execJob.data, refreshOpenClawVersion, runningActionId, runningActionLabel]);
 
     async function confirmRun() {
         if (!pendingAction) {
@@ -125,13 +133,33 @@ export function ServiceActionsCard() {
                     </h3>
                 </div>
 
-                {versionInfo?.updateAvailable && (
-                    <div className="mb-3 flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                        New OpenClaw version available ({versionInfo.current} →{" "}
-                        {versionInfo.latest}).
+                <div className="mb-3 flex items-center justify-between gap-2 rounded border border-primary-700 bg-primary-900/30 px-3 py-2 text-xs text-primary-200">
+                    <div className="min-w-0">
+                        {versionInfo?.updateAvailable ? (
+                            <div className="flex items-center gap-2 text-amber-200">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                New OpenClaw version available ({versionInfo.current} → {versionInfo.latest}).
+                            </div>
+                        ) : (
+                            <div>
+                                OpenClaw version cache: {versionInfo?.current || "Loading..."}
+                            </div>
+                        )}
                     </div>
-                )}
+                    <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={refreshOpenClawVersion.isPending}
+                        onClick={() => refreshOpenClawVersion.mutate()}
+                    >
+                        {refreshOpenClawVersion.isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                            <Play className="h-3.5 w-3.5" />
+                        )}
+                        Refresh version
+                    </button>
+                </div>
 
                 <div className="grid grid-cols-1 gap-3">
                     {(["system", "openclaw"] as const).map((scope) => (

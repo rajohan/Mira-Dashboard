@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
 
@@ -128,5 +128,21 @@ export function useOpenClawVersion() {
         queryKey: ["openclaw-version"],
         queryFn: () => apiFetch<OpenClawVersionInfo>("/openclaw/version"),
         staleTime: 60_000,
+    });
+}
+
+export function useRefreshOpenClawVersion() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () =>
+            apiPost<{ ok: boolean; version: OpenClawVersionInfo }>(
+                "/openclaw/version/refresh"
+            ),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ["openclaw-version"] });
+            await queryClient.invalidateQueries({ queryKey: ["cache", "heartbeat"] });
+            await queryClient.invalidateQueries({ queryKey: ["cache", "system.openclaw"] });
+        },
     });
 }
