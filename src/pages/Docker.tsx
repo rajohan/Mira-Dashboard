@@ -31,6 +31,7 @@ import {
     useDockerUpdaterServices,
     useDockerVolumes,
 } from "../hooks/useDocker";
+import { formatDate } from "../utils/format";
 
 function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -102,7 +103,7 @@ function formatTimestamp(value: string | null | undefined): string {
         return value;
     }
 
-    return date.toLocaleString();
+    return formatDate(date);
 }
 
 function formatUpdaterTransition(event: {
@@ -548,13 +549,11 @@ export function Docker() {
                         <div className="grid gap-4 md:grid-cols-2">
                             <Card className="p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
-                                <div>Created: {containerDetailsQuery.data.createdAt}</div>
                                 <div>
-                                    Started: {containerDetailsQuery.data.startedAt || "—"}
+                                    Created: {formatTimestamp(containerDetailsQuery.data.createdAt)}
                                 </div>
                                 <div>
-                                    Finished:{" "}
-                                    {containerDetailsQuery.data.finishedAt || "—"}
+                                    Started: {formatTimestamp(containerDetailsQuery.data.startedAt)}
                                 </div>
                                 <div>Status: {containerDetailsQuery.data.status}</div>
                             </Card>
