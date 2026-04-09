@@ -265,6 +265,16 @@ export function Dashboard() {
                             label: "OpenClaw version",
                             description: "Version + update availability",
                         },
+                        {
+                            key: "git.workspace",
+                            label: "Git workspace",
+                            description: "Dirty repo + push state snapshot",
+                        },
+                        {
+                            key: "system.host",
+                            label: "Host",
+                            description: "Disk, memory and host warnings",
+                        },
                     ]}
                 />
             </div>

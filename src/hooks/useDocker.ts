@@ -144,6 +144,18 @@ export interface DockerManualUpdateResult {
     stderr: string;
 }
 
+export interface DockerUpdaterRunStep {
+    step: string;
+    ok: boolean;
+    stdout: string;
+    stderr: string;
+}
+
+export interface DockerUpdaterRunResult {
+    success: boolean;
+    steps: DockerUpdaterRunStep[];
+}
+
 export const dockerKeys = {
     containers: ["docker", "containers"] as const,
     container: (containerId: string) => ["docker", "container", containerId] as const,
@@ -307,6 +319,23 @@ export function useDockerManualUpdate() {
     return useMutation({
         mutationFn: (serviceId: number) =>
             apiPost<DockerManualUpdateResult>(`/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.updaterServices }),
+                queryClient.invalidateQueries({ queryKey: ["docker", "updater", "events"] }),
+            ]);
+        },
+    });
+}
+
+export function useRunDockerUpdater() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () => apiPost<DockerUpdaterRunResult>("/docker/updater/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),

@@ -38,12 +38,9 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                     {title}
                 </h3>
-                <span className="text-xs text-primary-500">
-                    {data?.generatedAt ? formatDate(new Date(data.generatedAt)) : "Loading..."}
-                </span>
             </div>
 
-            <div className="space-y-3">
+            <div className="max-h-[400px] space-y-3 overflow-y-auto pr-2">
                 {entries.map(({ item, entry }) => {
                     const isRefreshing = refreshCache.isPending && refreshCache.variables === item.key;
 

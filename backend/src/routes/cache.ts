@@ -7,6 +7,7 @@ import { getAllCacheEntries, getCacheEntry, parseJsonField, type CacheEntryRow }
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
+const N8N_DATABASE = "n8n";
 
 const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     "git.workspace": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/git-cache.mjs`],
@@ -48,10 +49,19 @@ export async function refreshCacheKey(key: string) {
         throw new Error(`No refresh command configured for cache key: ${key}`);
     }
 
+    const env = {
+        ...process.env,
+        DB_POSTGRESDB_HOST: "127.0.0.1",
+        DB_POSTGRESDB_PORT: "6432",
+        DB_POSTGRESDB_DATABASE: N8N_DATABASE,
+        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
+        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+    };
+
     const [file, ...args] = command;
     await execFileAsync(file, args, {
         cwd: N8N_ROOT,
-        env: process.env,
+        env,
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
     });

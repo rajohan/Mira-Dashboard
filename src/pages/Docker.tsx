@@ -1,7 +1,6 @@
 import { Boxes, History, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
-import { CacheStatusCard } from "../components/features/dashboard";
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
 import { DockerVolumesTable } from "../components/features/docker/DockerVolumesTable";
@@ -28,6 +27,7 @@ import {
     useDockerManualUpdate,
     useDockerPrune,
     useDockerUpdaterEvents,
+    useRunDockerUpdater,
     useDockerUpdaterServices,
     useDockerVolumes,
 } from "../hooks/useDocker";
@@ -181,6 +181,7 @@ export function Docker() {
     const deleteVolume = useDeleteDockerVolume();
     const dockerPrune = useDockerPrune();
     const dockerManualUpdate = useDockerManualUpdate();
+    const runDockerUpdater = useRunDockerUpdater();
 
     const containers = containersQuery.data || [];
     const images = imagesQuery.data || [];
@@ -285,49 +286,31 @@ export function Docker() {
                 </Card>
             ) : null}
 
-            <div className="grid gap-6 xl:grid-cols-2">
-                <CacheStatusCard
-                    title="Automation cache"
-                    items={[
-                        {
-                            key: "git.workspace",
-                            label: "Git workspace",
-                            description: "Dirty repo + push state snapshot",
-                        },
-                        {
-                            key: "system.openclaw",
-                            label: "OpenClaw",
-                            description: "Version + update availability",
-                        },
-                        {
-                            key: "system.host",
-                            label: "Host",
-                            description: "Disk, memory and host warnings",
-                        },
-                    ]}
-                />
-                <CacheStatusCard
-                    title="External cache"
-                    items={[
-                        {
-                            key: "weather.spydeberg",
-                            label: "Weather",
-                            description: "Spydeberg weather cache",
-                        },
-                        {
-                            key: "quotas.summary",
-                            label: "Quotas",
-                            description: "Provider quota snapshot",
-                        },
-                    ]}
-                />
-            </div>
+            {runDockerUpdater.data ? (
+                <Card className="p-4">
+                    <div className="mb-2 text-sm font-semibold text-primary-100">
+                        Last updater run
+                    </div>
+                    <pre className="overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">{JSON.stringify(runDockerUpdater.data, null, 2)}</pre>
+                </Card>
+            ) : null}
 
             <Card className="overflow-hidden">
                 <div className="border-b border-primary-700 px-4 py-3">
-                    <div className="text-lg font-semibold">Updater overview</div>
-                    <div className="text-xs text-primary-400">
-                        Registry poll state from n8n, plus recent updater history.
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="text-lg font-semibold">Updater overview</div>
+                            <div className="text-xs text-primary-400">
+                                Registry poll state from n8n, plus recent updater history.
+                            </div>
+                        </div>
+                        <Button
+                            size="sm"
+                            onClick={() => runDockerUpdater.mutate()}
+                            disabled={runDockerUpdater.isPending}
+                        >
+                            {runDockerUpdater.isPending ? "Running..." : "Run updater now"}
+                        </Button>
                     </div>
                 </div>
                 <div className="grid gap-4 border-b border-primary-700 px-4 py-4 md:grid-cols-2 xl:grid-cols-5">
