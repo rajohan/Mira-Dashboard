@@ -19,6 +19,7 @@ const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     "quotas.summary": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/quotas-cache.mjs`],
     "system.openclaw": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/system-cache.mjs`],
     "system.host": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/system-cache.mjs`],
+    "backup.kopia.status": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/backup-kopia-status.mjs`],
     "weather.spydeberg": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/weather-cache.mjs`],
 };
 

@@ -11,6 +11,7 @@ import { getAuthUserFromRequest, getPersistedGatewayToken, requireAuth } from ".
 import gateway from "./gateway.js";
 import agentsRoutes from "./routes/agents.js";
 import authRoutes from "./routes/auth.js";
+import backupRoutes from "./routes/backups.js";
 import cacheRoutes from "./routes/cache.js";
 import configFilesRoutes from "./routes/configFiles.js";
 import execRoutes from "./routes/exec.js";
@@ -96,6 +97,7 @@ app.use("/api", (request, response, next) => {
 filesRoutes(app, express);
 configFilesRoutes(app, express);
 cacheRoutes(app);
+backupRoutes(app, express);
 agentsRoutes(app);
 logsRoutes(app);
 cronRoutes(app);

@@ -5,6 +5,7 @@ export { apiDelete, apiFetch, apiPost, apiPut } from "./useApi";
 export { useQueryClient } from "@tanstack/react-query";
 
 // Domain hooks
+export { backupKeys, useKopiaBackup, useRunKopiaBackup } from "./useBackups";
 export {
     configKeys,
     useConfig,

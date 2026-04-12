@@ -1,0 +1,51 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { apiFetch, apiPost } from "./useApi";
+import { cacheKeys } from "./useCache";
+
+export interface BackupJob {
+    id: string;
+    type: "kopia";
+    status: "running" | "done";
+    code: number | null;
+    stdout: string;
+    stderr: string;
+    startedAt: number;
+    endedAt: number | null;
+}
+
+interface KopiaBackupResponse {
+    job: BackupJob | null;
+}
+
+export const backupKeys = {
+    all: ["backups"] as const,
+    kopia: () => [...backupKeys.all, "kopia"] as const,
+};
+
+export function useKopiaBackup() {
+    return useQuery({
+        queryKey: backupKeys.kopia(),
+        queryFn: () => apiFetch<KopiaBackupResponse>("/backups/kopia"),
+        refetchInterval: (query) => {
+            const status = query.state.data?.job?.status;
+            return status === "running" ? 1_000 : 5_000;
+        },
+        staleTime: 1_000,
+    });
+}
+
+export function useRunKopiaBackup() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () => apiPost<{ ok: boolean; job: BackupJob }>("/backups/kopia/run"),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
+                queryClient.invalidateQueries({ queryKey: cacheKeys.entry("backup.kopia.status") }),
+                queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+            ]);
+        },
+    });
+}

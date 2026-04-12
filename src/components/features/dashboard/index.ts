@@ -1,4 +1,4 @@
-export { ActiveSessionsCard } from "./ActiveSessionsCard";
+export { BackupOverviewCard } from "./BackupOverviewCard";
 export { CacheStatusCard } from "./CacheStatusCard";
 export { CronOverviewCard } from "./CronOverviewCard";
 export { QuotaOverviewCard } from "./QuotaOverviewCard";

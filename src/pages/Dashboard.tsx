@@ -1,4 +1,3 @@
-import { useLiveQuery } from "@tanstack/react-db";
 import {
     ArrowDown,
     ArrowUp,
@@ -19,9 +18,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { sessionsCollection } from "../collections/sessions";
 import {
-    ActiveSessionsCard,
+    BackupOverviewCard,
     CacheStatusCard,
     CronOverviewCard,
     GitOverviewCard,
@@ -41,7 +39,6 @@ import {
     formatUptime,
     formatWeekdayShort,
 } from "../utils/format";
-import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 function getWeatherIcon(description?: string) {
     const text = (description || "").toLowerCase();
@@ -168,12 +165,6 @@ export function Dashboard() {
     const { data: metrics } = useMetrics(AUTO_REFRESH_MS);
     const { data: quotas } = useQuotas(AUTO_REFRESH_MS);
 
-    const { data: sessions = [] } = useLiveQuery((q) =>
-        q.from({ session: sessionsCollection })
-    );
-
-    const sortedSessions = sessions ? sortSessionsByTypeAndActivity(sessions) : [];
-
     return (
         <div className="space-y-6 p-6">
             {error && <Alert variant="error">{error}</Alert>}
@@ -275,12 +266,17 @@ export function Dashboard() {
                             label: "Host",
                             description: "Disk, memory and host warnings",
                         },
+                        {
+                            key: "backup.kopia.status",
+                            label: "Kopia backup",
+                            description: "Filesystem backup snapshot status",
+                        },
                     ]}
                 />
             </div>
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <ActiveSessionsCard sessions={sortedSessions} />
+                <BackupOverviewCard />
                 <ServiceActionsCard />
             </div>
         </div>
