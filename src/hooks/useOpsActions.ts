@@ -66,9 +66,9 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "system_update",
         label: "Update system",
-        description: "apt update + upgrade",
+        description: "apt update + full-upgrade",
         command:
-            "bash -lc 'sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; apt_status=$?; sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a; dpkg_status=$?; if [ $apt_status -ne 0 ]; then exit $apt_status; fi; exit $dpkg_status'",
+            "bash -lc 'sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; apt_status=$?; sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a; dpkg_status=$?; if [ $apt_status -ne 0 ]; then exit $apt_status; fi; exit $dpkg_status'",
         confirmLabel: "Run system update",
         confirmMessage: "Run system update now? This can take several minutes.",
         scope: "system",
