@@ -37,6 +37,26 @@ type BackupCacheData = {
     ok?: boolean;
 };
 
+type WalgBackup = {
+    backupName?: string | null;
+    modified?: string | null;
+    time?: string | null;
+    startTime?: string | null;
+    finishTime?: string | null;
+    walFileName?: string | null;
+    storageName?: string | null;
+};
+
+type WalgCacheData = {
+    checkedAt?: string;
+    tool?: string;
+    latest?: WalgBackup | null;
+    backupCount?: number;
+    latestAgeHours?: number | null;
+    stale?: boolean;
+    ok?: boolean;
+};
+
 function getVariant(status?: string, ok?: boolean) {
     if (status === "error") return "error" as const;
     if (ok === true) return "success" as const;
@@ -55,10 +75,12 @@ function formatPath(path: string | null | undefined) {
 export function BackupOverviewCard() {
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const { data, isLoading } = useCacheEntry<BackupCacheData>("backup.kopia.status", 30_000);
+    const { data: walgData } = useCacheEntry<WalgCacheData>("backup.walg.status", 30_000);
     const { data: backupState } = useKopiaBackup();
     const runBackup = useRunKopiaBackup();
 
     const entry = data;
+    const walgEntry = walgData;
     const snapshotGroups = entry?.data?.snapshotsByPath || [];
     const stale = entry?.data?.stale || [];
     const totalSnapshots = snapshotGroups.reduce((sum, group) => sum + group.snapshotCount, 0);
@@ -134,6 +156,53 @@ export function BackupOverviewCard() {
                     <div className="text-xs uppercase tracking-wide text-primary-400">Snapshots</div>
                     <div className="mt-1 text-2xl font-semibold text-primary-50">{totalSnapshots}</div>
                 </div>
+            </div>
+
+            <div className="mb-4 rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                        <div className="text-sm font-medium text-primary-100">WAL-G base backup</div>
+                        <div className="mt-1 text-xs text-primary-400">
+                            Continuous WAL is uploaded separately. Base backup is the restore anchor.
+                        </div>
+                    </div>
+                    <Badge variant={getVariant(walgEntry?.status, walgEntry?.data?.ok)}>
+                        {walgEntry?.status === "error"
+                            ? "error"
+                            : walgEntry?.data?.ok
+                              ? "healthy"
+                              : walgEntry?.data?.latest
+                                ? "attention"
+                                : "missing"}
+                    </Badge>
+                </div>
+
+                {walgEntry?.errorMessage ? (
+                    <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-sm text-rose-300">
+                        {walgEntry.errorMessage}
+                    </div>
+                ) : walgEntry?.data?.latest ? (
+                    <div className="grid grid-cols-1 gap-2 text-sm text-primary-200 sm:grid-cols-2">
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-primary-400">Latest backup</div>
+                            <div className="mt-1 font-mono text-xs">{walgEntry.data.latest.backupName || "Unknown"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-primary-400">Finished</div>
+                            <div className="mt-1">{walgEntry.data.latest.modified ? formatDate(walgEntry.data.latest.modified) : "Unknown"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-primary-400">WAL file</div>
+                            <div className="mt-1 font-mono text-xs">{walgEntry.data.latest.walFileName || "Unknown"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-primary-400">Backup count</div>
+                            <div className="mt-1">{walgEntry.data.backupCount ?? 0}</div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-sm text-primary-400">No WAL-G base backup cache data yet</div>
+                )}
             </div>
 
             {entry?.errorMessage ? (

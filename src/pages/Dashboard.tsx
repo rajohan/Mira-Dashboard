@@ -271,6 +271,11 @@ export function Dashboard() {
                             label: "Kopia backup",
                             description: "Filesystem backup snapshot status",
                         },
+                        {
+                            key: "backup.walg.status",
+                            label: "WAL-G backup",
+                            description: "Postgres base backup status",
+                        },
                     ]}
                 />
             </div>
