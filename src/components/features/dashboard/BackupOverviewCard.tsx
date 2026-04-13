@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Loader2, Play } from "lucide-react";
 import { useState } from "react";
 
-import { useCacheEntry, useKopiaBackup, useRunKopiaBackup } from "../../../hooks";
+import { useCacheEntry, useKopiaBackup, useRunKopiaBackup, useRunWalgBackup, useWalgBackup } from "../../../hooks";
 import { formatDate, formatDuration, formatSize } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
@@ -77,7 +77,9 @@ export function BackupOverviewCard() {
     const { data, isLoading } = useCacheEntry<BackupCacheData>("backup.kopia.status", 30_000);
     const { data: walgData } = useCacheEntry<WalgCacheData>("backup.walg.status", 30_000);
     const { data: backupState } = useKopiaBackup();
+    const { data: walgState } = useWalgBackup();
     const runBackup = useRunKopiaBackup();
+    const runWalgBackup = useRunWalgBackup();
 
     const entry = data;
     const walgEntry = walgData;
@@ -85,11 +87,17 @@ export function BackupOverviewCard() {
     const stale = entry?.data?.stale || [];
     const totalSnapshots = snapshotGroups.reduce((sum, group) => sum + group.snapshotCount, 0);
     const runningJob = backupState?.job?.status === "running" ? backupState.job : null;
+    const runningWalgJob = walgState?.job?.status === "running" ? walgState.job : null;
     const isRunning = Boolean(runningJob);
+    const isWalgRunning = Boolean(runningWalgJob);
 
     const handleRunBackup = async () => {
         await runBackup.mutateAsync();
         setIsConfirmOpen(false);
+    };
+
+    const handleRunWalgBackup = async () => {
+        await runWalgBackup.mutateAsync();
     };
 
     return (
@@ -112,6 +120,26 @@ export function BackupOverviewCard() {
                     <Button
                         type="button"
                         size="sm"
+                        disabled={isWalgRunning || runWalgBackup.isPending}
+                        onClick={() => {
+                            void handleRunWalgBackup();
+                        }}
+                    >
+                        {isWalgRunning ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Base running...
+                            </>
+                        ) : (
+                            <>
+                                <Play className="mr-2 h-4 w-4" />
+                                Run base now
+                            </>
+                        )}
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
                         disabled={isRunning || runBackup.isPending}
                         onClick={() => setIsConfirmOpen(true)}
                     >
@@ -129,6 +157,21 @@ export function BackupOverviewCard() {
                     </Button>
                 </div>
             </div>
+
+            {runningWalgJob ? (
+                <div className="mb-4 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3 text-sm text-accent-100">
+                    <div className="flex items-center gap-2 font-medium">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        WAL-G base backup is running
+                    </div>
+                    <div className="mt-1 text-accent-100/80">Started {formatDuration(runningWalgJob.startedAt)}</div>
+                    {runningWalgJob.stdout ? (
+                        <div className="mt-2 max-h-24 overflow-y-auto rounded bg-primary-950/50 p-2 font-mono text-xs text-primary-200">
+                            <pre className="whitespace-pre-wrap">{runningWalgJob.stdout}</pre>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
 
             {runningJob ? (
                 <div className="mb-4 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3 text-sm text-accent-100">

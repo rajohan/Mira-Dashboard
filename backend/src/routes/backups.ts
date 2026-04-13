@@ -9,7 +9,7 @@ const MAX_OUTPUT_CHARS = 100_000;
 
 interface BackupJob {
     id: string;
-    type: "kopia";
+    type: "kopia" | "walg";
     status: "running" | "done";
     code: number | null;
     stdout: string;
@@ -25,6 +25,7 @@ interface BackupJobResponse {
 
 const backupJobs = new Map<string, BackupJob>();
 let activeKopiaJobId: string | null = null;
+let activeWalgJobId: string | null = null;
 
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
@@ -34,22 +35,34 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
-function getCurrentKopiaJob() {
-    if (!activeKopiaJobId) {
+function getCurrentJob(activeJobId: string | null, clear: () => void) {
+    if (!activeJobId) {
         return null;
     }
 
-    const job = backupJobs.get(activeKopiaJobId) ?? null;
+    const job = backupJobs.get(activeJobId) ?? null;
     if (!job) {
-        activeKopiaJobId = null;
+        clear();
         return null;
     }
 
     if (job.status === "done") {
-        activeKopiaJobId = null;
+        clear();
     }
 
     return job;
+}
+
+function getCurrentKopiaJob() {
+    return getCurrentJob(activeKopiaJobId, () => {
+        activeKopiaJobId = null;
+    });
+}
+
+function getCurrentWalgJob() {
+    return getCurrentJob(activeWalgJobId, () => {
+        activeWalgJobId = null;
+    });
 }
 
 function mapJob(job: BackupJob | null) {
@@ -80,8 +93,8 @@ function createBackupEnv() {
     };
 }
 
-function startKopiaBackupJob() {
-    const existingJob = getCurrentKopiaJob();
+function startBackupJob(type: BackupJob["type"], command: string) {
+    const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
         return existingJob;
     }
@@ -89,7 +102,7 @@ function startKopiaBackupJob() {
     const jobId = randomUUID();
     const job: BackupJob = {
         id: jobId,
-        type: "kopia",
+        type,
         status: "running",
         code: null,
         stdout: "",
@@ -99,21 +112,15 @@ function startKopiaBackupJob() {
     };
 
     backupJobs.set(jobId, job);
-    activeKopiaJobId = jobId;
+    if (type === "kopia") {
+        activeKopiaJobId = jobId;
+    } else {
+        activeWalgJobId = jobId;
+    }
 
     const child = spawn(
         "/usr/local/bin/doppler",
-        [
-            "run",
-            "--project",
-            "rajohan",
-            "--config",
-            "prd",
-            "--",
-            "bash",
-            "-lc",
-            "/opt/docker/apps/kopia/backup.sh && node /home/ubuntu/projects/n8n/scripts/backup-kopia-status.mjs",
-        ],
+        ["run", "--project", "rajohan", "--config", "prd", "--", "bash", "-lc", command],
         {
             cwd: N8N_ROOT,
             env: createBackupEnv(),
@@ -134,8 +141,11 @@ function startKopiaBackupJob() {
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
-        if (activeKopiaJobId === job.id) {
+        if (type === "kopia" && activeKopiaJobId === job.id) {
             activeKopiaJobId = null;
+        }
+        if (type === "walg" && activeWalgJobId === job.id) {
+            activeWalgJobId = null;
         }
     });
 
@@ -144,12 +154,29 @@ function startKopiaBackupJob() {
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
-        if (activeKopiaJobId === job.id) {
+        if (type === "kopia" && activeKopiaJobId === job.id) {
             activeKopiaJobId = null;
+        }
+        if (type === "walg" && activeWalgJobId === job.id) {
+            activeWalgJobId = null;
         }
     });
 
     return job;
+}
+
+function startKopiaBackupJob() {
+    return startBackupJob(
+        "kopia",
+        "/opt/docker/apps/kopia/backup.sh && node /home/ubuntu/projects/n8n/scripts/backup-kopia-status.mjs"
+    );
+}
+
+function startWalgBackupJob() {
+    return startBackupJob(
+        "walg",
+        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node /home/ubuntu/projects/n8n/scripts/backup-walg-status.mjs"
+    );
 }
 
 export default function backupRoutes(app: express.Application, _express: typeof express): void {
@@ -164,6 +191,21 @@ export default function backupRoutes(app: express.Application, _express: typeof 
         } catch (error) {
             res.status(500).json({
                 error: error instanceof Error ? error.message : "Failed to start Kopia backup",
+            });
+        }
+    }) as RequestHandler);
+
+    app.get("/api/backups/walg", ((_req, res) => {
+        res.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
+    }) as RequestHandler);
+
+    app.post("/api/backups/walg/run", (async (_req, res) => {
+        try {
+            const job = startWalgBackupJob();
+            res.json({ ok: true, job: mapJob(job) });
+        } catch (error) {
+            res.status(500).json({
+                error: error instanceof Error ? error.message : "Failed to start WAL-G backup",
             });
         }
     }) as RequestHandler);
