@@ -107,54 +107,76 @@ export function BackupOverviewCard() {
                     <CardTitle>Backups</CardTitle>
                     <div className="mt-1 text-sm text-primary-400">Kopia snapshots grouped by source</div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Badge variant={getVariant(entry?.status, entry?.data?.ok)}>
-                        {entry?.status === "error"
-                            ? "error"
-                            : entry?.data?.ok
-                              ? "healthy"
-                              : snapshotGroups.length > 0
-                                ? "attention"
-                                : "missing"}
-                    </Badge>
-                    <Button
-                        type="button"
-                        size="sm"
-                        disabled={isWalgRunning || runWalgBackup.isPending}
-                        onClick={() => {
-                            void handleRunWalgBackup();
-                        }}
-                    >
-                        {isWalgRunning ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Base running...
-                            </>
-                        ) : (
-                            <>
-                                <Play className="mr-2 h-4 w-4" />
-                                Run base now
-                            </>
-                        )}
-                    </Button>
-                    <Button
-                        type="button"
-                        size="sm"
-                        disabled={isRunning || runBackup.isPending}
-                        onClick={() => setIsConfirmOpen(true)}
-                    >
-                        {isRunning ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Running...
-                            </>
-                        ) : (
-                            <>
-                                <Play className="mr-2 h-4 w-4" />
-                                Run backup now
-                            </>
-                        )}
-                    </Button>
+                <Badge variant={getVariant(entry?.status, entry?.data?.ok)}>
+                    {entry?.status === "error"
+                        ? "error"
+                        : entry?.data?.ok
+                          ? "healthy"
+                          : snapshotGroups.length > 0
+                            ? "attention"
+                            : "missing"}
+                </Badge>
+            </div>
+
+            <div className="mb-4 space-y-3">
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <div className="text-sm font-medium text-primary-100">Run WAL-G base backup</div>
+                            <div className="mt-1 text-xs text-primary-400">
+                                Creates a new Postgres restore anchor, then prunes old base backups and obsolete WAL.
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            disabled={isWalgRunning || runWalgBackup.isPending}
+                            onClick={() => {
+                                void handleRunWalgBackup();
+                            }}
+                        >
+                            {isWalgRunning ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Base running...
+                                </>
+                            ) : (
+                                <>
+                                    <Play className="mr-2 h-4 w-4" />
+                                    Run base backup
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <div className="text-sm font-medium text-primary-100">Run Kopia filesystem backup</div>
+                            <div className="mt-1 text-xs text-primary-400">
+                                Snapshots Docker, Projects, and OpenClaw files. Postgres data is not included here.
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            disabled={isRunning || runBackup.isPending}
+                            onClick={() => setIsConfirmOpen(true)}
+                        >
+                            {isRunning ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Running...
+                                </>
+                            ) : (
+                                <>
+                                    <Play className="mr-2 h-4 w-4" />
+                                    Run filesystem backup
+                                </>
+                            )}
+                        </Button>
+                    </div>
                 </div>
             </div>
 
