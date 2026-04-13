@@ -273,8 +273,8 @@ export function Dashboard() {
                         },
                         {
                             key: "backup.walg.status",
-                            label: "WAL-G backup",
-                            description: "Postgres base backup status",
+                            label: "Postgres backup",
+                            description: "Daily Postgres backup status",
                         },
                     ]}
                 />

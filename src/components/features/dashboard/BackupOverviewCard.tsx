@@ -122,9 +122,9 @@ export function BackupOverviewCard() {
                 <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <div className="text-sm font-medium text-primary-100">Run WAL-G base backup</div>
+                            <div className="text-sm font-medium text-primary-100">Run Postgres backup</div>
                             <div className="mt-1 text-xs text-primary-400">
-                                Creates a new Postgres restore anchor, then prunes old base backups and obsolete WAL.
+                                Creates a new Postgres backup and prunes older backup data kept by WAL-G.
                             </div>
                         </div>
                         <Button
@@ -138,12 +138,12 @@ export function BackupOverviewCard() {
                             {isWalgRunning ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Base running...
+                                    Running...
                                 </>
                             ) : (
                                 <>
                                     <Play className="mr-2 h-4 w-4" />
-                                    Run base backup
+                                    Run Postgres backup
                                 </>
                             )}
                         </Button>
@@ -184,7 +184,7 @@ export function BackupOverviewCard() {
                 <div className="mb-4 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3 text-sm text-accent-100">
                     <div className="flex items-center gap-2 font-medium">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        WAL-G base backup is running
+                        Postgres backup is running
                     </div>
                     <div className="mt-1 text-accent-100/80">Started {formatDuration(runningWalgJob.startedAt)}</div>
                     {runningWalgJob.stdout ? (
@@ -226,9 +226,9 @@ export function BackupOverviewCard() {
             <div className="mb-4 rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-sm font-medium text-primary-100">WAL-G base backup</div>
+                        <div className="text-sm font-medium text-primary-100">Postgres backup</div>
                         <div className="mt-1 text-xs text-primary-400">
-                            Continuous WAL is uploaded separately. Base backup is the restore anchor.
+                            Daily Postgres backup status stored through WAL-G.
                         </div>
                     </div>
                     <Badge variant={getVariant(walgEntry?.status, walgEntry?.data?.ok)}>
@@ -249,7 +249,7 @@ export function BackupOverviewCard() {
                 ) : walgEntry?.data?.latest ? (
                     <div className="grid grid-cols-1 gap-2 text-sm text-primary-200 sm:grid-cols-2">
                         <div>
-                            <div className="text-xs uppercase tracking-wide text-primary-400">Latest backup</div>
+                            <div className="text-xs uppercase tracking-wide text-primary-400">Latest Postgres backup</div>
                             <div className="mt-1 font-mono text-xs">{walgEntry.data.latest.backupName || "Unknown"}</div>
                         </div>
                         <div>
@@ -266,7 +266,7 @@ export function BackupOverviewCard() {
                         </div>
                     </div>
                 ) : (
-                    <div className="text-sm text-primary-400">No WAL-G base backup cache data yet</div>
+                    <div className="text-sm text-primary-400">No Postgres backup cache data yet</div>
                 )}
             </div>
 
