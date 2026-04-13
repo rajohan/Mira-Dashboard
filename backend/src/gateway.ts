@@ -427,9 +427,14 @@ async function getSessionHistory(
                 : msg.timestamp,
     }));
 
+    const total = allMessages.length;
+    const end = Math.max(total - offset, 0);
+    const start = Math.max(end - limit, 0);
+    const messages = allMessages.slice(start, end).reverse();
+
     return {
-        messages: allMessages.slice(offset, offset + limit),
-        total: allMessages.length,
+        messages,
+        total,
     };
 }
 
