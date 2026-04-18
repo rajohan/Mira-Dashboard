@@ -48,15 +48,12 @@ export {
 export type {
     ExecJobResponse,
     ExecResponse,
-    OpenClawVersionInfo,
     OpsActionDefinition,
     OpsActionId,
 } from "./useOpsActions";
 export {
     OPS_ACTIONS,
     useExecJob,
-    useOpenClawVersion,
-    useRefreshOpenClawVersion,
     useStartOpsAction,
 } from "./useOpsActions";
 export { cacheKeys, useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./useCache";

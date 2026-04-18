@@ -1,5 +1,5 @@
 import { db } from "../db.js";
-import { getOpenClawVersionCached } from "../routes/openclaw.js";
+import { fetchCachedSystemHost } from "../lib/systemCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
@@ -68,7 +68,12 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
     running = true;
 
     try {
-        const version = await getOpenClawVersionCached();
+        const cached = await fetchCachedSystemHost();
+        const version = cached.data.version;
+
+        if (!version) {
+            throw new Error("OpenClaw version missing from system.host cache");
+        }
         const state = getState();
 
         if (version.updateAvailable && version.latest) {

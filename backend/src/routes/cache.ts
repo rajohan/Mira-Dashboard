@@ -17,7 +17,6 @@ const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     "moltbook.profile": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/moltbook-profile-cache.mjs`],
     "moltbook.my-content": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/moltbook-profile-cache.mjs`],
     "quotas.summary": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/quotas-cache.mjs`],
-    "system.openclaw": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/system-cache.mjs`],
     "system.host": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/system-cache.mjs`],
     "backup.kopia.status": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/backup-kopia-status.mjs`],
     "backup.walg.status": ["/usr/local/bin/doppler", "run", "--project", "rajohan", "--config", "prd", "--", "node", `${N8N_ROOT}/scripts/backup-walg-status.mjs`],

@@ -9,6 +9,7 @@ interface CacheStatusCardItem {
     key: string;
     label: string;
     description?: string;
+    refreshKeys?: string[];
 }
 
 interface CacheStatusCardProps {
@@ -42,7 +43,12 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
 
             <div className="max-h-[400px] space-y-3 overflow-y-auto pr-2">
                 {entries.map(({ item, entry }) => {
-                    const isRefreshing = refreshCache.isPending && refreshCache.variables === item.key;
+                    const refreshKeys = item.refreshKeys && item.refreshKeys.length > 0
+                        ? item.refreshKeys
+                        : [item.key];
+                    const refreshToken = refreshKeys.join(",");
+                    const isRefreshing =
+                        refreshCache.isPending && refreshCache.variables === refreshToken;
 
                     return (
                         <div
@@ -83,7 +89,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                     type="button"
                                     className="inline-flex items-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60"
                                     disabled={isRefreshing}
-                                    onClick={() => refreshCache.mutate(item.key)}
+                                    onClick={() => refreshCache.mutate(refreshToken)}
                                 >
                                     {isRefreshing ? (
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />

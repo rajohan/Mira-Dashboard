@@ -7,7 +7,7 @@ export interface CachedOpenClawVersion {
     checkedAt: number;
 }
 
-interface SystemOpenClawPayload {
+interface SystemHostPayload {
     version?: CachedOpenClawVersion;
     gateway?: Record<string, unknown> | null;
     gatewayService?: Record<string, unknown> | null;
@@ -21,7 +21,7 @@ interface SystemOpenClawPayload {
     checkedAt?: string;
 }
 
-export interface CachedSystemOpenClawResponse {
+export interface CachedSystemHostResponse {
     source: string;
     status: string;
     updatedAt: string | null;
@@ -29,19 +29,19 @@ export interface CachedSystemOpenClawResponse {
     errorCode: string | null;
     errorMessage: string | null;
     consecutiveFailures: number;
-    data: SystemOpenClawPayload;
+    data: SystemHostPayload;
     meta: Record<string, unknown>;
 }
 
-export async function fetchCachedSystemOpenClaw(): Promise<CachedSystemOpenClawResponse> {
-    const row = await getCacheEntry("system.openclaw");
+export async function fetchCachedSystemHost(): Promise<CachedSystemHostResponse> {
+    const row = await getCacheEntry("system.host");
     if (!row || row.status !== "fresh") {
-        throw new Error("System OpenClaw cache entry not found or not fresh");
+        throw new Error("System host cache entry not found or not fresh");
     }
 
-    const data = parseJsonField<SystemOpenClawPayload>(row.data);
+    const data = parseJsonField<SystemHostPayload>(row.data);
     if (!data) {
-        throw new Error("System OpenClaw cache payload is invalid");
+        throw new Error("System host cache payload is invalid");
     }
 
     return {

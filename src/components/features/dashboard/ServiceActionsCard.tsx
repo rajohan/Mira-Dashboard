@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ExecResponse, OpsActionDefinition } from "../../../hooks";
 import {
     OPS_ACTIONS,
+    useCacheEntry,
     useExecJob,
-    useOpenClawVersion,
-    useRefreshOpenClawVersion,
+    useRefreshCacheEntry,
     useStartOpsAction,
 } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
@@ -16,8 +16,11 @@ import { ConfirmModal } from "../../ui/ConfirmModal";
 
 export function ServiceActionsCard() {
     const startAction = useStartOpsAction();
-    const refreshOpenClawVersion = useRefreshOpenClawVersion();
-    const { data: versionInfo } = useOpenClawVersion();
+    const refreshCache = useRefreshCacheEntry();
+    const { data: systemHost } = useCacheEntry<{
+        version?: { current: string; latest: string | null; updateAvailable: boolean };
+    }>("system.host", 60_000);
+    const versionInfo = systemHost?.data.version;
 
     const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
     const [runningActionId, setRunningActionId] = useState<string | null>(null);
@@ -55,9 +58,9 @@ export function ServiceActionsCard() {
         setRunningJobId(null);
 
         if (completedActionId === "openclaw_update") {
-            void refreshOpenClawVersion.mutateAsync().catch(() => undefined);
+            void refreshCache.mutateAsync("system.host").catch(() => undefined);
         }
-    }, [execJob.data, refreshOpenClawVersion, runningActionId, runningActionLabel]);
+    }, [execJob.data, refreshCache, runningActionId, runningActionLabel]);
 
     async function confirmRun() {
         if (!pendingAction) {

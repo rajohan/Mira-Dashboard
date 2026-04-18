@@ -23,7 +23,6 @@ import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
-import openclawRoutes from "./routes/openclaw.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
@@ -110,7 +109,6 @@ settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
 tasksRoutes(app, express);
 notificationsRoutes(app);
-openclawRoutes(app, express);
 terminalRoutes(app);
 
 // Static files & SPA (must be last)
