@@ -699,34 +699,40 @@ async function getDockerUpdaterServiceById(serviceId: number) {
 }
 
 async function runManualUpdaterForService(serviceId: number) {
-    const env = {
-        ...process.env,
-        DB_POSTGRESDB_HOST: "127.0.0.1",
-        DB_POSTGRESDB_PORT: "6432",
-        DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
-    };
+    const manual = await runUpdaterCommand("manual-update", [
+        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        "--mode",
+        "manual",
+        "--service-id",
+        String(serviceId),
+    ]);
 
-    const { stdout, stderr } = await execFileAsync(
-        "node",
-        [
-            "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
-            "--mode",
-            "manual",
-            "--service-id",
-            String(serviceId),
-        ],
-        {
-            cwd: "/home/ubuntu/projects/n8n",
-            env,
-            maxBuffer: 10 * 1024 * 1024,
-        }
-    );
+    const steps: DockerUpdaterRunResult[] = [manual];
+    if (!manual.ok) {
+        return {
+            output: extractTrailingJson(String(manual.stdout || "{}")),
+            stderr: String(manual.stderr || ""),
+            steps,
+        };
+    }
+
+    const notify = await runUpdaterCommand("notify", ["/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs"]);
+    steps.push(notify);
+    if (!notify.ok) {
+        return {
+            output: extractTrailingJson(String(manual.stdout || "{}")),
+            stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
+            steps,
+        };
+    }
+
+    const discord = await runUpdaterCommand("discord", ["/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs"]);
+    steps.push(discord);
 
     return {
-        output: extractTrailingJson(String(stdout || "{}")),
-        stderr: String(stderr || ""),
+        output: extractTrailingJson(String(manual.stdout || "{}")),
+        stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
+        steps,
     };
 }
 
