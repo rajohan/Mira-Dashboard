@@ -23,6 +23,7 @@ import {
     CacheStatusCard,
     CronOverviewCard,
     GitOverviewCard,
+    LogRotationCard,
     QuotaOverviewCard,
     ServiceActionsCard,
 } from "../components/features/dashboard";
@@ -176,7 +177,9 @@ export function Dashboard() {
                     <div className="grid gap-4">
                         <MetricCard
                             title="CPU"
-                            subtitle={metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."}
+                            subtitle={
+                                metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."
+                            }
                             percent={metrics?.cpu.loadPercent}
                             showValue={false}
                             icon={<Cpu className="h-5 w-5" />}
@@ -185,7 +188,10 @@ export function Dashboard() {
                             title="Memory"
                             subtitle={
                                 metrics
-                                    ? metrics.memory.usedGB + " GB of " + metrics.memory.totalGB + " GB"
+                                    ? metrics.memory.usedGB +
+                                      " GB of " +
+                                      metrics.memory.totalGB +
+                                      " GB"
                                     : "Loading..."
                             }
                             percent={metrics?.memory.percent}
@@ -199,7 +205,10 @@ export function Dashboard() {
                             title="Disk"
                             subtitle={
                                 metrics
-                                    ? metrics.disk.usedGB + " GB of " + metrics.disk.totalGB + " GB"
+                                    ? metrics.disk.usedGB +
+                                      " GB of " +
+                                      metrics.disk.totalGB +
+                                      " GB"
                                     : "Loading..."
                             }
                             percent={metrics?.disk.percent}
@@ -218,14 +227,22 @@ export function Dashboard() {
                     <div className="grid gap-4">
                         <MetricCard
                             title="Download"
-                            value={metrics?.network ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s` : "—"}
+                            value={
+                                metrics?.network
+                                    ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s`
+                                    : "—"
+                            }
                             subtitle="Current throughput"
                             color="blue"
                             icon={<ArrowDown className="h-5 w-5" />}
                         />
                         <MetricCard
                             title="Upload"
-                            value={metrics?.network ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s` : "—"}
+                            value={
+                                metrics?.network
+                                    ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s`
+                                    : "—"
+                            }
                             subtitle="Current throughput"
                             color="blue"
                             icon={<ArrowUp className="h-5 w-5" />}
@@ -254,7 +271,8 @@ export function Dashboard() {
                         {
                             key: "moltbook.home",
                             label: "Moltbook",
-                            description: "Refresh home, feed, profile, and my content caches",
+                            description:
+                                "Refresh home, feed, profile, and my content caches",
                             refreshKeys: [
                                 "moltbook.home",
                                 "moltbook.feed.hot",
@@ -283,6 +301,11 @@ export function Dashboard() {
                             label: "Postgres backup",
                             description: "Daily Postgres backup status",
                         },
+                        {
+                            key: "log_rotation.state",
+                            label: "Log rotation",
+                            description: "Docker file log rotation status",
+                        },
                     ]}
                 />
             </div>
@@ -291,6 +314,8 @@ export function Dashboard() {
                 <BackupOverviewCard />
                 <ServiceActionsCard />
             </div>
+
+            <LogRotationCard />
         </div>
     );
 }

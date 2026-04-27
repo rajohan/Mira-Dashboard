@@ -1,4 +1,9 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    keepPreviousData,
+    useMutation,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
 
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
@@ -138,8 +143,18 @@ export interface DockerManualUpdateResult {
             updated: number;
             failed: number;
         };
-        updated: Array<{ eventId: number; appSlug: string; serviceName: string; targetImageRef: string }>;
-        failed: Array<{ appSlug: string; serviceName: string; targetImageRef: string; error: string }>;
+        updated: Array<{
+            eventId: number;
+            appSlug: string;
+            serviceName: string;
+            targetImageRef: string;
+        }>;
+        failed: Array<{
+            appSlug: string;
+            serviceName: string;
+            targetImageRef: string;
+            error: string;
+        }>;
     };
     stderr: string;
 }
@@ -174,7 +189,9 @@ async function fetchContainers(): Promise<DockerContainer[]> {
 }
 
 async function fetchContainer(containerId: string): Promise<DockerContainerDetails> {
-    return apiFetch<DockerContainerDetails>(`/docker/containers/${encodeURIComponent(containerId)}`);
+    return apiFetch<DockerContainerDetails>(
+        `/docker/containers/${encodeURIComponent(containerId)}`
+    );
 }
 
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
@@ -208,7 +225,9 @@ async function fetchDockerUpdaterServices(): Promise<{
 }
 
 async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
-    const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(`/docker/updater/events?limit=${limit}`);
+    const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(
+        `/docker/updater/events?limit=${limit}`
+    );
     return data.events || [];
 }
 
@@ -232,7 +251,11 @@ export function useDockerContainer(containerId: string | null) {
     });
 }
 
-export function useDockerContainerLogs(containerId: string | null, tail: number, enabled = true) {
+export function useDockerContainerLogs(
+    containerId: string | null,
+    tail: number,
+    enabled = true
+) {
     return useQuery({
         queryKey: dockerKeys.containerLogs(containerId || "", tail),
         queryFn: () => fetchContainerLogs(containerId!, tail),
@@ -300,9 +323,12 @@ export function useDockerAction() {
 
     return useMutation({
         mutationFn: ({ containerId, action }: { containerId: string; action: string }) =>
-            apiPost<{ output: string }>(`/docker/containers/${encodeURIComponent(containerId)}/action`, {
-                action,
-            }),
+            apiPost<{ output: string }>(
+                `/docker/containers/${encodeURIComponent(containerId)}/action`,
+                {
+                    action,
+                }
+            ),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
@@ -318,14 +344,18 @@ export function useDockerManualUpdate() {
 
     return useMutation({
         mutationFn: (serviceId: number) =>
-            apiPost<DockerManualUpdateResult>(`/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`),
+            apiPost<DockerManualUpdateResult>(
+                `/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`
+            ),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.updaterServices }),
-                queryClient.invalidateQueries({ queryKey: ["docker", "updater", "events"] }),
+                queryClient.invalidateQueries({
+                    queryKey: ["docker", "updater", "events"],
+                }),
             ]);
         },
     });
@@ -342,7 +372,9 @@ export function useRunDockerUpdater() {
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.updaterServices }),
-                queryClient.invalidateQueries({ queryKey: ["docker", "updater", "events"] }),
+                queryClient.invalidateQueries({
+                    queryKey: ["docker", "updater", "events"],
+                }),
             ]);
         },
     });
@@ -352,7 +384,10 @@ export function useDeleteDockerImage() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (imageId: string) => apiDelete<{ success: boolean }>(`/docker/images/${encodeURIComponent(imageId)}`),
+        mutationFn: (imageId: string) =>
+            apiDelete<{ success: boolean }>(
+                `/docker/images/${encodeURIComponent(imageId)}`
+            ),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
         },
@@ -364,7 +399,9 @@ export function useDeleteDockerVolume() {
 
     return useMutation({
         mutationFn: (volumeName: string) =>
-            apiDelete<{ success: boolean }>(`/docker/volumes/${encodeURIComponent(volumeName)}`),
+            apiDelete<{ success: boolean }>(
+                `/docker/volumes/${encodeURIComponent(volumeName)}`
+            ),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: dockerKeys.volumes });
         },
@@ -394,5 +431,7 @@ export function startDockerExec(containerId: string, command: string) {
 }
 
 export function stopDockerExec(jobId: string) {
-    return apiPost<{ success: boolean }>(`/docker/exec/${encodeURIComponent(jobId)}/stop`);
+    return apiPost<{ success: boolean }>(
+        `/docker/exec/${encodeURIComponent(jobId)}/stop`
+    );
 }

@@ -23,6 +23,7 @@ import logsRoutes from "./routes/logs.js";
 import metricsRoutes from "./routes/metrics.js";
 import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
+import opsRoutes from "./routes/ops.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
@@ -109,6 +110,7 @@ settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
 tasksRoutes(app, express);
 notificationsRoutes(app);
+opsRoutes(app);
 terminalRoutes(app);
 
 // Static files & SPA (must be last)
@@ -136,7 +138,9 @@ server.listen(PORT, () => {
     if (token) {
         gateway.init(token);
     } else {
-        console.warn("[Backend] No gateway token configured yet; waiting for bootstrap registration");
+        console.warn(
+            "[Backend] No gateway token configured yet; waiting for bootstrap registration"
+        );
     }
 
     startQuotaNotificationMonitor();

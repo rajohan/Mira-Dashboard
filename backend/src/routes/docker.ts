@@ -277,7 +277,10 @@ async function queryN8n(sql: string): Promise<string> {
     return String(stdout);
 }
 
-async function queryN8nTsvRows<T extends object>(sql: string, columns: string[]): Promise<T[]> {
+async function queryN8nTsvRows<T extends object>(
+    sql: string,
+    columns: string[]
+): Promise<T[]> {
     // Simple approach: use tab-separated output without header
     const tempFile = `/tmp/updater-events-${Date.now()}.tsv`;
     const copySql = `COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\\t', NULL '');`;
@@ -303,25 +306,20 @@ async function queryN8nTsvRows<T extends object>(sql: string, columns: string[])
             }
         );
 
-        const lines = String(stdout)
-            .trim()
-            .split("\n")
-            .filter(Boolean);
+        const lines = String(stdout).trim().split("\n").filter(Boolean);
 
         return lines.map((line) => {
             const cells = line.split("\t");
-            return Object.fromEntries(columns.map((col, i) => [col, cells[i] ?? ""])) as T;
+            return Object.fromEntries(
+                columns.map((col, i) => [col, cells[i] ?? ""])
+            ) as T;
         });
     } finally {
         try {
-            await execFileAsync(
-                "docker",
-                ["exec", "postgres", "rm", "-f", tempFile],
-                {
-                    cwd: DOCKER_ROOT,
-                    env: process.env,
-                }
-            );
+            await execFileAsync("docker", ["exec", "postgres", "rm", "-f", tempFile], {
+                cwd: DOCKER_ROOT,
+                env: process.env,
+            });
         } catch {
             // ignore cleanup errors
         }
@@ -332,12 +330,16 @@ function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     if (service.pin_mode === "digest") {
         return Boolean(
             service.current_digest &&
-                service.latest_digest &&
-                service.current_digest !== service.latest_digest
+            service.latest_digest &&
+            service.current_digest !== service.latest_digest
         );
     }
 
-    return Boolean(service.current_tag && service.latest_tag && service.current_tag !== service.latest_tag);
+    return Boolean(
+        service.current_tag &&
+        service.latest_tag &&
+        service.current_tag !== service.latest_tag
+    );
 }
 
 function extractTrailingJson(input: string) {
@@ -514,7 +516,9 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
     });
 }
 
-async function getContainerDetails(containerId: string): Promise<DockerContainerDetails | null> {
+async function getContainerDetails(
+    containerId: string
+): Promise<DockerContainerDetails | null> {
     const containers = await getContainers();
     const summary = containers.find((container) => container.id.startsWith(containerId));
 
@@ -570,7 +574,10 @@ async function getImages(): Promise<DockerImageSummary[]> {
             tag: image.Tag,
             containerName: image.ContainerName || "",
             platform: image.Platform || "unknown",
-            size: typeof image.Size === "number" ? image.Size : parseDockerSizeToBytes(image.Size as unknown as string),
+            size:
+                typeof image.Size === "number"
+                    ? image.Size
+                    : parseDockerSizeToBytes(image.Size as unknown as string),
             createdAt: image.Created || image.CreatedAt || image.CreatedSince || "",
             lastTagTime: image.LastTagTime || image.CreatedAt || image.CreatedSince || "",
             inUseBy,
@@ -605,7 +612,8 @@ async function getVolumes(): Promise<DockerVolumeSummary[]> {
 }
 
 async function getDockerUpdaterServices() {
-    const rows = parseTable<DockerUpdaterServiceRow>(await queryN8n(`
+    const rows = parseTable<DockerUpdaterServiceRow>(
+        await queryN8n(`
         SELECT
             id::text AS id,
             app_slug,
@@ -625,7 +633,8 @@ async function getDockerUpdaterServices() {
             metadata::text AS metadata
         FROM docker_managed_services
         ORDER BY app_slug, service_name;
-    `));
+    `)
+    );
 
     return rows.map((row) => ({
         id: Number(row.id),
@@ -649,7 +658,8 @@ async function getDockerUpdaterServices() {
 }
 
 async function getDockerUpdaterServiceById(serviceId: number) {
-    const rows = parseTable<DockerUpdaterServiceRow>(await queryN8n(`
+    const rows = parseTable<DockerUpdaterServiceRow>(
+        await queryN8n(`
         SELECT
             id::text AS id,
             app_slug,
@@ -670,7 +680,8 @@ async function getDockerUpdaterServiceById(serviceId: number) {
         FROM docker_managed_services
         WHERE id = ${Math.floor(serviceId)}
         LIMIT 1;
-    `));
+    `)
+    );
 
     const row = rows[0];
     if (!row) {
@@ -716,7 +727,9 @@ async function runManualUpdaterForService(serviceId: number) {
         };
     }
 
-    const notify = await runUpdaterCommand("notify", ["/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs"]);
+    const notify = await runUpdaterCommand("notify", [
+        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+    ]);
     steps.push(notify);
     if (!notify.ok) {
         return {
@@ -726,7 +739,9 @@ async function runManualUpdaterForService(serviceId: number) {
         };
     }
 
-    const discord = await runUpdaterCommand("discord", ["/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs"]);
+    const discord = await runUpdaterCommand("discord", [
+        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+    ]);
     steps.push(discord);
 
     return {
@@ -736,7 +751,10 @@ async function runManualUpdaterForService(serviceId: number) {
     };
 }
 
-async function runUpdaterCommand(step: string, args: string[]): Promise<DockerUpdaterRunResult> {
+async function runUpdaterCommand(
+    step: string,
+    args: string[]
+): Promise<DockerUpdaterRunResult> {
     const env = {
         ...process.env,
         DB_POSTGRESDB_HOST: "127.0.0.1",
@@ -774,27 +792,37 @@ async function runDockerUpdaterNow() {
     const steps: DockerUpdaterRunResult[] = [];
 
     steps.push(
-        await runUpdaterCommand("register", ["/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs"])
+        await runUpdaterCommand("register", [
+            "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
+        ])
     );
     if (!steps.at(-1)?.ok) return steps;
 
     steps.push(
-        await runUpdaterCommand("poll", ["/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs"])
+        await runUpdaterCommand("poll", [
+            "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs",
+        ])
     );
     if (!steps.at(-1)?.ok) return steps;
 
     steps.push(
-        await runUpdaterCommand("auto-update", ["/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs"])
+        await runUpdaterCommand("auto-update", [
+            "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        ])
     );
     if (!steps.at(-1)?.ok) return steps;
 
     steps.push(
-        await runUpdaterCommand("notify", ["/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs"])
+        await runUpdaterCommand("notify", [
+            "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+        ])
     );
     if (!steps.at(-1)?.ok) return steps;
 
     steps.push(
-        await runUpdaterCommand("discord", ["/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs"])
+        await runUpdaterCommand("discord", [
+            "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+        ])
     );
 
     return steps;
@@ -827,7 +855,8 @@ async function getDockerUpdaterEvents(limit: number) {
         "to_digest",
         "created_at",
     ];
-    const rows = await queryN8nTsvRows<DockerUpdaterEventRow>(`
+    const rows = await queryN8nTsvRows<DockerUpdaterEventRow>(
+        `
         SELECT
             e.id::text,
             e.managed_service_id::text,
@@ -843,7 +872,9 @@ async function getDockerUpdaterEvents(limit: number) {
         JOIN docker_managed_services s ON s.id = e.managed_service_id
         ORDER BY e.created_at DESC
         LIMIT ${boundedLimit}
-    `, columns);
+    `,
+        columns
+    );
 
     return rows.map((row) => ({
         id: Number(row.id),
@@ -860,7 +891,10 @@ async function getDockerUpdaterEvents(limit: number) {
     }));
 }
 
-async function runContainerAction(containerId: string, action: DockerActionRequest["action"]) {
+async function runContainerAction(
+    containerId: string,
+    action: DockerActionRequest["action"]
+) {
     const details = await getContainerDetails(containerId);
 
     if (!details) {
@@ -932,7 +966,9 @@ function cleanupDockerExecJobs() {
         return;
     }
 
-    const entries = [...dockerExecJobs.values()].sort((a, b) => a.startedAt - b.startedAt);
+    const entries = [...dockerExecJobs.values()].sort(
+        (a, b) => a.startedAt - b.startedAt
+    );
     const overflow = entries.length - MAX_JOBS;
 
     for (let index = 0; index < overflow; index += 1) {
@@ -945,203 +981,286 @@ function cleanupDockerExecJobs() {
 }
 
 export default function dockerRoutes(app: express.Application): void {
-    app.get("/api/docker/updater/services", asyncRoute(async (_req, res) => {
-        const services = await getDockerUpdaterServices();
-        const summary = {
-            total: services.length,
-            enabled: services.filter((service) => service.enabled).length,
-            updateAvailable: services.filter((service) => service.updateAvailable).length,
-            autoPolicy: services.filter((service) => service.policy === "auto").length,
-            notifyPolicy: services.filter((service) => service.policy === "notify").length,
-            failed: services.filter((service) => service.lastStatus === "auto_update_failed").length,
-        };
-        res.json({ services, summary });
-    }));
+    app.get(
+        "/api/docker/updater/services",
+        asyncRoute(async (_req, res) => {
+            const services = await getDockerUpdaterServices();
+            const summary = {
+                total: services.length,
+                enabled: services.filter((service) => service.enabled).length,
+                updateAvailable: services.filter((service) => service.updateAvailable)
+                    .length,
+                autoPolicy: services.filter((service) => service.policy === "auto")
+                    .length,
+                notifyPolicy: services.filter((service) => service.policy === "notify")
+                    .length,
+                failed: services.filter(
+                    (service) => service.lastStatus === "auto_update_failed"
+                ).length,
+            };
+            res.json({ services, summary });
+        })
+    );
 
-    app.get("/api/docker/updater/events", asyncRoute(async (req, res) => {
-        const limitValue = Number(req.query.limit);
-        const limit = Number.isFinite(limitValue) ? limitValue : 50;
-        const events = await getDockerUpdaterEvents(limit);
-        res.json({ events });
-    }));
+    app.get(
+        "/api/docker/updater/events",
+        asyncRoute(async (req, res) => {
+            const limitValue = Number(req.query.limit);
+            const limit = Number.isFinite(limitValue) ? limitValue : 50;
+            const events = await getDockerUpdaterEvents(limit);
+            res.json({ events });
+        })
+    );
 
-    app.post("/api/docker/updater/run", express.json(), asyncRoute(async (_req, res) => {
-        const steps = await runDockerUpdaterNow();
-        res.json({
-            success: steps.every((step) => step.ok),
-            steps,
-        });
-    }));
+    app.post(
+        "/api/docker/updater/run",
+        express.json(),
+        asyncRoute(async (_req, res) => {
+            const steps = await runDockerUpdaterNow();
+            res.json({
+                success: steps.every((step) => step.ok),
+                steps,
+            });
+        })
+    );
 
-    app.post("/api/docker/updater/services/:serviceId/update", express.json(), asyncRoute(async (req, res) => {
-        const payload = req.body as DockerManualUpdateRequest;
-        const routeServiceId = Number.parseInt(String(req.params.serviceId || ""), 10);
-        const serviceId = Number.isFinite(routeServiceId) ? routeServiceId : Number(payload.serviceId || 0);
+    app.post(
+        "/api/docker/updater/services/:serviceId/update",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const payload = req.body as DockerManualUpdateRequest;
+            const routeServiceId = Number.parseInt(
+                String(req.params.serviceId || ""),
+                10
+            );
+            const serviceId = Number.isFinite(routeServiceId)
+                ? routeServiceId
+                : Number(payload.serviceId || 0);
 
-        if (!Number.isFinite(serviceId) || serviceId <= 0) {
-            res.status(400).json({ error: "Invalid service id" });
-            return;
-        }
-
-        const service = await getDockerUpdaterServiceById(serviceId);
-        if (!service) {
-            res.status(404).json({ error: "Updater service not found" });
-            return;
-        }
-
-        if (!service.enabled) {
-            res.status(400).json({ error: "Updater service is disabled" });
-            return;
-        }
-
-        if (!service.updateAvailable) {
-            res.status(400).json({ error: "No update available for this service" });
-            return;
-        }
-
-        const result = await runManualUpdaterForService(serviceId);
-        res.json({
-            success: true,
-            service,
-            result: result.output,
-            stderr: result.stderr,
-        });
-    }));
-
-    app.get("/api/docker/containers", asyncRoute(async (_req, res) => {
-        const containers = await getContainers();
-        res.json({ containers });
-    }));
-
-    app.get("/api/docker/containers/:containerId", asyncRoute(async (req, res) => {
-        const details = await getContainerDetails(String(req.params.containerId || ""));
-        if (!details) {
-            res.status(404).json({ error: "Container not found" });
-            return;
-        }
-
-        res.json(details);
-    }));
-
-    app.get("/api/docker/containers/:containerId/logs", asyncRoute(async (req, res) => {
-        const containerId = String(req.params.containerId || "");
-        const tail = Math.max(50, Number.parseInt(String(req.query.tail || "200"), 10) || 200);
-        const { stdout, stderr } = await execFileAsync("docker", ["logs", "--tail", String(tail), containerId], {
-            cwd: DOCKER_ROOT,
-            env: process.env,
-            maxBuffer: 10 * 1024 * 1024,
-        });
-        const content = [String(stdout), String(stderr)].filter(Boolean).join("\n").trim();
-        res.json({ content });
-    }));
-
-    app.post("/api/docker/containers/:containerId/action", express.json(), asyncRoute(async (req, res) => {
-        const payload = req.body as DockerActionRequest;
-        const result = await runContainerAction(String(req.params.containerId || ""), payload.action);
-        res.json(result);
-    }));
-
-    app.post("/api/docker/stack/action", express.json(), asyncRoute(async (req, res) => {
-        const payload = req.body as DockerStackActionRequest;
-        const result = await runStackAction(payload);
-        res.json(result);
-    }));
-
-    app.get("/api/docker/images", asyncRoute(async (_req, res) => {
-        const images = await getImages();
-        res.json({ images });
-    }));
-
-    app.delete("/api/docker/images/:imageId", asyncRoute(async (req, res) => {
-        await runDocker(["image", "rm", String(req.params.imageId || "")]);
-        res.json({ success: true });
-    }));
-
-    app.get("/api/docker/volumes", asyncRoute(async (_req, res) => {
-        const volumes = await getVolumes();
-        res.json({ volumes });
-    }));
-
-    app.delete("/api/docker/volumes/:volumeName", asyncRoute(async (req, res) => {
-        await runDocker(["volume", "rm", String(req.params.volumeName || "")]);
-        res.json({ success: true });
-    }));
-
-    app.post("/api/docker/prune", express.json(), asyncRoute(async (req, res) => {
-        const payload = req.body as DockerPruneRequest;
-
-        if (payload.target === "images") {
-            const output = await runDocker(["image", "prune", "-a", "-f"]);
-            res.json({ success: true, output });
-            return;
-        }
-
-        if (payload.target === "volumes") {
-            const output = await runDocker(["volume", "prune", "-f"]);
-            res.json({ success: true, output });
-            return;
-        }
-
-        res.status(400).json({ error: "Invalid prune target" });
-    }));
-
-    app.post("/api/docker/exec/start", express.json(), asyncRoute(async (req, res) => {
-        const payload = req.body as DockerExecStartRequest;
-
-        if (!payload.containerId || !payload.command) {
-            res.status(400).json({ error: "Missing containerId or command" });
-            return;
-        }
-
-        const jobId = randomUUID();
-        dockerExecJobs.set(jobId, {
-            id: jobId,
-            containerId: payload.containerId,
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "",
-            startedAt: Date.now(),
-            endedAt: null,
-        });
-
-        void runDockerExecCommand(payload.containerId, payload.command, jobId, (stdout, stderr) => {
-            const current = dockerExecJobs.get(jobId);
-            if (!current) {
+            if (!Number.isFinite(serviceId) || serviceId <= 0) {
+                res.status(400).json({ error: "Invalid service id" });
                 return;
             }
 
-            current.stdout = stdout;
-            current.stderr = stderr;
+            const service = await getDockerUpdaterServiceById(serviceId);
+            if (!service) {
+                res.status(404).json({ error: "Updater service not found" });
+                return;
+            }
+
+            if (!service.enabled) {
+                res.status(400).json({ error: "Updater service is disabled" });
+                return;
+            }
+
+            if (!service.updateAvailable) {
+                res.status(400).json({ error: "No update available for this service" });
+                return;
+            }
+
+            const result = await runManualUpdaterForService(serviceId);
+            res.json({
+                success: true,
+                service,
+                result: result.output,
+                stderr: result.stderr,
+            });
         })
-            .then((result) => {
-                const current = dockerExecJobs.get(jobId);
-                if (!current) {
-                    return;
-                }
+    );
 
-                current.status = "done";
-                current.code = result.code;
-                current.stdout = result.stdout;
-                current.stderr = result.stderr;
-                current.endedAt = Date.now();
-                cleanupDockerExecJobs();
-            })
-            .catch((error) => {
-                const current = dockerExecJobs.get(jobId);
-                if (!current) {
-                    return;
-                }
+    app.get(
+        "/api/docker/containers",
+        asyncRoute(async (_req, res) => {
+            const containers = await getContainers();
+            res.json({ containers });
+        })
+    );
 
-                current.status = "done";
-                current.code = 1;
-                current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
-                current.endedAt = Date.now();
-                cleanupDockerExecJobs();
+    app.get(
+        "/api/docker/containers/:containerId",
+        asyncRoute(async (req, res) => {
+            const details = await getContainerDetails(
+                String(req.params.containerId || "")
+            );
+            if (!details) {
+                res.status(404).json({ error: "Container not found" });
+                return;
+            }
+
+            res.json(details);
+        })
+    );
+
+    app.get(
+        "/api/docker/containers/:containerId/logs",
+        asyncRoute(async (req, res) => {
+            const containerId = String(req.params.containerId || "");
+            const tail = Math.max(
+                50,
+                Number.parseInt(String(req.query.tail || "200"), 10) || 200
+            );
+            const { stdout, stderr } = await execFileAsync(
+                "docker",
+                ["logs", "--tail", String(tail), containerId],
+                {
+                    cwd: DOCKER_ROOT,
+                    env: process.env,
+                    maxBuffer: 10 * 1024 * 1024,
+                }
+            );
+            const content = [String(stdout), String(stderr)]
+                .filter(Boolean)
+                .join("\n")
+                .trim();
+            res.json({ content });
+        })
+    );
+
+    app.post(
+        "/api/docker/containers/:containerId/action",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const payload = req.body as DockerActionRequest;
+            const result = await runContainerAction(
+                String(req.params.containerId || ""),
+                payload.action
+            );
+            res.json(result);
+        })
+    );
+
+    app.post(
+        "/api/docker/stack/action",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const payload = req.body as DockerStackActionRequest;
+            const result = await runStackAction(payload);
+            res.json(result);
+        })
+    );
+
+    app.get(
+        "/api/docker/images",
+        asyncRoute(async (_req, res) => {
+            const images = await getImages();
+            res.json({ images });
+        })
+    );
+
+    app.delete(
+        "/api/docker/images/:imageId",
+        asyncRoute(async (req, res) => {
+            await runDocker(["image", "rm", String(req.params.imageId || "")]);
+            res.json({ success: true });
+        })
+    );
+
+    app.get(
+        "/api/docker/volumes",
+        asyncRoute(async (_req, res) => {
+            const volumes = await getVolumes();
+            res.json({ volumes });
+        })
+    );
+
+    app.delete(
+        "/api/docker/volumes/:volumeName",
+        asyncRoute(async (req, res) => {
+            await runDocker(["volume", "rm", String(req.params.volumeName || "")]);
+            res.json({ success: true });
+        })
+    );
+
+    app.post(
+        "/api/docker/prune",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const payload = req.body as DockerPruneRequest;
+
+            if (payload.target === "images") {
+                const output = await runDocker(["image", "prune", "-a", "-f"]);
+                res.json({ success: true, output });
+                return;
+            }
+
+            if (payload.target === "volumes") {
+                const output = await runDocker(["volume", "prune", "-f"]);
+                res.json({ success: true, output });
+                return;
+            }
+
+            res.status(400).json({ error: "Invalid prune target" });
+        })
+    );
+
+    app.post(
+        "/api/docker/exec/start",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const payload = req.body as DockerExecStartRequest;
+
+            if (!payload.containerId || !payload.command) {
+                res.status(400).json({ error: "Missing containerId or command" });
+                return;
+            }
+
+            const jobId = randomUUID();
+            dockerExecJobs.set(jobId, {
+                id: jobId,
+                containerId: payload.containerId,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
             });
 
-        res.json({ jobId });
-    }));
+            void runDockerExecCommand(
+                payload.containerId,
+                payload.command,
+                jobId,
+                (stdout, stderr) => {
+                    const current = dockerExecJobs.get(jobId);
+                    if (!current) {
+                        return;
+                    }
+
+                    current.stdout = stdout;
+                    current.stderr = stderr;
+                }
+            )
+                .then((result) => {
+                    const current = dockerExecJobs.get(jobId);
+                    if (!current) {
+                        return;
+                    }
+
+                    current.status = "done";
+                    current.code = result.code;
+                    current.stdout = result.stdout;
+                    current.stderr = result.stderr;
+                    current.endedAt = Date.now();
+                    cleanupDockerExecJobs();
+                })
+                .catch((error) => {
+                    const current = dockerExecJobs.get(jobId);
+                    if (!current) {
+                        return;
+                    }
+
+                    current.status = "done";
+                    current.code = 1;
+                    current.stderr = trimOutput(
+                        `${current.stderr}\n${(error as Error).message}`.trim()
+                    );
+                    current.endedAt = Date.now();
+                    cleanupDockerExecJobs();
+                });
+
+            res.json({ jobId });
+        })
+    );
 
     app.get("/api/docker/exec/:jobId", ((req, res) => {
         const jobId = String(req.params.jobId || "");

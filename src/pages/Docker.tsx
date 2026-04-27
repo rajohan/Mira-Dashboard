@@ -208,7 +208,9 @@ export function Docker() {
     const updaterServices = updaterServicesQuery.data?.services || [];
     const updaterSummary = updaterServicesQuery.data?.summary;
     const updaterEvents = updaterEventsQuery.data || [];
-    const servicesWithUpdates = updaterServices.filter((service) => service.updateAvailable);
+    const servicesWithUpdates = updaterServices.filter(
+        (service) => service.updateAvailable
+    );
 
     async function handleContainerAction(
         containerId: string,
@@ -292,7 +294,9 @@ export function Docker() {
                     <div className="mb-2 text-sm font-semibold text-primary-100">
                         Last updater run
                     </div>
-                    <pre className="overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">{JSON.stringify(runDockerUpdater.data, null, 2)}</pre>
+                    <pre className="overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
+                        {JSON.stringify(runDockerUpdater.data, null, 2)}
+                    </pre>
                 </Card>
             ) : null}
 
@@ -310,7 +314,9 @@ export function Docker() {
                             onClick={() => runDockerUpdater.mutate()}
                             disabled={runDockerUpdater.isPending}
                         >
-                            {runDockerUpdater.isPending ? "Running..." : "Run updater now"}
+                            {runDockerUpdater.isPending
+                                ? "Running..."
+                                : "Run updater now"}
                         </Button>
                     </div>
                 </div>
@@ -354,7 +360,10 @@ export function Docker() {
                         </div>
                         <div className="max-h-[400px] overflow-y-auto pr-2">
                             {updaterServicesQuery.isLoading ? (
-                                <LoadingState message="Loading updater services..." size="md" />
+                                <LoadingState
+                                    message="Loading updater services..."
+                                    size="md"
+                                />
                             ) : servicesWithUpdates.length === 0 ? (
                                 <EmptyState message="No pending updater candidates right now." />
                             ) : (
@@ -382,21 +391,48 @@ export function Docker() {
                                                                 label: service.serviceName,
                                                             })
                                                         }
-                                                        disabled={dockerManualUpdate.isPending}
+                                                        disabled={
+                                                            dockerManualUpdate.isPending
+                                                        }
                                                     >
                                                         Update now
                                                     </Button>
                                                 </div>
                                             </div>
                                             <div className="mt-3 grid gap-2 text-xs text-primary-300 md:grid-cols-2">
-                                                <div title={formatFullVersionDisplay(service.currentTag, service.currentDigest)}>
-                                                    Current: {formatVersionDisplay(service.currentTag, service.currentDigest)}
+                                                <div
+                                                    title={formatFullVersionDisplay(
+                                                        service.currentTag,
+                                                        service.currentDigest
+                                                    )}
+                                                >
+                                                    Current:{" "}
+                                                    {formatVersionDisplay(
+                                                        service.currentTag,
+                                                        service.currentDigest
+                                                    )}
                                                 </div>
-                                                <div title={formatFullVersionDisplay(service.latestTag, service.latestDigest)}>
-                                                    Candidate: {formatVersionDisplay(service.latestTag, service.latestDigest)}
+                                                <div
+                                                    title={formatFullVersionDisplay(
+                                                        service.latestTag,
+                                                        service.latestDigest
+                                                    )}
+                                                >
+                                                    Candidate:{" "}
+                                                    {formatVersionDisplay(
+                                                        service.latestTag,
+                                                        service.latestDigest
+                                                    )}
                                                 </div>
-                                                <div>Last checked: {formatTimestamp(service.lastCheckedAt)}</div>
-                                                <div>Status: {service.lastStatus || "—"}</div>
+                                                <div>
+                                                    Last checked:{" "}
+                                                    {formatTimestamp(
+                                                        service.lastCheckedAt
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    Status: {service.lastStatus || "—"}
+                                                </div>
                                             </div>
                                         </Card>
                                     ))}
@@ -411,7 +447,10 @@ export function Docker() {
                         </div>
                         <div className="max-h-[400px] overflow-y-auto pr-2">
                             {updaterEventsQuery.isLoading ? (
-                                <LoadingState message="Loading updater history..." size="md" />
+                                <LoadingState
+                                    message="Loading updater history..."
+                                    size="md"
+                                />
                             ) : updaterEvents.length === 0 ? (
                                 <EmptyState message="No updater events yet." />
                             ) : (
@@ -430,7 +469,7 @@ export function Docker() {
                                                 {event.eventType}
                                             </div>
                                             <div
-                                                className="mt-2 text-xs text-primary-300 font-mono"
+                                                className="mt-2 font-mono text-xs text-primary-300"
                                                 title={`${formatFullVersionDisplay(event.fromTag, event.fromDigest)} → ${formatFullVersionDisplay(event.toTag, event.toDigest)}`}
                                             >
                                                 {formatUpdaterTransition(event)}
@@ -550,10 +589,16 @@ export function Docker() {
                             <Card className="p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
                                 <div>
-                                    Created: {formatTimestamp(containerDetailsQuery.data.createdAt)}
+                                    Created:{" "}
+                                    {formatTimestamp(
+                                        containerDetailsQuery.data.createdAt
+                                    )}
                                 </div>
                                 <div>
-                                    Started: {formatTimestamp(containerDetailsQuery.data.startedAt)}
+                                    Started:{" "}
+                                    {formatTimestamp(
+                                        containerDetailsQuery.data.startedAt
+                                    )}
                                 </div>
                                 <div>Status: {containerDetailsQuery.data.status}</div>
                             </Card>
