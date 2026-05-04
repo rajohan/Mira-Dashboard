@@ -2,6 +2,7 @@ import { Download, Loader2, RefreshCw, Server } from "lucide-react";
 import { useState } from "react";
 
 import {
+    AgentAccessSection,
     ChannelSection,
     HeartbeatSection,
     ModelSection,
@@ -22,7 +23,7 @@ import {
     useToggleSkill,
     useUpdateConfig,
 } from "../hooks";
-import type { OpenClawConfig, Skill } from "../hooks/useConfig";
+import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
 
 export function Settings() {
     const [error, setError] = useState<string | null>(null);
@@ -102,15 +103,46 @@ export function Settings() {
         }
     }
 
+    async function handleAgentAccessSave(
+        agents: AgentConfig[],
+        defaultSkills?: string[]
+    ) {
+        setError(null);
+        try {
+            await updateConfig.mutateAsync({
+                agents: {
+                    defaults: { skills: defaultSkills },
+                    list: agents,
+                },
+            } as OpenClawConfig);
+            setSuccess("Agent access settings saved");
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        }
+    }
+
     if (loading) {
         return <LoadingState size="lg" />;
     }
 
     const modelInfo = {
-        defaultModel: config?.agents?.defaultModel || "Not set",
-        fallbacks: config?.agents?.fallbacks?.join(", ") || "None",
-        contextWindow: config?.agents?.contextSettings?.maxTokens || 128000,
-        temperature: config?.agents?.contextSettings?.temperature || 0.7,
+        defaultModel:
+            config?.agents?.defaults?.model?.primary ||
+            config?.agents?.defaultModel ||
+            "Not set",
+        fallbacks:
+            config?.agents?.defaults?.model?.fallbacks?.join(", ") ||
+            config?.agents?.fallbacks?.join(", ") ||
+            "None",
+        contextWindow:
+            config?.agents?.defaults?.contextSettings?.maxTokens ||
+            config?.agents?.contextSettings?.maxTokens ||
+            128000,
+        temperature:
+            config?.agents?.defaults?.contextSettings?.temperature ||
+            config?.agents?.contextSettings?.temperature ||
+            0.7,
     };
 
     const channelInfo = {
@@ -225,6 +257,13 @@ export function Settings() {
             />
 
             <SkillsSection skills={skills as Skill[]} onToggle={handleSkillToggle} />
+
+            <AgentAccessSection
+                agents={config?.agents?.list || []}
+                defaultSkills={config?.agents?.defaults?.skills}
+                onSave={handleAgentAccessSave}
+                saving={updateConfig.isPending}
+            />
 
             {/* Server Info */}
             <div className="mb-4 rounded-lg border border-primary-700 bg-primary-800/50 p-4">

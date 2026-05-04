@@ -10,8 +10,33 @@ export interface Skill {
     description?: string;
 }
 
+export interface AgentConfig {
+    id: string;
+    default?: boolean;
+    name?: string;
+    skills?: string[];
+    tools?: {
+        allow?: string[];
+        alsoAllow?: string[];
+        deny?: string[];
+        profile?: string;
+    };
+    [key: string]: unknown;
+}
+
 export interface OpenClawConfig {
+    __hash?: string;
     agents?: {
+        defaults?: {
+            skills?: string[];
+            model?: { primary?: string; fallbacks?: string[] };
+            contextSettings?: {
+                maxTokens?: number;
+                temperature?: number;
+            };
+            [key: string]: unknown;
+        };
+        list?: AgentConfig[];
         defaultModel?: string;
         fallbacks?: string[];
         contextSettings?: {
