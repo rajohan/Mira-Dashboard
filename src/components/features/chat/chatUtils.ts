@@ -85,6 +85,24 @@ export function activeRunStorageKey(sessionKey: string): string {
     return `mira-dashboard-chat-active-run:${sessionKey}`;
 }
 
+export function hasActiveRunMarker(sessionKey: string): boolean {
+    const key = activeRunStorageKey(sessionKey);
+    return Boolean(
+        window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
+}
+
+export function markActiveRun(sessionKey: string): void {
+    window.localStorage.setItem(
+        activeRunStorageKey(sessionKey),
+        JSON.stringify({ startedAt: new Date().toISOString() })
+    );
+}
+
+export function clearActiveRunMarker(sessionKey: string): void {
+    window.localStorage.removeItem(activeRunStorageKey(sessionKey));
+}
+
 export function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();

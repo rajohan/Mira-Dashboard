@@ -21,11 +21,13 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
-    activeRunStorageKey,
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
+    clearActiveRunMarker,
     dataUrlToBase64,
     displayMimeType,
+    hasActiveRunMarker,
+    markActiveRun,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
@@ -128,6 +130,26 @@ export function Chat() {
     }, [sortedSessions, selectedSessionKey]);
 
     useEffect(() => {
+        if (!selectedSessionKey) {
+            return;
+        }
+
+        if (selectedSessionIsRunning) {
+            markActiveRun(selectedSessionKey);
+            setIsAssistantTyping(true);
+            return;
+        }
+
+        const interval = window.setInterval(() => {
+            if (hasActiveRunMarker(selectedSessionKey)) {
+                setIsAssistantTyping(true);
+            }
+        }, 5_000);
+
+        return () => window.clearInterval(interval);
+    }, [selectedSessionIsRunning, selectedSessionKey]);
+
+    useEffect(() => {
         if (!isConnected) {
             return;
         }
@@ -162,10 +184,7 @@ export function Chat() {
         setIsAtBottom(true);
         setAttachments([]);
         setIsAssistantTyping(
-            Boolean(
-                selectedSessionKey &&
-                window.sessionStorage.getItem(activeRunStorageKey(selectedSessionKey))
-            )
+            Boolean(selectedSessionKey && hasActiveRunMarker(selectedSessionKey))
         );
 
         if (!selectedSessionKey) {
@@ -290,10 +309,7 @@ export function Chat() {
                     content: payload.message,
                 }).text;
                 setIsAssistantTyping(true);
-                window.sessionStorage.setItem(
-                    activeRunStorageKey(selectedSessionKey),
-                    "1"
-                );
+                markActiveRun(selectedSessionKey);
                 setStreamText((previous) =>
                     nextText.length >= previous.length ? nextText : previous
                 );
@@ -311,7 +327,7 @@ export function Chat() {
                 ]);
                 setStreamText("");
                 setIsAssistantTyping(false);
-                window.sessionStorage.removeItem(activeRunStorageKey(selectedSessionKey));
+                clearActiveRunMarker(selectedSessionKey);
                 return;
             }
 
@@ -331,7 +347,7 @@ export function Chat() {
                 }
                 setStreamText("");
                 setIsAssistantTyping(false);
-                window.sessionStorage.removeItem(activeRunStorageKey(selectedSessionKey));
+                clearActiveRunMarker(selectedSessionKey);
                 return;
             }
 
@@ -339,7 +355,7 @@ export function Chat() {
                 setSendError(payload.errorMessage || "Chat request failed");
                 setStreamText("");
                 setIsAssistantTyping(false);
-                window.sessionStorage.removeItem(activeRunStorageKey(selectedSessionKey));
+                clearActiveRunMarker(selectedSessionKey);
             }
         });
     }, [selectedSessionKey, streamText, subscribe]);
@@ -865,7 +881,7 @@ export function Chat() {
         setStreamText("");
         setIsSending(true);
         setIsAssistantTyping(true);
-        window.sessionStorage.setItem(activeRunStorageKey(selectedSessionKey), "1");
+        markActiveRun(selectedSessionKey);
 
         try {
             const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -879,7 +895,7 @@ export function Chat() {
         } catch (error_) {
             setSendError((error_ as Error).message || "Failed to send message");
             setIsAssistantTyping(false);
-            window.sessionStorage.removeItem(activeRunStorageKey(selectedSessionKey));
+            clearActiveRunMarker(selectedSessionKey);
         } finally {
             setIsSending(false);
         }
