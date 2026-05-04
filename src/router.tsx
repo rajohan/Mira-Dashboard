@@ -7,12 +7,11 @@ import {
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
-import { authStore, authActions } from "./stores/authStore";
 import { Agents } from "./pages/Agents";
 import { Chat } from "./pages/Chat";
 import { Cron } from "./pages/Cron";
-import { Database } from "./pages/Database";
 import { Dashboard } from "./pages/Dashboard";
+import { Database } from "./pages/Database";
 import { Docker } from "./pages/Docker";
 import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
@@ -25,6 +24,7 @@ import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Tasks } from "./pages/Tasks";
 import { Terminal } from "./pages/Terminal";
+import { authActions, authStore } from "./stores/authStore";
 
 const rootRoute = createRootRoute({
     component: () => <Outlet />,

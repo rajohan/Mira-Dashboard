@@ -83,7 +83,9 @@ function getHealthRank(health: string): number {
     }
 }
 
-function getHealthVariant(container: DockerContainer): "success" | "warning" | "error" | "default" {
+function getHealthVariant(
+    container: DockerContainer
+): "success" | "warning" | "error" | "default" {
     if (container.health === "healthy") return "success";
     if (container.health === "unhealthy") return "error";
     if (container.state === "running") return "warning";
@@ -136,122 +138,149 @@ export function DockerContainersTable({
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [
-            columnHelper.accessor("name", {
-                header: "Container",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return (
-                        <div>
-                            <div className="font-medium text-primary-50">{container.name}</div>
-                            <div className="text-xs text-primary-400">{container.image}</div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-primary-500">
-                                {container.service ? <span>service: {container.service}</span> : null}
-                                {container.project ? <span>project: {container.project}</span> : null}
-                            </div>
+        columnHelper.accessor("name", {
+            header: "Container",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div>
+                        <div className="font-medium text-primary-50">
+                            {container.name}
                         </div>
-                    );
-                },
-            }),
-            columnHelper.accessor((row) => `${getStateRank(row.state)}|${row.status}`, {
-                id: "state",
-                header: "State",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return (
-                        <div>
-                            <Badge variant={getStateVariant(container.state)}>{container.state}</Badge>
-                            <div className="mt-1 text-xs text-primary-400">{container.status}</div>
+                        <div className="text-xs text-primary-400">{container.image}</div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-primary-500">
+                            {container.service ? (
+                                <span>service: {container.service}</span>
+                            ) : null}
+                            {container.project ? (
+                                <span>project: {container.project}</span>
+                            ) : null}
                         </div>
-                    );
-                },
-                sortingFn: (a, b) => {
-                    const stateDiff = getStateRank(a.original.state) - getStateRank(b.original.state);
-                    if (stateDiff !== 0) {
-                        return stateDiff;
-                    }
-                    return a.original.status.localeCompare(b.original.status);
-                },
-            }),
-            columnHelper.accessor((row) => row.health, {
-                id: "health",
-                header: "Health",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return (
-                        <div>
-                            <Badge variant={getHealthVariant(container)}>{container.health}</Badge>
-                            <div className="mt-1 text-xs text-primary-400">restarts: {container.restartCount}</div>
+                    </div>
+                );
+            },
+        }),
+        columnHelper.accessor((row) => `${getStateRank(row.state)}|${row.status}`, {
+            id: "state",
+            header: "State",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div>
+                        <Badge variant={getStateVariant(container.state)}>
+                            {container.state}
+                        </Badge>
+                        <div className="mt-1 text-xs text-primary-400">
+                            {container.status}
                         </div>
-                    );
-                },
-                sortingFn: (a, b) => getHealthRank(a.original.health) - getHealthRank(b.original.health),
-            }),
-            columnHelper.accessor((row) => parsePercent(row.stats?.cpu), {
-                id: "cpu",
-                header: "CPU",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return <div className="text-xs text-primary-300">{container.stats?.cpu || "-"}</div>;
-                },
-            }),
-            columnHelper.accessor((row) => parseMemoryUsedMiB(row.stats?.memory), {
-                id: "memory",
-                header: "Memory",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return <div className="text-xs text-primary-300">{formatMemoryUsedMb(container.stats?.memory)}</div>;
-                },
-            }),
-            columnHelper.display({
-                id: "ports",
-                header: "Ports",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return (
-                        <div className="text-xs break-words text-primary-300">
-                            {container.ports.length > 0 ? container.ports.join(", ") : "—"}
+                    </div>
+                );
+            },
+            sortingFn: (a, b) => {
+                const stateDiff =
+                    getStateRank(a.original.state) - getStateRank(b.original.state);
+                if (stateDiff !== 0) {
+                    return stateDiff;
+                }
+                return a.original.status.localeCompare(b.original.status);
+            },
+        }),
+        columnHelper.accessor((row) => row.health, {
+            id: "health",
+            header: "Health",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div>
+                        <Badge variant={getHealthVariant(container)}>
+                            {container.health}
+                        </Badge>
+                        <div className="mt-1 text-xs text-primary-400">
+                            restarts: {container.restartCount}
                         </div>
-                    );
-                },
-            }),
-            columnHelper.display({
-                id: "actions",
-                header: "Actions",
-                cell: (info) => {
-                    const container = info.row.original;
-                    return (
-                        <div className="flex flex-nowrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                title="Logs"
-                                aria-label="Logs"
-                                onClick={() => onLogs(container.id)}
-                            >
-                                <FileText className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                title="Console"
-                                aria-label="Console"
-                                onClick={() => onConsole(container.id)}
-                            >
-                                <SquareTerminal className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                title="Restart"
-                                aria-label="Restart"
-                                onClick={() => onRestart(container.id)}
-                            >
-                                <RotateCcw className="h-4 w-4" />
-                            </Button>
-                        </div>
-                    );
-                },
-            }),
+                    </div>
+                );
+            },
+            sortingFn: (a, b) =>
+                getHealthRank(a.original.health) - getHealthRank(b.original.health),
+        }),
+        columnHelper.accessor((row) => parsePercent(row.stats?.cpu), {
+            id: "cpu",
+            header: "CPU",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div className="text-xs text-primary-300">
+                        {container.stats?.cpu || "-"}
+                    </div>
+                );
+            },
+        }),
+        columnHelper.accessor((row) => parseMemoryUsedMiB(row.stats?.memory), {
+            id: "memory",
+            header: "Memory",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div className="text-xs text-primary-300">
+                        {formatMemoryUsedMb(container.stats?.memory)}
+                    </div>
+                );
+            },
+        }),
+        columnHelper.display({
+            id: "ports",
+            header: "Ports",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div className="break-words text-xs text-primary-300">
+                        {container.ports.length > 0 ? container.ports.join(", ") : "—"}
+                    </div>
+                );
+            },
+        }),
+        columnHelper.display({
+            id: "actions",
+            header: "Actions",
+            cell: (info) => {
+                const container = info.row.original;
+                return (
+                    <div
+                        className="flex flex-nowrap items-center gap-2"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            title="Logs"
+                            aria-label="Logs"
+                            onClick={() => onLogs(container.id)}
+                        >
+                            <FileText className="h-4 w-4" />
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            title="Console"
+                            aria-label="Console"
+                            onClick={() => onConsole(container.id)}
+                        >
+                            <SquareTerminal className="h-4 w-4" />
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            title="Restart"
+                            aria-label="Restart"
+                            onClick={() => onRestart(container.id)}
+                        >
+                            <RotateCcw className="h-4 w-4" />
+                        </Button>
+                    </div>
+                );
+            },
+        }),
     ];
 
     const table = useReactTable({
@@ -266,7 +295,9 @@ export function DockerContainersTable({
     if (containers.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">Containers</div>
+                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                    Containers
+                </div>
                 <EmptyState message="No containers found." />
             </Card>
         );
@@ -293,21 +324,29 @@ export function DockerContainersTable({
                                         {header.column.getCanSort() ? (
                                             <button
                                                 type="button"
-                                                className="flex items-center gap-1 select-none hover:text-primary-100"
+                                                className="flex select-none items-center gap-1 hover:text-primary-100"
                                                 onClick={header.column.getToggleSortingHandler()}
                                             >
-                                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                                {flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
                                                 <span className="text-primary-500">
-                                                    {header.column.getIsSorted() === "asc" ? (
+                                                    {header.column.getIsSorted() ===
+                                                    "asc" ? (
                                                         <ChevronDown className="h-3 w-3" />
-                                                    ) : header.column.getIsSorted() === "desc" ? (
+                                                    ) : header.column.getIsSorted() ===
+                                                      "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
                                                     ) : null}
                                                 </span>
                                             </button>
                                         ) : (
                                             <div className="flex items-center gap-1">
-                                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                                {flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
                                             </div>
                                         )}
                                     </th>
@@ -324,7 +363,10 @@ export function DockerContainersTable({
                             >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3 align-top">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                        {flexRender(
+                                            cell.column.columnDef.cell,
+                                            cell.getContext()
+                                        )}
                                     </td>
                                 ))}
                             </tr>

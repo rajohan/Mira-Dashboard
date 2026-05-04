@@ -53,7 +53,8 @@ export function useAgentsConfig() {
 export function useAgentTaskHistory(limit = 8) {
     return useQuery<AgentTaskHistoryResponse>({
         queryKey: ["agents", "tasks", "history", limit],
-        queryFn: () => apiFetch<AgentTaskHistoryResponse>(`/agents/tasks/history?limit=${limit}`),
+        queryFn: () =>
+            apiFetch<AgentTaskHistoryResponse>(`/agents/tasks/history?limit=${limit}`),
         refetchInterval: 5000,
         staleTime: 4000,
     });

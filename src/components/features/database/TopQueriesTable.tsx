@@ -4,8 +4,8 @@ import { useState } from "react";
 
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { Button } from "../../ui/Button";
-import { EmptyState } from "../../ui/EmptyState";
 import { Card } from "../../ui/Card";
+import { EmptyState } from "../../ui/EmptyState";
 import { Modal } from "../../ui/Modal";
 import { DatabaseTableShell } from "./DatabaseTableShell";
 import { truncateQuery } from "./databaseUtils";
@@ -50,7 +50,9 @@ export function TopQueriesTable({
     enabled: boolean;
     data: DatabaseOverviewResponse["topQueries"];
 }) {
-    const [selectedQuery, setSelectedQuery] = useState<DatabaseOverviewResponse["topQueries"][number] | null>(null);
+    const [selectedQuery, setSelectedQuery] = useState<
+        DatabaseOverviewResponse["topQueries"][number] | null
+    >(null);
     const [copied, setCopied] = useState(false);
 
     if (!enabled) {
@@ -96,13 +98,17 @@ export function TopQueriesTable({
                         </div>
 
                         <div className="flex justify-end">
-                            <Button variant="secondary" size="sm" onClick={() => void handleCopy()}>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => void handleCopy()}
+                            >
                                 <Copy className="mr-2 h-4 w-4" />
                                 {copied ? "Copied" : "Copy query"}
                             </Button>
                         </div>
 
-                        <pre className="overflow-x-auto rounded-lg border border-primary-700 bg-primary-900/50 p-4 text-sm text-primary-100 whitespace-pre-wrap break-words">
+                        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-primary-700 bg-primary-900/50 p-4 text-sm text-primary-100">
                             <code>{selectedQuery.query}</code>
                         </pre>
                     </div>

@@ -5,7 +5,19 @@ export { apiDelete, apiFetch, apiPost, apiPut } from "./useApi";
 export { useQueryClient } from "@tanstack/react-query";
 
 // Domain hooks
-export { backupKeys, useKopiaBackup, useRunKopiaBackup, useRunWalgBackup, useWalgBackup } from "./useBackups";
+export {
+    backupKeys,
+    useKopiaBackup,
+    useRunKopiaBackup,
+    useRunWalgBackup,
+    useWalgBackup,
+} from "./useBackups";
+export {
+    cacheKeys,
+    useCacheEntry,
+    useCacheHeartbeat,
+    useRefreshCacheEntry,
+} from "./useCache";
 export {
     configKeys,
     useConfig,
@@ -51,12 +63,7 @@ export type {
     OpsActionDefinition,
     OpsActionId,
 } from "./useOpsActions";
-export {
-    OPS_ACTIONS,
-    useExecJob,
-    useStartOpsAction,
-} from "./useOpsActions";
-export { cacheKeys, useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./useCache";
+export { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export {
     sessionKeys,

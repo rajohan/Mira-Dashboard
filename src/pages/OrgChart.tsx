@@ -31,7 +31,8 @@ const agentCards: AgentCardData[] = [
         id: "ops",
         role: "Operations Agent",
         department: "Operations",
-        description: "Runs heartbeat checks, monitors systems, and surfaces actionable issues.",
+        description:
+            "Runs heartbeat checks, monitors systems, and surfaces actionable issues.",
     },
 ];
 

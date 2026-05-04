@@ -3,7 +3,8 @@ import { createColumnHelper } from "@tanstack/react-table";
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { DatabaseTableShell } from "./DatabaseTableShell";
 
-const columnHelper = createColumnHelper<DatabaseOverviewResponse["pgbouncerStats"][number]>();
+const columnHelper =
+    createColumnHelper<DatabaseOverviewResponse["pgbouncerStats"][number]>();
 
 const columns = [
     columnHelper.accessor("database", { header: "Database" }),
@@ -24,6 +25,10 @@ const columns = [
     }),
 ];
 
-export function PgBouncerStatsTable({ data }: { data: DatabaseOverviewResponse["pgbouncerStats"] }) {
+export function PgBouncerStatsTable({
+    data,
+}: {
+    data: DatabaseOverviewResponse["pgbouncerStats"];
+}) {
     return <DatabaseTableShell data={data} columns={columns} />;
 }

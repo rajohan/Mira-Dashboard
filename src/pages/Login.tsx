@@ -72,7 +72,7 @@ export function Login() {
                 setError(
                     error_ instanceof Error ? error_.message : "Authentication failed"
                 );
-                await authActions.refreshSession().catch(() => undefined);
+                await authActions.refreshSession().catch(() => {});
                 const nextBootstrap = await fetch("/api/auth/bootstrap", {
                     credentials: "include",
                 }).then((response) => response.json() as Promise<BootstrapResponse>);

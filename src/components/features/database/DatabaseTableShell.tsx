@@ -1,8 +1,8 @@
 import {
+    type ColumnDef,
     flexRender,
     getCoreRowModel,
     getSortedRowModel,
-    type ColumnDef,
     type SortingState,
     useReactTable,
 } from "@tanstack/react-table";
@@ -14,6 +14,8 @@ import { EmptyState } from "../../ui/EmptyState";
 
 interface Props<T extends object> {
     data: T[];
+    // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     columns: ColumnDef<T, any>[];
     emptyMessage?: string;
     maxHeight?: string;
@@ -49,24 +51,37 @@ export function DatabaseTableShell<T extends object>({
                             {table.getHeaderGroups().map((headerGroup) => (
                                 <tr key={headerGroup.id}>
                                     {headerGroup.headers.map((header) => (
-                                        <th key={header.id} className="px-4 py-3 align-top">
+                                        <th
+                                            key={header.id}
+                                            className="px-4 py-3 align-top"
+                                        >
                                             {header.column.getCanSort() ? (
                                                 <button
                                                     type="button"
-                                                    className="flex items-center gap-1 select-none hover:text-primary-100"
+                                                    className="flex select-none items-center gap-1 hover:text-primary-100"
                                                     onClick={header.column.getToggleSortingHandler()}
                                                 >
-                                                    {flexRender(header.column.columnDef.header, header.getContext())}
+                                                    {flexRender(
+                                                        header.column.columnDef.header,
+                                                        header.getContext()
+                                                    )}
                                                     <span className="text-primary-500">
-                                                        {header.column.getIsSorted() === "asc" ? (
+                                                        {header.column.getIsSorted() ===
+                                                        "asc" ? (
                                                             <ChevronDown className="h-3 w-3" />
-                                                        ) : header.column.getIsSorted() === "desc" ? (
+                                                        ) : header.column.getIsSorted() ===
+                                                          "desc" ? (
                                                             <ChevronDown className="h-3 w-3 rotate-180" />
                                                         ) : null}
                                                     </span>
                                                 </button>
                                             ) : (
-                                                <div>{flexRender(header.column.columnDef.header, header.getContext())}</div>
+                                                <div>
+                                                    {flexRender(
+                                                        header.column.columnDef.header,
+                                                        header.getContext()
+                                                    )}
+                                                </div>
                                             )}
                                         </th>
                                     ))}
@@ -81,11 +96,18 @@ export function DatabaseTableShell<T extends object>({
                                         "border-b border-primary-700/50 hover:bg-primary-700/30",
                                         onRowClick ? "cursor-pointer" : "",
                                     ].join(" ")}
-                                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                                    onClick={
+                                        onRowClick
+                                            ? () => onRowClick(row.original)
+                                            : undefined
+                                    }
                                 >
                                     {row.getVisibleCells().map((cell) => (
                                         <td key={cell.id} className="px-4 py-3 align-top">
-                                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            {flexRender(
+                                                cell.column.columnDef.cell,
+                                                cell.getContext()
+                                            )}
                                         </td>
                                     ))}
                                 </tr>

@@ -27,7 +27,9 @@ export function ConfirmModal({
     return (
         <Modal isOpen={isOpen} onClose={onCancel} title={title} size="md">
             <div className="space-y-4">
-                <p className="break-words whitespace-pre-wrap text-sm text-primary-300">{message}</p>
+                <p className="whitespace-pre-wrap break-words text-sm text-primary-300">
+                    {message}
+                </p>
                 <div className="flex justify-end gap-2">
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
                         Cancel
@@ -37,7 +39,9 @@ export function ConfirmModal({
                         onClick={onConfirm}
                         disabled={loading}
                     >
-                        {loading ? (confirmLoadingLabel || `${confirmLabel}...`) : confirmLabel}
+                        {loading
+                            ? confirmLoadingLabel || `${confirmLabel}...`
+                            : confirmLabel}
                     </Button>
                 </div>
             </div>

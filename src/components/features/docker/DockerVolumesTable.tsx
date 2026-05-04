@@ -33,60 +33,68 @@ interface DockerVolumesTableProps {
     isPruning?: boolean;
 }
 
-export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning = false }: DockerVolumesTableProps) {
+export function DockerVolumesTable({
+    volumes,
+    onDelete,
+    onPruneUnused,
+    isPruning = false,
+}: DockerVolumesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [
-            columnHelper.accessor("name", {
-                header: "Volume",
-                cell: (info) => {
-                    const volume = info.row.original;
-                    return (
-                        <div>
-                            <div className="font-medium text-primary-50" title={volume.name}>
-                                {truncateMiddle(volume.name, 40)}
-                            </div>
-                            <div className="text-xs text-primary-400" title={volume.mountpoint}>
-                                {volume.driver} · {truncateMiddle(volume.mountpoint, 54)}
-                            </div>
+        columnHelper.accessor("name", {
+            header: "Volume",
+            cell: (info) => {
+                const volume = info.row.original;
+                return (
+                    <div>
+                        <div className="font-medium text-primary-50" title={volume.name}>
+                            {truncateMiddle(volume.name, 40)}
                         </div>
-                    );
-                },
-            }),
-            columnHelper.accessor((row) => (row.usedBy.length > 0 ? 1 : 0), {
-                id: "usage",
-                header: "Status",
-                cell: (info) => {
-                    const volume = info.row.original;
-                    return (
-                        <div className="text-xs text-primary-300">
-                            {volume.usedBy.length > 0 ? "Used" : "Unused"}
-                        </div>
-                    );
-                },
-            }),
-            columnHelper.display({
-                id: "actions",
-                header: "Actions",
-                cell: (info) => {
-                    const volume = info.row.original;
-                    return (
-                        <Button
-                            size="sm"
-                            variant="danger"
-                            title="Delete"
-                            aria-label="Delete"
-                            disabled={volume.usedBy.length > 0}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(volume.name);
-                            }}
+                        <div
+                            className="text-xs text-primary-400"
+                            title={volume.mountpoint}
                         >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    );
-                },
-            }),
+                            {volume.driver} · {truncateMiddle(volume.mountpoint, 54)}
+                        </div>
+                    </div>
+                );
+            },
+        }),
+        columnHelper.accessor((row) => (row.usedBy.length > 0 ? 1 : 0), {
+            id: "usage",
+            header: "Status",
+            cell: (info) => {
+                const volume = info.row.original;
+                return (
+                    <div className="text-xs text-primary-300">
+                        {volume.usedBy.length > 0 ? "Used" : "Unused"}
+                    </div>
+                );
+            },
+        }),
+        columnHelper.display({
+            id: "actions",
+            header: "Actions",
+            cell: (info) => {
+                const volume = info.row.original;
+                return (
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        title="Delete"
+                        aria-label="Delete"
+                        disabled={volume.usedBy.length > 0}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onDelete(volume.name);
+                        }}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                    </Button>
+                );
+            },
+        }),
     ];
 
     const table = useReactTable({
@@ -100,11 +108,12 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
 
     const unusedCount = volumes.filter((volume) => volume.usedBy.length === 0).length;
 
-
     if (volumes.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">Volumes</div>
+                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                    Volumes
+                </div>
                 <EmptyState message="No volumes found." />
             </Card>
         );
@@ -114,7 +123,12 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
         <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Volumes</div>
-                <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onPruneUnused}
+                    disabled={isPruning}
+                >
                     <Trash2 className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
@@ -136,12 +150,17 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
                                         onClick={header.column.getToggleSortingHandler()}
                                     >
                                         <div className="flex items-center gap-1">
-                                            {flexRender(header.column.columnDef.header, header.getContext())}
+                                            {flexRender(
+                                                header.column.columnDef.header,
+                                                header.getContext()
+                                            )}
                                             {header.column.getCanSort() ? (
                                                 <span className="text-primary-500">
-                                                    {header.column.getIsSorted() === "asc" ? (
+                                                    {header.column.getIsSorted() ===
+                                                    "asc" ? (
                                                         <ChevronDown className="h-3 w-3" />
-                                                    ) : header.column.getIsSorted() === "desc" ? (
+                                                    ) : header.column.getIsSorted() ===
+                                                      "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
                                                     ) : null}
                                                 </span>
@@ -154,10 +173,16 @@ export function DockerVolumesTable({ volumes, onDelete, onPruneUnused, isPruning
                     </thead>
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr key={row.id} className="border-b border-primary-700/50 align-top hover:bg-primary-700/30">
+                            <tr
+                                key={row.id}
+                                className="border-b border-primary-700/50 align-top hover:bg-primary-700/30"
+                            >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                        {flexRender(
+                                            cell.column.columnDef.cell,
+                                            cell.getContext()
+                                        )}
                                     </td>
                                 ))}
                             </tr>

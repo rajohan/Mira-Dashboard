@@ -60,7 +60,13 @@ export function MetricCard({
                 <div>
                     {showValue ? <div className="text-2xl font-bold">{value}</div> : null}
                     {subtitle ? (
-                        <div className={showValue ? "mt-1 text-xs text-primary-400" : "text-sm text-primary-300"}>
+                        <div
+                            className={
+                                showValue
+                                    ? "mt-1 text-xs text-primary-400"
+                                    : "text-sm text-primary-300"
+                            }
+                        >
                             {subtitle}
                         </div>
                     ) : null}

@@ -30,7 +30,11 @@ export function Database() {
                     Databases
                 </h2>
             </div>
-            <DatabasesTable databases={data.databases} pools={data.pgbouncerPools} stats={data.pgbouncerStats} />
+            <DatabasesTable
+                databases={data.databases}
+                pools={data.pgbouncerPools}
+                stats={data.pgbouncerStats}
+            />
 
             <div className="border-b border-primary-700 pb-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
@@ -44,7 +48,10 @@ export function Database() {
                     Query performance
                 </h2>
             </div>
-            <TopQueriesTable enabled={data.overview.pgStatStatementsEnabled} data={data.topQueries} />
+            <TopQueriesTable
+                enabled={data.overview.pgStatStatementsEnabled}
+                data={data.topQueries}
+            />
         </div>
     );
 }

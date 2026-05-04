@@ -10,8 +10,17 @@ export default function staticRoutes(
     const indexExists = fs.existsSync(path.join(frontendPath, "index.html"));
 
     if (indexExists) {
-        // Serve static files
-        app.use(express.static(frontendPath, { index: false }));
+        // Serve static files. Avoid stale dashboard bundles during active development;
+        // hashed asset names still keep payloads stable, but the browser must revalidate
+        // so chat capability fixes land immediately after a deploy/restart.
+        app.use(
+            express.static(frontendPath, {
+                index: false,
+                setHeaders: (response) => {
+                    response.setHeader("Cache-Control", "no-store");
+                },
+            })
+        );
 
         // SPA fallback - serve index.html for all non-API routes
         app.get("*", (req, res, next) => {
@@ -22,6 +31,7 @@ export default function staticRoutes(
             }
 
             const indexPath = path.join(frontendPath, "index.html");
+            res.setHeader("Cache-Control", "no-store");
             res.sendFile(indexPath, (err) => {
                 if (err) {
                     console.error("[Static] Error serving index.html:", err.message);

@@ -22,12 +22,15 @@ interface DatabaseRow {
 function mergeWithPoolData(
     databases: DatabaseOverviewResponse["databases"],
     pools: DatabaseOverviewResponse["pgbouncerPools"],
-    stats: DatabaseOverviewResponse["pgbouncerStats"],
+    stats: DatabaseOverviewResponse["pgbouncerStats"]
 ): DatabaseRow[] {
     const poolMap = new Map<string, DatabaseOverviewResponse["pgbouncerPools"][number]>();
     for (const pool of pools) poolMap.set(pool.database, pool);
 
-    const statsMap = new Map<string, DatabaseOverviewResponse["pgbouncerStats"][number]>();
+    const statsMap = new Map<
+        string,
+        DatabaseOverviewResponse["pgbouncerStats"][number]
+    >();
     for (const stat of stats) statsMap.set(stat.database, stat);
 
     return databases.map((db) => {
@@ -75,17 +78,17 @@ const columns = [
     columnHelper.accessor((row) => row.avg_query_time, {
         id: "avgQuery",
         header: "Avg query ms",
-        cell: (info) => info.getValue() > 0 ? info.getValue().toFixed(2) : "—",
+        cell: (info) => (info.getValue() > 0 ? info.getValue().toFixed(2) : "—"),
     }),
     columnHelper.accessor((row) => row.avg_xact_time, {
         id: "avgXact",
         header: "Avg xact ms",
-        cell: (info) => info.getValue() > 0 ? info.getValue().toFixed(2) : "—",
+        cell: (info) => (info.getValue() > 0 ? info.getValue().toFixed(2) : "—"),
     }),
     columnHelper.accessor((row) => row.total_query_count, {
         id: "queries",
         header: "Queries",
-        cell: (info) => info.getValue() > 0 ? info.getValue().toLocaleString() : "—",
+        cell: (info) => (info.getValue() > 0 ? info.getValue().toLocaleString() : "—"),
     }),
 ];
 

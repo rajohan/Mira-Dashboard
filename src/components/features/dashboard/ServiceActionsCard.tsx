@@ -58,7 +58,7 @@ export function ServiceActionsCard() {
         setRunningJobId(null);
 
         if (completedActionId === "openclaw_update") {
-            void refreshCache.mutateAsync("system.host").catch(() => undefined);
+            void refreshCache.mutateAsync("system.host").catch(() => {});
         }
     }, [execJob.data, refreshCache, runningActionId, runningActionLabel]);
 
@@ -140,7 +140,8 @@ export function ServiceActionsCard() {
                     <div className="mb-3 rounded border border-primary-700 bg-primary-900/30 px-3 py-2 text-xs text-amber-200">
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="h-3.5 w-3.5" />
-                            New OpenClaw version available ({versionInfo.current} → {versionInfo.latest}).
+                            New OpenClaw version available ({versionInfo.current} →{" "}
+                            {versionInfo.latest}).
                         </div>
                     </div>
                 ) : null}

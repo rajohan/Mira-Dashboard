@@ -25,7 +25,11 @@ const columns = [
     }),
 ];
 
-export function AutovacuumHealthTable({ data }: { data: DatabaseOverviewResponse["deadTuples"] }) {
+export function AutovacuumHealthTable({
+    data,
+}: {
+    data: DatabaseOverviewResponse["deadTuples"];
+}) {
     return (
         <DatabaseTableShell
             data={data}

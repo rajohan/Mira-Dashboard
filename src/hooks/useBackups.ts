@@ -56,7 +56,9 @@ export function useRunKopiaBackup() {
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
-                queryClient.invalidateQueries({ queryKey: cacheKeys.entry("backup.kopia.status") }),
+                queryClient.invalidateQueries({
+                    queryKey: cacheKeys.entry("backup.kopia.status"),
+                }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
             ]);
         },
@@ -71,7 +73,9 @@ export function useRunWalgBackup() {
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.walg() }),
-                queryClient.invalidateQueries({ queryKey: cacheKeys.entry("backup.walg.status") }),
+                queryClient.invalidateQueries({
+                    queryKey: cacheKeys.entry("backup.walg.status"),
+                }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
             ]);
         },

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import Path from "node:path";
 
 import WebSocket from "ws";
@@ -13,6 +15,8 @@ import {
 const DASHBOARD_OPENCLAW_HOME =
     process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
     Path.join(process.cwd(), "data", "openclaw-client");
+
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || Path.join(os.homedir(), ".openclaw");
 
 function loadOrCreateDashboardDeviceIdentity(): DeviceIdentity | undefined {
     const identityPath = Path.join(
@@ -79,6 +83,32 @@ interface HistoryMessage {
     role?: string;
     content?: string | Array<{ type?: string; text?: string }>;
     timestamp?: string | number;
+}
+
+interface ChatHistoryPayload {
+    sessionKey?: string;
+    sessionId?: string;
+    messages?: unknown[];
+}
+
+interface ChatImageBlockRecord {
+    type?: string;
+    text?: string;
+    data?: string;
+    mimeType?: string;
+    source?: {
+        media_type?: string;
+        data?: string;
+        omitted?: boolean;
+    };
+    omitted?: boolean;
+}
+
+interface RawTranscriptImageMessage {
+    role: string;
+    text: string;
+    timestamp?: number;
+    images: ChatImageBlockRecord[];
 }
 
 let gatewayClient: OpenClawGatewayClientInstance | null = null;
@@ -154,6 +184,232 @@ function broadcast(msg: unknown): void {
     }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+}
+
+function imageBlockHasOmittedData(block: Record<string, unknown>): boolean {
+    if (block.type !== "image") {
+        return false;
+    }
+
+    if (typeof block.data === "string" && block.data.trim()) {
+        return false;
+    }
+
+    const source = asRecord(block.source);
+    return block.omitted === true || source?.omitted === true || !source?.data;
+}
+
+function normalizeMessageText(content: unknown): string {
+    if (typeof content === "string") {
+        return content.trim();
+    }
+
+    if (!Array.isArray(content)) {
+        return "";
+    }
+
+    return content
+        .map((block) => {
+            if (typeof block === "string") {
+                return block;
+            }
+
+            const record = asRecord(block);
+            return typeof record?.text === "string" ? record.text : "";
+        })
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
+}
+
+function normalizeTimestamp(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === "string") {
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    return undefined;
+}
+
+function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
+    if (!sessionId) {
+        const session = sessionList.find((entry) => entry.key === sessionKey);
+        sessionId = session?.id;
+    }
+
+    if (!sessionId || sessionId === "unknown") {
+        return null;
+    }
+
+    const agentId = sessionKey.split(":")[1] || "main";
+    return Path.join(OPENCLAW_HOME, "agents", agentId, "sessions", `${sessionId}.jsonl`);
+}
+
+function readRawTranscriptImageMessages(
+    sessionKey: string,
+    sessionId?: string
+): RawTranscriptImageMessage[] {
+    const transcriptPath = getTranscriptPath(sessionKey, sessionId);
+
+    if (!transcriptPath || !transcriptPath.startsWith(OPENCLAW_HOME)) {
+        return [];
+    }
+
+    let raw: string;
+    try {
+        raw = fs.readFileSync(transcriptPath, "utf8");
+    } catch {
+        return [];
+    }
+
+    const messages: RawTranscriptImageMessage[] = [];
+    for (const line of raw.split("\n")) {
+        if (!line.trim() || !line.includes('"type":"image"')) {
+            continue;
+        }
+
+        try {
+            const parsed = JSON.parse(line) as { timestamp?: unknown; message?: unknown };
+            const message = asRecord(parsed.message);
+            if (!message) {
+                continue;
+            }
+
+            const content = message.content;
+
+            if (!Array.isArray(content)) {
+                continue;
+            }
+
+            const images = content
+                .map((block) => asRecord(block))
+                .filter(
+                    (block): block is Record<string, unknown> =>
+                        block?.type === "image" &&
+                        (typeof block.data === "string" ||
+                            typeof asRecord(block.source)?.data === "string")
+                )
+                .map((block) => ({
+                    type: "image",
+                    data:
+                        typeof block.data === "string"
+                            ? block.data
+                            : (asRecord(block.source)?.data as string | undefined),
+                    mimeType:
+                        typeof block.mimeType === "string"
+                            ? block.mimeType
+                            : typeof asRecord(block.source)?.media_type === "string"
+                              ? (asRecord(block.source)?.media_type as string)
+                              : "image/jpeg",
+                }));
+
+            if (images.length === 0) {
+                continue;
+            }
+
+            messages.push({
+                role: typeof message.role === "string" ? message.role : "unknown",
+                text: normalizeMessageText(content),
+                timestamp:
+                    normalizeTimestamp(message.timestamp) ??
+                    normalizeTimestamp(parsed.timestamp),
+                images,
+            });
+        } catch {
+            // Ignore malformed transcript lines.
+        }
+    }
+
+    return messages;
+}
+
+function hydrateOmittedChatHistoryImages(
+    payload: unknown,
+    requestedSessionKey?: string
+): unknown {
+    const history = asRecord(payload) as ChatHistoryPayload | null;
+    const sessionKey = history?.sessionKey || requestedSessionKey;
+
+    if (!history || !sessionKey || !Array.isArray(history.messages)) {
+        return payload;
+    }
+
+    const rawImageMessages = readRawTranscriptImageMessages(
+        sessionKey,
+        history.sessionId
+    );
+    if (rawImageMessages.length === 0) {
+        return payload;
+    }
+
+    let rawCursor = 0;
+    history.messages = history.messages.map((message) => {
+        const record = asRecord(message);
+        if (!record || !Array.isArray(record.content)) {
+            return message;
+        }
+
+        const omittedImageIndexes = record.content
+            .map((block, index) => ({ block: asRecord(block), index }))
+            .filter(({ block }) => block && imageBlockHasOmittedData(block));
+
+        if (omittedImageIndexes.length === 0) {
+            return message;
+        }
+
+        const role = typeof record.role === "string" ? record.role : "unknown";
+        const text = normalizeMessageText(record.content);
+        const timestamp = normalizeTimestamp(record.timestamp);
+        const rawMatchIndex = rawImageMessages.findIndex((candidate, index) => {
+            if (index < rawCursor || candidate.role !== role) {
+                return false;
+            }
+
+            const timestampMatches =
+                timestamp === undefined ||
+                candidate.timestamp === undefined ||
+                Math.abs(candidate.timestamp - timestamp) < 5000;
+            const textMatches =
+                !text ||
+                !candidate.text ||
+                candidate.text === text ||
+                candidate.text.endsWith(text) ||
+                candidate.text.includes(text);
+            return timestampMatches && textMatches;
+        });
+
+        if (rawMatchIndex === -1) {
+            return message;
+        }
+
+        rawCursor = rawMatchIndex + 1;
+        const rawImages = rawImageMessages[rawMatchIndex]?.images || [];
+        let imageCursor = 0;
+        return {
+            ...record,
+            content: record.content.map((block) => {
+                const blockRecord = asRecord(block);
+                if (!blockRecord || !imageBlockHasOmittedData(blockRecord)) {
+                    return block;
+                }
+
+                const rawImage = rawImages[imageCursor++];
+                return rawImage || block;
+            }),
+        };
+    });
+
+    return history;
+}
+
 async function refreshSessions(): Promise<void> {
     if (!gatewayClient || !isGatewayConnected) {
         return;
@@ -190,14 +446,20 @@ function init(token: string): void {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
             void refreshSessions().catch((error) => {
-                console.error("[Gateway] Failed to refresh sessions:", (error as Error).message);
+                console.error(
+                    "[Gateway] Failed to refresh sessions:",
+                    (error as Error).message
+                );
             });
         },
         onEvent: (evt) => {
             broadcast({ type: "event", event: evt.event, payload: evt.payload });
             if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
                 void refreshSessions().catch((error) => {
-                    console.error("[Gateway] Failed to refresh sessions:", (error as Error).message);
+                    console.error(
+                        "[Gateway] Failed to refresh sessions:",
+                        (error as Error).message
+                    );
                 });
             }
         },
@@ -228,7 +490,13 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const payload = await gatewayClient.request(method, params);
+            let payload = await gatewayClient.request(method, params);
+            if (method === "chat.history") {
+                payload = hydrateOmittedChatHistoryImages(
+                    payload,
+                    typeof params.sessionKey === "string" ? params.sessionKey : undefined
+                );
+            }
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
             if (pending?.clientWs.readyState === WebSocket.OPEN) {
@@ -328,7 +596,12 @@ function handleClient(ws: WebSocket): void {
                 }
 
                 if ((msg.type === "request" || msg.type === "req") && msg.method) {
-                    const ok = await forwardRequest(msg.method, msg.params || {}, ws, msg.id);
+                    const ok = await forwardRequest(
+                        msg.method,
+                        msg.params || {},
+                        ws,
+                        msg.id
+                    );
                     if (!ok && msg.id && ws.readyState === WebSocket.OPEN) {
                         ws.send(
                             JSON.stringify({
@@ -341,7 +614,10 @@ function handleClient(ws: WebSocket): void {
                     }
                 }
             } catch (error) {
-                console.error("[Gateway] Client message error:", (error as Error).message);
+                console.error(
+                    "[Gateway] Client message error:",
+                    (error as Error).message
+                );
             }
         })();
     });
@@ -397,7 +673,10 @@ async function abortSessionRun(sessionKey: string): Promise<void> {
     });
 }
 
-async function request(method: string, params: Record<string, unknown>): Promise<unknown> {
+async function request(
+    method: string,
+    params: Record<string, unknown>
+): Promise<unknown> {
     return sendRequestAsync(method, params);
 }
 

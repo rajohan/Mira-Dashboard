@@ -60,7 +60,7 @@ export const authActions: AuthActions = {
                         isInitialized: true,
                     }));
                 })
-                .then(() => undefined)
+                .then(() => {})
                 .finally(() => {
                     initializePromise = null;
                 });
@@ -95,7 +95,7 @@ export const authActions: AuthActions = {
         await fetch("/api/auth/logout", {
             method: "POST",
             credentials: "include",
-        }).catch(() => undefined);
+        }).catch(() => {});
         authActions.clearSession();
     },
 };

@@ -56,12 +56,20 @@ export function GitOverviewCard() {
                 <div className="space-y-3 text-sm text-primary-200">
                     <div className="flex items-center justify-between">
                         <span>Repos tracked</span>
-                        <span className="font-semibold text-primary-50">{repos.length}</span>
+                        <span className="font-semibold text-primary-50">
+                            {repos.length}
+                        </span>
                     </div>
 
                     <div className="flex items-center justify-between">
                         <span>Dirty repos</span>
-                        <span className={dirtyRepos.length > 0 ? "font-semibold text-yellow-300" : "font-semibold text-green-300"}>
+                        <span
+                            className={
+                                dirtyRepos.length > 0
+                                    ? "font-semibold text-yellow-300"
+                                    : "font-semibold text-green-300"
+                            }
+                        >
                             {dirtyRepos.length}
                         </span>
                     </div>
@@ -90,7 +98,6 @@ export function GitOverviewCard() {
                             </div>
                         ))}
                     </div>
-
                 </div>
             )}
         </Card>

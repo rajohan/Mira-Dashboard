@@ -80,11 +80,21 @@ export function useRefreshCacheEntry() {
                 ...(keys.some((key) => key.startsWith("moltbook."))
                     ? [
                           queryClient.invalidateQueries({ queryKey: ["moltbook"] }),
-                          queryClient.invalidateQueries({ queryKey: cacheKeys.entry("moltbook.home") }),
-                          queryClient.invalidateQueries({ queryKey: cacheKeys.entry("moltbook.feed.hot") }),
-                          queryClient.invalidateQueries({ queryKey: cacheKeys.entry("moltbook.feed.new") }),
-                          queryClient.invalidateQueries({ queryKey: cacheKeys.entry("moltbook.profile") }),
-                          queryClient.invalidateQueries({ queryKey: cacheKeys.entry("moltbook.my-content") }),
+                          queryClient.invalidateQueries({
+                              queryKey: cacheKeys.entry("moltbook.home"),
+                          }),
+                          queryClient.invalidateQueries({
+                              queryKey: cacheKeys.entry("moltbook.feed.hot"),
+                          }),
+                          queryClient.invalidateQueries({
+                              queryKey: cacheKeys.entry("moltbook.feed.new"),
+                          }),
+                          queryClient.invalidateQueries({
+                              queryKey: cacheKeys.entry("moltbook.profile"),
+                          }),
+                          queryClient.invalidateQueries({
+                              queryKey: cacheKeys.entry("moltbook.my-content"),
+                          }),
                       ]
                     : []),
             ]);

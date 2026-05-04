@@ -43,9 +43,10 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
 
             <div className="max-h-[400px] space-y-3 overflow-y-auto pr-2">
                 {entries.map(({ item, entry }) => {
-                    const refreshKeys = item.refreshKeys && item.refreshKeys.length > 0
-                        ? item.refreshKeys
-                        : [item.key];
+                    const refreshKeys =
+                        item.refreshKeys && item.refreshKeys.length > 0
+                            ? item.refreshKeys
+                            : [item.key];
                     const refreshToken = refreshKeys.join(",");
                     const isRefreshing =
                         refreshCache.isPending && refreshCache.variables === refreshToken;
@@ -80,7 +81,10 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                         </span>
                                     </div>
                                     {entry?.errorMessage ? (
-                                        <div className="mt-1 truncate text-rose-300" title={entry.errorMessage}>
+                                        <div
+                                            className="mt-1 truncate text-rose-300"
+                                            title={entry.errorMessage}
+                                        >
                                             {entry.errorMessage}
                                         </div>
                                     ) : null}

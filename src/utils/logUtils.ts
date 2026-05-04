@@ -77,7 +77,10 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
                           : "";
 
                 const nestedMessage =
-                    nestedRecord.msg ?? nestedRecord.message ?? nestedRecord[0] ?? nestedRecord["0"];
+                    nestedRecord.msg ??
+                    nestedRecord.message ??
+                    nestedRecord[0] ??
+                    nestedRecord["0"];
                 if (typeof nestedMessage === "string" && nestedMessage.trim()) {
                     msg = nestedMessage;
                 } else if (nestedMessage != null && String(nestedMessage).trim()) {
@@ -133,7 +136,12 @@ function buildDedupeKey(entry: {
     subsystem?: string;
     msg: string;
 }): string {
-    return [entry.ts || "", (entry.level || "").toLowerCase(), entry.subsystem || "", entry.msg]
+    return [
+        entry.ts || "",
+        (entry.level || "").toLowerCase(),
+        entry.subsystem || "",
+        entry.msg,
+    ]
         .join("|")
         .trim();
 }
@@ -153,7 +161,9 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
     try {
         const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
         const level =
-            typeof parsed._meta === "object" && parsed._meta && "logLevelName" in parsed._meta
+            typeof parsed._meta === "object" &&
+            parsed._meta &&
+            "logLevelName" in parsed._meta
                 ? String((parsed._meta as Record<string, unknown>).logLevelName || "INFO")
                 : String(parsed.level || parsed.lvl || "INFO");
         const ts =

@@ -2,8 +2,8 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { useHealth } from "../../hooks";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
-import { Button } from "../ui/Button";
 import { authActions } from "../../stores/authStore";
+import { Button } from "../ui/Button";
 import { NotificationBell } from "./NotificationBell";
 
 interface AppHeaderProps {
@@ -72,7 +72,9 @@ export function AppHeader({ title }: AppHeaderProps) {
                         variant="secondary"
                         size="sm"
                         onClick={() => {
-                            void authActions.logout().then(() => navigate({ to: "/login" }));
+                            void authActions
+                                .logout()
+                                .then(() => navigate({ to: "/login" }));
                         }}
                     >
                         Log out

@@ -1,4 +1,5 @@
 import { Boxes, History, RefreshCw } from "lucide-react";
+import type { ChangeEvent } from "react";
 import { useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
@@ -27,9 +28,9 @@ import {
     useDockerManualUpdate,
     useDockerPrune,
     useDockerUpdaterEvents,
-    useRunDockerUpdater,
     useDockerUpdaterServices,
     useDockerVolumes,
+    useRunDockerUpdater,
 } from "../hooks/useDocker";
 import { formatDate } from "../utils/format";
 
@@ -716,7 +717,9 @@ export function Docker() {
                 <div className="mb-4 flex items-center gap-3">
                     <Input
                         value={consoleCommand}
-                        onChange={(event: any) => setConsoleCommand(event.target.value)}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setConsoleCommand(event.target.value)
+                        }
                         placeholder="Command to run inside container"
                         className="flex-1"
                     />

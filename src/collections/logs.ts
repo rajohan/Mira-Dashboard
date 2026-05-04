@@ -28,7 +28,9 @@ export function writeLogFromWebSocket(line: string) {
             return;
         }
 
-        logsCollection.utils.writeUpsert(parsed as unknown as Partial<Record<string, unknown>>);
+        logsCollection.utils.writeUpsert(
+            parsed as unknown as Partial<Record<string, unknown>>
+        );
     } catch (error) {
         console.error("Error parsing log line:", line, error);
     }

@@ -40,60 +40,74 @@ interface DockerImagesTableProps {
     isPruning?: boolean;
 }
 
-export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning = false }: DockerImagesTableProps) {
+export function DockerImagesTable({
+    images,
+    onDelete,
+    onPruneUnused,
+    isPruning = false,
+}: DockerImagesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [
-            columnHelper.accessor("repository", {
-                header: "Image",
-                cell: (info) => {
-                    const image = info.row.original;
-                    return (
-                        <div>
-                            <div className="font-medium text-primary-50">{image.repository}</div>
-                            <div className="text-xs text-primary-400">tag: {image.tag || "<none>"}</div>
+        columnHelper.accessor("repository", {
+            header: "Image",
+            cell: (info) => {
+                const image = info.row.original;
+                return (
+                    <div>
+                        <div className="font-medium text-primary-50">
+                            {image.repository}
                         </div>
-                    );
-                },
-            }),
-            columnHelper.accessor("size", {
-                header: "Size",
-                cell: (info) => <span className="text-primary-300">{formatBytes(info.getValue())}</span>,
-            }),
-            columnHelper.accessor((row) => row.inUseBy.length, {
-                id: "usage",
-                header: "Used by",
-                cell: (info) => {
-                    const image = info.row.original;
-                    return (
-                        <div className="text-xs text-primary-300">
-                            {image.inUseBy.length > 0 ? image.inUseBy.join(", ") : "Unused"}
+                        <div className="text-xs text-primary-400">
+                            tag: {image.tag || "<none>"}
                         </div>
-                    );
-                },
-            }),
-            columnHelper.display({
-                id: "actions",
-                header: "Actions",
-                cell: (info) => {
-                    const image = info.row.original;
-                    return (
-                        <Button
-                            size="sm"
-                            variant="danger"
-                            title="Delete"
-                            aria-label="Delete"
-                            disabled={image.inUseBy.length > 0}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(image.id, `${image.repository}:${image.tag || "<none>"}`);
-                            }}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    );
-                },
-            }),
+                    </div>
+                );
+            },
+        }),
+        columnHelper.accessor("size", {
+            header: "Size",
+            cell: (info) => (
+                <span className="text-primary-300">{formatBytes(info.getValue())}</span>
+            ),
+        }),
+        columnHelper.accessor((row) => row.inUseBy.length, {
+            id: "usage",
+            header: "Used by",
+            cell: (info) => {
+                const image = info.row.original;
+                return (
+                    <div className="text-xs text-primary-300">
+                        {image.inUseBy.length > 0 ? image.inUseBy.join(", ") : "Unused"}
+                    </div>
+                );
+            },
+        }),
+        columnHelper.display({
+            id: "actions",
+            header: "Actions",
+            cell: (info) => {
+                const image = info.row.original;
+                return (
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        title="Delete"
+                        aria-label="Delete"
+                        disabled={image.inUseBy.length > 0}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onDelete(
+                                image.id,
+                                `${image.repository}:${image.tag || "<none>"}`
+                            );
+                        }}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                    </Button>
+                );
+            },
+        }),
     ];
 
     const table = useReactTable({
@@ -107,11 +121,12 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
 
     const unusedCount = images.filter((image) => image.inUseBy.length === 0).length;
 
-
     if (images.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">Images</div>
+                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                    Images
+                </div>
                 <EmptyState message="No images found." />
             </Card>
         );
@@ -121,7 +136,12 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
         <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
                 <div className="text-lg font-semibold">Images</div>
-                <Button size="sm" variant="secondary" onClick={onPruneUnused} disabled={isPruning}>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onPruneUnused}
+                    disabled={isPruning}
+                >
                     <Trash2 className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
@@ -143,12 +163,17 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
                                         onClick={header.column.getToggleSortingHandler()}
                                     >
                                         <div className="flex items-center gap-1">
-                                            {flexRender(header.column.columnDef.header, header.getContext())}
+                                            {flexRender(
+                                                header.column.columnDef.header,
+                                                header.getContext()
+                                            )}
                                             {header.column.getCanSort() ? (
                                                 <span className="text-primary-500">
-                                                    {header.column.getIsSorted() === "asc" ? (
+                                                    {header.column.getIsSorted() ===
+                                                    "asc" ? (
                                                         <ChevronDown className="h-3 w-3" />
-                                                    ) : header.column.getIsSorted() === "desc" ? (
+                                                    ) : header.column.getIsSorted() ===
+                                                      "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
                                                     ) : null}
                                                 </span>
@@ -161,10 +186,16 @@ export function DockerImagesTable({ images, onDelete, onPruneUnused, isPruning =
                     </thead>
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr key={row.id} className="border-b border-primary-700/50 align-top hover:bg-primary-700/30">
+                            <tr
+                                key={row.id}
+                                className="border-b border-primary-700/50 align-top hover:bg-primary-700/30"
+                            >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                        {flexRender(
+                                            cell.column.columnDef.cell,
+                                            cell.getContext()
+                                        )}
                                     </td>
                                 ))}
                             </tr>
