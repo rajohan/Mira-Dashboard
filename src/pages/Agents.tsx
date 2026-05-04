@@ -104,7 +104,7 @@ export function Agents() {
                                     <p className="text-primary-400">
                                         No agents configured. Check{" "}
                                         <code className="rounded bg-primary-700 px-1 py-0.5 text-primary-300">
-                                            ~/.openclaw/config/agents.json5
+                                            ~/.openclaw/openclaw.json
                                         </code>
                                     </p>
                                 </Card>

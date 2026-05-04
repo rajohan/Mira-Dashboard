@@ -28,10 +28,10 @@ const agentCards: AgentCardData[] = [
         description: "Drafts high-quality messages, announcements, and outbound content.",
     },
     {
-        id: "monitor",
-        role: "Operations Monitor",
+        id: "ops",
+        role: "Operations Agent",
         department: "Operations",
-        description: "Tracks system health, risks, and ongoing operational status.",
+        description: "Runs heartbeat checks, monitors systems, and surfaces actionable issues.",
     },
 ];
 

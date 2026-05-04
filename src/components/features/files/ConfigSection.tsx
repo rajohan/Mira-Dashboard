@@ -1,12 +1,7 @@
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 import { useState } from "react";
 
-import {
-    CONFIG_DIR_FILES,
-    CONFIG_TOP_FILES,
-    CRON_DIR_FILES,
-    HOOKS_DIR_FILES,
-} from "./fileConstants";
+import { CONFIG_TOP_FILES, CRON_DIR_FILES, HOOKS_DIR_FILES } from "./fileConstants";
 
 interface ConfigSectionProps {
     selectedPath: string | null;
@@ -14,46 +9,11 @@ interface ConfigSectionProps {
 }
 
 export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
-    const [configDirExpanded, setConfigDirExpanded] = useState(false);
     const [cronDirExpanded, setCronDirExpanded] = useState(false);
     const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
 
     return (
         <div className="p-2">
-            {/* config/ subdirectory */}
-            <div
-                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
-                onClick={() => setConfigDirExpanded(!configDirExpanded)}
-            >
-                {configDirExpanded ? (
-                    <ChevronDown size={14} className="text-primary-400" />
-                ) : (
-                    <ChevronRight size={14} className="text-primary-400" />
-                )}
-                <Folder size={16} className="flex-shrink-0 text-yellow-400" />
-                <span className="truncate">config</span>
-            </div>
-            {configDirExpanded &&
-                CONFIG_DIR_FILES.map((file) => {
-                    const isSelected = selectedPath === file.path;
-                    return (
-                        <div
-                            key={file.path}
-                            className={
-                                "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
-                                (isSelected
-                                    ? "bg-accent-500/20 text-accent-400"
-                                    : "text-primary-200")
-                            }
-                            style={{ paddingLeft: 28 }}
-                            onClick={() => onSelect(file.path)}
-                        >
-                            <File size={14} className="flex-shrink-0 text-primary-400" />
-                            <span className="truncate font-mono">{file.label}</span>
-                        </div>
-                    );
-                })}
-
             {/* cron/ subdirectory */}
             <div
                 className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"

@@ -216,15 +216,26 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 }
 
 function parseAgentsConfig(): AgentsConfig | null {
-    const configPath = Path.join(OPENCLAW_ROOT, "config", "agents.json5");
+    const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
+
     try {
         if (!FS.existsSync(configPath)) {
             return null;
         }
+
         const content = FS.readFileSync(configPath, "utf8");
-        return JSON5.parse(content) as AgentsConfig;
+        const parsed = JSON5.parse(content) as { agents?: AgentsConfig };
+
+        if (parsed.agents && Array.isArray(parsed.agents.list)) {
+            return parsed.agents;
+        }
+
+        return null;
     } catch (error) {
-        console.error("[Agents] Failed to parse agents config:", (error as Error).message);
+        console.error(
+            `[Agents] Failed to parse OpenClaw config ${configPath}:`,
+            (error as Error).message
+        );
         return null;
     }
 }

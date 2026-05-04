@@ -8,9 +8,6 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 // Allowed config files (whitelist for security)
 const ALLOWED_CONFIG_FILES = [
     "openclaw.json",
-    "config/agents.json5",
-    "config/channels.json5",
-    "config/models.json5",
     "cron/jobs.json",
     "hooks/transforms/agentmail.ts",
 ];

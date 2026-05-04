@@ -51,7 +51,7 @@ const deskSpots: DeskSpot[] = [
         deskPosition: [2, 0, -4],
         workPosition: [2, -0.02, -3.03],
     },
-    { agentId: "monitor", deskPosition: [6, 0, -4], workPosition: [6, -0.02, -3.03] },
+    { agentId: "ops", deskPosition: [6, 0, -4], workPosition: [6, -0.02, -3.03] },
 ];
 
 const baseIdlePoints: IdlePoint[] = [
@@ -79,7 +79,7 @@ const roleById: Record<string, string> = {
     researcher: "Research Specialist",
     coder: "Engineering Specialist",
     communicator: "Communication Specialist",
-    monitor: "Operations Monitor",
+    ops: "Operations Agent",
 };
 
 const statusColor: Record<Agent["status"], string> = {
