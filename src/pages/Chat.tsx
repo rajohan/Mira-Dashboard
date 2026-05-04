@@ -1,9 +1,12 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertCircle, Paperclip, Send, X } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
+import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
+import { ChatComposer } from "../components/features/chat/ChatComposer";
+import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
     attachmentKind,
@@ -17,223 +20,31 @@ import {
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
-import { Button } from "../components/ui/Button";
+import {
+    activeRunStorageKey,
+    CHAT_HISTORY_LIMIT,
+    type ChatModelOption,
+    dataUrlToBase64,
+    displayMimeType,
+    MAX_ATTACHMENT_BYTES,
+    MAX_ATTACHMENTS,
+    mergeWithRecentOptimisticMessages,
+    readFileAsDataUrl,
+} from "../components/features/chat/chatUtils";
+import {
+    buildSlashCommandSuggestions,
+    ELEVATED_CHOICES,
+    REASONING_CHOICES,
+    SLASH_COMMANDS,
+    slashCommandCanonicalName,
+    THINKING_CHOICES,
+    VERBOSE_CHOICES,
+} from "../components/features/chat/slashCommands";
 import { Card } from "../components/ui/Card";
-import { Modal } from "../components/ui/Modal";
-import { Select } from "../components/ui/Select";
-import { Textarea } from "../components/ui/Textarea";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import { formatDuration, formatSize } from "../utils/format";
+import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
-
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-const MAX_ATTACHMENTS = 10;
-const CHAT_HISTORY_LIMIT = 1000;
-const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
-
-interface SlashCommandDefinition {
-    name: string;
-    aliases?: string[];
-    description: string;
-    args?: string;
-    choices?: string[];
-}
-
-interface ChatModelOption {
-    id?: string;
-    label?: string;
-    name?: string;
-}
-
-const THINKING_CHOICES = [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-    "adaptive",
-];
-const MODE_CHOICES = ["status", "on", "off"];
-const VERBOSE_CHOICES = ["off", "on", "full"];
-const REASONING_CHOICES = ["off", "on", "stream"];
-const ELEVATED_CHOICES = ["off", "on", "ask", "full"];
-const USAGE_CHOICES = ["off", "tokens", "on", "full"];
-
-const SLASH_COMMANDS: SlashCommandDefinition[] = [
-    { name: "/help", description: "Show available commands" },
-    { name: "/commands", description: "List available slash commands" },
-    { name: "/status", description: "Show selected session status" },
-    {
-        name: "/usage",
-        description: "Show or set usage display",
-        args: "[off|tokens|full|cost]",
-        choices: USAGE_CHOICES,
-    },
-    { name: "/reset", description: "Reset the selected session" },
-    { name: "/new", description: "Start a fresh selected session" },
-    { name: "/compact", description: "Compact the selected session context" },
-    { name: "/stop", aliases: ["/abort"], description: "Stop the current run" },
-    { name: "/clear", description: "Clear only the local chat view" },
-    { name: "/model", description: "Show or set the model", args: "[model]" },
-    { name: "/models", description: "List configured models" },
-    {
-        name: "/think",
-        aliases: ["/thinking", "/t"],
-        description: "Show or set thinking level",
-        args: "[level]",
-        choices: THINKING_CHOICES,
-    },
-    {
-        name: "/verbose",
-        aliases: ["/v"],
-        description: "Show or set verbose mode",
-        args: "[off|on|full]",
-        choices: VERBOSE_CHOICES,
-    },
-    {
-        name: "/fast",
-        description: "Show or set fast mode",
-        args: "[status|on|off]",
-        choices: MODE_CHOICES,
-    },
-    {
-        name: "/reasoning",
-        aliases: ["/reason"],
-        description: "Show or set reasoning visibility",
-        args: "[off|on|stream]",
-        choices: REASONING_CHOICES,
-    },
-    {
-        name: "/elevated",
-        aliases: ["/elev"],
-        description: "Show or set elevated mode",
-        args: "[off|on|ask|full]",
-        choices: ELEVATED_CHOICES,
-    },
-    {
-        name: "/exec",
-        description: "Set exec defaults",
-        args: "[sandbox|gateway|node] [deny|allowlist|full] [off|on-miss|always]",
-    },
-    {
-        name: "/steer",
-        aliases: ["/tell"],
-        description: "Send guidance to the active run",
-        args: "<message>",
-    },
-    { name: "/kill", description: "Kill a running subagent", args: "[target|all]" },
-    { name: "/agents", description: "List thread-bound agents" },
-    {
-        name: "/subagents",
-        description: "Manage subagent runs",
-        args: "[list|kill|log|info|send|steer|spawn]",
-    },
-    { name: "/tools", description: "List runtime tools", args: "[compact|verbose]" },
-    {
-        name: "/tts",
-        description: "Control text-to-speech",
-        args: "[on|off|status|provider|limit|summary|audio|help]",
-    },
-];
-
-function dataUrlToBase64(dataUrl: string): string {
-    const commaIndex = dataUrl.indexOf(",");
-    return commaIndex === -1 ? dataUrl : dataUrl.slice(commaIndex + 1);
-}
-
-function base64ToText(base64: string): string {
-    const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
-    return new TextDecoder().decode(bytes);
-}
-
-function messageIdentity(message: ChatHistoryMessage): string {
-    return `${message.role.toLowerCase()}::${message.text.trim()}`;
-}
-
-function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const seen = new Set<string>();
-    const deduped: ChatHistoryMessage[] = [];
-
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (!message) {
-            continue;
-        }
-
-        const identity = messageIdentity(message);
-        if (message.text.trim() && seen.has(identity)) {
-            continue;
-        }
-
-        seen.add(identity);
-        deduped.unshift(message);
-    }
-
-    return deduped;
-}
-
-function mergeWithRecentOptimisticMessages(
-    previousMessages: ChatHistoryMessage[],
-    nextMessages: ChatHistoryMessage[]
-): ChatHistoryMessage[] {
-    if (previousMessages.length === 0) {
-        return dedupeMessages(nextMessages);
-    }
-
-    if (nextMessages.length === 0) {
-        return previousMessages;
-    }
-
-    const nextIdentities = new Set(nextMessages.map(messageIdentity));
-    const now = Date.now();
-    const recentMissingMessages = previousMessages.filter((message) => {
-        if (message.role.toLowerCase() !== "user") {
-            return false;
-        }
-
-        if (nextIdentities.has(messageIdentity(message))) {
-            return false;
-        }
-
-        const timestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
-        return (
-            Number.isFinite(timestamp) &&
-            now - timestamp < OPTIMISTIC_MESSAGE_RETENTION_MS
-        );
-    });
-
-    return dedupeMessages([...nextMessages, ...recentMissingMessages]);
-}
-
-function activeRunStorageKey(sessionKey: string): string {
-    return `mira-dashboard-chat-active-run:${sessionKey}`;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.addEventListener("load", () => {
-            if (typeof reader.result === "string") {
-                resolve(reader.result);
-                return;
-            }
-
-            reject(new Error(`Could not read ${file.name}`));
-        });
-        reader.addEventListener("error", () =>
-            reject(reader.error || new Error(`Could not read ${file.name}`))
-        );
-        reader.readAsDataURL(file);
-    });
-}
-
-function displayMimeType(file: File): string {
-    return file.type || "application/octet-stream";
-}
 
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
@@ -631,49 +442,7 @@ export function Chat() {
             description: agent.currentTask || agent.model || agent.status || "agent",
         }));
 
-    const slashCommandSuggestions = (() => {
-        const input = draft.trimStart();
-        if (!input.startsWith("/")) {
-            return [];
-        }
-
-        const [commandPart = "", ...argumentParts] = input.split(/\s+/);
-        const argumentPart = argumentParts.join(" ").trim().toLowerCase();
-        const matchedCommand = SLASH_COMMANDS.find(
-            (command) =>
-                command.name === commandPart.toLowerCase() ||
-                command.aliases?.includes(commandPart.toLowerCase())
-        );
-
-        if (matchedCommand && input.includes(" ")) {
-            const commandChoices =
-                matchedCommand.name === "/model"
-                    ? chatModelOptions
-                          .map((model) => model.id || model.label || model.name || "")
-                          .filter(Boolean)
-                    : matchedCommand.choices || [];
-
-            return commandChoices
-                .filter((choice) => choice.toLowerCase().includes(argumentPart))
-                .slice(0, 8)
-                .map((choice) => ({
-                    value: `${commandPart} ${choice}`,
-                    title: choice,
-                    description: matchedCommand.description,
-                }));
-        }
-
-        const needle = commandPart.toLowerCase();
-        return SLASH_COMMANDS.flatMap((command) =>
-            [command.name, ...(command.aliases || [])]
-                .filter((name) => name.startsWith(needle))
-                .map((name) => ({
-                    value: `${name}${command.args ? " " : ""}`,
-                    title: `${name}${command.args ? ` ${command.args}` : ""}`,
-                    description: command.description,
-                }))
-        ).slice(0, 10);
-    })();
+    const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
 
     const applySlashSuggestion = (value: string) => {
         setDraft(value);
@@ -774,10 +543,7 @@ export function Chat() {
 
     const handleSlashCommand = async (commandText: string): Promise<boolean> => {
         const [rawCommand = "", ...argumentParts] = commandText.trim().split(/\s+/);
-        const aliasTarget = SLASH_COMMANDS.find((definition) =>
-            definition.aliases?.includes(rawCommand.toLowerCase())
-        );
-        const command = aliasTarget?.name || rawCommand.toLowerCase();
+        const command = slashCommandCanonicalName(rawCommand);
         const argumentText = argumentParts.join(" ").trim();
 
         if (!command.startsWith("/")) {
@@ -1130,44 +896,13 @@ export function Chat() {
         <div className="flex h-full min-h-0 flex-col overflow-hidden p-6">
             <div className="min-h-0 flex-1">
                 <Card className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0">
-                    <div className="border-b border-primary-700 pb-3">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                            <div className="min-w-0">
-                                <p className="truncate text-sm text-primary-400">
-                                    {selectedSession
-                                        ? `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · ${formatDuration(selectedSession.updatedAt)}`
-                                        : "Choose a session to begin"}
-                                </p>
-                            </div>
-                            <div
-                                className={[
-                                    "grid w-full gap-2 lg:ml-auto",
-                                    agentOptions.length > 0
-                                        ? "sm:grid-cols-2 lg:w-[min(48rem,72vw)] xl:w-[52rem]"
-                                        : "lg:w-[min(24rem,36vw)] xl:w-[26rem]",
-                                ].join(" ")}
-                            >
-                                <Select
-                                    value={selectedSessionKey}
-                                    onChange={setSelectedSessionKey}
-                                    options={sessionOptions}
-                                    placeholder="Select session"
-                                    width="w-full"
-                                    menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
-                                />
-                                {agentOptions.length > 0 ? (
-                                    <Select
-                                        value=""
-                                        onChange={setSelectedSessionKey}
-                                        options={agentOptions}
-                                        placeholder="Jump to agent"
-                                        width="w-full"
-                                        menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
-                                    />
-                                ) : null}
-                            </div>
-                        </div>
-                    </div>
+                    <ChatHeader
+                        selectedSession={selectedSession}
+                        selectedSessionKey={selectedSessionKey}
+                        sessionOptions={sessionOptions}
+                        agentOptions={agentOptions}
+                        onSelectSession={setSelectedSessionKey}
+                    />
 
                     <ChatMessagesList
                         isLoadingHistory={isLoadingHistory}
@@ -1179,232 +914,36 @@ export function Chat() {
                         onScroll={handleMessagesScroll}
                     />
 
-                    <div className="mt-4 border-t border-primary-700 pt-4">
-                        {sendError || error ? (
-                            <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                                <span>{sendError || error}</span>
-                            </div>
-                        ) : null}
-
-                        {attachments.length > 0 ? (
-                            <div className="mb-3 flex flex-wrap gap-2">
-                                {attachments.map((attachment) => (
-                                    <button
-                                        key={attachment.id}
-                                        type="button"
-                                        onClick={() =>
-                                            setPreviewItem({
-                                                title: attachment.fileName,
-                                                mimeType: attachment.mimeType,
-                                                kind: attachment.kind,
-                                                url:
-                                                    attachment.dataUrl ||
-                                                    `data:${attachment.mimeType};base64,${attachment.contentBase64}`,
-                                                text:
-                                                    attachment.kind === "text"
-                                                        ? base64ToText(
-                                                              attachment.contentBase64
-                                                          )
-                                                        : undefined,
-                                                sizeBytes: attachment.sizeBytes,
-                                            })
-                                        }
-                                        className="group flex max-w-full items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-700"
-                                    >
-                                        {attachment.kind === "image" &&
-                                        attachment.dataUrl ? (
-                                            <img
-                                                src={attachment.dataUrl}
-                                                alt=""
-                                                className="h-8 w-8 rounded object-cover"
-                                            />
-                                        ) : (
-                                            <Paperclip className="h-4 w-4 text-primary-400" />
-                                        )}
-                                        <div className="min-w-0">
-                                            <div className="truncate">
-                                                {attachment.fileName}
-                                            </div>
-                                            <div className="text-primary-400">
-                                                {formatSize(attachment.sizeBytes)}
-                                            </div>
-                                        </div>
-                                        <span
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                removeAttachment(attachment.id);
-                                            }}
-                                            onKeyDown={(event) => {
-                                                if (
-                                                    event.key === "Enter" ||
-                                                    event.key === " "
-                                                ) {
-                                                    event.preventDefault();
-                                                    event.stopPropagation();
-                                                    removeAttachment(attachment.id);
-                                                }
-                                            }}
-                                            className="rounded p-1 text-primary-400 hover:bg-primary-700 hover:text-primary-100"
-                                            aria-label={`Remove ${attachment.fileName}`}
-                                        >
-                                            <X className="h-3.5 w-3.5" />
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        ) : null}
-
-                        <div className="flex gap-3">
-                            <input
-                                ref={fileInputReference}
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={(event) =>
-                                    void handleFilesSelected(event.target.files)
-                                }
-                            />
-                            <div className="relative flex-1">
-                                {slashCommandSuggestions.length > 0 ? (
-                                    <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
-                                        <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium uppercase tracking-wide text-primary-400">
-                                            Slash commands
-                                        </div>
-                                        <div className="max-h-72 overflow-y-auto py-1">
-                                            {slashCommandSuggestions.map((suggestion) => (
-                                                <button
-                                                    key={suggestion.value}
-                                                    type="button"
-                                                    onClick={() =>
-                                                        applySlashSuggestion(
-                                                            suggestion.value
-                                                        )
-                                                    }
-                                                    className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
-                                                >
-                                                    <span className="min-w-0 flex-1">
-                                                        <span className="block truncate font-mono text-sm text-primary-100">
-                                                            {suggestion.title}
-                                                        </span>
-                                                        <span className="mt-0.5 block truncate text-xs text-primary-400">
-                                                            {suggestion.description}
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : null}
-                                <Textarea
-                                    value={draft}
-                                    onChange={(event) => setDraft(event.target.value)}
-                                    onKeyDown={(event) => {
-                                        if (
-                                            event.key === "Tab" &&
-                                            slashCommandSuggestions.length > 0
-                                        ) {
-                                            event.preventDefault();
-                                            applySlashSuggestion(
-                                                slashCommandSuggestions[0]?.value || draft
-                                            );
-                                            return;
-                                        }
-
-                                        if (
-                                            event.key === "Enter" &&
-                                            !event.shiftKey &&
-                                            !event.nativeEvent.isComposing
-                                        ) {
-                                            event.preventDefault();
-                                            void handleSend();
-                                        }
-                                    }}
-                                    disabled={
-                                        !selectedSessionKey || !isConnected || isSending
-                                    }
-                                    placeholder={
-                                        selectedSessionKey
-                                            ? "Message, attach files, or use / commands (try /help)"
-                                            : "Choose a session first"
-                                    }
-                                    rows={5}
-                                />
-                            </div>
-                            <div className="flex flex-col gap-2">
-                                <Button
-                                    variant="secondary"
-                                    size="md"
-                                    onClick={() => fileInputReference.current?.click()}
-                                    disabled={
-                                        !isConnected ||
-                                        !selectedSessionKey ||
-                                        isSending ||
-                                        attachments.length >= MAX_ATTACHMENTS
-                                    }
-                                    title="Attach files"
-                                >
-                                    <Paperclip className="mr-2 h-4 w-4" /> Attach
-                                </Button>
-                                <Button
-                                    variant="primary"
-                                    size="md"
-                                    onClick={() => void handleSend()}
-                                    disabled={!canSend}
-                                >
-                                    <Send className="mr-2 h-4 w-4" /> Send
-                                </Button>
-                            </div>
+                    {(sendError || error) && (
+                        <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                            <span>{sendError || error}</span>
                         </div>
-                    </div>
+                    )}
+
+                    <ChatComposer
+                        attachments={attachments}
+                        canSend={canSend}
+                        draft={draft}
+                        fileInputReference={fileInputReference}
+                        isConnected={isConnected}
+                        isSending={isSending}
+                        selectedSessionKey={selectedSessionKey}
+                        slashCommandSuggestions={slashCommandSuggestions}
+                        onApplySlashSuggestion={applySlashSuggestion}
+                        onAttachFiles={(files) => void handleFilesSelected(files)}
+                        onChangeDraft={setDraft}
+                        onPreview={setPreviewItem}
+                        onRemoveAttachment={removeAttachment}
+                        onSend={() => void handleSend()}
+                    />
                 </Card>
             </div>
 
-            <Modal
-                isOpen={Boolean(previewItem)}
+            <AttachmentPreviewModal
+                previewItem={previewItem}
                 onClose={() => setPreviewItem(null)}
-                title={previewItem?.title || "Attachment preview"}
-                size="3xl"
-            >
-                {previewItem ? (
-                    <div className="space-y-3">
-                        <div className="text-xs text-primary-400">
-                            {previewItem.mimeType || "application/octet-stream"}
-                            {previewItem.sizeBytes
-                                ? ` · ${formatSize(previewItem.sizeBytes)}`
-                                : ""}
-                        </div>
-                        {previewItem.kind === "image" && previewItem.url ? (
-                            <img
-                                src={previewItem.url}
-                                alt={previewItem.title}
-                                className="max-h-[70vh] w-full rounded-lg object-contain"
-                            />
-                        ) : previewItem.kind === "text" && previewItem.text ? (
-                            <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm text-primary-100">
-                                {previewItem.text}
-                            </pre>
-                        ) : previewItem.url ? (
-                            <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-200">
-                                Preview is not available for this file type yet.
-                                <a
-                                    href={previewItem.url}
-                                    download={previewItem.title}
-                                    className="ml-2 text-accent-300 underline hover:text-accent-200"
-                                >
-                                    Download file
-                                </a>
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
-                                This historical attachment has no preview data available.
-                            </div>
-                        )}
-                    </div>
-                ) : null}
-            </Modal>
+            />
         </div>
     );
 }
