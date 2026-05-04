@@ -46,8 +46,8 @@ export function Dropdown({
         <Menu as="div">
             <MenuButton
                 className={cn(
-                    "inline-flex items-center justify-center gap-1 rounded-lg font-medium",
-                    "focus:outline-none focus:ring-2 focus:ring-accent-500",
+                    "inline-flex items-center justify-center gap-1 rounded-lg font-medium outline-none",
+                    "focus:outline-none data-[focus]:outline-none",
                     "disabled:cursor-not-allowed disabled:opacity-50",
                     variantStyles[variant],
                     sizeStyles[size]
@@ -62,7 +62,7 @@ export function Dropdown({
 
             <MenuItems
                 anchor={align === "right" ? "bottom end" : "bottom start"}
-                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-primary-600 bg-primary-800 p-1 shadow-lg focus:outline-none"
+                className="z-50 mt-1 min-w-[160px] origin-top-right rounded-lg border border-primary-600 bg-primary-800 p-1 shadow-lg outline-none focus:outline-none data-[focus]:outline-none"
             >
                 {content ||
                     items.map((item, index) => (
@@ -72,7 +72,7 @@ export function Dropdown({
                                 onClick={item.onClick}
                                 className={cn(
                                     "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
-                                    "hover:bg-primary-700 hover:text-primary-100 data-[focus]:bg-primary-700 data-[focus]:text-primary-100",
+                                    "outline-none hover:bg-primary-700 hover:text-primary-100 focus:outline-none data-[focus]:bg-primary-700 data-[focus]:text-primary-100 data-[focus]:outline-none",
                                     "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
                                     item.variant === "danger"
                                         ? "text-red-400 hover:bg-red-500/20 data-[focus]:bg-red-500/20"

@@ -39,8 +39,8 @@ export function Select({
         >
             <MenuButton
                 className={cn(
-                    "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm transition-colors",
-                    "hover:border-indigo-500 hover:bg-primary-700 data-[focus]:outline-none data-[focus]:ring-2 data-[focus]:ring-indigo-500",
+                    "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm outline-none transition-colors",
+                    "hover:border-indigo-500 hover:bg-primary-700 focus:outline-none data-[focus]:outline-none",
                     width,
                     className
                 )}
@@ -54,7 +54,7 @@ export function Select({
             <MenuItems
                 anchor={{ to: "bottom start", gap: 8 }}
                 className={cn(
-                    "z-10 max-h-60 min-w-[var(--button-width)] max-w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg",
+                    "z-10 max-h-60 min-w-[var(--button-width)] max-w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg outline-none focus:outline-none data-[focus]:outline-none",
                     menuWidth || "w-max"
                 )}
             >
@@ -63,8 +63,8 @@ export function Select({
                         <button
                             onClick={() => onChange(option.value)}
                             className={cn(
-                                "flex w-full flex-col px-3 py-2 text-left text-sm transition-colors",
-                                "hover:bg-primary-700 data-[focus]:bg-primary-700",
+                                "flex w-full flex-col px-3 py-2 text-left text-sm outline-none transition-colors",
+                                "hover:bg-primary-700 focus:outline-none data-[focus]:bg-primary-700 data-[focus]:outline-none",
                                 value === option.value && "text-indigo-400"
                             )}
                         >

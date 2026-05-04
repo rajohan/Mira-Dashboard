@@ -31,7 +31,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                         variant === "default" && [
                             "w-full rounded-lg border border-primary-600 bg-primary-700 px-3 py-2",
                             "text-primary-100 placeholder-primary-500",
-                            "focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500",
+                            "focus:border-accent-500 focus:outline-none",
                             "hover:border-primary-500",
                         ],
                         variant === "code" && [

@@ -25,6 +25,14 @@ export interface Session {
     label: string;
     displayLabel: string;
     channel: string;
+    status?: string;
+    endedAt?: string | number | null;
+    startedAt?: string | number | null;
+    runId?: string | null;
+    activeRunId?: string | null;
+    currentRunId?: string | null;
+    isRunning?: boolean;
+    running?: boolean;
 }
 
 export interface AgentInfo {
