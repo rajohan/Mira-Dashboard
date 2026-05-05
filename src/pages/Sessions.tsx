@@ -253,7 +253,7 @@ export function Sessions() {
                     <div
                         ref={liveFeedContainerReference}
                         onScroll={handleFeedScroll}
-                        className="max-h-96 overflow-y-auto pr-1"
+                        className="h-96 overflow-y-auto pr-1"
                     >
                         <div className="w-full">
                             {feedPaddingTop > 0 ? (
