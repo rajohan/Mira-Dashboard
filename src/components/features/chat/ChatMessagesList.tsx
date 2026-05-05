@@ -300,15 +300,11 @@ export function ChatMessagesList({
                                                     ))}
                                             </div>
                                         ) : null}
-                                        <div className="whitespace-pre-wrap break-words">
-                                            {row.message.text ||
-                                            (row.message.images &&
-                                                row.message.images.length > 0) ||
-                                            (row.message.attachments &&
-                                                row.message.attachments.length > 0)
-                                                ? row.message.text || null
-                                                : "[no text content]"}
-                                        </div>
+                                        {row.message.text ? (
+                                            <div className="whitespace-pre-wrap break-words">
+                                                {row.message.text}
+                                            </div>
+                                        ) : null}
                                         <AttachmentList
                                             attachments={
                                                 row.message.attachments?.filter(

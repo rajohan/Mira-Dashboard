@@ -4,6 +4,7 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 export const CHAT_HISTORY_LIMIT = 1000;
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
+export const ACTIVE_RUN_MARKER_TTL_MS = 2 * 60 * 60 * 1000;
 
 export interface ChatModelOption {
     id?: string;
@@ -63,7 +64,12 @@ export function mergeWithRecentOptimisticMessages(
     const nextIdentities = new Set(nextMessages.map(messageIdentity));
     const now = Date.now();
     const recentMissingMessages = previousMessages.filter((message) => {
-        if (message.role.toLowerCase() !== "user") {
+        const role = message.role.toLowerCase();
+        if (role !== "user" && role !== "assistant") {
+            return false;
+        }
+
+        if (!message.text.trim()) {
             return false;
         }
 
@@ -87,9 +93,27 @@ export function activeRunStorageKey(sessionKey: string): string {
 
 export function hasActiveRunMarker(sessionKey: string): boolean {
     const key = activeRunStorageKey(sessionKey);
-    return Boolean(
-        window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
-    );
+    const raw = window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+
+    if (!raw) {
+        return false;
+    }
+
+    try {
+        const parsed = JSON.parse(raw) as { startedAt?: string };
+        const startedAt = parsed.startedAt ? new Date(parsed.startedAt).getTime() : 0;
+        if (
+            Number.isFinite(startedAt) &&
+            Date.now() - startedAt < ACTIVE_RUN_MARKER_TTL_MS
+        ) {
+            return true;
+        }
+    } catch {
+        // Legacy marker format; clear it below.
+    }
+
+    clearActiveRunMarker(sessionKey);
+    return false;
 }
 
 export function markActiveRun(sessionKey: string): void {
@@ -101,6 +125,7 @@ export function markActiveRun(sessionKey: string): void {
 
 export function clearActiveRunMarker(sessionKey: string): void {
     window.localStorage.removeItem(activeRunStorageKey(sessionKey));
+    window.sessionStorage.removeItem(activeRunStorageKey(sessionKey));
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {

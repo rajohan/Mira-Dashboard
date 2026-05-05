@@ -16,7 +16,9 @@ import {
     type ChatSendAttachment,
     type ChatStreamEventMessage,
     gatewayAttachments,
+    isRenderableChatHistoryMessage,
     normalizeChatHistoryMessage,
+    normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
@@ -25,6 +27,7 @@ import {
     type ChatModelOption,
     clearActiveRunMarker,
     dataUrlToBase64,
+    dedupeMessages,
     displayMimeType,
     hasActiveRunMarker,
     markActiveRun,
@@ -48,23 +51,91 @@ import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
+interface ActiveChatStream {
+    sessionKey: string;
+    runId: string;
+    aliases: string[];
+    text: string;
+    updatedAt: string;
+}
+
+type ActiveChatStreams = Record<string, ActiveChatStream>;
+
+function mergeStreamText(previous: string, next: string): string {
+    if (!next.trim()) {
+        return previous;
+    }
+
+    if (!previous) {
+        return next;
+    }
+
+    if (next.startsWith(previous)) {
+        return next;
+    }
+
+    if (previous.endsWith(next)) {
+        return previous;
+    }
+
+    return `${previous}${next}`;
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+    return [...new Set(values.filter(Boolean))] as string[];
+}
+
+function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        const record = value as RawChatHistoryMessage;
+        if ("content" in record || "text" in record || "role" in record) {
+            return normalizeChatHistoryMessage({
+                ...record,
+                role: record.role || "assistant",
+            });
+        }
+    }
+
+    return normalizeChatHistoryMessage({
+        role: "assistant",
+        content: value,
+    });
+}
+
+function streamTextFromPayload(payload: ChatStreamEventMessage): string {
+    return normalizeAssistantPayload(
+        payload.message ?? payload.delta ?? payload.content ?? payload.text
+    ).text;
+}
+
+function finalMessageFromPayload(payload: ChatStreamEventMessage): ChatHistoryMessage {
+    return {
+        ...normalizeAssistantPayload(payload.message ?? payload.content ?? payload.text),
+        timestamp: new Date().toISOString(),
+    };
+}
+
+function visibleHistoryMessages(messages: RawChatHistoryMessage[] = []) {
+    return normalizeVisibleChatHistoryMessages(messages);
+}
+
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
     const fileInputReference = useRef<HTMLInputElement | null>(null);
     const shouldStickToBottomReference = useRef(true);
+    const activeStreamsReference = useRef<ActiveChatStreams>({});
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<ChatSendAttachment[]>([]);
     const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const [streamText, setStreamText] = useState("");
+    const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({});
     const [sendError, setSendError] = useState<string | null>(null);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isAssistantTyping, setIsAssistantTyping] = useState(false);
-    const [activeChatRunId, setActiveChatRunId] = useState<string | null>(null);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
@@ -74,6 +145,16 @@ export function Chat() {
     );
     const { data: agentsStatus } = useAgentsStatus();
     const agents = agentsStatus?.agents || [];
+
+    const updateActiveStreams = (
+        updater: (previous: ActiveChatStreams) => ActiveChatStreams
+    ) => {
+        setActiveStreams((previous) => {
+            const next = updater(previous);
+            activeStreamsReference.current = next;
+            return next;
+        });
+    };
 
     const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
     const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
@@ -93,21 +174,25 @@ export function Chat() {
             selectedSession.status === "running") &&
         selectedSession.endedAt == null
     );
-    const shouldShowTypingIndicator = isAssistantTyping || selectedSessionIsRunning;
+    const selectedStreamText = selectedSessionKey
+        ? activeStreams[selectedSessionKey]?.text || ""
+        : "";
+    const shouldShowTypingIndicator =
+        isAssistantTyping || selectedSessionIsRunning || Boolean(selectedStreamText);
     const chatRows: ChatRow[] = messages.map((message, index) => ({
         key: `${message.timestamp || index}-${index}`,
         kind: "message",
         message,
     }));
 
-    if (streamText) {
+    if (selectedStreamText) {
         chatRows.push({
             key: `stream-${selectedSessionKey || "none"}`,
             kind: "stream",
             message: {
                 role: "assistant",
-                content: streamText,
-                text: streamText,
+                content: selectedStreamText,
+                text: selectedStreamText,
             },
         });
     }
@@ -198,7 +283,6 @@ export function Chat() {
         const loadHistory = async () => {
             setIsLoadingHistory(true);
             setSendError(null);
-            setStreamText("");
 
             try {
                 const result = (await request("chat.history", {
@@ -212,7 +296,7 @@ export function Chat() {
                     return;
                 }
 
-                setMessages((result.messages || []).map(normalizeChatHistoryMessage));
+                setMessages(visibleHistoryMessages(result.messages));
                 shouldStickToBottomReference.current = true;
                 setIsAtBottom(true);
                 setHistoryLoadVersion((previous) => previous + 1);
@@ -250,9 +334,7 @@ export function Chat() {
                     messages?: RawChatHistoryMessage[];
                 };
 
-                const nextMessages = (result.messages || []).map(
-                    normalizeChatHistoryMessage
-                );
+                const nextMessages = visibleHistoryMessages(result.messages);
 
                 setMessages((previous) => {
                     const previousLast = previous.at(-1)?.timestamp || "";
@@ -304,124 +386,156 @@ export function Chat() {
                 return;
             }
 
-            const isSelectedSessionEvent = payload.sessionKey === selectedSessionKey;
-            const isActiveRunEvent = Boolean(
-                activeChatRunId && payload.runId === activeChatRunId
-            );
+            const streams = activeStreamsReference.current;
+            const streamForRun = payload.runId
+                ? Object.values(streams).find((stream) =>
+                      stream.aliases.includes(payload.runId as string)
+                  )
+                : undefined;
+            const eventSessionKey = payload.sessionKey || streamForRun?.sessionKey;
 
-            if (!isSelectedSessionEvent && !isActiveRunEvent) {
+            if (!eventSessionKey) {
                 return;
             }
 
-            const refreshHistoryAfterTerminalEvent = () => {
+            const isRelevantEvent =
+                eventSessionKey === selectedSessionKey || Boolean(streamForRun);
+            if (!isRelevantEvent) {
+                return;
+            }
+
+            const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
                     try {
                         const result = (await request("chat.history", {
-                            sessionKey: selectedSessionKey,
+                            sessionKey,
                             limit: CHAT_HISTORY_LIMIT,
                         })) as { messages?: RawChatHistoryMessage[] };
+
+                        if (sessionKey !== selectedSessionKey) {
+                            return;
+                        }
+
                         setMessages((previous) =>
                             mergeWithRecentOptimisticMessages(
                                 previous,
-                                (result.messages || []).map(normalizeChatHistoryMessage)
+                                visibleHistoryMessages(result.messages)
                             )
                         );
                         shouldStickToBottomReference.current = true;
                         setIsAtBottom(true);
                         setHistoryLoadVersion((previous) => previous + 1);
                     } catch {
-                        // Keep the streamed text if history refresh is unavailable.
+                        // Keep local stream/final state if history refresh is unavailable.
                     }
-                }, 250);
+                }, 500);
             };
 
             if (payload.state === "delta") {
-                const nextText = normalizeChatHistoryMessage({
-                    role: "assistant",
-                    content:
-                        payload.message ??
-                        payload.delta ??
-                        payload.content ??
-                        payload.text,
-                }).text;
+                const nextText = streamTextFromPayload(payload);
                 setIsAssistantTyping(true);
-                markActiveRun(selectedSessionKey);
+                markActiveRun(eventSessionKey);
+
                 if (nextText.trim()) {
-                    setStreamText((previous) =>
-                        nextText.length >= previous.length ? nextText : previous
-                    );
+                    updateActiveStreams((previous) => {
+                        const existing = previous[eventSessionKey];
+                        const runId = payload.runId || existing?.runId || eventSessionKey;
+                        return {
+                            ...previous,
+                            [eventSessionKey]: {
+                                sessionKey: eventSessionKey,
+                                runId,
+                                aliases: uniqueStrings([
+                                    ...(existing?.aliases || []),
+                                    payload.runId,
+                                    runId,
+                                ]),
+                                text: mergeStreamText(existing?.text || "", nextText),
+                                updatedAt: new Date().toISOString(),
+                            },
+                        };
+                    });
                 }
                 return;
             }
 
             if (payload.state === "final") {
-                const finalMessage = normalizeChatHistoryMessage({
-                    role: "assistant",
-                    content: payload.message ?? payload.content ?? payload.text,
-                    timestamp: new Date().toISOString(),
-                });
-                setMessages((previous) => {
-                    if (
-                        finalMessage.text.trim() ||
-                        (finalMessage.images?.length || 0) > 0 ||
-                        (finalMessage.attachments?.length || 0) > 0
-                    ) {
-                        return [...previous, finalMessage];
-                    }
+                const finalMessage = finalMessageFromPayload(payload);
+                const bufferedText =
+                    activeStreamsReference.current[eventSessionKey]?.text || "";
+                const messageToAppend = isRenderableChatHistoryMessage(finalMessage)
+                    ? finalMessage
+                    : bufferedText.trim()
+                      ? {
+                            role: "assistant",
+                            content: bufferedText,
+                            text: bufferedText,
+                            images: [],
+                            attachments: [],
+                            timestamp: new Date().toISOString(),
+                        }
+                      : null;
 
-                    return streamText.trim()
-                        ? [
-                              ...previous,
-                              {
-                                  role: "assistant",
-                                  content: streamText,
-                                  text: streamText,
-                                  images: [],
-                                  attachments: [],
-                                  timestamp: new Date().toISOString(),
-                              },
-                          ]
-                        : previous;
+                if (messageToAppend && eventSessionKey === selectedSessionKey) {
+                    setMessages((previous) =>
+                        dedupeMessages([...previous, messageToAppend])
+                    );
+                }
+
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[eventSessionKey];
+                    return next;
                 });
-                setStreamText("");
                 setIsAssistantTyping(false);
-                setActiveChatRunId(null);
-                clearActiveRunMarker(selectedSessionKey);
-                refreshHistoryAfterTerminalEvent();
+                clearActiveRunMarker(eventSessionKey);
+                refreshHistoryAfterTerminalEvent(eventSessionKey);
                 return;
             }
 
             if (payload.state === "aborted") {
-                if (streamText.trim()) {
-                    setMessages((previous) => [
-                        ...previous,
-                        {
-                            role: "assistant",
-                            content: streamText,
-                            text: streamText,
-                            images: [],
-                            attachments: [],
-                            timestamp: new Date().toISOString(),
-                        },
-                    ]);
+                const bufferedText =
+                    activeStreamsReference.current[eventSessionKey]?.text || "";
+                if (bufferedText.trim() && eventSessionKey === selectedSessionKey) {
+                    setMessages((previous) =>
+                        dedupeMessages([
+                            ...previous,
+                            {
+                                role: "assistant",
+                                content: bufferedText,
+                                text: bufferedText,
+                                images: [],
+                                attachments: [],
+                                timestamp: new Date().toISOString(),
+                            },
+                        ])
+                    );
                 }
-                setStreamText("");
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[eventSessionKey];
+                    return next;
+                });
                 setIsAssistantTyping(false);
-                setActiveChatRunId(null);
-                clearActiveRunMarker(selectedSessionKey);
-                refreshHistoryAfterTerminalEvent();
+                clearActiveRunMarker(eventSessionKey);
+                refreshHistoryAfterTerminalEvent(eventSessionKey);
                 return;
             }
 
             if (payload.state === "error") {
-                setSendError(payload.errorMessage || "Chat request failed");
-                setStreamText("");
+                if (eventSessionKey === selectedSessionKey) {
+                    setSendError(payload.errorMessage || "Chat request failed");
+                }
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[eventSessionKey];
+                    return next;
+                });
                 setIsAssistantTyping(false);
-                setActiveChatRunId(null);
-                clearActiveRunMarker(selectedSessionKey);
+                clearActiveRunMarker(eventSessionKey);
             }
         });
-    }, [activeChatRunId, selectedSessionKey, streamText, subscribe]);
+    }, [request, selectedSessionKey, subscribe]);
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -465,7 +579,12 @@ export function Chat() {
 
     useLayoutEffect(() => {
         messagesVirtualizer.measure();
-    }, [chatRows.length, streamText, shouldShowTypingIndicator, messagesVirtualizer]);
+    }, [
+        chatRows.length,
+        selectedStreamText,
+        shouldShowTypingIndicator,
+        messagesVirtualizer,
+    ]);
 
     useLayoutEffect(() => {
         if (chatRows.length === 0) {
@@ -498,7 +617,7 @@ export function Chat() {
         };
     }, [
         chatRows.length,
-        streamText,
+        selectedStreamText,
         shouldShowTypingIndicator,
         isAtBottom,
         messagesVirtualizer,
@@ -612,7 +731,7 @@ export function Chat() {
         setMessages((previous) =>
             mergeWithRecentOptimisticMessages(
                 previous,
-                (result.messages || []).map(normalizeChatHistoryMessage)
+                visibleHistoryMessages(result.messages)
             )
         );
         shouldStickToBottomReference.current = true;
@@ -664,9 +783,12 @@ export function Chat() {
             }
 
             await runSimpleCommand(async () => {
-                setStreamText("");
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
                 setIsAssistantTyping(false);
-                setActiveChatRunId(null);
                 await request("sessions.reset", { key: selectedSessionKey });
                 await reloadChatHistory();
                 addSystemMessage("Session reset.");
@@ -678,9 +800,12 @@ export function Chat() {
         if (command === "/stop" || command === "/abort") {
             await runSimpleCommand(async () => {
                 await request("chat.abort", { sessionKey: selectedSessionKey });
-                setStreamText("");
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
                 setIsAssistantTyping(false);
-                setActiveChatRunId(null);
                 addSystemMessage("Stopped current run.");
             });
 
@@ -692,9 +817,13 @@ export function Chat() {
 
         if (command === "/clear") {
             setMessages([]);
-            setStreamText("");
+            updateActiveStreams((previous) => {
+                const next = { ...previous };
+                delete next[selectedSessionKey];
+                return next;
+            });
             setIsAssistantTyping(false);
-            setActiveChatRunId(null);
+            clearActiveRunMarker(selectedSessionKey);
             addSystemMessage("Local chat view cleared. Session history was not reset.");
             return true;
         }
@@ -944,13 +1073,23 @@ export function Chat() {
         setDraft("");
         setAttachments([]);
         setSendError(null);
-        setStreamText("");
         setIsSending(true);
         setIsAssistantTyping(true);
+
+        const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        updateActiveStreams((previous) => ({
+            ...previous,
+            [selectedSessionKey]: {
+                sessionKey: selectedSessionKey,
+                runId: idempotencyKey,
+                aliases: [idempotencyKey],
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        }));
         markActiveRun(selectedSessionKey);
 
         try {
-            const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 message: messageText,
@@ -958,11 +1097,35 @@ export function Chat() {
                 deliver: false,
                 idempotencyKey,
             })) as { runId?: string } | undefined;
-            setActiveChatRunId(result?.runId || idempotencyKey);
+            const acknowledgedRunId = result?.runId;
+            if (acknowledgedRunId) {
+                updateActiveStreams((previous) => {
+                    const existing = previous[selectedSessionKey];
+                    if (!existing) {
+                        return previous;
+                    }
+
+                    return {
+                        ...previous,
+                        [selectedSessionKey]: {
+                            ...existing,
+                            runId: acknowledgedRunId,
+                            aliases: uniqueStrings([
+                                ...existing.aliases,
+                                acknowledgedRunId,
+                            ]),
+                        },
+                    };
+                });
+            }
         } catch (error_) {
             setSendError((error_ as Error).message || "Failed to send message");
             setIsAssistantTyping(false);
-            setActiveChatRunId(null);
+            updateActiveStreams((previous) => {
+                const next = { ...previous };
+                delete next[selectedSessionKey];
+                return next;
+            });
             clearActiveRunMarker(selectedSessionKey);
         } finally {
             setIsSending(false);

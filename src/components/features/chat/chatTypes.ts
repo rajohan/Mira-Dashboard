@@ -309,3 +309,24 @@ export function normalizeText(content: unknown): string {
 
     return "";
 }
+
+export function isRenderableChatHistoryMessage(message: ChatHistoryMessage): boolean {
+    const role = message.role.toLowerCase();
+    if (role === "tool" || role === "toolresult" || role === "tool_result") {
+        return false;
+    }
+
+    return Boolean(
+        message.text.trim() ||
+        (message.images?.length || 0) > 0 ||
+        (message.attachments?.length || 0) > 0
+    );
+}
+
+export function normalizeVisibleChatHistoryMessages(
+    messages: RawChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    return messages
+        .map(normalizeChatHistoryMessage)
+        .filter(isRenderableChatHistoryMessage);
+}
