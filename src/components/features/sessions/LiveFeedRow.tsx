@@ -31,7 +31,7 @@ function getRoleVariant(role: string) {
 
 export function LiveFeedRow({ item }: LiveFeedRowProps) {
     return (
-        <div className="rounded-lg border border-primary-700 bg-primary-800/40 p-3">
+        <div className="rounded-lg border border-primary-700 p-3">
             <div className="mb-1 flex items-center justify-between gap-2 text-xs">
                 <span className="truncate text-primary-300">{item.sessionLabel}</span>
                 <span className="text-primary-500">

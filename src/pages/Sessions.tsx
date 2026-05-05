@@ -245,7 +245,7 @@ export function Sessions() {
 
     return (
         <div className="p-6">
-            <Card className="mb-4">
+            <Card className="mb-4 bg-transparent p-0">
                 <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                         Live Feed (cross-session)
@@ -274,7 +274,7 @@ export function Sessions() {
                 </div>
 
                 {filteredFeed.length === 0 ? (
-                    <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed border-primary-700 bg-primary-900/30 px-4 py-6">
+                    <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed border-primary-700 px-4 py-6">
                         <p className="text-sm text-primary-400">No live messages yet.</p>
                     </div>
                 ) : (
