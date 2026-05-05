@@ -83,7 +83,7 @@ function AttachmentList({
     }
 
     return (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
             {attachments.map((attachment) => {
                 const preview = previewFromAttachment(attachment);
                 const content = (
@@ -129,8 +129,8 @@ function AttachmentList({
 function TypingIndicator() {
     return (
         <div className="flex justify-start pb-3">
-            <div className="rounded-2xl border border-primary-700 bg-primary-800 px-4 py-3 text-sm text-primary-100 shadow-sm">
-                <div className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
+            <div className="rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
+                <div className="mb-0.5 text-[11px] uppercase tracking-wide opacity-70">
                     assistant
                 </div>
                 <div className="flex items-center gap-2 text-primary-300">
@@ -234,18 +234,18 @@ export function ChatMessagesList({
                                 >
                                     <div
                                         className={[
-                                            "max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm",
+                                            "max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm",
                                             isUser
                                                 ? "bg-accent-500 text-white"
                                                 : "border border-primary-700 bg-primary-800 text-primary-100",
                                         ].join(" ")}
                                     >
-                                        <div className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
+                                        <div className="mb-0.5 text-[11px] uppercase tracking-wide opacity-70">
                                             {row.message.role}
                                         </div>
                                         {row.message.images &&
                                         row.message.images.length > 0 ? (
-                                            <div className="mb-2 flex flex-wrap gap-2">
+                                            <div className="mb-1.5 flex flex-wrap gap-1.5">
                                                 {row.message.images.map(
                                                     (image, imageIndex) => {
                                                         const imageData =
@@ -297,7 +297,7 @@ export function ChatMessagesList({
                                                 attachment.kind === "image" &&
                                                 attachment.dataUrl
                                         ) ? (
-                                            <div className="mb-2 flex flex-wrap gap-2">
+                                            <div className="mb-1.5 flex flex-wrap gap-1.5">
                                                 {row.message.attachments
                                                     .filter(
                                                         (attachment) =>
@@ -350,7 +350,7 @@ export function ChatMessagesList({
                                             visibility={visibility}
                                         />
                                         {row.message.timestamp ? (
-                                            <div className="mt-2 text-[11px] opacity-60">
+                                            <div className="mt-1.5 text-[11px] opacity-60">
                                                 {formatDate(row.message.timestamp)}
                                             </div>
                                         ) : null}

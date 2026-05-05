@@ -86,11 +86,11 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 
     if (parsedJson) {
         return (
-            <div className="my-2 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-                <div className="border-b border-white/10 px-3 py-1 text-[10px] uppercase tracking-wide text-primary-400">
+            <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
+                <div className="border-b border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary-400">
                     {JSON_LANGUAGES.has(language) ? language : "json"}
                 </div>
-                <div className="max-w-full overflow-x-auto p-3">
+                <div className="max-w-full overflow-x-auto p-2">
                     <ReactJsonView
                         src={parsedJson}
                         name={false}
@@ -111,8 +111,8 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     }
 
     return (
-        <div className="my-2 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-            <div className="border-b border-white/10 px-3 py-1 text-[10px] uppercase tracking-wide text-primary-400">
+        <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
+            <div className="border-b border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary-400">
                 {language}
             </div>
             <SyntaxHighlighter
@@ -120,7 +120,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
                 style={monokai}
                 customStyle={{
                     margin: 0,
-                    padding: "0.75rem",
+                    padding: "0.5rem",
                     background: "transparent",
                     fontSize: "12px",
                 }}
@@ -162,7 +162,7 @@ const markdownComponents: Components = {
             <blockquote
                 {...blockquoteProps}
                 className={cn(
-                    "border-current/30 border-l-2 pl-3 italic opacity-90",
+                    "border-current/30 my-1 border-l-2 pl-2 italic opacity-90",
                     className
                 )}
             />
@@ -214,7 +214,7 @@ const markdownComponents: Components = {
             <pre
                 {...preProps}
                 className={cn(
-                    "my-2 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-black/25 p-3 font-mono text-[12px] leading-relaxed",
+                    "my-1.5 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-black/25 p-2 font-mono text-[12px] leading-normal",
                     className
                 )}
             >
@@ -227,7 +227,7 @@ const markdownComponents: Components = {
         void node;
 
         return (
-            <div className="my-2 max-w-full overflow-x-auto">
+            <div className="my-1.5 max-w-full overflow-x-auto">
                 <table
                     {...tableProps}
                     className={cn(
@@ -245,7 +245,7 @@ const markdownComponents: Components = {
         return (
             <td
                 {...tdProps}
-                className={cn("border-current/20 border px-2 py-1", className)}
+                className={cn("border-current/20 border px-1.5 py-0.5", className)}
             />
         );
     },
@@ -257,7 +257,7 @@ const markdownComponents: Components = {
             <th
                 {...thProps}
                 className={cn(
-                    "border-current/20 border bg-white/5 px-2 py-1 font-semibold",
+                    "border-current/20 border bg-white/5 px-1.5 py-0.5 font-semibold",
                     className
                 )}
             />
@@ -269,8 +269,9 @@ export function ChatMarkdown({ text }: { text: string }) {
     return (
         <div
             className={cn(
-                "prose prose-invert max-w-none whitespace-pre-wrap break-words text-sm leading-relaxed text-inherit",
-                "prose-headings:my-2 prose-headings:text-inherit prose-p:my-2 prose-p:text-inherit prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5",
+                "prose prose-invert max-w-none whitespace-pre-wrap break-words text-sm leading-normal text-inherit",
+                "prose-headings:mb-1 prose-headings:mt-1.5 prose-headings:text-inherit prose-p:my-1 prose-ol:my-1 prose-ul:my-1 prose-li:m-0 prose-li:p-0",
+                "[&_li+li]:mt-0 [&_li>p]:my-0 [&_ol]:space-y-0 [&_ol]:whitespace-normal [&_ul]:space-y-0 [&_ul]:whitespace-normal",
                 "prose-strong:text-inherit prose-code:text-inherit prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0",
                 "[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit"
             )}

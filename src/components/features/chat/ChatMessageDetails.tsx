@@ -39,8 +39,8 @@ function DetailBlock({
               : "border-primary-600 bg-primary-900/70 text-primary-100";
 
     return (
-        <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${toneClass}`}>
-            <div className="mb-1 font-medium uppercase tracking-wide opacity-70">
+        <div className={`mt-1.5 rounded-lg border px-2 py-1.5 text-xs ${toneClass}`}>
+            <div className="mb-0.5 font-medium uppercase tracking-wide opacity-70">
                 {label}
             </div>
             {children}
@@ -66,11 +66,11 @@ export function ChatMessageDetails({
     }
 
     return (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1.5 space-y-1.5">
             {shouldShowThinking
                 ? message.thinking?.map((block, index) => (
                       <DetailBlock key={`thinking-${index}`} label="Thinking / working">
-                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-primary-200">
+                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal text-primary-200">
                               {block.text}
                           </pre>
                       </DetailBlock>
@@ -87,7 +87,7 @@ export function ChatMessageDetails({
                               tone="warning"
                           >
                               {formattedArguments ? (
-                                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+                                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal">
                                       {formattedArguments}
                                   </pre>
                               ) : (
@@ -104,7 +104,7 @@ export function ChatMessageDetails({
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
-                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal">
                             {message.toolResult.content}
                         </pre>
                     ) : (
