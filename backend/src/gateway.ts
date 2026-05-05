@@ -58,6 +58,19 @@ interface Session {
     label: string;
     displayLabel: string;
     channel: string;
+    status?: string;
+    endedAt?: string | number | null;
+    startedAt?: string | number | null;
+    runId?: string | null;
+    activeRunId?: string | null;
+    currentRunId?: string | null;
+    isRunning?: boolean;
+    running?: boolean;
+    thinkingLevel?: string;
+    fastMode?: boolean;
+    verboseLevel?: string;
+    reasoningLevel?: string;
+    elevatedLevel?: string;
 }
 
 interface GatewaySession {
@@ -71,6 +84,19 @@ interface GatewaySession {
     displayName?: string;
     label?: string;
     channel?: string;
+    status?: string;
+    endedAt?: string | number | null;
+    startedAt?: string | number | null;
+    runId?: string | null;
+    activeRunId?: string | null;
+    currentRunId?: string | null;
+    isRunning?: boolean;
+    running?: boolean;
+    thinkingLevel?: string;
+    fastMode?: boolean;
+    verboseLevel?: string;
+    reasoningLevel?: string;
+    elevatedLevel?: string;
 }
 
 interface PendingRequest {
@@ -170,6 +196,19 @@ function transformSession(session: GatewaySession): Session {
         label: session.label || "",
         displayLabel,
         channel: session.channel || "unknown",
+        status: session.status,
+        endedAt: session.endedAt,
+        startedAt: session.startedAt,
+        runId: session.runId,
+        activeRunId: session.activeRunId,
+        currentRunId: session.currentRunId,
+        isRunning: session.isRunning,
+        running: session.running,
+        thinkingLevel: session.thinkingLevel,
+        fastMode: session.fastMode,
+        verboseLevel: session.verboseLevel,
+        reasoningLevel: session.reasoningLevel,
+        elevatedLevel: session.elevatedLevel,
     };
 }
 

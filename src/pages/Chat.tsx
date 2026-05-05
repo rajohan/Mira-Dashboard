@@ -274,21 +274,30 @@ export function Chat() {
     const selectedSession = selectedSessionKey
         ? sessionMap.get(selectedSessionKey) || null
         : null;
+    const selectedSessionStatus = selectedSession?.status?.toLowerCase() || "";
     const selectedSessionIsRunning = Boolean(
         selectedSession &&
         (selectedSession.isRunning ||
             selectedSession.running ||
             selectedSession.activeRunId ||
             selectedSession.currentRunId ||
-            selectedSession.runId ||
-            selectedSession.status === "running") &&
+            ["active", "running", "thinking", "working"].includes(
+                selectedSessionStatus
+            )) &&
         selectedSession.endedAt == null
+    );
+    const selectedSessionHasActiveMarker = Boolean(
+        selectedSessionKey && hasActiveRunMarker(selectedSessionKey)
     );
     const selectedStreamText = selectedSessionKey
         ? activeStreams[selectedSessionKey]?.text || ""
         : "";
     const shouldShowTypingIndicator =
-        isAssistantTyping || selectedSessionIsRunning || Boolean(selectedStreamText);
+        isSending ||
+        isAssistantTyping ||
+        selectedSessionIsRunning ||
+        selectedSessionHasActiveMarker ||
+        Boolean(selectedStreamText);
     const chatRows: ChatRow[] = messages.map((message, index) => ({
         key: `${message.timestamp || index}-${index}`,
         kind: "message",

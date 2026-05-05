@@ -33,6 +33,11 @@ export interface Session {
     currentRunId?: string | null;
     isRunning?: boolean;
     running?: boolean;
+    thinkingLevel?: string;
+    fastMode?: boolean;
+    verboseLevel?: string;
+    reasoningLevel?: string;
+    elevatedLevel?: string;
 }
 
 export interface AgentInfo {

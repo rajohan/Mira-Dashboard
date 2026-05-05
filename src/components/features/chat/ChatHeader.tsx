@@ -60,6 +60,16 @@ interface ChatHeaderProps {
     onSelectSession: (sessionKey: string) => void;
 }
 
+function formatHeaderStatus(selectedSession: Session | null): string {
+    if (!selectedSession) {
+        return "Choose a session to begin";
+    }
+
+    const thinkingLevel = selectedSession.thinkingLevel || "default";
+
+    return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Thinking: ${thinkingLevel} · ${formatDuration(selectedSession.updatedAt)}`;
+}
+
 export function ChatHeader({
     selectedSession,
     selectedSessionKey,
@@ -76,13 +86,11 @@ export function ChatHeader({
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
                     <p className="truncate text-sm text-primary-400">
-                        {selectedSession
-                            ? `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · ${formatDuration(selectedSession.updatedAt)}`
-                            : "Choose a session to begin"}
+                        {formatHeaderStatus(selectedSession)}
                     </p>
                 </div>
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
-                    <div className="flex shrink-0 flex-wrap justify-start gap-1.5 rounded-full border border-primary-700/70 bg-primary-950/50 p-1 lg:justify-end">
+                    <div className="flex shrink-0 flex-wrap justify-start gap-1.5 lg:justify-end">
                         <DiagnosticToggle
                             active={showThinking}
                             icon={Brain}
