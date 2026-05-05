@@ -164,15 +164,11 @@ export function Settings() {
         }
     }
 
-    async function handleAgentAccessSave(
-        agents: AgentConfig[],
-        defaultSkills?: string[]
-    ) {
+    async function handleAgentAccessSave(agents: AgentConfig[]) {
         setError(null);
         try {
             await updateConfig.mutateAsync({
                 agents: {
-                    defaults: { skills: defaultSkills },
                     list: agents,
                 },
             } as OpenClawConfig);
@@ -382,7 +378,6 @@ export function Settings() {
 
             <AgentAccessSection
                 agents={config?.agents?.list || []}
-                defaultSkills={config?.agents?.defaults?.skills}
                 onSave={handleAgentAccessSave}
                 saving={updateConfig.isPending}
             />

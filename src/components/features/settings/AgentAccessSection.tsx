@@ -1,5 +1,5 @@
 import { Check, Loader2, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { AgentConfig } from "../../../hooks/useConfig";
 import { cn } from "../../../utils/cn";
@@ -11,22 +11,8 @@ import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
 interface AgentAccessSectionProps {
     agents: AgentConfig[];
-    defaultSkills?: string[];
-    onSave: (agents: AgentConfig[], defaultSkills?: string[]) => Promise<void>;
+    onSave: (agents: AgentConfig[]) => Promise<void>;
     saving: boolean;
-}
-
-function parseList(value: string): string[] | undefined {
-    const items = value
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-
-    return items.length > 0 ? items : undefined;
-}
-
-function formatList(value: string[] | undefined): string {
-    return (value || []).join(", ");
 }
 
 function toolEnabled(agent: AgentConfig, toolId: string): boolean {
@@ -58,8 +44,8 @@ function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): Agent
         ...agent,
         tools: {
             ...agent.tools,
-            allow: allow ? [...allow].sort() : undefined,
-            deny: deny.size > 0 ? [...deny].sort() : undefined,
+            allow: allow ? [...allow].sort() : agent.tools?.allow,
+            deny: [...deny].sort(),
         },
     };
 }
@@ -71,18 +57,17 @@ const riskStyles: Record<ToolRisk, string> = {
     critical: "border-red-500/20 bg-red-500/5 text-red-300",
 };
 
-export function AgentAccessSection({
-    agents,
-    defaultSkills,
-    onSave,
-    saving,
-}: AgentAccessSectionProps) {
+export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectionProps) {
     const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
     const [toolFilter, setToolFilter] = useState("");
     const [draftAgents, setDraftAgents] = useState(() => agents);
-    const [draftDefaultSkills, setDraftDefaultSkills] = useState(() =>
-        formatList(defaultSkills)
-    );
+
+    useEffect(() => {
+        setDraftAgents(agents);
+        setActiveAgentId((previous) =>
+            agents.some((agent) => agent.id === previous) ? previous : agents[0]?.id || ""
+        );
+    }, [agents]);
 
     const activeAgent =
         draftAgents.find((agent) => agent.id === activeAgentId) || draftAgents[0];
@@ -132,43 +117,8 @@ export function AgentAccessSection({
                     })}
                 </div>
 
-                <div className="rounded-lg border border-primary-700 bg-primary-900/50 p-3">
-                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
-                        Default skill allowlist
-                    </label>
-                    <Input
-                        value={draftDefaultSkills}
-                        onChange={(event) => setDraftDefaultSkills(event.target.value)}
-                        placeholder="Leave empty for unrestricted skills"
-                    />
-                    <p className="mt-1 text-xs text-primary-500">
-                        Comma-separated skill IDs inherited by agents without their own
-                        list.
-                    </p>
-                </div>
-
                 {activeAgent ? (
                     <div className="space-y-4">
-                        <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
-                            <label className="mb-1.5 block text-sm font-medium text-primary-300">
-                                {activeAgent.name || activeAgent.id} skill allowlist
-                            </label>
-                            <Input
-                                value={formatList(activeAgent.skills)}
-                                onChange={(event) =>
-                                    updateAgent(activeAgent.id, (agent) => ({
-                                        ...agent,
-                                        skills: parseList(event.target.value),
-                                    }))
-                                }
-                                placeholder="inherit default skills"
-                            />
-                            <p className="mt-1 text-xs text-primary-500">
-                                Leave empty to inherit. Use the Skills section below to
-                                enable or disable skill installation globally.
-                            </p>
-                        </div>
-
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div>
                                 <h4 className="text-lg font-semibold text-primary-100">
@@ -176,6 +126,7 @@ export function AgentAccessSection({
                                 </h4>
                                 <p className="text-sm text-primary-400">
                                     Turning a tool off adds it to this agent’s deny list.
+                                    Turning it back on clears that deny entry.
                                 </p>
                             </div>
                             <Input
@@ -269,7 +220,7 @@ export function AgentAccessSection({
                 <div className="flex justify-end">
                     <Button
                         variant="primary"
-                        onClick={() => onSave(draftAgents, parseList(draftDefaultSkills))}
+                        onClick={() => onSave(draftAgents)}
                         disabled={saving}
                     >
                         {saving ? (
