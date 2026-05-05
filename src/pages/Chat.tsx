@@ -9,17 +9,20 @@ import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
+    type ActiveChatStreams,
+    createChatVisibility,
+    historyContainsRecoveredStream,
+    shouldShowStreamRow as shouldRenderStreamRow,
+    uniqueStrings,
+    visibleHistoryMessages,
+} from "../components/features/chat/chatRuntime";
+import {
     attachmentKind,
     type ChatHistoryMessage,
     type ChatPreviewItem,
     type ChatRow,
     type ChatSendAttachment,
-    type ChatStreamEventMessage,
-    type ChatVisibilitySettings,
     gatewayAttachments,
-    isRenderableChatHistoryMessage,
-    normalizeChatHistoryMessage,
-    normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
@@ -28,7 +31,6 @@ import {
     type ChatModelOption,
     clearActiveRunMarker,
     dataUrlToBase64,
-    dedupeMessages,
     displayMimeType,
     hasActiveRunMarker,
     markActiveRun,
@@ -37,214 +39,14 @@ import {
     mergeWithRecentOptimisticMessages,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtils";
-import {
-    buildSlashCommandSuggestions,
-    ELEVATED_CHOICES,
-    REASONING_CHOICES,
-    SLASH_COMMANDS,
-    slashCommandCanonicalName,
-    THINKING_CHOICES,
-    VERBOSE_CHOICES,
-} from "../components/features/chat/slashCommands";
+import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
+import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
+import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
 import { Card } from "../components/ui/Card";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
-
-interface ActiveChatStream {
-    sessionKey: string;
-    runId: string;
-    aliases: string[];
-    text: string;
-    message?: ChatHistoryMessage;
-    updatedAt: string;
-}
-
-type ActiveChatStreams = Record<string, ActiveChatStream>;
-
-function mergeStreamText(previous: string, next: string): string {
-    if (!next.trim()) {
-        return previous;
-    }
-
-    if (!previous) {
-        return next;
-    }
-
-    if (next.startsWith(previous)) {
-        return next;
-    }
-
-    if (previous.endsWith(next)) {
-        return previous;
-    }
-
-    return `${previous}${next}`;
-}
-
-function uniqueStrings(values: Array<string | undefined>): string[] {
-    return [...new Set(values.filter(Boolean))] as string[];
-}
-
-interface ParsedAgentSessionKey {
-    agentId: string;
-    rest: string;
-}
-
-function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
-    const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
-    if (!match) {
-        return null;
-    }
-
-    return {
-        agentId: match[1]?.toLowerCase() || "",
-        rest: match[2]?.toLowerCase() || "",
-    };
-}
-
-function isSameSessionKey(left?: string, right?: string): boolean {
-    const normalizedLeft = left?.trim().toLowerCase();
-    const normalizedRight = right?.trim().toLowerCase();
-
-    if (!normalizedLeft || !normalizedRight) {
-        return false;
-    }
-
-    if (normalizedLeft === normalizedRight) {
-        return true;
-    }
-
-    const parsedLeft = parseAgentSessionKey(normalizedLeft);
-    const parsedRight = parseAgentSessionKey(normalizedRight);
-
-    if (parsedLeft && parsedRight) {
-        return (
-            parsedLeft.agentId === parsedRight.agentId &&
-            parsedLeft.rest === parsedRight.rest
-        );
-    }
-
-    if (parsedLeft) {
-        return parsedLeft.rest === normalizedRight;
-    }
-
-    if (parsedRight) {
-        return normalizedLeft === parsedRight.rest;
-    }
-
-    return false;
-}
-
-function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-        const record = value as RawChatHistoryMessage;
-        if ("content" in record || "text" in record || "role" in record) {
-            return normalizeChatHistoryMessage({
-                ...record,
-                role: record.role || "assistant",
-            });
-        }
-    }
-
-    return normalizeChatHistoryMessage({
-        role: "assistant",
-        content: value,
-    });
-}
-
-function finalMessageFromPayload(payload: ChatStreamEventMessage): ChatHistoryMessage {
-    return {
-        ...normalizeAssistantPayload(payload.message ?? payload.content ?? payload.text),
-        timestamp: new Date().toISOString(),
-        runId: payload.runId,
-    };
-}
-
-function mergeStreamMessage(
-    previous: ChatHistoryMessage | undefined,
-    next: ChatHistoryMessage,
-    text: string,
-    runId?: string
-): ChatHistoryMessage {
-    return {
-        role: "assistant",
-        content: next.content,
-        text,
-        images: next.images?.length ? next.images : previous?.images || [],
-        attachments: next.attachments?.length
-            ? next.attachments
-            : previous?.attachments || [],
-        thinking: next.thinking?.length ? next.thinking : previous?.thinking,
-        toolCalls: next.toolCalls?.length ? next.toolCalls : previous?.toolCalls,
-        timestamp: new Date().toISOString(),
-        runId,
-    };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function payloadIsCommandMessage(value: unknown): boolean {
-    return Boolean(
-        value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        (value as { command?: unknown }).command === true
-    );
-}
-
-function createLocalSystemMessage(text: string): ChatHistoryMessage {
-    return {
-        role: "system",
-        content: text,
-        text,
-        images: [],
-        attachments: [],
-        timestamp: new Date().toISOString(),
-        local: true,
-    };
-}
-
-function textLooksLikeRecoveredStream(historyText: string, streamText: string): boolean {
-    const normalizedHistoryText = historyText.trim();
-    const normalizedStreamText = streamText.trim();
-
-    return Boolean(
-        normalizedHistoryText &&
-        normalizedStreamText &&
-        (normalizedHistoryText === normalizedStreamText ||
-            normalizedHistoryText.includes(normalizedStreamText) ||
-            normalizedStreamText.includes(normalizedHistoryText))
-    );
-}
-
-function historyContainsRecoveredStream(
-    messages: ChatHistoryMessage[],
-    streamText: string
-): boolean {
-    return messages.some(
-        (message) =>
-            message.role.toLowerCase() === "assistant" &&
-            textLooksLikeRecoveredStream(message.text, streamText)
-    );
-}
-
-function visibleHistoryMessages(
-    messages: RawChatHistoryMessage[] = [],
-    visibility: ChatVisibilitySettings
-) {
-    return normalizeVisibleChatHistoryMessages(messages, visibility);
-}
-
-function createChatVisibility(
-    showThinking: boolean,
-    showTools: boolean
-): ChatVisibilitySettings {
-    return { showThinking, showTools };
-}
 
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
@@ -315,13 +117,10 @@ export function Chat() {
         : undefined;
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
-    const shouldShowStreamRow = Boolean(
-        selectedStreamText ||
-        (selectedStreamMessage &&
-            isRenderableChatHistoryMessage(
-                selectedStreamMessage,
-                createChatVisibility(showThinkingOutput, showToolOutput)
-            ))
+    const shouldShowSelectedStreamRow = shouldRenderStreamRow(
+        selectedStreamText,
+        selectedStreamMessage,
+        createChatVisibility(showThinkingOutput, showToolOutput)
     );
     const shouldShowTypingIndicator =
         isSending ||
@@ -335,7 +134,7 @@ export function Chat() {
         message,
     }));
 
-    if (shouldShowStreamRow) {
+    if (shouldShowSelectedStreamRow) {
         chatRows.push({
             key: `stream-${selectedSessionKey || "none"}`,
             kind: "stream",
@@ -550,6 +349,23 @@ export function Chat() {
         showToolOutput,
     ]);
 
+    useChatRuntimeEvents({
+        request,
+        subscribe,
+        selectedSessionKey,
+        showThinkingOutput,
+        showToolOutput,
+        activeStreamsReference,
+        liveHistoryRefreshTimerReference,
+        shouldStickToBottomReference,
+        updateActiveStreams,
+        setMessages,
+        setSendError,
+        setIsAssistantTyping,
+        setIsAtBottom,
+        setHistoryLoadVersion,
+    });
+
     const messagesVirtualizer = useVirtualizer({
         count: chatRows.length,
         getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
@@ -557,344 +373,6 @@ export function Chat() {
         estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
         overscan: 12,
     });
-
-    useEffect(() => {
-        const refreshSelectedHistorySoon = (delayMs = 450) => {
-            if (!selectedSessionKey) {
-                return;
-            }
-
-            if (liveHistoryRefreshTimerReference.current !== null) {
-                window.clearTimeout(liveHistoryRefreshTimerReference.current);
-            }
-
-            liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
-                liveHistoryRefreshTimerReference.current = null;
-
-                try {
-                    const result = (await request("chat.history", {
-                        sessionKey: selectedSessionKey,
-                        limit: CHAT_HISTORY_LIMIT,
-                    })) as { messages?: RawChatHistoryMessage[] };
-
-                    setMessages((previous) =>
-                        mergeWithRecentOptimisticMessages(
-                            previous,
-                            visibleHistoryMessages(
-                                result.messages,
-                                createChatVisibility(showThinkingOutput, showToolOutput)
-                            )
-                        )
-                    );
-
-                    if (shouldStickToBottomReference.current) {
-                        setIsAtBottom(true);
-                    }
-                    setHistoryLoadVersion((previous) => previous + 1);
-                } catch {
-                    // Keep existing live state if an opportunistic refresh fails.
-                }
-            }, delayMs);
-        };
-
-        const handleRuntimeTranscriptEvent = (
-            eventName: string | undefined,
-            payload: unknown
-        ) => {
-            if (!eventName || !selectedSessionKey || !isRecord(payload)) {
-                return;
-            }
-
-            const eventSessionKey =
-                typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
-            const eventRunId =
-                typeof payload.runId === "string" ? payload.runId : undefined;
-            const streamForRun = eventRunId
-                ? Object.values(activeStreamsReference.current).find((stream) =>
-                      stream.aliases.includes(eventRunId)
-                  )
-                : undefined;
-            const eventMatchesSelected = isSameSessionKey(
-                eventSessionKey || streamForRun?.sessionKey,
-                selectedSessionKey
-            );
-
-            if (!eventMatchesSelected) {
-                return;
-            }
-
-            const stream = typeof payload.stream === "string" ? payload.stream : "";
-            const data = isRecord(payload.data) ? payload.data : {};
-            const phase = typeof data.phase === "string" ? data.phase : "";
-            const shouldRefreshDiagnostics =
-                showThinkingOutput ||
-                showToolOutput ||
-                eventName === "session.tool" ||
-                stream === "tool" ||
-                stream === "item";
-
-            if (!shouldRefreshDiagnostics) {
-                return;
-            }
-
-            const isTerminalLifecycleEvent =
-                stream === "lifecycle" && (phase === "end" || phase === "error");
-
-            if (isTerminalLifecycleEvent) {
-                setIsAssistantTyping(false);
-                clearActiveRunMarker(selectedSessionKey);
-            } else {
-                setIsAssistantTyping(true);
-                markActiveRun(selectedSessionKey);
-            }
-
-            if (eventRunId) {
-                updateActiveStreams((previous) => {
-                    const existing = previous[selectedSessionKey];
-                    const runId = existing?.runId || eventRunId;
-                    return {
-                        ...previous,
-                        [selectedSessionKey]: {
-                            sessionKey: selectedSessionKey,
-                            runId,
-                            aliases: uniqueStrings([
-                                ...(existing?.aliases || []),
-                                eventRunId,
-                                runId,
-                            ]),
-                            text: existing?.text || "",
-                            message: existing?.message,
-                            updatedAt: new Date().toISOString(),
-                        },
-                    };
-                });
-            }
-
-            refreshSelectedHistorySoon(phase === "end" ? 150 : 500);
-        };
-
-        const unsubscribe = subscribe((raw) => {
-            const data = raw as {
-                type?: string;
-                event?: string;
-                payload?: unknown;
-            };
-
-            if (data.type !== "event") {
-                return;
-            }
-
-            if (data.event !== "chat") {
-                handleRuntimeTranscriptEvent(data.event, data.payload);
-                return;
-            }
-
-            const payload = data.payload as ChatStreamEventMessage | undefined;
-            if (!payload) {
-                return;
-            }
-
-            const streams = activeStreamsReference.current;
-            const streamForRun = payload.runId
-                ? Object.values(streams).find((stream) =>
-                      stream.aliases.includes(payload.runId as string)
-                  )
-                : undefined;
-            const eventSessionKey = payload.sessionKey || streamForRun?.sessionKey;
-
-            if (!eventSessionKey) {
-                return;
-            }
-
-            const eventMatchesSelected = isSameSessionKey(
-                eventSessionKey,
-                selectedSessionKey
-            );
-            const isRelevantEvent = eventMatchesSelected || Boolean(streamForRun);
-            if (!isRelevantEvent) {
-                return;
-            }
-
-            const streamSessionKey = eventMatchesSelected
-                ? selectedSessionKey
-                : streamForRun?.sessionKey || eventSessionKey;
-
-            const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
-                window.setTimeout(async () => {
-                    try {
-                        const result = (await request("chat.history", {
-                            sessionKey,
-                            limit: CHAT_HISTORY_LIMIT,
-                        })) as { messages?: RawChatHistoryMessage[] };
-
-                        if (sessionKey !== selectedSessionKey) {
-                            return;
-                        }
-
-                        setMessages((previous) =>
-                            mergeWithRecentOptimisticMessages(
-                                previous,
-                                visibleHistoryMessages(
-                                    result.messages,
-                                    createChatVisibility(
-                                        showThinkingOutput,
-                                        showToolOutput
-                                    )
-                                )
-                            )
-                        );
-                        shouldStickToBottomReference.current = true;
-                        setIsAtBottom(true);
-                        setHistoryLoadVersion((previous) => previous + 1);
-                    } catch {
-                        // Keep local stream/final state if history refresh is unavailable.
-                    }
-                }, 500);
-            };
-
-            if (payload.state === "delta") {
-                const deltaMessage = normalizeAssistantPayload(
-                    payload.message ?? payload.delta ?? payload.content ?? payload.text
-                );
-                const nextText = deltaMessage.text;
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(true);
-                }
-                markActiveRun(streamSessionKey);
-
-                if (
-                    nextText.trim() ||
-                    deltaMessage.thinking?.length ||
-                    deltaMessage.toolCalls?.length
-                ) {
-                    updateActiveStreams((previous) => {
-                        const existing = previous[streamSessionKey];
-                        const runId =
-                            payload.runId || existing?.runId || streamSessionKey;
-                        const text = mergeStreamText(existing?.text || "", nextText);
-                        return {
-                            ...previous,
-                            [streamSessionKey]: {
-                                sessionKey: streamSessionKey,
-                                runId,
-                                aliases: uniqueStrings([
-                                    ...(existing?.aliases || []),
-                                    payload.runId,
-                                    runId,
-                                ]),
-                                text,
-                                message: mergeStreamMessage(
-                                    existing?.message,
-                                    deltaMessage,
-                                    text,
-                                    runId
-                                ),
-                                updatedAt: new Date().toISOString(),
-                            },
-                        };
-                    });
-                }
-                return;
-            }
-
-            if (payload.state === "final") {
-                const finalMessage = finalMessageFromPayload(payload);
-                const bufferedText =
-                    activeStreamsReference.current[streamSessionKey]?.text || "";
-                const messageToAppend = payloadIsCommandMessage(payload.message)
-                    ? createLocalSystemMessage(finalMessage.text)
-                    : isRenderableChatHistoryMessage(
-                            finalMessage,
-                            createChatVisibility(showThinkingOutput, showToolOutput)
-                        )
-                      ? finalMessage
-                      : bufferedText.trim()
-                        ? {
-                              role: "assistant",
-                              content: bufferedText,
-                              text: bufferedText,
-                              images: [],
-                              attachments: [],
-                              timestamp: new Date().toISOString(),
-                              runId: payload.runId,
-                          }
-                        : null;
-
-                if (messageToAppend && eventMatchesSelected) {
-                    setMessages((previous) =>
-                        dedupeMessages([...previous, messageToAppend])
-                    );
-                }
-
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
-                    delete next[streamSessionKey];
-                    return next;
-                });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
-                refreshHistoryAfterTerminalEvent(streamSessionKey);
-                return;
-            }
-
-            if (payload.state === "aborted") {
-                const bufferedText =
-                    activeStreamsReference.current[streamSessionKey]?.text || "";
-                if (bufferedText.trim() && eventMatchesSelected) {
-                    setMessages((previous) =>
-                        dedupeMessages([
-                            ...previous,
-                            {
-                                role: "assistant",
-                                content: bufferedText,
-                                text: bufferedText,
-                                images: [],
-                                attachments: [],
-                                timestamp: new Date().toISOString(),
-                                runId: payload.runId,
-                            },
-                        ])
-                    );
-                }
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
-                    delete next[streamSessionKey];
-                    return next;
-                });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
-                refreshHistoryAfterTerminalEvent(streamSessionKey);
-                return;
-            }
-
-            if (payload.state === "error") {
-                if (eventMatchesSelected) {
-                    setSendError(payload.errorMessage || "Chat request failed");
-                }
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
-                    delete next[streamSessionKey];
-                    return next;
-                });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
-            }
-        });
-
-        return () => {
-            unsubscribe();
-            if (liveHistoryRefreshTimerReference.current !== null) {
-                window.clearTimeout(liveHistoryRefreshTimerReference.current);
-                liveHistoryRefreshTimerReference.current = null;
-            }
-        };
-    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput, subscribe]);
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -1061,337 +539,24 @@ export function Chat() {
         );
     };
 
-    const addSystemMessage = (text: string) => {
-        setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
-    };
-
-    const reloadChatHistory = async () => {
-        if (!selectedSessionKey) {
-            return;
-        }
-
-        const result = (await request("chat.history", {
-            sessionKey: selectedSessionKey,
-            limit: CHAT_HISTORY_LIMIT,
-        })) as {
-            messages?: RawChatHistoryMessage[];
-        };
-
-        setMessages((previous) =>
-            mergeWithRecentOptimisticMessages(
-                previous,
-                visibleHistoryMessages(
-                    result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
-                )
-            )
-        );
-        shouldStickToBottomReference.current = true;
-        setIsAtBottom(true);
-        setHistoryLoadVersion((previous) => previous + 1);
-    };
-
-    const handleSlashCommand = async (commandText: string): Promise<boolean> => {
-        const [rawCommand = "", ...argumentParts] = commandText.trim().split(/\s+/);
-        const command = slashCommandCanonicalName(rawCommand);
-        const argumentText = argumentParts.join(" ").trim();
-
-        if (!command.startsWith("/")) {
-            return false;
-        }
-
-        if (attachments.length > 0) {
-            setSendError("Slash commands cannot include attachments yet.");
-            return true;
-        }
-
-        const patchSession = async (patch: Record<string, unknown>) => {
-            await request("sessions.patch", { key: selectedSessionKey, ...patch });
-        };
-
-        const runSimpleCommand = async (action: () => Promise<void>) => {
-            setDraft("");
-            setSendError(null);
-            setIsSending(true);
-
-            try {
-                await action();
-            } catch (error_) {
-                setSendError((error_ as Error).message || `Failed to run ${rawCommand}`);
-            } finally {
-                setIsSending(false);
-            }
-        };
-
-        if (command === "/reset" || command === "/new") {
-            const confirmed = window.confirm(
-                "Reset this chat session? This clears the session history/transcript for the selected target."
-            );
-
-            if (!confirmed) {
-                setDraft("");
-                addSystemMessage("Reset cancelled.");
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
-                setIsAssistantTyping(false);
-                await request("sessions.reset", { key: selectedSessionKey });
-                await reloadChatHistory();
-                addSystemMessage("Session reset.");
-            });
-
-            return true;
-        }
-
-        if (command === "/stop" || command === "/abort") {
-            await runSimpleCommand(async () => {
-                await request("chat.abort", { sessionKey: selectedSessionKey });
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
-                setIsAssistantTyping(false);
-                addSystemMessage("Stopped current run.");
-            });
-
-            return true;
-        }
-
-        setDraft("");
-        setSendError(null);
-
-        if (command === "/clear") {
-            setMessages([]);
-            updateActiveStreams((previous) => {
-                const next = { ...previous };
-                delete next[selectedSessionKey];
-                return next;
-            });
-            setIsAssistantTyping(false);
-            clearActiveRunMarker(selectedSessionKey);
-            addSystemMessage("Local chat view cleared. Session history was not reset.");
-            return true;
-        }
-
-        if (command === "/help" || command === "/commands") {
-            addSystemMessage(
-                [
-                    "Available slash commands:",
-                    ...SLASH_COMMANDS.map(
-                        (definition) =>
-                            `${definition.name}${definition.args ? ` ${definition.args}` : ""} — ${definition.description}`
-                    ),
-                ].join("\n")
-            );
-            return true;
-        }
-
-        if (command === "/status") {
-            if (!selectedSession) {
-                addSystemMessage("No selected session.");
-                return true;
-            }
-
-            const session = selectedSession as typeof selectedSession & {
-                status?: string;
-                model?: string;
-                thinkingLevel?: string;
-                fastMode?: boolean;
-                verboseLevel?: string;
-                reasoningLevel?: string;
-                elevatedLevel?: string;
-            };
-
-            addSystemMessage(
-                [
-                    `Session: ${selectedSession.displayLabel || selectedSession.key}`,
-                    `Status: ${session.status || "unknown"}`,
-                    `Model: ${session.model || "default"}`,
-                    `Thinking: ${session.thinkingLevel || "default"}`,
-                    `Fast mode: ${session.fastMode ? "on" : "off"}`,
-                    `Verbose: ${session.verboseLevel || "off"}`,
-                    `Reasoning: ${session.reasoningLevel || "off"}`,
-                    `Elevated: ${session.elevatedLevel || "off"}`,
-                ].join("\n")
-            );
-            return true;
-        }
-
-        if (command === "/models") {
-            const models = chatModelOptions
-                .map((model) => model.id || model.label || model.name || "")
-                .filter(Boolean);
-            addSystemMessage(
-                models.length > 0
-                    ? `Configured models:\n${models.map((model) => `- ${model}`).join("\n")}`
-                    : "No configured models returned by the gateway."
-            );
-            return true;
-        }
-
-        if (command === "/model") {
-            if (!argumentText) {
-                const models = chatModelOptions
-                    .map((model) => model.id || model.label || model.name || "")
-                    .filter(Boolean);
-                addSystemMessage(
-                    [
-                        `Current model: ${selectedSession?.model || "default"}`,
-                        models.length > 0
-                            ? `Available: ${models.slice(0, 12).join(", ")}${models.length > 12 ? ` +${models.length - 12} more` : ""}`
-                            : "No model list available.",
-                    ].join("\n")
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ model: argumentText });
-                addSystemMessage(`Model set to ${argumentText}.`);
-            });
-            return true;
-        }
-
-        if (command === "/think") {
-            if (!argumentText) {
-                addSystemMessage(
-                    `Current thinking level: ${(selectedSession as { thinkingLevel?: string } | null)?.thinkingLevel || "default"}. Options: ${THINKING_CHOICES.join(", ")}.`
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ thinkingLevel: argumentText });
-                addSystemMessage(`Thinking level set to ${argumentText}.`);
-            });
-            return true;
-        }
-
-        if (command === "/verbose") {
-            const mode = argumentText.toLowerCase();
-            if (!mode) {
-                addSystemMessage(
-                    `Current verbose mode: ${(selectedSession as { verboseLevel?: string } | null)?.verboseLevel || "off"}. Options: ${VERBOSE_CHOICES.join(", ")}.`
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ verboseLevel: mode });
-                addSystemMessage(`Verbose mode set to ${mode}.`);
-            });
-            return true;
-        }
-
-        if (command === "/fast") {
-            const mode = argumentText.toLowerCase();
-            if (!mode || mode === "status") {
-                addSystemMessage(
-                    `Current fast mode: ${(selectedSession as { fastMode?: boolean } | null)?.fastMode ? "on" : "off"}. Options: status, on, off.`
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ fastMode: mode === "on" });
-                addSystemMessage(`Fast mode ${mode === "on" ? "enabled" : "disabled"}.`);
-            });
-            return true;
-        }
-
-        if (command === "/reasoning") {
-            const mode = argumentText.toLowerCase();
-            if (!mode) {
-                addSystemMessage(
-                    `Current reasoning visibility: ${(selectedSession as { reasoningLevel?: string } | null)?.reasoningLevel || "off"}. Options: ${REASONING_CHOICES.join(", ")}.`
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ reasoningLevel: mode });
-                addSystemMessage(`Reasoning visibility set to ${mode}.`);
-            });
-            return true;
-        }
-
-        if (command === "/elevated") {
-            const mode = argumentText.toLowerCase();
-            if (!mode) {
-                addSystemMessage(
-                    `Current elevated mode: ${(selectedSession as { elevatedLevel?: string } | null)?.elevatedLevel || "off"}. Options: ${ELEVATED_CHOICES.join(", ")}.`
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ elevatedLevel: mode });
-                addSystemMessage(`Elevated mode set to ${mode}.`);
-            });
-            return true;
-        }
-
-        if (command === "/usage") {
-            const mode = argumentText.toLowerCase();
-            if (!mode) {
-                const session = selectedSession as {
-                    inputTokens?: number;
-                    outputTokens?: number;
-                    totalTokens?: number;
-                } | null;
-                addSystemMessage(
-                    [
-                        "Session usage:",
-                        `Input: ${session?.inputTokens ?? "n/a"}`,
-                        `Output: ${session?.outputTokens ?? "n/a"}`,
-                        `Total: ${session?.totalTokens ?? "n/a"}`,
-                    ].join("\n")
-                );
-                return true;
-            }
-
-            await runSimpleCommand(async () => {
-                await patchSession({ responseUsage: mode });
-                addSystemMessage(`Usage display set to ${mode}.`);
-            });
-            return true;
-        }
-
-        if (command === "/compact") {
-            await runSimpleCommand(async () => {
-                const result = (await request("sessions.compact", {
-                    key: selectedSessionKey,
-                })) as { compacted?: boolean; reason?: string };
-                addSystemMessage(
-                    result.compacted
-                        ? "Context compacted successfully."
-                        : `Compaction skipped${result.reason ? `: ${result.reason}` : "."}`
-                );
-            });
-            return true;
-        }
-
-        if (command === "/exec") {
-            const [execHost, execSecurity, execAsk, execNode] = argumentText.split(/\s+/);
-            await runSimpleCommand(async () => {
-                await patchSession({ execHost, execSecurity, execAsk, execNode });
-                addSystemMessage("Exec defaults updated.");
-            });
-            return true;
-        }
-
-        setSendError(
-            `${rawCommand} is visible in autocomplete, but is not wired in Mira Dashboard yet. Use the integrated OpenClaw chat for that command for now.`
-        );
-        return true;
-    };
+    const handleSlashCommand = useChatSlashCommands({
+        request,
+        selectedSession,
+        selectedSessionKey,
+        attachments,
+        chatModelOptions,
+        showThinkingOutput,
+        showToolOutput,
+        updateActiveStreams,
+        setMessages,
+        setDraft,
+        setSendError,
+        setIsSending,
+        setIsAssistantTyping,
+        setIsAtBottom,
+        setHistoryLoadVersion,
+        shouldStickToBottomReference,
+    });
 
     const handleSend = async () => {
         if (!selectedSessionKey || isSending) {
