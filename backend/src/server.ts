@@ -32,6 +32,7 @@ import staticRoutes from "./routes/static.js";
 import sttRoutes from "./routes/stt.js";
 import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
+import ttsRoutes from "./routes/tts.js";
 import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
@@ -115,6 +116,7 @@ settingsRoutes(app, express, gateway.getStatus);
 sessionsRoutes(app);
 sttRoutes(app, express);
 tasksRoutes(app, express);
+ttsRoutes(app, express);
 notificationsRoutes(app);
 opsRoutes(app);
 terminalRoutes(app);

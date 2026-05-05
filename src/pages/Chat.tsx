@@ -38,6 +38,7 @@ import {
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
+    messageDeleteKey,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtils";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
@@ -53,6 +54,43 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
+
+function deletedMessagesStorageKey(sessionKey: string): string {
+    return `mira-dashboard-chat-deleted-messages:${sessionKey}`;
+}
+
+function readDeletedMessageKeys(sessionKey: string): Set<string> {
+    if (!sessionKey || typeof window === "undefined") {
+        return new Set();
+    }
+
+    try {
+        const raw = window.localStorage.getItem(deletedMessagesStorageKey(sessionKey));
+        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+        return new Set(
+            Array.isArray(parsed)
+                ? parsed.filter((value): value is string => typeof value === "string")
+                : []
+        );
+    } catch {
+        return new Set();
+    }
+}
+
+function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): void {
+    if (!sessionKey) {
+        return;
+    }
+
+    try {
+        window.localStorage.setItem(
+            deletedMessagesStorageKey(sessionKey),
+            JSON.stringify([...keys])
+        );
+    } catch {
+        // Keep in-memory deleted state if browser storage is unavailable.
+    }
+}
 
 interface StoredChatDiagnosticVisibility {
     thinking: boolean;
@@ -170,6 +208,9 @@ export function Chat() {
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({});
     const [sendError, setSendError] = useState<string | null>(null);
+    const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
+        () => new Set()
+    );
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -244,8 +285,11 @@ export function Chat() {
         selectedSessionIsRunning ||
         selectedSessionHasActiveMarker ||
         Boolean(selectedStreamText);
-    const chatRows: ChatRow[] = messages.map((message, index) => ({
-        key: message.runId || `${message.timestamp || "no-time"}-${index}`,
+    const visibleMessagesForRows = messages.filter(
+        (message) => !deletedMessageKeys.has(messageDeleteKey(message))
+    );
+    const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
+        key: messageDeleteKey(message),
         kind: "message",
         message,
     }));
@@ -279,6 +323,12 @@ export function Chat() {
             setSelectedSessionKey(sortedSessions[0]?.key || "");
         }
     }, [sortedSessions, selectedSessionKey]);
+
+    useEffect(() => {
+        setDeletedMessageKeys(
+            selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
+        );
+    }, [selectedSessionKey]);
 
     useEffect(() => {
         if (!selectedSessionKey) {
@@ -677,6 +727,23 @@ export function Chat() {
         setDraft(value);
     };
 
+    const handleDeleteMessage = (messageKey: string) => {
+        if (!selectedSessionKey) {
+            return;
+        }
+
+        if (!window.confirm("Delete this message from your local chat view?")) {
+            return;
+        }
+
+        setDeletedMessageKeys((previous) => {
+            const next = new Set(previous);
+            next.add(messageKey);
+            writeDeletedMessageKeys(selectedSessionKey, next);
+            return next;
+        });
+    };
+
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) {
             return;
@@ -1019,6 +1086,8 @@ export function Chat() {
                             showToolOutput
                         )}
                         onScroll={handleMessagesScroll}
+                        onTtsError={setSendError}
+                        onDeleteMessage={handleDeleteMessage}
                     />
 
                     {(sendError || error) && (

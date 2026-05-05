@@ -1,6 +1,14 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
-import { FileText, Image as ImageIcon, Loader2, Paperclip } from "lucide-react";
-import type { RefObject } from "react";
+import {
+    FileText,
+    Image as ImageIcon,
+    Loader2,
+    Paperclip,
+    Square,
+    Trash2,
+    Volume2,
+} from "lucide-react";
+import { type RefObject, useRef, useState } from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -24,6 +32,8 @@ interface ChatMessagesListProps {
     onPreview: (preview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
+    onTtsError: (error: string) => void;
+    onDeleteMessage: (messageKey: string) => void;
 }
 
 function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
@@ -126,6 +136,66 @@ function AttachmentList({
     );
 }
 
+function DeleteMessageButton({
+    messageKey,
+    onDelete,
+}: {
+    messageKey: string;
+    onDelete: (messageKey: string) => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={() => onDelete(messageKey)}
+            className="rounded p-1 text-white/80 opacity-75 transition hover:bg-white/20 hover:text-white hover:opacity-100"
+            title="Delete message from this chat view"
+            aria-label="Delete your message"
+        >
+            <Trash2 className="h-3.5 w-3.5" />
+        </button>
+    );
+}
+
+function TtsButton({
+    text,
+    messageKey,
+    playingMessageKey,
+    loadingMessageKey,
+    onSpeak,
+}: {
+    text: string;
+    messageKey: string;
+    playingMessageKey: string | null;
+    loadingMessageKey: string | null;
+    onSpeak: (messageKey: string, text: string) => void;
+}) {
+    const isLoading = loadingMessageKey === messageKey;
+    const isPlaying = playingMessageKey === messageKey;
+
+    if (!text.trim()) {
+        return null;
+    }
+
+    return (
+        <button
+            type="button"
+            onClick={() => onSpeak(messageKey, text)}
+            disabled={isLoading}
+            className="rounded p-1 text-primary-300 opacity-75 transition hover:bg-primary-700 hover:text-primary-100 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+            title={isPlaying ? "Stop reading aloud" : "Read aloud"}
+            aria-label={isPlaying ? "Stop reading aloud" : "Read assistant message aloud"}
+        >
+            {isLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : isPlaying ? (
+                <Square className="h-3.5 w-3.5" />
+            ) : (
+                <Volume2 className="h-3.5 w-3.5" />
+            )}
+        </button>
+    );
+}
+
 function TypingIndicator() {
     return (
         <div className="flex justify-start pb-3">
@@ -157,7 +227,75 @@ export function ChatMessagesList({
     onPreview,
     visibility,
     onScroll,
+    onTtsError,
+    onDeleteMessage,
 }: ChatMessagesListProps) {
+    const audioReference = useRef<HTMLAudioElement | null>(null);
+    const audioUrlReference = useRef<string | null>(null);
+    const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
+    const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
+
+    const stopAudio = () => {
+        audioReference.current?.pause();
+        audioReference.current = null;
+
+        if (audioUrlReference.current) {
+            URL.revokeObjectURL(audioUrlReference.current);
+            audioUrlReference.current = null;
+        }
+
+        setPlayingMessageKey(null);
+    };
+
+    const speakMessage = async (messageKey: string, text: string) => {
+        if (playingMessageKey === messageKey) {
+            stopAudio();
+            return;
+        }
+
+        stopAudio();
+        setLoadingMessageKey(messageKey);
+        onTtsError("");
+
+        try {
+            const response = await fetch("/api/tts/speak", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text }),
+            });
+
+            if (!response.ok) {
+                const error = (await response
+                    .json()
+                    .catch(() => ({ error: "Failed to generate speech" }))) as {
+                    error?: string;
+                };
+                throw new Error(error.error || `HTTP ${response.status}`);
+            }
+
+            const audioUrl = URL.createObjectURL(await response.blob());
+            const audio = new Audio(audioUrl);
+            audioReference.current = audio;
+            audioUrlReference.current = audioUrl;
+            audio.addEventListener("ended", stopAudio, { once: true });
+            audio.addEventListener(
+                "error",
+                () => {
+                    onTtsError("Failed to play generated speech.");
+                    stopAudio();
+                },
+                { once: true }
+            );
+            setPlayingMessageKey(messageKey);
+            await audio.play();
+        } catch (error_) {
+            stopAudio();
+            onTtsError((error_ as Error).message || "Failed to read message aloud");
+        } finally {
+            setLoadingMessageKey(null);
+        }
+    };
     const virtualItems = messagesVirtualizer.getVirtualItems();
     const firstVirtualItem = virtualItems[0];
     const lastVirtualItem = virtualItems.at(-1);
@@ -214,6 +352,12 @@ export function ChatMessagesList({
 
                         const normalizedRole = row.message.role.toLowerCase();
                         const isUser = normalizedRole === "user";
+                        const canDeleteMessage = isUser && row.kind === "message";
+                        const canSpeakMessage =
+                            !isUser &&
+                            normalizedRole === "assistant" &&
+                            row.kind === "message" &&
+                            Boolean(row.message.text.trim());
                         const isToolResult =
                             normalizedRole === "tool" ||
                             normalizedRole === "toolresult" ||
@@ -240,8 +384,29 @@ export function ChatMessagesList({
                                                 : "border border-primary-700 bg-primary-800 text-primary-100",
                                         ].join(" ")}
                                     >
-                                        <div className="mb-0.5 text-[11px] uppercase tracking-wide opacity-70">
-                                            {row.message.role}
+                                        <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide opacity-70">
+                                            <span>{row.message.role}</span>
+                                            <div className="flex items-center gap-1">
+                                                {canDeleteMessage ? (
+                                                    <DeleteMessageButton
+                                                        messageKey={row.key}
+                                                        onDelete={onDeleteMessage}
+                                                    />
+                                                ) : null}
+                                                {canSpeakMessage ? (
+                                                    <TtsButton
+                                                        text={row.message.text}
+                                                        messageKey={row.key}
+                                                        playingMessageKey={
+                                                            playingMessageKey
+                                                        }
+                                                        loadingMessageKey={
+                                                            loadingMessageKey
+                                                        }
+                                                        onSpeak={speakMessage}
+                                                    />
+                                                ) : null}
+                                            </div>
                                         </div>
                                         {row.message.images &&
                                         row.message.images.length > 0 ? (

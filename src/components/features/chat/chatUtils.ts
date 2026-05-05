@@ -27,6 +27,15 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     return `${message.role.toLowerCase()}::${message.text.trim()}`;
 }
 
+export function messageDeleteKey(message: ChatHistoryMessage): string {
+    return [
+        message.role.toLowerCase(),
+        message.timestamp || "no-time",
+        message.runId || "no-run",
+        message.text.trim(),
+    ].join("::");
+}
+
 function assistantTextLooksRecovered(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();
