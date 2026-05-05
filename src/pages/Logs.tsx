@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Download, FileText } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { logsCollection } from "../collections/logs";
 import { LevelFilter, LogLine } from "../components/features/logs";
@@ -27,6 +27,7 @@ export function Logs() {
 
     const logContainerRef = useRef<HTMLDivElement>(null);
     const shouldStickToBottomRef = useRef(true);
+    const lastKnownLogScrollTopRef = useRef(0);
     const subscribedConnectionIdRef = useRef<number | null>(null);
     const requestSeqRef = useRef(0);
 
@@ -140,14 +141,6 @@ export function Logs() {
         overscan: 15,
         getItemKey: (index) => filteredLogs[index]?.id ?? index,
         measureElement: (element) => Math.ceil(element.getBoundingClientRect().height),
-        rangeExtractor: (range) => {
-            const base = defaultRangeExtractor(range);
-            const lastIndex = filteredLogs.length - 1;
-            if (lastIndex < 0 || base.includes(lastIndex)) {
-                return base;
-            }
-            return [...base, lastIndex];
-        },
     });
 
     const checkIsAtBottom = () => {
@@ -159,6 +152,11 @@ export function Logs() {
     };
 
     const handleScroll = () => {
+        const el = logContainerRef.current;
+        if (el) {
+            lastKnownLogScrollTopRef.current = el.scrollTop;
+        }
+
         const atBottom = checkIsAtBottom();
         shouldStickToBottomRef.current = atBottom;
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
@@ -168,20 +166,38 @@ export function Logs() {
         const el = logContainerRef.current;
         if (!el) return;
         el.scrollTop = el.scrollHeight;
+        lastKnownLogScrollTopRef.current = el.scrollTop;
         shouldStickToBottomRef.current = true;
         setIsAtBottom(true);
     };
 
-    useEffect(() => {
-        if (!shouldStickToBottomRef.current || filteredLogs.length === 0) return;
+    useLayoutEffect(() => {
+        if (filteredLogs.length === 0) return;
+
+        if (!shouldStickToBottomRef.current) {
+            const restoreScrollTop = () => {
+                const el = logContainerRef.current;
+                if (!el || shouldStickToBottomRef.current) {
+                    return;
+                }
+
+                el.scrollTop = lastKnownLogScrollTopRef.current;
+            };
+
+            restoreScrollTop();
+            const restoreFrame = requestAnimationFrame(restoreScrollTop);
+            return () => cancelAnimationFrame(restoreFrame);
+        }
 
         const lastIndex = filteredLogs.length - 1;
         rowVirtualizer.scrollToIndex(lastIndex, { align: "end" });
 
-        requestAnimationFrame(() => {
+        const followFrame = requestAnimationFrame(() => {
             rowVirtualizer.scrollToIndex(lastIndex, { align: "end" });
         });
-    }, [isAtBottom, filteredLogs.length, rowVirtualizer]);
+
+        return () => cancelAnimationFrame(followFrame);
+    }, [filteredLogs.length, rowVirtualizer]);
 
     const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
 
@@ -268,6 +284,7 @@ export function Logs() {
                     ref={logContainerRef}
                     onScroll={handleScroll}
                     className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
+                    style={{ overflowAnchor: "none" }}
                 >
                     {!isAtBottom && filteredLogs.length > 0 && (
                         <button

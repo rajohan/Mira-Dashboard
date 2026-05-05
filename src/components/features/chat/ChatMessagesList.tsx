@@ -170,6 +170,7 @@ export function ChatMessagesList({
             ref={messagesContainerReference}
             onScroll={onScroll}
             className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1"
+            style={{ overflowAnchor: "none" }}
         >
             {!isAtBottom && chatRows.length > 0 ? (
                 <button

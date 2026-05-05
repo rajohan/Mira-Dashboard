@@ -51,6 +51,7 @@ import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessi
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
+const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
 
 interface StoredChatDiagnosticVisibility {
     thinking: boolean;
@@ -96,6 +97,7 @@ export function Chat() {
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
     const fileInputReference = useRef<HTMLInputElement | null>(null);
     const shouldStickToBottomReference = useRef(true);
+    const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const liveHistoryRefreshTimerReference = useRef<number | null>(null);
     const loadedHistorySessionReference = useRef("");
@@ -410,6 +412,56 @@ export function Chat() {
         showToolOutput,
     ]);
 
+    useEffect(() => {
+        if (!selectedSessionKey || (!showThinkingOutput && !showToolOutput)) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const refreshDiagnosticHistory = async () => {
+            try {
+                const result = (await request("chat.history", {
+                    sessionKey: selectedSessionKey,
+                    limit: CHAT_HISTORY_LIMIT,
+                })) as {
+                    messages?: RawChatHistoryMessage[];
+                };
+
+                if (cancelled) {
+                    return;
+                }
+
+                setMessages((previous) =>
+                    mergeWithRecentOptimisticMessages(
+                        previous,
+                        visibleHistoryMessages(
+                            result.messages,
+                            createChatVisibility(showThinkingOutput, showToolOutput)
+                        )
+                    )
+                );
+
+                if (shouldStickToBottomReference.current) {
+                    setIsAtBottom(true);
+                }
+                setHistoryLoadVersion((previous) => previous + 1);
+            } catch {
+                // Diagnostics refresh is opportunistic; live events still handle the main path.
+            }
+        };
+
+        const interval = window.setInterval(
+            () => void refreshDiagnosticHistory(),
+            DIAGNOSTIC_HISTORY_POLL_MS
+        );
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(interval);
+        };
+    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput]);
+
     useChatRuntimeEvents({
         request,
         subscribe,
@@ -449,6 +501,11 @@ export function Chat() {
     };
 
     const handleMessagesScroll = () => {
+        const container = messagesContainerReference.current;
+        if (container) {
+            lastKnownMessagesScrollTopReference.current = container.scrollTop;
+        }
+
         const atBottom = checkIsAtBottom();
         shouldStickToBottomReference.current = atBottom;
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
@@ -462,6 +519,7 @@ export function Chat() {
 
         messagesVirtualizer.scrollToIndex(chatRows.length - 1, { align: "end" });
         container.scrollTo({ top: container.scrollHeight });
+        lastKnownMessagesScrollTopReference.current = container.scrollTop;
         setIsAtBottom(true);
         shouldStickToBottomReference.current = true;
     };
@@ -491,7 +549,18 @@ export function Chat() {
         }
 
         if (!shouldStickToBottomReference.current) {
-            return;
+            const restoreScrollTop = () => {
+                const container = messagesContainerReference.current;
+                if (!container || shouldStickToBottomReference.current) {
+                    return;
+                }
+
+                container.scrollTop = lastKnownMessagesScrollTopReference.current;
+            };
+
+            restoreScrollTop();
+            const restoreFrame = requestAnimationFrame(restoreScrollTop);
+            return () => cancelAnimationFrame(restoreFrame);
         }
 
         scrollMessagesToBottom();

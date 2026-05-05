@@ -38,6 +38,7 @@ export function Sessions() {
     const [isFeedAtBottom, setIsFeedAtBottom] = useState(true);
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
     const shouldStickFeedToBottomReference = useRef(true);
+    const lastKnownFeedScrollTopReference = useRef(0);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -140,11 +141,17 @@ export function Sessions() {
 
         feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
         container.scrollTo({ top: container.scrollHeight });
+        lastKnownFeedScrollTopReference.current = container.scrollTop;
         shouldStickFeedToBottomReference.current = true;
         setIsFeedAtBottom(true);
     };
 
     const handleFeedScroll = () => {
+        const container = liveFeedContainerReference.current;
+        if (container) {
+            lastKnownFeedScrollTopReference.current = container.scrollTop;
+        }
+
         const atBottom = checkFeedIsAtBottom();
         shouldStickFeedToBottomReference.current = atBottom;
         setIsFeedAtBottom((previous) => (previous === atBottom ? previous : atBottom));
@@ -155,8 +162,23 @@ export function Sessions() {
     }, [feedRows.length, feedVirtualizer]);
 
     useLayoutEffect(() => {
-        if (feedRows.length === 0 || !shouldStickFeedToBottomReference.current) {
+        if (feedRows.length === 0) {
             return;
+        }
+
+        if (!shouldStickFeedToBottomReference.current) {
+            const restoreScrollTop = () => {
+                const container = liveFeedContainerReference.current;
+                if (!container || shouldStickFeedToBottomReference.current) {
+                    return;
+                }
+
+                container.scrollTop = lastKnownFeedScrollTopReference.current;
+            };
+
+            restoreScrollTop();
+            const restoreFrame = requestAnimationFrame(restoreScrollTop);
+            return () => cancelAnimationFrame(restoreFrame);
         }
 
         scrollFeedToBottom();
@@ -262,6 +284,7 @@ export function Sessions() {
                         ref={liveFeedContainerReference}
                         onScroll={handleFeedScroll}
                         className="h-96 overflow-y-auto pr-1"
+                        style={{ overflowAnchor: "none" }}
                     >
                         {!isFeedAtBottom && feedRows.length > 0 ? (
                             <button
