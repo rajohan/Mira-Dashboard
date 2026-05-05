@@ -57,6 +57,7 @@ interface ActiveChatStream {
     runId: string;
     aliases: string[];
     text: string;
+    message?: ChatHistoryMessage;
     updatedAt: string;
 }
 
@@ -153,18 +154,37 @@ function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
     });
 }
 
-function streamTextFromPayload(payload: ChatStreamEventMessage): string {
-    return normalizeAssistantPayload(
-        payload.message ?? payload.delta ?? payload.content ?? payload.text
-    ).text;
-}
-
 function finalMessageFromPayload(payload: ChatStreamEventMessage): ChatHistoryMessage {
     return {
         ...normalizeAssistantPayload(payload.message ?? payload.content ?? payload.text),
         timestamp: new Date().toISOString(),
         runId: payload.runId,
     };
+}
+
+function mergeStreamMessage(
+    previous: ChatHistoryMessage | undefined,
+    next: ChatHistoryMessage,
+    text: string,
+    runId?: string
+): ChatHistoryMessage {
+    return {
+        role: "assistant",
+        content: next.content,
+        text,
+        images: next.images?.length ? next.images : previous?.images || [],
+        attachments: next.attachments?.length
+            ? next.attachments
+            : previous?.attachments || [],
+        thinking: next.thinking?.length ? next.thinking : previous?.thinking,
+        toolCalls: next.toolCalls?.length ? next.toolCalls : previous?.toolCalls,
+        timestamp: new Date().toISOString(),
+        runId,
+    };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function payloadIsCommandMessage(value: unknown): boolean {
@@ -232,6 +252,7 @@ export function Chat() {
     const fileInputReference = useRef<HTMLInputElement | null>(null);
     const shouldStickToBottomReference = useRef(true);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
+    const liveHistoryRefreshTimerReference = useRef<number | null>(null);
     const loadedHistorySessionReference = useRef("");
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
@@ -289,9 +310,19 @@ export function Chat() {
     const selectedSessionHasActiveMarker = Boolean(
         selectedSessionKey && hasActiveRunMarker(selectedSessionKey)
     );
-    const selectedStreamText = selectedSessionKey
-        ? activeStreams[selectedSessionKey]?.text || ""
-        : "";
+    const selectedStream = selectedSessionKey
+        ? activeStreams[selectedSessionKey]
+        : undefined;
+    const selectedStreamText = selectedStream?.text || "";
+    const selectedStreamMessage = selectedStream?.message;
+    const shouldShowStreamRow = Boolean(
+        selectedStreamText ||
+        (selectedStreamMessage &&
+            isRenderableChatHistoryMessage(
+                selectedStreamMessage,
+                createChatVisibility(showThinkingOutput, showToolOutput)
+            ))
+    );
     const shouldShowTypingIndicator =
         isSending ||
         isAssistantTyping ||
@@ -304,11 +335,11 @@ export function Chat() {
         message,
     }));
 
-    if (selectedStreamText) {
+    if (shouldShowStreamRow) {
         chatRows.push({
             key: `stream-${selectedSessionKey || "none"}`,
             kind: "stream",
-            message: {
+            message: selectedStreamMessage || {
                 role: "assistant",
                 content: selectedStreamText,
                 text: selectedStreamText,
@@ -528,14 +559,133 @@ export function Chat() {
     });
 
     useEffect(() => {
-        return subscribe((raw) => {
+        const refreshSelectedHistorySoon = (delayMs = 450) => {
+            if (!selectedSessionKey) {
+                return;
+            }
+
+            if (liveHistoryRefreshTimerReference.current !== null) {
+                window.clearTimeout(liveHistoryRefreshTimerReference.current);
+            }
+
+            liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
+                liveHistoryRefreshTimerReference.current = null;
+
+                try {
+                    const result = (await request("chat.history", {
+                        sessionKey: selectedSessionKey,
+                        limit: CHAT_HISTORY_LIMIT,
+                    })) as { messages?: RawChatHistoryMessage[] };
+
+                    setMessages((previous) =>
+                        mergeWithRecentOptimisticMessages(
+                            previous,
+                            visibleHistoryMessages(
+                                result.messages,
+                                createChatVisibility(showThinkingOutput, showToolOutput)
+                            )
+                        )
+                    );
+
+                    if (shouldStickToBottomReference.current) {
+                        setIsAtBottom(true);
+                    }
+                    setHistoryLoadVersion((previous) => previous + 1);
+                } catch {
+                    // Keep existing live state if an opportunistic refresh fails.
+                }
+            }, delayMs);
+        };
+
+        const handleRuntimeTranscriptEvent = (
+            eventName: string | undefined,
+            payload: unknown
+        ) => {
+            if (!eventName || !selectedSessionKey || !isRecord(payload)) {
+                return;
+            }
+
+            const eventSessionKey =
+                typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
+            const eventRunId =
+                typeof payload.runId === "string" ? payload.runId : undefined;
+            const streamForRun = eventRunId
+                ? Object.values(activeStreamsReference.current).find((stream) =>
+                      stream.aliases.includes(eventRunId)
+                  )
+                : undefined;
+            const eventMatchesSelected = isSameSessionKey(
+                eventSessionKey || streamForRun?.sessionKey,
+                selectedSessionKey
+            );
+
+            if (!eventMatchesSelected) {
+                return;
+            }
+
+            const stream = typeof payload.stream === "string" ? payload.stream : "";
+            const data = isRecord(payload.data) ? payload.data : {};
+            const phase = typeof data.phase === "string" ? data.phase : "";
+            const shouldRefreshDiagnostics =
+                showThinkingOutput ||
+                showToolOutput ||
+                eventName === "session.tool" ||
+                stream === "tool" ||
+                stream === "item";
+
+            if (!shouldRefreshDiagnostics) {
+                return;
+            }
+
+            const isTerminalLifecycleEvent =
+                stream === "lifecycle" && (phase === "end" || phase === "error");
+
+            if (isTerminalLifecycleEvent) {
+                setIsAssistantTyping(false);
+                clearActiveRunMarker(selectedSessionKey);
+            } else {
+                setIsAssistantTyping(true);
+                markActiveRun(selectedSessionKey);
+            }
+
+            if (eventRunId) {
+                updateActiveStreams((previous) => {
+                    const existing = previous[selectedSessionKey];
+                    const runId = existing?.runId || eventRunId;
+                    return {
+                        ...previous,
+                        [selectedSessionKey]: {
+                            sessionKey: selectedSessionKey,
+                            runId,
+                            aliases: uniqueStrings([
+                                ...(existing?.aliases || []),
+                                eventRunId,
+                                runId,
+                            ]),
+                            text: existing?.text || "",
+                            message: existing?.message,
+                            updatedAt: new Date().toISOString(),
+                        },
+                    };
+                });
+            }
+
+            refreshSelectedHistorySoon(phase === "end" ? 150 : 500);
+        };
+
+        const unsubscribe = subscribe((raw) => {
             const data = raw as {
                 type?: string;
                 event?: string;
                 payload?: unknown;
             };
 
-            if (data.type !== "event" || data.event !== "chat") {
+            if (data.type !== "event") {
+                return;
+            }
+
+            if (data.event !== "chat") {
+                handleRuntimeTranscriptEvent(data.event, data.payload);
                 return;
             }
 
@@ -603,17 +753,25 @@ export function Chat() {
             };
 
             if (payload.state === "delta") {
-                const nextText = streamTextFromPayload(payload);
+                const deltaMessage = normalizeAssistantPayload(
+                    payload.message ?? payload.delta ?? payload.content ?? payload.text
+                );
+                const nextText = deltaMessage.text;
                 if (eventMatchesSelected) {
                     setIsAssistantTyping(true);
                 }
                 markActiveRun(streamSessionKey);
 
-                if (nextText.trim()) {
+                if (
+                    nextText.trim() ||
+                    deltaMessage.thinking?.length ||
+                    deltaMessage.toolCalls?.length
+                ) {
                     updateActiveStreams((previous) => {
                         const existing = previous[streamSessionKey];
                         const runId =
                             payload.runId || existing?.runId || streamSessionKey;
+                        const text = mergeStreamText(existing?.text || "", nextText);
                         return {
                             ...previous,
                             [streamSessionKey]: {
@@ -624,7 +782,13 @@ export function Chat() {
                                     payload.runId,
                                     runId,
                                 ]),
-                                text: mergeStreamText(existing?.text || "", nextText),
+                                text,
+                                message: mergeStreamMessage(
+                                    existing?.message,
+                                    deltaMessage,
+                                    text,
+                                    runId
+                                ),
                                 updatedAt: new Date().toISOString(),
                             },
                         };
@@ -722,6 +886,14 @@ export function Chat() {
                 clearActiveRunMarker(streamSessionKey);
             }
         });
+
+        return () => {
+            unsubscribe();
+            if (liveHistoryRefreshTimerReference.current !== null) {
+                window.clearTimeout(liveHistoryRefreshTimerReference.current);
+                liveHistoryRefreshTimerReference.current = null;
+            }
+        };
     }, [request, selectedSessionKey, showThinkingOutput, showToolOutput, subscribe]);
 
     const checkIsAtBottom = () => {
