@@ -102,7 +102,7 @@ export function AgentAccessSection({
     };
 
     return (
-        <ExpandableCard title="Agent access control" icon={ShieldCheck} defaultExpanded>
+        <ExpandableCard title="Agent access control" icon={ShieldCheck}>
             <div className="space-y-5">
                 <div className="flex flex-wrap gap-2">
                     {draftAgents.map((agent) => {

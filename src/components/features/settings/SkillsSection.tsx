@@ -50,7 +50,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
     }
 
     return (
-        <ExpandableCard title="Skills" icon={Users} defaultExpanded>
+        <ExpandableCard title="Skills" icon={Users}>
             <div className="space-y-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="text-sm text-primary-400">
