@@ -33,6 +33,8 @@ export interface OpenClawConfig {
         defaults?: {
             skills?: string[];
             model?: { primary?: string; fallbacks?: string[] };
+            imageModel?: { primary?: string; fallbacks?: string[] };
+            imageGenerationModel?: { primary?: string; fallbacks?: string[] };
             contextSettings?: {
                 maxTokens?: number;
                 temperature?: number;
@@ -47,21 +49,37 @@ export interface OpenClawConfig {
             temperature?: number;
         };
     };
-    channels?: {
-        discord?: {
+    channels?: Record<
+        string,
+        {
             enabled?: boolean;
             botId?: string;
-        };
-    };
+            groupPolicy?: string;
+            dmPolicy?: string;
+            allowFrom?: string[];
+            [key: string]: unknown;
+        }
+    >;
     tools?: {
+        profile?: string;
         webSearch?: {
             enabled?: boolean;
             provider?: string;
         };
+        web?: {
+            search?: { enabled?: boolean; provider?: string };
+            fetch?: { enabled?: boolean };
+        };
         exec?: {
             enabled?: boolean;
             mode?: string;
+            security?: string;
+            ask?: string;
         };
+        elevated?: { enabled?: boolean };
+        agentToAgent?: { enabled?: boolean };
+        sessions?: { visibility?: string };
+        [key: string]: unknown;
     };
     gateway?: {
         port?: number;
@@ -77,8 +95,26 @@ export interface OpenClawConfig {
         };
     };
     heartbeat?: {
-        every?: number;
+        every?: number | string;
         target?: string;
+    };
+    auth?: {
+        profiles?: Record<string, unknown>;
+    };
+    commands?: {
+        restart?: boolean;
+        ownerAllowFrom?: string[];
+    };
+    logging?: {
+        redactSensitive?: string;
+    };
+    meta?: {
+        lastTouchedVersion?: string;
+        lastTouchedAt?: string;
+    };
+    wizard?: {
+        lastRunVersion?: string;
+        lastRunAt?: string;
     };
     [key: string]: unknown;
 }
@@ -111,8 +147,14 @@ async function restartGateway(): Promise<void> {
     await apiPost("/restart");
 }
 
-async function createBackup(): Promise<{ path: string }> {
-    return apiPost<{ path: string }>("/backup");
+async function createBackup(): Promise<{
+    createdAt: string;
+    hash?: string;
+    config: OpenClawConfig;
+}> {
+    return apiPost<{ createdAt: string; hash?: string; config: OpenClawConfig }>(
+        "/backup"
+    );
 }
 
 // Hooks

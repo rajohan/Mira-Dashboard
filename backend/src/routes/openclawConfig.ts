@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import express, { type RequestHandler } from "express";
 import fs from "fs";
 import os from "os";
@@ -38,10 +41,15 @@ interface SkillInfo {
     source: SkillSource;
 }
 
+const execFileAsync = promisify(execFile);
+
 const OPENCLAW_PACKAGE_ROOT = path.resolve(
     process.env.OPENCLAW_PACKAGE_ROOT ||
         path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
 );
+
+const OPENCLAW_BIN =
+    process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw");
 
 function readSkillDescription(skillPath: string): string | undefined {
     try {
@@ -173,6 +181,33 @@ export default function openClawConfigRoutes(app: express.Application): void {
             res.json({ skills: getSkills(snapshot.parsed) });
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
+
+    app.post("/api/backup", (async (_req, res) => {
+        try {
+            const snapshot = await getConfigSnapshot();
+            res.json({
+                createdAt: new Date().toISOString(),
+                hash: snapshot.hash,
+                config: snapshot.parsed || {},
+            });
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
+
+    app.post("/api/restart", (async (_req, res) => {
+        try {
+            await execFileAsync(OPENCLAW_BIN, ["gateway", "restart"], {
+                timeout: 30_000,
+            });
+            res.json({ ok: true });
+        } catch (error) {
+            res.status(500).json({
+                error:
+                    error instanceof Error ? error.message : "Failed to restart gateway",
+            });
         }
     }) as RequestHandler);
 

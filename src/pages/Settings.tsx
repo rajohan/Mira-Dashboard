@@ -11,6 +11,8 @@ import {
     SkillsSection,
     ToolSection,
 } from "../components/features/settings";
+import type { ChannelSummary } from "../components/features/settings/ChannelSection";
+import type { ToolSettings } from "../components/features/settings/ToolSection";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { LoadingState } from "../components/ui/LoadingState";
@@ -24,6 +26,44 @@ import {
     useUpdateConfig,
 } from "../hooks";
 import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
+
+function patchSuccess(setSuccess: (value: string | null) => void, message: string) {
+    setSuccess(message);
+    setTimeout(() => setSuccess(null), 3000);
+}
+
+function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[] {
+    const channels = (config?.channels || {}) as Record<string, Record<string, unknown>>;
+    return Object.entries(channels)
+        .map(([id, value]) => ({
+            id,
+            enabled: value.enabled === true,
+            policy:
+                typeof value.groupPolicy === "string"
+                    ? `group: ${value.groupPolicy}`
+                    : typeof value.dmPolicy === "string"
+                      ? `dm: ${value.dmPolicy}`
+                      : undefined,
+            details:
+                typeof value.botId === "string"
+                    ? value.botId
+                    : Array.isArray(value.allowFrom)
+                      ? `${value.allowFrom.length} allowed senders`
+                      : undefined,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function numberFromDuration(value: unknown, fallback: number): number {
+    if (typeof value === "number") return value;
+    if (typeof value !== "string") return fallback;
+    const match = value.match(/^(\d+)([smhd])?$/i);
+    if (!match) return fallback;
+    const amount = Number(match[1]);
+    const unit = (match[2] || "s").toLowerCase();
+    const factors: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86_400 };
+    return amount * (factors[unit] || 1);
+}
 
 export function Settings() {
     const [error, setError] = useState<string | null>(null);
@@ -83,8 +123,7 @@ export function Settings() {
             await updateConfig.mutateAsync({
                 session: { reset: { idleMinutes } },
             } as OpenClawConfig);
-            setSuccess("Session settings saved");
-            setTimeout(() => setSuccess(null), 3000);
+            patchSuccess(setSuccess, "Session settings saved");
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -93,11 +132,33 @@ export function Settings() {
     async function handleHeartbeatSave(every: number, target: string) {
         setError(null);
         try {
-            await updateConfig.mutateAsync({
-                heartbeat: { every, target: target || undefined },
-            } as OpenClawConfig);
-            setSuccess("Heartbeat settings saved");
-            setTimeout(() => setSuccess(null), 3000);
+            const nextEvery = every % 60 === 0 ? `${every / 60}m` : `${every}s`;
+            const agents = config?.agents?.list || [];
+            const opsAgent = agents.find((agent) => agent.id === "ops");
+            const patch = opsAgent
+                ? {
+                      agents: {
+                          list: agents.map((agent) =>
+                              agent.id === "ops"
+                                  ? {
+                                        ...agent,
+                                        heartbeat: {
+                                            ...((agent.heartbeat || {}) as Record<
+                                                string,
+                                                unknown
+                                            >),
+                                            every: nextEvery,
+                                            target: target || undefined,
+                                        },
+                                    }
+                                  : agent
+                          ),
+                      },
+                  }
+                : { heartbeat: { every, target: target || undefined } };
+
+            await updateConfig.mutateAsync(patch as OpenClawConfig);
+            patchSuccess(setSuccess, "Heartbeat settings saved");
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -115,8 +176,61 @@ export function Settings() {
                     list: agents,
                 },
             } as OpenClawConfig);
-            setSuccess("Agent access settings saved");
-            setTimeout(() => setSuccess(null), 3000);
+            patchSuccess(setSuccess, "Agent access settings saved");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        }
+    }
+
+    async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
+        setError(null);
+        try {
+            await updateConfig.mutateAsync({
+                agents: { defaults: { model: values } },
+            } as OpenClawConfig);
+            patchSuccess(setSuccess, "Model settings saved");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        }
+    }
+
+    async function handleToolSave(values: ToolSettings) {
+        setError(null);
+        try {
+            await updateConfig.mutateAsync({
+                tools: {
+                    profile: values.profile || undefined,
+                    web: {
+                        search: {
+                            enabled: values.webSearchEnabled,
+                            provider: values.webSearchProvider || undefined,
+                        },
+                        fetch: { enabled: values.webFetchEnabled },
+                    },
+                    exec: {
+                        security: values.execSecurity,
+                        ask: values.execAsk,
+                    },
+                    elevated: { enabled: values.elevatedEnabled },
+                    agentToAgent: { enabled: values.agentToAgentEnabled },
+                    sessions: { visibility: values.sessionsVisibility || undefined },
+                },
+            } as OpenClawConfig);
+            patchSuccess(setSuccess, "Tool settings saved");
+        } catch (error_) {
+            setError(error_ instanceof Error ? error_.message : "Failed to save");
+        }
+    }
+
+    async function handleChannelsSave(channels: ChannelSummary[]) {
+        setError(null);
+        try {
+            await updateConfig.mutateAsync({
+                channels: Object.fromEntries(
+                    channels.map((channel) => [channel.id, { enabled: channel.enabled }])
+                ),
+            } as OpenClawConfig);
+            patchSuccess(setSuccess, "Channel settings saved");
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -130,47 +244,58 @@ export function Settings() {
         defaultModel:
             config?.agents?.defaults?.model?.primary ||
             config?.agents?.defaultModel ||
-            "Not set",
+            "",
         fallbacks:
-            config?.agents?.defaults?.model?.fallbacks?.join(", ") ||
-            config?.agents?.fallbacks?.join(", ") ||
-            "None",
-        contextWindow:
-            config?.agents?.defaults?.contextSettings?.maxTokens ||
-            config?.agents?.contextSettings?.maxTokens ||
-            128000,
-        temperature:
-            config?.agents?.defaults?.contextSettings?.temperature ||
-            config?.agents?.contextSettings?.temperature ||
-            0.7,
-    };
-
-    const channelInfo = {
-        discordEnabled: config?.channels?.discord?.enabled || false,
-        discordBotId: config?.channels?.discord?.botId || "Not configured",
+            config?.agents?.defaults?.model?.fallbacks || config?.agents?.fallbacks || [],
+        imageModel: config?.agents?.defaults?.imageModel?.primary,
+        imageGenerationModel: config?.agents?.defaults?.imageGenerationModel?.primary,
     };
 
     const toolInfo = {
-        webSearchEnabled: config?.tools?.webSearch?.enabled || false,
-        webSearchProvider: config?.tools?.webSearch?.provider || "None",
-        execEnabled: config?.tools?.exec?.enabled || false,
-        execMode: config?.tools?.exec?.mode || "disabled",
+        profile: config?.tools?.profile || "",
+        webSearchEnabled: config?.tools?.web?.search?.enabled !== false,
+        webSearchProvider: config?.tools?.web?.search?.provider || "",
+        webFetchEnabled: config?.tools?.web?.fetch?.enabled !== false,
+        execSecurity:
+            config?.tools?.exec?.security || config?.tools?.exec?.mode || "deny",
+        execAsk: config?.tools?.exec?.ask || "always",
+        elevatedEnabled: config?.tools?.elevated?.enabled === true,
+        agentToAgentEnabled: config?.tools?.agentToAgent?.enabled === true,
+        sessionsVisibility: config?.tools?.sessions?.visibility || "",
     };
 
     const securityInfo = {
-        gatewayPort: config?.gateway?.port || 18789,
-        gatewayMode: config?.gateway?.mode || "development",
-        authEnabled: config?.gateway?.auth?.enabled || false,
-        authType: config?.gateway?.auth?.type || "None",
+        authProfiles: Object.keys(config?.auth?.profiles || {}).length,
+        commandRestartEnabled: config?.commands?.restart === true,
+        ownerAllowFrom: (config?.commands?.ownerAllowFrom || []).join(", "),
+        elevatedEnabled: toolInfo.elevatedEnabled,
+        execSecurity: toolInfo.execSecurity,
+        execAsk: toolInfo.execAsk,
+        redactionMode: config?.logging?.redactSensitive,
     };
 
     const sessionInfo = {
         idleMinutes: config?.session?.reset?.idleMinutes || 30,
     };
 
+    const opsAgent = config?.agents?.list?.find((agent) => agent.id === "ops");
+    const heartbeat = (opsAgent?.heartbeat || config?.heartbeat || {}) as {
+        every?: string | number;
+        target?: string;
+    };
     const heartbeatInfo = {
-        every: config?.heartbeat?.every || 60,
-        target: config?.heartbeat?.target || "",
+        every: numberFromDuration(heartbeat.every, 60),
+        target: heartbeat.target || "",
+    };
+
+    const serverInfo = {
+        version:
+            config?.meta?.lastTouchedVersion ||
+            config?.wizard?.lastRunVersion ||
+            "Unknown",
+        lastTouched:
+            config?.meta?.lastTouchedAt || config?.wizard?.lastRunAt || "Unknown",
+        configHash: config?.__hash ? `${config.__hash.slice(0, 12)}…` : "Unknown",
     };
 
     return (
@@ -220,28 +345,25 @@ export function Settings() {
             <ModelSection
                 defaultModel={modelInfo.defaultModel}
                 fallbacks={modelInfo.fallbacks}
-                contextWindow={modelInfo.contextWindow}
-                temperature={modelInfo.temperature}
+                imageModel={modelInfo.imageModel}
+                imageGenerationModel={modelInfo.imageGenerationModel}
+                onSave={handleModelSave}
+                saving={updateConfig.isPending}
             />
 
             <ChannelSection
-                discordEnabled={channelInfo.discordEnabled}
-                discordBotId={channelInfo.discordBotId}
+                channels={configuredChannels(config)}
+                onSave={handleChannelsSave}
+                saving={updateConfig.isPending}
             />
 
             <ToolSection
-                webSearchEnabled={toolInfo.webSearchEnabled}
-                webSearchProvider={toolInfo.webSearchProvider}
-                execEnabled={toolInfo.execEnabled}
-                execMode={toolInfo.execMode}
+                {...toolInfo}
+                onSave={handleToolSave}
+                saving={updateConfig.isPending}
             />
 
-            <SecuritySection
-                gatewayPort={securityInfo.gatewayPort}
-                gatewayMode={securityInfo.gatewayMode}
-                authEnabled={securityInfo.authEnabled}
-                authType={securityInfo.authType}
-            />
+            <SecuritySection {...securityInfo} />
 
             <SessionSection
                 idleMinutes={sessionInfo.idleMinutes}
@@ -275,15 +397,19 @@ export function Settings() {
                     <div className="flex items-center justify-between py-1">
                         <span className="text-sm text-primary-400">Version</span>
                         <span className="font-mono text-sm text-primary-100">
-                            2026.2.23
+                            {serverInfo.version}
                         </span>
                     </div>
                     <div className="flex items-center justify-between py-1">
-                        <span className="text-sm text-primary-400">Platform</span>
+                        <span className="text-sm text-primary-400">Config hash</span>
                         <span className="font-mono text-sm text-primary-100">
-                            {typeof window === "undefined"
-                                ? "Unknown"
-                                : window.navigator.platform}
+                            {serverInfo.configHash}
+                        </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1">
+                        <span className="text-sm text-primary-400">Last touched</span>
+                        <span className="font-mono text-sm text-primary-100">
+                            {serverInfo.lastTouched}
                         </span>
                     </div>
                 </div>
