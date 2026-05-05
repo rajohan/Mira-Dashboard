@@ -313,32 +313,81 @@ export function Chat() {
                 return;
             }
 
+            const refreshHistoryAfterTerminalEvent = () => {
+                window.setTimeout(async () => {
+                    try {
+                        const result = (await request("chat.history", {
+                            sessionKey: selectedSessionKey,
+                            limit: CHAT_HISTORY_LIMIT,
+                        })) as { messages?: RawChatHistoryMessage[] };
+                        setMessages((previous) =>
+                            mergeWithRecentOptimisticMessages(
+                                previous,
+                                (result.messages || []).map(normalizeChatHistoryMessage)
+                            )
+                        );
+                        shouldStickToBottomReference.current = true;
+                        setIsAtBottom(true);
+                        setHistoryLoadVersion((previous) => previous + 1);
+                    } catch {
+                        // Keep the streamed text if history refresh is unavailable.
+                    }
+                }, 250);
+            };
+
             if (payload.state === "delta") {
                 const nextText = normalizeChatHistoryMessage({
                     role: "assistant",
-                    content: payload.message,
+                    content:
+                        payload.message ??
+                        payload.delta ??
+                        payload.content ??
+                        payload.text,
                 }).text;
                 setIsAssistantTyping(true);
                 markActiveRun(selectedSessionKey);
-                setStreamText((previous) =>
-                    nextText.length >= previous.length ? nextText : previous
-                );
+                if (nextText.trim()) {
+                    setStreamText((previous) =>
+                        nextText.length >= previous.length ? nextText : previous
+                    );
+                }
                 return;
             }
 
             if (payload.state === "final") {
-                setMessages((previous) => [
-                    ...previous,
-                    normalizeChatHistoryMessage({
-                        role: "assistant",
-                        content: payload.message,
-                        timestamp: new Date().toISOString(),
-                    }),
-                ]);
+                const finalMessage = normalizeChatHistoryMessage({
+                    role: "assistant",
+                    content: payload.message ?? payload.content ?? payload.text,
+                    timestamp: new Date().toISOString(),
+                });
+                setMessages((previous) => {
+                    if (
+                        finalMessage.text.trim() ||
+                        (finalMessage.images?.length || 0) > 0 ||
+                        (finalMessage.attachments?.length || 0) > 0
+                    ) {
+                        return [...previous, finalMessage];
+                    }
+
+                    return streamText.trim()
+                        ? [
+                              ...previous,
+                              {
+                                  role: "assistant",
+                                  content: streamText,
+                                  text: streamText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: new Date().toISOString(),
+                              },
+                          ]
+                        : previous;
+                });
                 setStreamText("");
                 setIsAssistantTyping(false);
                 setActiveChatRunId(null);
                 clearActiveRunMarker(selectedSessionKey);
+                refreshHistoryAfterTerminalEvent();
                 return;
             }
 
@@ -360,6 +409,7 @@ export function Chat() {
                 setIsAssistantTyping(false);
                 setActiveChatRunId(null);
                 clearActiveRunMarker(selectedSessionKey);
+                refreshHistoryAfterTerminalEvent();
                 return;
             }
 

@@ -72,6 +72,9 @@ export interface ChatStreamEventMessage {
     state?: string;
     errorMessage?: string;
     message?: unknown;
+    content?: unknown;
+    text?: string;
+    delta?: unknown;
 }
 
 export interface ChatRow {
