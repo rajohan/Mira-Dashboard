@@ -6,7 +6,15 @@
     color-scheme: dark;
 }
 
+html,
+body,
+#root {
+    height: 100%;
+}
+
 body {
+    margin: 0;
+    overflow: hidden;
     background: #0b0b0c;
     color: #e7e9ee;
 }

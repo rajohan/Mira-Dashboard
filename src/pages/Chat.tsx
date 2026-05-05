@@ -64,6 +64,7 @@ export function Chat() {
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isAssistantTyping, setIsAssistantTyping] = useState(false);
+    const [activeChatRunId, setActiveChatRunId] = useState<string | null>(null);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
@@ -299,7 +300,16 @@ export function Chat() {
             }
 
             const payload = data.payload as ChatStreamEventMessage | undefined;
-            if (!payload || payload.sessionKey !== selectedSessionKey) {
+            if (!payload) {
+                return;
+            }
+
+            const isSelectedSessionEvent = payload.sessionKey === selectedSessionKey;
+            const isActiveRunEvent = Boolean(
+                activeChatRunId && payload.runId === activeChatRunId
+            );
+
+            if (!isSelectedSessionEvent && !isActiveRunEvent) {
                 return;
             }
 
@@ -327,6 +337,7 @@ export function Chat() {
                 ]);
                 setStreamText("");
                 setIsAssistantTyping(false);
+                setActiveChatRunId(null);
                 clearActiveRunMarker(selectedSessionKey);
                 return;
             }
@@ -347,6 +358,7 @@ export function Chat() {
                 }
                 setStreamText("");
                 setIsAssistantTyping(false);
+                setActiveChatRunId(null);
                 clearActiveRunMarker(selectedSessionKey);
                 return;
             }
@@ -355,10 +367,11 @@ export function Chat() {
                 setSendError(payload.errorMessage || "Chat request failed");
                 setStreamText("");
                 setIsAssistantTyping(false);
+                setActiveChatRunId(null);
                 clearActiveRunMarker(selectedSessionKey);
             }
         });
-    }, [selectedSessionKey, streamText, subscribe]);
+    }, [activeChatRunId, selectedSessionKey, streamText, subscribe]);
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -603,6 +616,7 @@ export function Chat() {
             await runSimpleCommand(async () => {
                 setStreamText("");
                 setIsAssistantTyping(false);
+                setActiveChatRunId(null);
                 await request("sessions.reset", { key: selectedSessionKey });
                 await reloadChatHistory();
                 addSystemMessage("Session reset.");
@@ -616,6 +630,7 @@ export function Chat() {
                 await request("chat.abort", { sessionKey: selectedSessionKey });
                 setStreamText("");
                 setIsAssistantTyping(false);
+                setActiveChatRunId(null);
                 addSystemMessage("Stopped current run.");
             });
 
@@ -629,6 +644,7 @@ export function Chat() {
             setMessages([]);
             setStreamText("");
             setIsAssistantTyping(false);
+            setActiveChatRunId(null);
             addSystemMessage("Local chat view cleared. Session history was not reset.");
             return true;
         }
@@ -885,16 +901,18 @@ export function Chat() {
 
         try {
             const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            await request("chat.send", {
+            const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 message: messageText,
                 attachments: gatewayAttachments(sendAttachments),
                 deliver: false,
                 idempotencyKey,
-            });
+            })) as { runId?: string } | undefined;
+            setActiveChatRunId(result?.runId || idempotencyKey);
         } catch (error_) {
             setSendError((error_ as Error).message || "Failed to send message");
             setIsAssistantTyping(false);
+            setActiveChatRunId(null);
             clearActiveRunMarker(selectedSessionKey);
         } finally {
             setIsSending(false);
