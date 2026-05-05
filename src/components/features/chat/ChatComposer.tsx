@@ -1,4 +1,4 @@
-import { Paperclip, Send, X } from "lucide-react";
+import { Mic, Paperclip, Send, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 
 import { formatSize } from "../../../utils/format";
@@ -14,7 +14,9 @@ interface ChatComposerProps {
     draft: string;
     fileInputReference: RefObject<HTMLInputElement | null>;
     isConnected: boolean;
+    isRecording: boolean;
     isSending: boolean;
+    isTranscribing: boolean;
     selectedSessionKey: string;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
@@ -23,6 +25,7 @@ interface ChatComposerProps {
     onPreview: (preview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
+    onToggleRecording: () => void;
 }
 
 export function ChatComposer({
@@ -31,7 +34,9 @@ export function ChatComposer({
     draft,
     fileInputReference,
     isConnected,
+    isRecording,
     isSending,
+    isTranscribing,
     selectedSessionKey,
     slashCommandSuggestions,
     onApplySlashSuggestion,
@@ -40,6 +45,7 @@ export function ChatComposer({
     onPreview,
     onRemoveAttachment,
     onSend,
+    onToggleRecording,
 }: ChatComposerProps) {
     return (
         <div className="mt-4 border-t border-primary-700 pt-4">
@@ -177,6 +183,25 @@ export function ChatComposer({
                 </div>
                 <div className="flex flex-col gap-2">
                     <Button
+                        variant={isRecording ? "primary" : "secondary"}
+                        size="md"
+                        onClick={onToggleRecording}
+                        disabled={
+                            !isConnected ||
+                            !selectedSessionKey ||
+                            isSending ||
+                            isTranscribing
+                        }
+                        title={isRecording ? "Stop recording" : "Record voice input"}
+                    >
+                        {isRecording ? (
+                            <Square className="mr-2 h-4 w-4" />
+                        ) : (
+                            <Mic className="mr-2 h-4 w-4" />
+                        )}
+                        {isRecording ? "Stop" : isTranscribing ? "STT…" : "Voice"}
+                    </Button>
+                    <Button
                         variant="secondary"
                         size="md"
                         onClick={() => fileInputReference.current?.click()}
@@ -184,6 +209,7 @@ export function ChatComposer({
                             !isConnected ||
                             !selectedSessionKey ||
                             isSending ||
+                            isRecording ||
                             attachments.length >= 10
                         }
                         title="Attach files"
@@ -194,7 +220,7 @@ export function ChatComposer({
                         variant="primary"
                         size="md"
                         onClick={onSend}
-                        disabled={!canSend}
+                        disabled={!canSend || isRecording || isTranscribing}
                     >
                         <Send className="mr-2 h-4 w-4" /> Send
                     </Button>

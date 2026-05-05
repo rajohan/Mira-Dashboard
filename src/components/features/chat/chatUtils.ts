@@ -27,6 +27,28 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     return `${message.role.toLowerCase()}::${message.text.trim()}`;
 }
 
+function assistantTextLooksRecovered(left: string, right: string): boolean {
+    const normalizedLeft = left.trim();
+    const normalizedRight = right.trim();
+
+    if (!normalizedLeft || !normalizedRight) {
+        return false;
+    }
+
+    if (normalizedLeft === normalizedRight) {
+        return true;
+    }
+
+    if (normalizedLeft.length < 20 || normalizedRight.length < 20) {
+        return false;
+    }
+
+    return (
+        normalizedLeft.includes(normalizedRight) ||
+        normalizedRight.includes(normalizedLeft)
+    );
+}
+
 export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
     const seen = new Set<string>();
     const deduped: ChatHistoryMessage[] = [];
@@ -116,6 +138,9 @@ export function mergeWithRecentOptimisticMessages(
     }
 
     const nextIdentities = new Set(nextMessages.map(messageIdentity));
+    const nextAssistantTexts = nextMessages
+        .filter((message) => message.role.toLowerCase() === "assistant")
+        .map((message) => message.text);
     const now = Date.now();
     const recentMissingMessages = previousMessages.filter((message) => {
         const role = message.role.toLowerCase();
@@ -131,6 +156,15 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         if (nextIdentities.has(messageIdentity(message))) {
+            return false;
+        }
+
+        if (
+            role === "assistant" &&
+            nextAssistantTexts.some((nextText) =>
+                assistantTextLooksRecovered(message.text, nextText)
+            )
+        ) {
             return false;
         }
 

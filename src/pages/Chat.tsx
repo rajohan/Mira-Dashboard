@@ -131,6 +131,22 @@ function writeStoredChatDiagnosticVisibility(
     }
 }
 
+function supportedAudioRecordingMimeType(): string | undefined {
+    if (window.MediaRecorder === undefined) {
+        return undefined;
+    }
+
+    const candidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4;codecs=mp4a.40.2",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+    ];
+
+    return candidates.find((mimeType) => window.MediaRecorder.isTypeSupported(mimeType));
+}
+
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
@@ -139,6 +155,9 @@ export function Chat() {
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const liveHistoryRefreshTimerReference = useRef<number | null>(null);
+    const mediaRecorderReference = useRef<MediaRecorder | null>(null);
+    const recordingChunksReference = useRef<Blob[]>([]);
+    const voiceFileInputReference = useRef<HTMLInputElement | null>(null);
     const loadedHistorySessionReference = useRef("");
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
@@ -153,6 +172,8 @@ export function Chat() {
     const [sendError, setSendError] = useState<string | null>(null);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const [isAssistantTyping, setIsAssistantTyping] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
     const [showThinkingOutput, setShowThinkingOutput] = useState(
@@ -412,14 +433,21 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
                 const activeStream = activeStreamsReference.current[selectedSessionKey];
+                const lastHistoryMessage = nextMessages.at(-1);
                 const recoveredStreamInHistory = Boolean(
                     !selectedSessionIsRunning &&
-                    activeStream?.text &&
-                    (historyContainsRecoveredStream(nextMessages, activeStream.text) ||
+                    activeStream &&
+                    ((activeStream.text &&
+                        historyContainsRecoveredStream(
+                            nextMessages,
+                            activeStream.text
+                        )) ||
                         historyHasNewerAssistantMessage(
                             nextMessages,
                             activeStream.updatedAt
-                        ))
+                        ) ||
+                        (!activeStream.text &&
+                            lastHistoryMessage?.role.toLowerCase() === "assistant"))
                 );
 
                 setMessages((previous) => {
@@ -705,6 +733,141 @@ export function Chat() {
         );
     };
 
+    const transcribeRecording = async (audioBlob: Blob) => {
+        if (audioBlob.size === 0) {
+            setSendError("No audio was recorded.");
+            return;
+        }
+
+        setIsTranscribing(true);
+        setSendError(null);
+
+        try {
+            const response = await fetch("/api/stt/transcribe", {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    "Content-Type": audioBlob.type || "audio/webm",
+                },
+                body: audioBlob,
+            });
+
+            if (!response.ok) {
+                const error = (await response
+                    .json()
+                    .catch(() => ({ error: "Failed to transcribe audio" }))) as {
+                    error?: string;
+                };
+                throw new Error(error.error || `HTTP ${response.status}`);
+            }
+
+            const result = (await response.json()) as { text?: string };
+            const text = result.text?.trim();
+            if (!text) {
+                setSendError("Whisper did not detect any speech.");
+                return;
+            }
+
+            setDraft((previous) => {
+                const trimmedPrevious = previous.trimEnd();
+                return trimmedPrevious ? `${trimmedPrevious}\n${text}` : text;
+            });
+        } catch (error_) {
+            setSendError((error_ as Error).message || "Failed to transcribe audio");
+        } finally {
+            setIsTranscribing(false);
+        }
+    };
+
+    const handleVoiceFileSelected = async (files: FileList | null) => {
+        const file = files?.[0];
+        if (!file) {
+            return;
+        }
+
+        try {
+            if (file.size > MAX_ATTACHMENT_BYTES) {
+                throw new Error(
+                    `${file.name} is too large (${formatSize(file.size)}). Max is ${formatSize(MAX_ATTACHMENT_BYTES)}.`
+                );
+            }
+
+            await transcribeRecording(file);
+        } catch (error_) {
+            setSendError((error_ as Error).message || "Failed to read audio file");
+        } finally {
+            if (voiceFileInputReference.current) {
+                voiceFileInputReference.current.value = "";
+            }
+        }
+    };
+
+    const handleToggleRecording = async () => {
+        if (isRecording) {
+            mediaRecorderReference.current?.stop();
+            return;
+        }
+
+        const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
+        const canUseDirectRecorder =
+            Boolean(mediaDevices) &&
+            typeof mediaDevices?.getUserMedia === "function" &&
+            window.MediaRecorder !== undefined;
+
+        if (!canUseDirectRecorder) {
+            setSendError(
+                window.isSecureContext
+                    ? "Direct voice recording is not supported here. Choose or record an audio file instead."
+                    : "Direct voice recording requires HTTPS or localhost. Choose or record an audio file instead."
+            );
+            voiceFileInputReference.current?.click();
+            return;
+        }
+
+        let stream: MediaStream | null = null;
+
+        try {
+            setSendError(null);
+            stream = await mediaDevices!.getUserMedia({ audio: true });
+            const recordingStream = stream;
+            const mimeType = supportedAudioRecordingMimeType();
+            const recorder = mimeType
+                ? new window.MediaRecorder(recordingStream, { mimeType })
+                : new window.MediaRecorder(recordingStream);
+            recordingChunksReference.current = [];
+            mediaRecorderReference.current = recorder;
+
+            recorder.addEventListener("dataavailable", (event) => {
+                if (event.data.size > 0) {
+                    recordingChunksReference.current.push(event.data);
+                }
+            });
+
+            recorder.addEventListener("stop", () => {
+                for (const track of recordingStream.getTracks()) {
+                    track.stop();
+                }
+                setIsRecording(false);
+                mediaRecorderReference.current = null;
+                const audioBlob = new Blob(recordingChunksReference.current, {
+                    type: recorder.mimeType || "audio/webm",
+                });
+                recordingChunksReference.current = [];
+                void transcribeRecording(audioBlob);
+            });
+
+            recorder.start();
+            setIsRecording(true);
+        } catch (error_) {
+            if (stream) {
+                for (const track of stream.getTracks()) {
+                    track.stop();
+                }
+            }
+            setSendError((error_ as Error).message || "Failed to start recording");
+        }
+    };
+
     const handleSlashCommand = useChatSlashCommands({
         request,
         selectedSession,
@@ -819,6 +982,8 @@ export function Chat() {
         isConnected &&
         selectedSessionKey &&
         !isSending &&
+        !isRecording &&
+        !isTranscribing &&
         (draft.trim() || attachments.length > 0)
     );
 
@@ -863,13 +1028,26 @@ export function Chat() {
                         </div>
                     )}
 
+                    <input
+                        ref={voiceFileInputReference}
+                        type="file"
+                        accept="audio/*"
+                        capture
+                        className="hidden"
+                        onChange={(event) =>
+                            void handleVoiceFileSelected(event.target.files)
+                        }
+                    />
+
                     <ChatComposer
                         attachments={attachments}
                         canSend={canSend}
                         draft={draft}
                         fileInputReference={fileInputReference}
                         isConnected={isConnected}
+                        isRecording={isRecording}
                         isSending={isSending}
+                        isTranscribing={isTranscribing}
                         selectedSessionKey={selectedSessionKey}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}
@@ -878,6 +1056,7 @@ export function Chat() {
                         onPreview={setPreviewItem}
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
+                        onToggleRecording={() => void handleToggleRecording()}
                     />
                 </Card>
             </div>

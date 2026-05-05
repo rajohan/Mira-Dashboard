@@ -161,6 +161,11 @@ export function useChatRuntimeEvents({
 
             if (isTerminalLifecycleEvent) {
                 setIsAssistantTyping(false);
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
                 clearActiveRunMarker(selectedSessionKey);
             } else {
                 setIsAssistantTyping(true);
