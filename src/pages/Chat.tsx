@@ -15,6 +15,7 @@ import {
     type ChatRow,
     type ChatSendAttachment,
     type ChatStreamEventMessage,
+    type ChatVisibilitySettings,
     gatewayAttachments,
     isRenderableChatHistoryMessage,
     normalizeChatHistoryMessage,
@@ -211,8 +212,18 @@ function historyContainsRecoveredStream(
     );
 }
 
-function visibleHistoryMessages(messages: RawChatHistoryMessage[] = []) {
-    return normalizeVisibleChatHistoryMessages(messages);
+function visibleHistoryMessages(
+    messages: RawChatHistoryMessage[] = [],
+    visibility: ChatVisibilitySettings
+) {
+    return normalizeVisibleChatHistoryMessages(messages, visibility);
+}
+
+function createChatVisibility(
+    showThinking: boolean,
+    showTools: boolean
+): ChatVisibilitySettings {
+    return { showThinking, showTools };
 }
 
 export function Chat() {
@@ -221,6 +232,7 @@ export function Chat() {
     const fileInputReference = useRef<HTMLInputElement | null>(null);
     const shouldStickToBottomReference = useRef(true);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
+    const loadedHistorySessionReference = useRef("");
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -233,6 +245,8 @@ export function Chat() {
     const [isSending, setIsSending] = useState(false);
     const [isAssistantTyping, setIsAssistantTyping] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
+    const [showThinkingOutput, setShowThinkingOutput] = useState(false);
+    const [showToolOutput, setShowToolOutput] = useState(false);
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
 
@@ -370,6 +384,7 @@ export function Chat() {
         );
 
         if (!selectedSessionKey) {
+            loadedHistorySessionReference.current = "";
             setMessages([]);
             return;
         }
@@ -392,7 +407,18 @@ export function Chat() {
                     return;
                 }
 
-                setMessages(visibleHistoryMessages(result.messages));
+                const nextMessages = visibleHistoryMessages(
+                    result.messages,
+                    createChatVisibility(showThinkingOutput, showToolOutput)
+                );
+                setMessages((previous) => {
+                    if (loadedHistorySessionReference.current !== selectedSessionKey) {
+                        loadedHistorySessionReference.current = selectedSessionKey;
+                        return nextMessages;
+                    }
+
+                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
+                });
                 shouldStickToBottomReference.current = true;
                 setIsAtBottom(true);
                 setHistoryLoadVersion((previous) => previous + 1);
@@ -414,7 +440,7 @@ export function Chat() {
         return () => {
             cancelled = true;
         };
-    }, [request, selectedSessionKey]);
+    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput]);
 
     useEffect(() => {
         if (!selectedSessionKey || !selectedSessionUpdatedAt || isLoadingHistory) {
@@ -430,7 +456,10 @@ export function Chat() {
                     messages?: RawChatHistoryMessage[];
                 };
 
-                const nextMessages = visibleHistoryMessages(result.messages);
+                const nextMessages = visibleHistoryMessages(
+                    result.messages,
+                    createChatVisibility(showThinkingOutput, showToolOutput)
+                );
                 const activeStream = activeStreamsReference.current[selectedSessionKey];
                 const recoveredStreamInHistory = Boolean(
                     !selectedSessionIsRunning &&
@@ -477,6 +506,8 @@ export function Chat() {
         selectedSessionIsRunning,
         selectedSessionKey,
         selectedSessionUpdatedAt,
+        showThinkingOutput,
+        showToolOutput,
     ]);
 
     const messagesVirtualizer = useVirtualizer({
@@ -544,7 +575,13 @@ export function Chat() {
                         setMessages((previous) =>
                             mergeWithRecentOptimisticMessages(
                                 previous,
-                                visibleHistoryMessages(result.messages)
+                                visibleHistoryMessages(
+                                    result.messages,
+                                    createChatVisibility(
+                                        showThinkingOutput,
+                                        showToolOutput
+                                    )
+                                )
                             )
                         );
                         shouldStickToBottomReference.current = true;
@@ -593,7 +630,10 @@ export function Chat() {
                     activeStreamsReference.current[streamSessionKey]?.text || "";
                 const messageToAppend = payloadIsCommandMessage(payload.message)
                     ? createLocalSystemMessage(finalMessage.text)
-                    : isRenderableChatHistoryMessage(finalMessage)
+                    : isRenderableChatHistoryMessage(
+                            finalMessage,
+                            createChatVisibility(showThinkingOutput, showToolOutput)
+                        )
                       ? finalMessage
                       : bufferedText.trim()
                         ? {
@@ -673,7 +713,7 @@ export function Chat() {
                 clearActiveRunMarker(streamSessionKey);
             }
         });
-    }, [request, selectedSessionKey, subscribe]);
+    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput, subscribe]);
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -859,7 +899,10 @@ export function Chat() {
         setMessages((previous) =>
             mergeWithRecentOptimisticMessages(
                 previous,
-                visibleHistoryMessages(result.messages)
+                visibleHistoryMessages(
+                    result.messages,
+                    createChatVisibility(showThinkingOutput, showToolOutput)
+                )
             )
         );
         shouldStickToBottomReference.current = true;
@@ -1276,6 +1319,12 @@ export function Chat() {
                         selectedSessionKey={selectedSessionKey}
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
+                        showThinking={showThinkingOutput}
+                        showTools={showToolOutput}
+                        onToggleThinking={() =>
+                            setShowThinkingOutput((previous) => !previous)
+                        }
+                        onToggleTools={() => setShowToolOutput((previous) => !previous)}
                         onSelectSession={setSelectedSessionKey}
                     />
 
@@ -1286,6 +1335,10 @@ export function Chat() {
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
                         onPreview={setPreviewItem}
+                        visibility={createChatVisibility(
+                            showThinkingOutput,
+                            showToolOutput
+                        )}
                         onScroll={handleMessagesScroll}
                     />
 

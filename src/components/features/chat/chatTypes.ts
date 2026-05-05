@@ -46,12 +46,38 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
+export interface ChatThinkingDisplay {
+    text: string;
+}
+
+export interface ChatToolCallDisplay {
+    id?: string;
+    name: string;
+    arguments?: unknown;
+}
+
+export interface ChatToolResultDisplay {
+    id?: string;
+    name?: string;
+    content: string;
+    isError?: boolean;
+    images?: ChatImageBlock[];
+}
+
+export interface ChatVisibilitySettings {
+    showThinking: boolean;
+    showTools: boolean;
+}
+
 export interface ChatHistoryMessage {
     role: string;
     content: unknown;
     text: string;
     images?: ChatImageBlock[];
     attachments?: ChatAttachmentDisplay[];
+    thinking?: ChatThinkingDisplay[];
+    toolCalls?: ChatToolCallDisplay[];
+    toolResult?: ChatToolResultDisplay;
     timestamp?: string;
     local?: boolean;
     runId?: string;
@@ -63,6 +89,11 @@ export interface RawChatHistoryMessage {
     text?: string;
     timestamp?: string | number;
     command?: boolean;
+    toolCallId?: string;
+    tool_call_id?: string;
+    toolName?: string;
+    tool_name?: string;
+    isError?: boolean;
     MediaPath?: string;
     MediaPaths?: string[];
     MediaType?: string;
@@ -86,19 +117,76 @@ export interface ChatRow {
     message: ChatHistoryMessage;
 }
 
+export const DEFAULT_CHAT_VISIBILITY: ChatVisibilitySettings = {
+    showThinking: false,
+    showTools: false,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 export function extractImages(content: unknown): ChatImageBlock[] {
     if (!Array.isArray(content)) {
         return [];
     }
 
     return content.filter((item): item is ChatImageBlock => {
-        if (!item || typeof item !== "object") {
+        if (!isRecord(item)) {
             return false;
         }
 
-        const block = item as Record<string, unknown>;
-        return block.type === "image";
+        return item.type === "image";
     });
+}
+
+export function extractThinkingBlocks(content: unknown): ChatThinkingDisplay[] {
+    if (!Array.isArray(content)) {
+        return [];
+    }
+
+    const blocks: ChatThinkingDisplay[] = [];
+
+    for (const item of content) {
+        if (!isRecord(item) || item.type !== "thinking") {
+            continue;
+        }
+
+        const text =
+            typeof item.thinking === "string"
+                ? item.thinking
+                : typeof item.text === "string"
+                  ? item.text
+                  : "";
+
+        if (text.trim()) {
+            blocks.push({ text });
+        }
+    }
+
+    return blocks;
+}
+
+export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
+    if (!Array.isArray(content)) {
+        return [];
+    }
+
+    const toolCalls: ChatToolCallDisplay[] = [];
+
+    for (const item of content) {
+        if (!isRecord(item) || item.type !== "toolCall") {
+            continue;
+        }
+
+        toolCalls.push({
+            id: typeof item.id === "string" ? item.id : undefined,
+            name: typeof item.name === "string" ? item.name : "tool",
+            arguments: item.arguments,
+        });
+    }
+
+    return toolCalls;
 }
 
 export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] {
@@ -220,6 +308,43 @@ function extractMediaReferenceAttachments(
     });
 }
 
+function isToolRole(role: string): boolean {
+    const normalizedRole = role.toLowerCase();
+    return (
+        normalizedRole === "tool" ||
+        normalizedRole === "toolresult" ||
+        normalizedRole === "tool_result"
+    );
+}
+
+function extractToolResult(
+    message: RawChatHistoryMessage,
+    content: unknown
+): ChatToolResultDisplay | undefined {
+    const role = message.role || "";
+    if (!isToolRole(role)) {
+        return undefined;
+    }
+
+    return {
+        id:
+            typeof message.toolCallId === "string"
+                ? message.toolCallId
+                : typeof message.tool_call_id === "string"
+                  ? message.tool_call_id
+                  : undefined,
+        name:
+            typeof message.toolName === "string"
+                ? message.toolName
+                : typeof message.tool_name === "string"
+                  ? message.tool_name
+                  : undefined,
+        content: normalizeText(content),
+        isError: message.isError,
+        images: extractImages(content),
+    };
+}
+
 function stripGeneratedMediaOnlyText(
     text: string,
     images: ChatImageBlock[],
@@ -248,6 +373,9 @@ export function normalizeChatHistoryMessage(
 ): ChatHistoryMessage {
     const content = message.content ?? message.text ?? "";
     const images = extractImages(content);
+    const thinking = extractThinkingBlocks(content);
+    const toolCalls = extractToolCalls(content);
+    const toolResult = extractToolResult(message, content);
     const normalizedText = normalizeText(content);
     const attachments = [
         ...extractMediaReferenceAttachments(message),
@@ -265,6 +393,9 @@ export function normalizeChatHistoryMessage(
         text,
         images,
         attachments,
+        thinking,
+        toolCalls,
+        toolResult,
         timestamp:
             typeof message.timestamp === "number"
                 ? new Date(message.timestamp).toISOString()
@@ -313,23 +444,38 @@ export function normalizeText(content: unknown): string {
     return "";
 }
 
-export function isRenderableChatHistoryMessage(message: ChatHistoryMessage): boolean {
+export function isRenderableChatHistoryMessage(
+    message: ChatHistoryMessage,
+    visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY
+): boolean {
     const role = message.role.toLowerCase();
-    if (role === "tool" || role === "toolresult" || role === "tool_result") {
-        return false;
+    if (isToolRole(role)) {
+        return Boolean(
+            visibility.showTools &&
+            ((message.toolResult?.content.trim() || "").length > 0 ||
+                (message.toolResult?.images?.length || 0) > 0)
+        );
     }
 
-    return Boolean(
+    if (
         message.text.trim() ||
         (message.images?.length || 0) > 0 ||
         (message.attachments?.length || 0) > 0
+    ) {
+        return true;
+    }
+
+    return Boolean(
+        (visibility.showThinking && (message.thinking?.length || 0) > 0) ||
+        (visibility.showTools && (message.toolCalls?.length || 0) > 0)
     );
 }
 
 export function normalizeVisibleChatHistoryMessages(
-    messages: RawChatHistoryMessage[]
+    messages: RawChatHistoryMessage[],
+    visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY
 ): ChatHistoryMessage[] {
     return messages
         .map(normalizeChatHistoryMessage)
-        .filter(isRenderableChatHistoryMessage);
+        .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
