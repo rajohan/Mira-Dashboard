@@ -14,10 +14,12 @@ import type {
 
 interface ChatMessagesListProps {
     isLoadingHistory: boolean;
+    isAtBottom: boolean;
     chatRows: ChatRow[];
     messagesContainerReference: RefObject<HTMLDivElement | null>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
+    onFollow: () => void;
     onPreview: (preview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
@@ -145,10 +147,12 @@ function TypingIndicator() {
 
 export function ChatMessagesList({
     isLoadingHistory,
+    isAtBottom,
     chatRows,
     messagesContainerReference,
     messagesVirtualizer,
     onDynamicContentLoad,
+    onFollow,
     onPreview,
     visibility,
     onScroll,
@@ -167,6 +171,16 @@ export function ChatMessagesList({
             onScroll={onScroll}
             className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1"
         >
+            {!isAtBottom && chatRows.length > 0 ? (
+                <button
+                    type="button"
+                    onClick={onFollow}
+                    className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                >
+                    ↓ Follow
+                </button>
+            ) : null}
+
             {isLoadingHistory ? (
                 <div className="flex items-center justify-center py-10 text-primary-400">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading chat…

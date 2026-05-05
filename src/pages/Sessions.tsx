@@ -23,6 +23,8 @@ import { type Session } from "../types/session";
 import { formatDate } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
+const FEED_BOTTOM_THRESHOLD_PX = 32;
+
 export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
     const sessionActions = useSessionActions();
@@ -33,6 +35,7 @@ export function Sessions() {
     const [feedSessionFilter, setFeedSessionFilter] = useState<string>("ALL");
     const [feedTypeFilter, setFeedTypeFilter] = useState<string>("ALL");
     const [liveFeed, setLiveFeed] = useState<FeedItem[]>([]);
+    const [isFeedAtBottom, setIsFeedAtBottom] = useState(true);
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
     const shouldStickFeedToBottomReference = useRef(true);
 
@@ -124,7 +127,8 @@ export function Sessions() {
         }
 
         return (
-            container.scrollHeight - container.scrollTop - container.clientHeight < 120
+            container.scrollHeight - container.scrollTop - container.clientHeight <=
+            FEED_BOTTOM_THRESHOLD_PX
         );
     };
 
@@ -136,10 +140,14 @@ export function Sessions() {
 
         feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
         container.scrollTo({ top: container.scrollHeight });
+        shouldStickFeedToBottomReference.current = true;
+        setIsFeedAtBottom(true);
     };
 
     const handleFeedScroll = () => {
-        shouldStickFeedToBottomReference.current = checkFeedIsAtBottom();
+        const atBottom = checkFeedIsAtBottom();
+        shouldStickFeedToBottomReference.current = atBottom;
+        setIsFeedAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
     useLayoutEffect(() => {
@@ -255,6 +263,16 @@ export function Sessions() {
                         onScroll={handleFeedScroll}
                         className="h-96 overflow-y-auto pr-1"
                     >
+                        {!isFeedAtBottom && feedRows.length > 0 ? (
+                            <button
+                                type="button"
+                                onClick={scrollFeedToBottom}
+                                className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                            >
+                                ↓ Follow
+                            </button>
+                        ) : null}
+
                         <div className="w-full">
                             {feedPaddingTop > 0 ? (
                                 <div style={{ height: feedPaddingTop }} />

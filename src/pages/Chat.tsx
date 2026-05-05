@@ -738,10 +738,12 @@ export function Chat() {
 
                     <ChatMessagesList
                         isLoadingHistory={isLoadingHistory}
+                        isAtBottom={isAtBottom}
                         chatRows={chatRows}
                         messagesContainerReference={messagesContainerReference}
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
+                        onFollow={scrollMessagesToBottom}
                         onPreview={setPreviewItem}
                         visibility={createChatVisibility(
                             showThinkingOutput,

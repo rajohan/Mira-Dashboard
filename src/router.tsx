@@ -16,7 +16,6 @@ import { Docker } from "./pages/Docker";
 import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
-import { Metrics } from "./pages/Metrics";
 import { Moltbook } from "./pages/Moltbook";
 import { Office3D } from "./pages/Office3D";
 import { OrgChart } from "./pages/OrgChart";
@@ -118,12 +117,6 @@ const databaseRoute = createRoute({
     component: Database,
 });
 
-const metricsRoute = createRoute({
-    getParentRoute: () => authenticatedRoute,
-    path: "/metrics",
-    component: Metrics,
-});
-
 const orgChartRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/org-chart",
@@ -167,7 +160,6 @@ const routeTree = rootRoute.addChildren([
         filesRoute,
         dockerRoute,
         databaseRoute,
-        metricsRoute,
         orgChartRoute,
         office3DRoute,
         moltbookRoute,

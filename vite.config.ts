@@ -46,7 +46,6 @@ export default defineConfig({
                     ui: ["@headlessui/react", "lucide-react"],
                     router: ["@tanstack/react-router"],
                     query: ["@tanstack/react-query"],
-                    charts: ["recharts"],
                     markdown: ["react-markdown", "remark-gfm"],
                     syntax: ["react-syntax-highlighter"],
                 },
