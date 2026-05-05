@@ -1144,7 +1144,7 @@ export function Chat() {
             <ConfirmModal
                 isOpen={!!pendingDeleteMessageKey}
                 title="Delete message"
-                message="Delete this message from the chat view on this browser? This matches OpenClaw's built-in dashboard behavior and does not rewrite the underlying transcript."
+                message="Delete this message from your chat view?"
                 confirmLabel="Delete"
                 danger
                 onCancel={() => setPendingDeleteMessageKey(null)}
