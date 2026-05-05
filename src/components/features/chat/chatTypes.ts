@@ -53,6 +53,8 @@ export interface ChatHistoryMessage {
     images?: ChatImageBlock[];
     attachments?: ChatAttachmentDisplay[];
     timestamp?: string;
+    local?: boolean;
+    runId?: string;
 }
 
 export interface RawChatHistoryMessage {
@@ -60,6 +62,7 @@ export interface RawChatHistoryMessage {
     content?: unknown;
     text?: string;
     timestamp?: string | number;
+    command?: boolean;
     MediaPath?: string;
     MediaPaths?: string[];
     MediaType?: string;

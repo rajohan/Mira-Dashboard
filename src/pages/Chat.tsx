@@ -85,6 +85,56 @@ function uniqueStrings(values: Array<string | undefined>): string[] {
     return [...new Set(values.filter(Boolean))] as string[];
 }
 
+interface ParsedAgentSessionKey {
+    agentId: string;
+    rest: string;
+}
+
+function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
+    const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
+    if (!match) {
+        return null;
+    }
+
+    return {
+        agentId: match[1]?.toLowerCase() || "",
+        rest: match[2]?.toLowerCase() || "",
+    };
+}
+
+function isSameSessionKey(left?: string, right?: string): boolean {
+    const normalizedLeft = left?.trim().toLowerCase();
+    const normalizedRight = right?.trim().toLowerCase();
+
+    if (!normalizedLeft || !normalizedRight) {
+        return false;
+    }
+
+    if (normalizedLeft === normalizedRight) {
+        return true;
+    }
+
+    const parsedLeft = parseAgentSessionKey(normalizedLeft);
+    const parsedRight = parseAgentSessionKey(normalizedRight);
+
+    if (parsedLeft && parsedRight) {
+        return (
+            parsedLeft.agentId === parsedRight.agentId &&
+            parsedLeft.rest === parsedRight.rest
+        );
+    }
+
+    if (parsedLeft) {
+        return parsedLeft.rest === normalizedRight;
+    }
+
+    if (parsedRight) {
+        return normalizedLeft === parsedRight.rest;
+    }
+
+    return false;
+}
+
 function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
     if (value && typeof value === "object" && !Array.isArray(value)) {
         const record = value as RawChatHistoryMessage;
@@ -112,7 +162,53 @@ function finalMessageFromPayload(payload: ChatStreamEventMessage): ChatHistoryMe
     return {
         ...normalizeAssistantPayload(payload.message ?? payload.content ?? payload.text),
         timestamp: new Date().toISOString(),
+        runId: payload.runId,
     };
+}
+
+function payloadIsCommandMessage(value: unknown): boolean {
+    return Boolean(
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        (value as { command?: unknown }).command === true
+    );
+}
+
+function createLocalSystemMessage(text: string): ChatHistoryMessage {
+    return {
+        role: "system",
+        content: text,
+        text,
+        images: [],
+        attachments: [],
+        timestamp: new Date().toISOString(),
+        local: true,
+    };
+}
+
+function textLooksLikeRecoveredStream(historyText: string, streamText: string): boolean {
+    const normalizedHistoryText = historyText.trim();
+    const normalizedStreamText = streamText.trim();
+
+    return Boolean(
+        normalizedHistoryText &&
+        normalizedStreamText &&
+        (normalizedHistoryText === normalizedStreamText ||
+            normalizedHistoryText.includes(normalizedStreamText) ||
+            normalizedStreamText.includes(normalizedHistoryText))
+    );
+}
+
+function historyContainsRecoveredStream(
+    messages: ChatHistoryMessage[],
+    streamText: string
+): boolean {
+    return messages.some(
+        (message) =>
+            message.role.toLowerCase() === "assistant" &&
+            textLooksLikeRecoveredStream(message.text, streamText)
+    );
 }
 
 function visibleHistoryMessages(messages: RawChatHistoryMessage[] = []) {
@@ -335,6 +431,12 @@ export function Chat() {
                 };
 
                 const nextMessages = visibleHistoryMessages(result.messages);
+                const activeStream = activeStreamsReference.current[selectedSessionKey];
+                const recoveredStreamInHistory = Boolean(
+                    !selectedSessionIsRunning &&
+                    activeStream?.text &&
+                    historyContainsRecoveredStream(nextMessages, activeStream.text)
+                );
 
                 setMessages((previous) => {
                     const previousLast = previous.at(-1)?.timestamp || "";
@@ -353,13 +455,29 @@ export function Chat() {
 
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
+
+                if (recoveredStreamInHistory) {
+                    updateActiveStreams((previous) => {
+                        const next = { ...previous };
+                        delete next[selectedSessionKey];
+                        return next;
+                    });
+                    clearActiveRunMarker(selectedSessionKey);
+                    setIsAssistantTyping(false);
+                }
             } catch {
                 // Ignore background refresh failures.
             }
         };
 
         void refreshHistory();
-    }, [isLoadingHistory, request, selectedSessionKey, selectedSessionUpdatedAt]);
+    }, [
+        isLoadingHistory,
+        request,
+        selectedSessionIsRunning,
+        selectedSessionKey,
+        selectedSessionUpdatedAt,
+    ]);
 
     const messagesVirtualizer = useVirtualizer({
         count: chatRows.length,
@@ -398,11 +516,18 @@ export function Chat() {
                 return;
             }
 
-            const isRelevantEvent =
-                eventSessionKey === selectedSessionKey || Boolean(streamForRun);
+            const eventMatchesSelected = isSameSessionKey(
+                eventSessionKey,
+                selectedSessionKey
+            );
+            const isRelevantEvent = eventMatchesSelected || Boolean(streamForRun);
             if (!isRelevantEvent) {
                 return;
             }
+
+            const streamSessionKey = eventMatchesSelected
+                ? selectedSessionKey
+                : streamForRun?.sessionKey || eventSessionKey;
 
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
@@ -433,17 +558,20 @@ export function Chat() {
 
             if (payload.state === "delta") {
                 const nextText = streamTextFromPayload(payload);
-                setIsAssistantTyping(true);
-                markActiveRun(eventSessionKey);
+                if (eventMatchesSelected) {
+                    setIsAssistantTyping(true);
+                }
+                markActiveRun(streamSessionKey);
 
                 if (nextText.trim()) {
                     updateActiveStreams((previous) => {
-                        const existing = previous[eventSessionKey];
-                        const runId = payload.runId || existing?.runId || eventSessionKey;
+                        const existing = previous[streamSessionKey];
+                        const runId =
+                            payload.runId || existing?.runId || streamSessionKey;
                         return {
                             ...previous,
-                            [eventSessionKey]: {
-                                sessionKey: eventSessionKey,
+                            [streamSessionKey]: {
+                                sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
                                     ...(existing?.aliases || []),
@@ -462,21 +590,24 @@ export function Chat() {
             if (payload.state === "final") {
                 const finalMessage = finalMessageFromPayload(payload);
                 const bufferedText =
-                    activeStreamsReference.current[eventSessionKey]?.text || "";
-                const messageToAppend = isRenderableChatHistoryMessage(finalMessage)
-                    ? finalMessage
-                    : bufferedText.trim()
-                      ? {
-                            role: "assistant",
-                            content: bufferedText,
-                            text: bufferedText,
-                            images: [],
-                            attachments: [],
-                            timestamp: new Date().toISOString(),
-                        }
-                      : null;
+                    activeStreamsReference.current[streamSessionKey]?.text || "";
+                const messageToAppend = payloadIsCommandMessage(payload.message)
+                    ? createLocalSystemMessage(finalMessage.text)
+                    : isRenderableChatHistoryMessage(finalMessage)
+                      ? finalMessage
+                      : bufferedText.trim()
+                        ? {
+                              role: "assistant",
+                              content: bufferedText,
+                              text: bufferedText,
+                              images: [],
+                              attachments: [],
+                              timestamp: new Date().toISOString(),
+                              runId: payload.runId,
+                          }
+                        : null;
 
-                if (messageToAppend && eventSessionKey === selectedSessionKey) {
+                if (messageToAppend && eventMatchesSelected) {
                     setMessages((previous) =>
                         dedupeMessages([...previous, messageToAppend])
                     );
@@ -484,19 +615,21 @@ export function Chat() {
 
                 updateActiveStreams((previous) => {
                     const next = { ...previous };
-                    delete next[eventSessionKey];
+                    delete next[streamSessionKey];
                     return next;
                 });
-                setIsAssistantTyping(false);
-                clearActiveRunMarker(eventSessionKey);
-                refreshHistoryAfterTerminalEvent(eventSessionKey);
+                if (eventMatchesSelected) {
+                    setIsAssistantTyping(false);
+                }
+                clearActiveRunMarker(streamSessionKey);
+                refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
 
             if (payload.state === "aborted") {
                 const bufferedText =
-                    activeStreamsReference.current[eventSessionKey]?.text || "";
-                if (bufferedText.trim() && eventSessionKey === selectedSessionKey) {
+                    activeStreamsReference.current[streamSessionKey]?.text || "";
+                if (bufferedText.trim() && eventMatchesSelected) {
                     setMessages((previous) =>
                         dedupeMessages([
                             ...previous,
@@ -507,32 +640,37 @@ export function Chat() {
                                 images: [],
                                 attachments: [],
                                 timestamp: new Date().toISOString(),
+                                runId: payload.runId,
                             },
                         ])
                     );
                 }
                 updateActiveStreams((previous) => {
                     const next = { ...previous };
-                    delete next[eventSessionKey];
+                    delete next[streamSessionKey];
                     return next;
                 });
-                setIsAssistantTyping(false);
-                clearActiveRunMarker(eventSessionKey);
-                refreshHistoryAfterTerminalEvent(eventSessionKey);
+                if (eventMatchesSelected) {
+                    setIsAssistantTyping(false);
+                }
+                clearActiveRunMarker(streamSessionKey);
+                refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
 
             if (payload.state === "error") {
-                if (eventSessionKey === selectedSessionKey) {
+                if (eventMatchesSelected) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
                 updateActiveStreams((previous) => {
                     const next = { ...previous };
-                    delete next[eventSessionKey];
+                    delete next[streamSessionKey];
                     return next;
                 });
-                setIsAssistantTyping(false);
-                clearActiveRunMarker(eventSessionKey);
+                if (eventMatchesSelected) {
+                    setIsAssistantTyping(false);
+                }
+                clearActiveRunMarker(streamSessionKey);
             }
         });
     }, [request, selectedSessionKey, subscribe]);
@@ -703,17 +841,7 @@ export function Chat() {
     };
 
     const addSystemMessage = (text: string) => {
-        setMessages((previous) => [
-            ...previous,
-            {
-                role: "system",
-                content: text,
-                text,
-                images: [],
-                attachments: [],
-                timestamp: new Date().toISOString(),
-            },
-        ]);
+        setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
     };
 
     const reloadChatHistory = async () => {

@@ -65,7 +65,10 @@ export function mergeWithRecentOptimisticMessages(
     const now = Date.now();
     const recentMissingMessages = previousMessages.filter((message) => {
         const role = message.role.toLowerCase();
-        if (role !== "user" && role !== "assistant") {
+        const isOptimisticRole = role === "user" || role === "assistant";
+        const isLocalUiMessage = message.local === true || role === "system";
+
+        if (!isOptimisticRole && !isLocalUiMessage) {
             return false;
         }
 
@@ -75,6 +78,10 @@ export function mergeWithRecentOptimisticMessages(
 
         if (nextIdentities.has(messageIdentity(message))) {
             return false;
+        }
+
+        if (isLocalUiMessage) {
+            return true;
         }
 
         const timestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
