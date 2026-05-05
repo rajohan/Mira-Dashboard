@@ -1,3 +1,5 @@
+import { Brain, type LucideIcon, Wrench } from "lucide-react";
+
 import type { Session } from "../../../types/session";
 import { formatDuration } from "../../../utils/format";
 import { formatSessionType } from "../../../utils/sessionUtils";
@@ -8,6 +10,42 @@ interface Option {
     value: string;
     label: string;
     description?: string;
+}
+
+interface DiagnosticToggleProps {
+    active: boolean;
+    icon: LucideIcon;
+    label: string;
+    title: string;
+    onClick: () => void;
+}
+
+function DiagnosticToggle({
+    active,
+    icon: Icon,
+    label,
+    title,
+    onClick,
+}: DiagnosticToggleProps) {
+    return (
+        <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={active}
+            className={[
+                "gap-1.5 rounded-full border px-2.5 py-1.5 text-xs",
+                active
+                    ? "border-accent-400/40 bg-accent-500/20 text-accent-100 shadow-[0_0_0_1px_rgba(99,102,241,0.12)] hover:bg-accent-500/25"
+                    : "border-primary-700/80 bg-primary-900/40 text-primary-300 hover:border-primary-600 hover:bg-primary-800/80 hover:text-primary-100",
+            ].join(" ")}
+            onClick={onClick}
+            title={title}
+        >
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{label}</span>
+        </Button>
+    );
 }
 
 interface ChatHeaderProps {
@@ -43,36 +81,22 @@ export function ChatHeader({
                             : "Choose a session to begin"}
                     </p>
                 </div>
-                <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:items-end">
-                    <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-                        <Button
-                            type="button"
-                            variant={showThinking ? "secondary" : "ghost"}
-                            size="sm"
-                            className={
-                                showThinking
-                                    ? "border border-accent-500/40 bg-accent-500/15 text-accent-100"
-                                    : undefined
-                            }
-                            onClick={onToggleThinking}
+                <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
+                    <div className="flex shrink-0 flex-wrap justify-start gap-1.5 rounded-full border border-primary-700/70 bg-primary-950/50 p-1 lg:justify-end">
+                        <DiagnosticToggle
+                            active={showThinking}
+                            icon={Brain}
+                            label="Thinking"
                             title="Toggle assistant thinking / working output"
-                        >
-                            Thinking
-                        </Button>
-                        <Button
-                            type="button"
-                            variant={showTools ? "secondary" : "ghost"}
-                            size="sm"
-                            className={
-                                showTools
-                                    ? "border border-accent-500/40 bg-accent-500/15 text-accent-100"
-                                    : undefined
-                            }
-                            onClick={onToggleTools}
+                            onClick={onToggleThinking}
+                        />
+                        <DiagnosticToggle
+                            active={showTools}
+                            icon={Wrench}
+                            label="Tools"
                             title="Toggle tool calls and tool result output"
-                        >
-                            Tools
-                        </Button>
+                            onClick={onToggleTools}
+                        />
                     </div>
                     <div
                         className={[

@@ -49,6 +49,60 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
     return deduped;
 }
 
+function messageTimestampMs(message: ChatHistoryMessage): number | null {
+    const timestamp = message.timestamp
+        ? new Date(message.timestamp).getTime()
+        : Number.NaN;
+    return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function insertMessagesByTimestamp(
+    baseMessages: ChatHistoryMessage[],
+    messagesToInsert: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    const merged = [...baseMessages];
+    const orderedInsertions = [...messagesToInsert].sort((left, right) => {
+        const leftTimestamp = messageTimestampMs(left);
+        const rightTimestamp = messageTimestampMs(right);
+
+        if (leftTimestamp === null && rightTimestamp === null) {
+            return 0;
+        }
+
+        if (leftTimestamp === null) {
+            return 1;
+        }
+
+        if (rightTimestamp === null) {
+            return -1;
+        }
+
+        return leftTimestamp - rightTimestamp;
+    });
+
+    for (const message of orderedInsertions) {
+        const timestamp = messageTimestampMs(message);
+
+        if (timestamp === null) {
+            merged.push(message);
+            continue;
+        }
+
+        const insertionIndex = merged.findIndex((candidate) => {
+            const candidateTimestamp = messageTimestampMs(candidate);
+            return candidateTimestamp !== null && candidateTimestamp > timestamp;
+        });
+
+        if (insertionIndex === -1) {
+            merged.push(message);
+        } else {
+            merged.splice(insertionIndex, 0, message);
+        }
+    }
+
+    return merged;
+}
+
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
@@ -91,7 +145,7 @@ export function mergeWithRecentOptimisticMessages(
         );
     });
 
-    return dedupeMessages([...nextMessages, ...recentMissingMessages]);
+    return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));
 }
 
 export function activeRunStorageKey(sessionKey: string): string {
