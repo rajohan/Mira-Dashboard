@@ -14,6 +14,8 @@ import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
+const LOG_BOTTOM_THRESHOLD_PX = 24;
+
 export function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [lineCount, setLineCount] = useState<number>(100);
@@ -24,6 +26,7 @@ export function Logs() {
     const [isAtBottom, setIsAtBottom] = useState(true);
 
     const logContainerRef = useRef<HTMLDivElement>(null);
+    const shouldStickToBottomRef = useRef(true);
     const subscribedConnectionIdRef = useRef<number | null>(null);
     const requestSeqRef = useRef(0);
 
@@ -97,6 +100,7 @@ export function Logs() {
     // Load on mount and when file/lineCount changes
     useEffect(() => {
         if (selectedFile && logFiles.length > 0) {
+            shouldStickToBottomRef.current = true;
             setIsAtBottom(true);
             void loadLogContent();
         }
@@ -149,11 +153,14 @@ export function Logs() {
     const checkIsAtBottom = () => {
         const el = logContainerRef.current;
         if (!el) return true;
-        return el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+        return (
+            el.scrollHeight - el.scrollTop - el.clientHeight <= LOG_BOTTOM_THRESHOLD_PX
+        );
     };
 
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
+        shouldStickToBottomRef.current = atBottom;
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
@@ -161,11 +168,12 @@ export function Logs() {
         const el = logContainerRef.current;
         if (!el) return;
         el.scrollTop = el.scrollHeight;
+        shouldStickToBottomRef.current = true;
         setIsAtBottom(true);
     };
 
     useEffect(() => {
-        if (!isAtBottom || filteredLogs.length === 0) return;
+        if (!shouldStickToBottomRef.current || filteredLogs.length === 0) return;
 
         const lastIndex = filteredLogs.length - 1;
         rowVirtualizer.scrollToIndex(lastIndex, { align: "end" });

@@ -48,6 +48,49 @@ import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
+const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
+    "mira-dashboard-chat-diagnostic-visibility";
+const CHAT_BOTTOM_THRESHOLD_PX = 32;
+
+interface StoredChatDiagnosticVisibility {
+    thinking: boolean;
+    tools: boolean;
+}
+
+function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
+    if (typeof window === "undefined") {
+        return { thinking: false, tools: false };
+    }
+
+    try {
+        const raw = window.localStorage.getItem(CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY);
+        if (!raw) {
+            return { thinking: false, tools: false };
+        }
+
+        const parsed = JSON.parse(raw) as Partial<StoredChatDiagnosticVisibility>;
+        return {
+            thinking: parsed.thinking === true,
+            tools: parsed.tools === true,
+        };
+    } catch {
+        return { thinking: false, tools: false };
+    }
+}
+
+function writeStoredChatDiagnosticVisibility(
+    visibility: StoredChatDiagnosticVisibility
+): void {
+    try {
+        window.localStorage.setItem(
+            CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY,
+            JSON.stringify(visibility)
+        );
+    } catch {
+        // Keep the in-memory toggle state if browser storage is unavailable.
+    }
+}
+
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
@@ -68,8 +111,12 @@ export function Chat() {
     const [isSending, setIsSending] = useState(false);
     const [isAssistantTyping, setIsAssistantTyping] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
-    const [showThinkingOutput, setShowThinkingOutput] = useState(false);
-    const [showToolOutput, setShowToolOutput] = useState(false);
+    const [showThinkingOutput, setShowThinkingOutput] = useState(
+        () => readStoredChatDiagnosticVisibility().thinking
+    );
+    const [showToolOutput, setShowToolOutput] = useState(
+        () => readStoredChatDiagnosticVisibility().tools
+    );
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
 
@@ -215,9 +262,19 @@ export function Chat() {
     }, [isConnected, request]);
 
     useEffect(() => {
-        shouldStickToBottomReference.current = true;
-        setIsAtBottom(true);
-        setAttachments([]);
+        writeStoredChatDiagnosticVisibility({
+            thinking: showThinkingOutput,
+            tools: showToolOutput,
+        });
+    }, [showThinkingOutput, showToolOutput]);
+
+    useEffect(() => {
+        const isNewSession = loadedHistorySessionReference.current !== selectedSessionKey;
+        if (isNewSession) {
+            shouldStickToBottomReference.current = true;
+            setIsAtBottom(true);
+            setAttachments([]);
+        }
         setIsAssistantTyping(
             Boolean(selectedSessionKey && hasActiveRunMarker(selectedSessionKey))
         );
@@ -258,8 +315,12 @@ export function Chat() {
 
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
-                shouldStickToBottomReference.current = true;
-                setIsAtBottom(true);
+                if (isNewSession) {
+                    shouldStickToBottomReference.current = true;
+                    setIsAtBottom(true);
+                } else if (shouldStickToBottomReference.current) {
+                    setIsAtBottom(true);
+                }
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch (error_) {
                 if (!cancelled) {
@@ -382,7 +443,8 @@ export function Chat() {
         }
 
         return (
-            container.scrollHeight - container.scrollTop - container.clientHeight < 120
+            container.scrollHeight - container.scrollTop - container.clientHeight <=
+            CHAT_BOTTOM_THRESHOLD_PX
         );
     };
 
@@ -428,7 +490,7 @@ export function Chat() {
             return;
         }
 
-        if (!shouldStickToBottomReference.current && !isAtBottom) {
+        if (!shouldStickToBottomReference.current) {
             return;
         }
 

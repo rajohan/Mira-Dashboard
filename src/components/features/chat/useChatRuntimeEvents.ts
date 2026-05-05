@@ -260,8 +260,9 @@ export function useChatRuntimeEvents({
                                 )
                             )
                         );
-                        shouldStickToBottomReference.current = true;
-                        setIsAtBottom(true);
+                        if (shouldStickToBottomReference.current) {
+                            setIsAtBottom(true);
+                        }
                         setHistoryLoadVersion((previous) => previous + 1);
                     } catch {
                         // Keep local stream/final state if history refresh is unavailable.
