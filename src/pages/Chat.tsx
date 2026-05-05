@@ -27,6 +27,7 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
+    ACTIVE_RUN_MARKER_TTL_MS,
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
     clearActiveRunMarker,
@@ -56,6 +57,44 @@ const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
 interface StoredChatDiagnosticVisibility {
     thinking: boolean;
     tools: boolean;
+}
+
+function sessionTimestampMs(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === "string") {
+        const timestamp = new Date(value).getTime();
+        return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    return null;
+}
+
+function isRecentSessionActivity(value: unknown): boolean {
+    const timestamp = sessionTimestampMs(value);
+    return timestamp !== null && Date.now() - timestamp < ACTIVE_RUN_MARKER_TTL_MS;
+}
+
+function historyHasNewerAssistantMessage(
+    messages: ChatHistoryMessage[],
+    updatedAt: string | undefined
+): boolean {
+    const streamUpdatedAt = sessionTimestampMs(updatedAt);
+
+    if (streamUpdatedAt === null) {
+        return false;
+    }
+
+    return messages.some((message) => {
+        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
+            return false;
+        }
+
+        const messageTimestamp = sessionTimestampMs(message.timestamp);
+        return messageTimestamp !== null && messageTimestamp >= streamUpdatedAt;
+    });
 }
 
 function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
@@ -150,8 +189,12 @@ export function Chat() {
         ? sessionMap.get(selectedSessionKey) || null
         : null;
     const selectedSessionStatus = selectedSession?.status?.toLowerCase() || "";
+    const selectedSessionHasRecentActivity = isRecentSessionActivity(
+        selectedSession?.updatedAt ?? selectedSession?.startedAt
+    );
     const selectedSessionIsRunning = Boolean(
         selectedSession &&
+        selectedSessionHasRecentActivity &&
         (selectedSession.isRunning ||
             selectedSession.running ||
             selectedSession.activeRunId ||
@@ -228,9 +271,8 @@ export function Chat() {
         }
 
         const interval = window.setInterval(() => {
-            if (hasActiveRunMarker(selectedSessionKey)) {
-                setIsAssistantTyping(true);
-            }
+            const hasMarker = hasActiveRunMarker(selectedSessionKey);
+            setIsAssistantTyping(hasMarker);
         }, 5_000);
 
         return () => window.clearInterval(interval);
@@ -373,7 +415,11 @@ export function Chat() {
                 const recoveredStreamInHistory = Boolean(
                     !selectedSessionIsRunning &&
                     activeStream?.text &&
-                    historyContainsRecoveredStream(nextMessages, activeStream.text)
+                    (historyContainsRecoveredStream(nextMessages, activeStream.text) ||
+                        historyHasNewerAssistantMessage(
+                            nextMessages,
+                            activeStream.updatedAt
+                        ))
                 );
 
                 setMessages((previous) => {
