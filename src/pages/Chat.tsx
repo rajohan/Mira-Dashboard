@@ -45,6 +45,7 @@ import { buildSlashCommandSuggestions } from "../components/features/chat/slashC
 import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
 import { Card } from "../components/ui/Card";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { formatSize } from "../utils/format";
@@ -56,7 +57,7 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
 
 function deletedMessagesStorageKey(sessionKey: string): string {
-    return `mira-dashboard-chat-deleted-messages:${sessionKey}`;
+    return `openclaw:deleted:${sessionKey}`;
 }
 
 function readDeletedMessageKeys(sessionKey: string): Set<string> {
@@ -211,6 +212,9 @@ export function Chat() {
     const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
         () => new Set()
     );
+    const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<string | null>(
+        null
+    );
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -328,6 +332,7 @@ export function Chat() {
         setDeletedMessageKeys(
             selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
         );
+        setPendingDeleteMessageKey(null);
     }, [selectedSessionKey]);
 
     useEffect(() => {
@@ -728,20 +733,21 @@ export function Chat() {
     };
 
     const handleDeleteMessage = (messageKey: string) => {
-        if (!selectedSessionKey) {
-            return;
-        }
+        setPendingDeleteMessageKey(messageKey);
+    };
 
-        if (!window.confirm("Delete this message from your local chat view?")) {
+    const confirmDeleteMessage = () => {
+        if (!selectedSessionKey || !pendingDeleteMessageKey) {
             return;
         }
 
         setDeletedMessageKeys((previous) => {
             const next = new Set(previous);
-            next.add(messageKey);
+            next.add(pendingDeleteMessageKey);
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
         });
+        setPendingDeleteMessageKey(null);
     };
 
     const handleFilesSelected = async (files: FileList | null) => {
@@ -1133,6 +1139,16 @@ export function Chat() {
             <AttachmentPreviewModal
                 previewItem={previewItem}
                 onClose={() => setPreviewItem(null)}
+            />
+
+            <ConfirmModal
+                isOpen={!!pendingDeleteMessageKey}
+                title="Delete message"
+                message="Delete this message from the chat view on this browser? This matches OpenClaw's built-in dashboard behavior and does not rewrite the underlying transcript."
+                confirmLabel="Delete"
+                danger
+                onCancel={() => setPendingDeleteMessageKey(null)}
+                onConfirm={confirmDeleteMessage}
             />
         </div>
     );
