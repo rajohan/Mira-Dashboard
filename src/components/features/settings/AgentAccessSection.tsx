@@ -2,9 +2,12 @@ import { Check, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import type { AgentConfig } from "../../../hooks/useConfig";
+import { cn } from "../../../utils/cn";
 import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
+import { Switch } from "../../ui/Switch";
+import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
 interface AgentAccessSectionProps {
     agents: AgentConfig[];
@@ -26,39 +29,108 @@ function formatList(value: string[] | undefined): string {
     return (value || []).join(", ");
 }
 
+function toolEnabled(agent: AgentConfig, toolId: string): boolean {
+    if (agent.tools?.deny?.includes(toolId)) {
+        return false;
+    }
+
+    if (agent.tools?.allow && agent.tools.allow.length > 0) {
+        return agent.tools.allow.includes(toolId);
+    }
+
+    return true;
+}
+
+function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): AgentConfig {
+    const deny = new Set(agent.tools?.deny || []);
+    const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
+
+    if (enabled) {
+        deny.delete(toolId);
+        allow?.add(toolId);
+    } else if (allow) {
+        allow.delete(toolId);
+    } else {
+        deny.add(toolId);
+    }
+
+    return {
+        ...agent,
+        tools: {
+            ...agent.tools,
+            allow: allow ? [...allow].sort() : undefined,
+            deny: deny.size > 0 ? [...deny].sort() : undefined,
+        },
+    };
+}
+
+const riskStyles: Record<ToolRisk, string> = {
+    read: "border-emerald-500/20 bg-emerald-500/5 text-emerald-300",
+    standard: "border-blue-500/20 bg-blue-500/5 text-blue-300",
+    elevated: "border-amber-500/20 bg-amber-500/5 text-amber-300",
+    critical: "border-red-500/20 bg-red-500/5 text-red-300",
+};
+
 export function AgentAccessSection({
     agents,
     defaultSkills,
     onSave,
     saving,
 }: AgentAccessSectionProps) {
+    const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
+    const [toolFilter, setToolFilter] = useState("");
     const [draftAgents, setDraftAgents] = useState(() => agents);
     const [draftDefaultSkills, setDraftDefaultSkills] = useState(() =>
         formatList(defaultSkills)
     );
 
-    const updateAgent = (agentId: string, patch: Partial<AgentConfig>) => {
+    const activeAgent =
+        draftAgents.find((agent) => agent.id === activeAgentId) || draftAgents[0];
+    const filteredTools = TOOL_CATALOG.filter((tool) =>
+        `${tool.label} ${tool.description} ${tool.id}`
+            .toLowerCase()
+            .includes(toolFilter.toLowerCase())
+    );
+
+    const updateAgent = (
+        agentId: string,
+        updater: (agent: AgentConfig) => AgentConfig
+    ) => {
         setDraftAgents((previous) =>
-            previous.map((agent) =>
-                agent.id === agentId
-                    ? {
-                          ...agent,
-                          ...patch,
-                          tools: { ...agent.tools, ...patch.tools },
-                      }
-                    : agent
-            )
+            previous.map((agent) => (agent.id === agentId ? updater(agent) : agent))
         );
     };
 
     return (
-        <ExpandableCard title="Agent access control" icon={ShieldCheck}>
-            <div className="space-y-4">
-                <p className="text-sm text-primary-400">
-                    Configure skill allowlists and per-agent tool policy. Empty fields
-                    inherit OpenClaw defaults; explicit empty arrays can still be handled
-                    later in the raw config editor.
-                </p>
+        <ExpandableCard title="Agent access control" icon={ShieldCheck} defaultExpanded>
+            <div className="space-y-5">
+                <div className="flex flex-wrap gap-2">
+                    {draftAgents.map((agent) => {
+                        const enabledCount = TOOL_CATALOG.filter((tool) =>
+                            toolEnabled(agent, tool.id)
+                        ).length;
+                        return (
+                            <button
+                                key={agent.id}
+                                type="button"
+                                onClick={() => setActiveAgentId(agent.id)}
+                                className={cn(
+                                    "rounded-xl border px-4 py-3 text-left transition",
+                                    activeAgent?.id === agent.id
+                                        ? "border-accent-500 bg-accent-500/10 text-accent-200"
+                                        : "border-primary-700 bg-primary-900/40 text-primary-300 hover:border-primary-600"
+                                )}
+                            >
+                                <div className="font-medium">
+                                    {agent.name || agent.id}
+                                </div>
+                                <div className="mt-1 text-xs opacity-75">
+                                    {enabledCount}/{TOOL_CATALOG.length} tools
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
 
                 <div className="rounded-lg border border-primary-700 bg-primary-900/50 p-3">
                     <label className="mb-1.5 block text-sm font-medium text-primary-300">
@@ -75,76 +147,124 @@ export function AgentAccessSection({
                     </p>
                 </div>
 
-                <div className="space-y-3">
-                    {draftAgents.map((agent) => (
-                        <div
-                            key={agent.id}
-                            className="rounded-lg border border-primary-700 bg-primary-900/40 p-3"
-                        >
-                            <div className="mb-3 flex items-center justify-between">
-                                <div>
-                                    <h4 className="font-medium text-primary-100">
-                                        {agent.name || agent.id}
-                                    </h4>
-                                    <p className="text-xs text-primary-500">
-                                        {agent.default
-                                            ? "Default agent"
-                                            : "Configured agent"}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="grid gap-3 lg:grid-cols-3">
-                                <div>
-                                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-primary-400">
-                                        Skills
-                                    </label>
-                                    <Input
-                                        value={formatList(agent.skills)}
-                                        onChange={(event) =>
-                                            updateAgent(agent.id, {
-                                                skills: parseList(event.target.value),
-                                            })
-                                        }
-                                        placeholder="inherit"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-primary-400">
-                                        Tools allow
-                                    </label>
-                                    <Input
-                                        value={formatList(agent.tools?.allow)}
-                                        onChange={(event) =>
-                                            updateAgent(agent.id, {
-                                                tools: {
-                                                    allow: parseList(event.target.value),
-                                                },
-                                            })
-                                        }
-                                        placeholder="inherit"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-primary-400">
-                                        Tools deny
-                                    </label>
-                                    <Input
-                                        value={formatList(agent.tools?.deny)}
-                                        onChange={(event) =>
-                                            updateAgent(agent.id, {
-                                                tools: {
-                                                    deny: parseList(event.target.value),
-                                                },
-                                            })
-                                        }
-                                        placeholder="none"
-                                    />
-                                </div>
-                            </div>
+                {activeAgent ? (
+                    <div className="space-y-4">
+                        <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                            <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                                {activeAgent.name || activeAgent.id} skill allowlist
+                            </label>
+                            <Input
+                                value={formatList(activeAgent.skills)}
+                                onChange={(event) =>
+                                    updateAgent(activeAgent.id, (agent) => ({
+                                        ...agent,
+                                        skills: parseList(event.target.value),
+                                    }))
+                                }
+                                placeholder="inherit default skills"
+                            />
+                            <p className="mt-1 text-xs text-primary-500">
+                                Leave empty to inherit. Use the Skills section below to
+                                enable or disable skill installation globally.
+                            </p>
                         </div>
-                    ))}
-                </div>
+
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <h4 className="text-lg font-semibold text-primary-100">
+                                    Tool toggles
+                                </h4>
+                                <p className="text-sm text-primary-400">
+                                    Turning a tool off adds it to this agent’s deny list.
+                                </p>
+                            </div>
+                            <Input
+                                value={toolFilter}
+                                onChange={(event) => setToolFilter(event.target.value)}
+                                placeholder="Filter tools..."
+                                className="lg:w-80"
+                            />
+                        </div>
+
+                        <div className="grid gap-4 xl:grid-cols-2">
+                            {(
+                                ["read", "standard", "elevated", "critical"] as ToolRisk[]
+                            ).map((risk) => {
+                                const riskTools = filteredTools.filter(
+                                    (tool) => tool.risk === risk
+                                );
+                                if (riskTools.length === 0) {
+                                    return null;
+                                }
+
+                                const enabledCount = riskTools.filter((tool) =>
+                                    toolEnabled(activeAgent, tool.id)
+                                ).length;
+
+                                return (
+                                    <div
+                                        key={risk}
+                                        className={cn(
+                                            "overflow-hidden rounded-xl border",
+                                            riskStyles[risk]
+                                        )}
+                                    >
+                                        <div className="border-current/10 flex items-center justify-between border-b px-4 py-3">
+                                            <div>
+                                                <h5 className="font-semibold text-primary-100">
+                                                    {TOOL_RISK_LABELS[risk]}
+                                                    <span className="ml-2 rounded-full bg-primary-800 px-2 py-0.5 text-sm text-current">
+                                                        {enabledCount}/{riskTools.length}
+                                                    </span>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                        <div className="divide-y divide-primary-800 bg-primary-950/30">
+                                            {riskTools.map((tool) => {
+                                                const Icon = tool.icon;
+                                                return (
+                                                    <div
+                                                        key={tool.id}
+                                                        className="flex items-center gap-3 px-4 py-3"
+                                                    >
+                                                        <div className="rounded-lg bg-primary-800 p-2 text-accent-300">
+                                                            <Icon className="h-5 w-5" />
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="font-medium text-primary-100">
+                                                                {tool.label}
+                                                            </div>
+                                                            <div className="text-sm text-primary-500">
+                                                                {tool.description}
+                                                            </div>
+                                                        </div>
+                                                        <Switch
+                                                            checked={toolEnabled(
+                                                                activeAgent,
+                                                                tool.id
+                                                            )}
+                                                            onChange={(checked) =>
+                                                                updateAgent(
+                                                                    activeAgent.id,
+                                                                    (agent) =>
+                                                                        updateTool(
+                                                                            agent,
+                                                                            tool.id,
+                                                                            checked
+                                                                        )
+                                                                )
+                                                            }
+                                                        />
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ) : null}
 
                 <div className="flex justify-end">
                     <Button

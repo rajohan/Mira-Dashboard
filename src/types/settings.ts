@@ -1,8 +1,11 @@
+export type SkillSource = "workspace" | "builtin" | "extra";
+
 export interface Skill {
     name: string;
     description?: string;
     enabled: boolean;
     location?: string;
+    source?: SkillSource;
 }
 
 export interface Config {

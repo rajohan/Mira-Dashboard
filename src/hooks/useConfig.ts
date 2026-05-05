@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost, apiPut } from "./useApi";
 
 // Types
+export type SkillSource = "workspace" | "builtin" | "extra";
+
 export interface Skill {
     name: string;
     path: string;
     enabled: boolean;
     description?: string;
+    source?: SkillSource;
 }
 
 export interface AgentConfig {

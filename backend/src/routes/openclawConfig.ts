@@ -1,4 +1,7 @@
 import express, { type RequestHandler } from "express";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 import gateway from "../gateway.js";
 
@@ -25,21 +28,124 @@ async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
     });
 }
 
-function getSkills(config: Record<string, unknown> | undefined) {
-    const skills = config?.skills as { entries?: Record<string, unknown> } | undefined;
-    const entries = skills?.entries || {};
+type SkillSource = "workspace" | "builtin" | "extra";
 
-    return Object.entries(entries)
-        .map(([name, value]) => {
-            const entry = (value || {}) as { enabled?: boolean; description?: string };
-            return {
-                name,
-                path: `skills.entries.${name}`,
-                enabled: entry.enabled !== false,
-                description: entry.description,
-            };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
+interface SkillInfo {
+    name: string;
+    path: string;
+    enabled: boolean;
+    description?: string;
+    source: SkillSource;
+}
+
+const OPENCLAW_PACKAGE_ROOT = path.resolve(
+    process.env.OPENCLAW_PACKAGE_ROOT ||
+        path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
+);
+
+function readSkillDescription(skillPath: string): string | undefined {
+    try {
+        const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
+        const description = content.match(/^description:\s*(.+)$/m)?.[1];
+        if (description) {
+            return description.replace(/^['\"]|['\"]$/g, "");
+        }
+
+        return content
+            .split("\n")
+            .find(
+                (line) => line.trim() && !line.startsWith("---") && !line.startsWith("#")
+            )
+            ?.trim();
+    } catch {
+        return undefined;
+    }
+}
+
+function collectSkillDirectories(root: string): string[] {
+    try {
+        return fs
+            .readdirSync(root, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join(root, entry.name))
+            .filter((skillPath) => fs.existsSync(path.join(skillPath, "SKILL.md")));
+    } catch {
+        return [];
+    }
+}
+
+function collectExtraSkillDirectories(): string[] {
+    const extensionsRoot = path.join(OPENCLAW_PACKAGE_ROOT, "dist/extensions");
+    try {
+        return fs
+            .readdirSync(extensionsRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .flatMap((entry) =>
+                collectSkillDirectories(path.join(extensionsRoot, entry.name, "skills"))
+            );
+    } catch {
+        return [];
+    }
+}
+
+function getConfiguredSkillEntries(config: Record<string, unknown> | undefined) {
+    const skills = config?.skills as { entries?: Record<string, unknown> } | undefined;
+    return skills?.entries || {};
+}
+
+function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
+    const entries = getConfiguredSkillEntries(config);
+    const skillsByName = new Map<string, SkillInfo>();
+
+    const addSkill = (skillPath: string, source: SkillSource) => {
+        const name = path.basename(skillPath);
+        const entry = (entries[name] || {}) as {
+            enabled?: boolean;
+            description?: string;
+        };
+        skillsByName.set(name, {
+            name,
+            path: `skills.entries.${name}`,
+            enabled: entry.enabled !== false,
+            description: entry.description || readSkillDescription(skillPath),
+            source,
+        });
+    };
+
+    for (const skillPath of collectSkillDirectories(
+        path.join(os.homedir(), ".openclaw/workspace/skills")
+    )) {
+        addSkill(skillPath, "workspace");
+    }
+
+    for (const skillPath of collectSkillDirectories(
+        path.join(OPENCLAW_PACKAGE_ROOT, "skills")
+    )) {
+        addSkill(skillPath, "builtin");
+    }
+
+    for (const skillPath of collectExtraSkillDirectories()) {
+        addSkill(skillPath, "extra");
+    }
+
+    for (const [name, value] of Object.entries(entries)) {
+        if (skillsByName.has(name)) {
+            continue;
+        }
+
+        const entry = (value || {}) as { enabled?: boolean; description?: string };
+        skillsByName.set(name, {
+            name,
+            path: `skills.entries.${name}`,
+            enabled: entry.enabled !== false,
+            description: entry.description,
+            source: "extra",
+        });
+    }
+
+    return [...skillsByName.values()].sort(
+        (a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name)
+    );
 }
 
 export default function openClawConfigRoutes(app: express.Application): void {
