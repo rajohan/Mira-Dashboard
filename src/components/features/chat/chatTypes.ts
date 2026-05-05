@@ -230,6 +230,58 @@ function fileNameFromPath(path: string): string {
     return path.split(/[\\/]/).pop() || path;
 }
 
+function mimeTypeFromPath(path: string): string {
+    const extension = path.split(".").pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        svg: "image/svg+xml",
+        bmp: "image/bmp",
+        txt: "text/plain",
+        json: "application/json",
+        mp3: "audio/mpeg",
+        wav: "audio/wav",
+        mp4: "video/mp4",
+        webm: "video/webm",
+    };
+
+    return extension
+        ? mimeTypes[extension] || "application/octet-stream"
+        : "application/octet-stream";
+}
+
+function mediaUrlFromPath(path: string): string {
+    return `/api/media?path=${encodeURIComponent(path)}`;
+}
+
+function extractMediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
+    const attachments: ChatAttachmentDisplay[] = [];
+    const mediaPattern = /^MEDIA:(.+)$/gm;
+
+    for (const match of text.matchAll(mediaPattern)) {
+        const mediaPath = match[1]?.trim();
+        if (!mediaPath) {
+            continue;
+        }
+
+        const mimeType = mimeTypeFromPath(mediaPath);
+        const kind = attachmentKind(mimeType);
+
+        attachments.push({
+            id: `media-${mediaPath}-${attachments.length}`,
+            fileName: fileNameFromPath(mediaPath),
+            mimeType,
+            dataUrl: kind === "image" ? mediaUrlFromPath(mediaPath) : undefined,
+            kind,
+        });
+    }
+
+    return attachments;
+}
+
 function textToBase64(text: string): string {
     const bytes = new TextEncoder().encode(text);
     let binary = "";
@@ -276,6 +328,7 @@ function extractInlineFileAttachments(text: string): ChatAttachmentDisplay[] {
 
 function stripInlineFileMarkup(text: string): string {
     return text
+        .replaceAll(/^MEDIA:.+$/gm, "")
         .replaceAll(/^\[media attached: .*?\]\n?/gm, "")
         .replaceAll(/<file\s+name="[^"]+"\s+mime="[^"]+">[\s\S]*?<\/file>/g, "")
         .replaceAll(/\n{3,}/g, "\n\n")
@@ -297,13 +350,16 @@ function extractMediaReferenceAttachments(
           : [];
 
     return paths.map((path, index) => {
-        const mimeType = types[index] || "application/octet-stream";
+        const mimeType = types[index] || mimeTypeFromPath(path);
+
+        const kind = attachmentKind(mimeType);
 
         return {
             id: `${path}-${index}`,
             fileName: fileNameFromPath(path),
             mimeType,
-            kind: attachmentKind(mimeType),
+            dataUrl: kind === "image" ? mediaUrlFromPath(path) : undefined,
+            kind,
         };
     });
 }
@@ -379,6 +435,7 @@ export function normalizeChatHistoryMessage(
     const normalizedText = normalizeText(content);
     const attachments = [
         ...extractMediaReferenceAttachments(message),
+        ...extractMediaDirectiveAttachments(normalizedText),
         ...extractInlineFileAttachments(normalizedText),
     ];
     const text = stripGeneratedMediaOnlyText(
@@ -475,7 +532,51 @@ export function normalizeVisibleChatHistoryMessages(
     messages: RawChatHistoryMessage[],
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY
 ): ChatHistoryMessage[] {
-    return messages
-        .map(normalizeChatHistoryMessage)
-        .filter((message) => isRenderableChatHistoryMessage(message, visibility));
+    const visibleMessages: ChatHistoryMessage[] = [];
+    let pendingHiddenToolMedia: ChatAttachmentDisplay[] = [];
+
+    for (const message of messages.map(normalizeChatHistoryMessage)) {
+        const isToolMessage = isToolRole(message.role);
+        const hiddenToolMedia =
+            isToolMessage &&
+            !visibility.showTools &&
+            (message.attachments || []).length > 0;
+
+        if (hiddenToolMedia) {
+            pendingHiddenToolMedia = [
+                ...pendingHiddenToolMedia,
+                ...(message.attachments || []),
+            ];
+            continue;
+        }
+
+        if (!isRenderableChatHistoryMessage(message, visibility)) {
+            continue;
+        }
+
+        if (
+            pendingHiddenToolMedia.length > 0 &&
+            message.role.toLowerCase() === "assistant"
+        ) {
+            visibleMessages.push({
+                ...message,
+                attachments: [...(message.attachments || []), ...pendingHiddenToolMedia],
+            });
+            pendingHiddenToolMedia = [];
+            continue;
+        }
+
+        visibleMessages.push(message);
+    }
+
+    if (pendingHiddenToolMedia.length > 0) {
+        visibleMessages.push({
+            role: "assistant",
+            content: "",
+            text: "",
+            attachments: pendingHiddenToolMedia,
+        });
+    }
+
+    return visibleMessages;
 }

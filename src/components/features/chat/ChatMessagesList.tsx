@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { ChatMessageDetails } from "./ChatMessageDetails";
 import type {
     ChatAttachmentDisplay,
@@ -332,9 +333,7 @@ export function ChatMessagesList({
                                             </div>
                                         ) : null}
                                         {shouldRenderPrimaryText ? (
-                                            <div className="whitespace-pre-wrap break-words">
-                                                {row.message.text}
-                                            </div>
+                                            <ChatMarkdown text={row.message.text} />
                                         ) : null}
                                         <AttachmentList
                                             attachments={

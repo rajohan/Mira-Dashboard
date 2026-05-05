@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { WifiOff } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -24,6 +24,7 @@ import { formatDate } from "../utils/format";
 import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
 const FEED_BOTTOM_THRESHOLD_PX = 32;
+const MAX_STICKY_LIVE_FEED_ITEMS = 500;
 
 export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
@@ -39,6 +40,8 @@ export function Sessions() {
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
     const shouldStickFeedToBottomReference = useRef(true);
     const lastKnownFeedScrollTopReference = useRef(0);
+    const previousFeedRowsLengthReference = useRef(0);
+    const previousFeedFilterKeyReference = useRef("ALL:ALL:ALL");
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -58,6 +61,10 @@ export function Sessions() {
     useEffect(() => {
         if (latestFeedItems.length === 0) return;
 
+        if (!shouldStickFeedToBottomReference.current) {
+            return;
+        }
+
         setLiveFeed((prev) => {
             const seen = new Set(prev.map((item) => item.id));
             const next = [...prev];
@@ -69,7 +76,10 @@ export function Sessions() {
                 }
             }
 
-            return next.sort((a, b) => a.timestamp - b.timestamp).slice(-500);
+            const sorted = next.sort((a, b) => a.timestamp - b.timestamp);
+            return sorted.length > MAX_STICKY_LIVE_FEED_ITEMS
+                ? sorted.slice(-MAX_STICKY_LIVE_FEED_ITEMS)
+                : sorted;
         });
     }, [latestFeedItems]);
 
@@ -110,6 +120,7 @@ export function Sessions() {
         estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 88),
         measureElement: (element) => element.getBoundingClientRect().height,
         overscan: 8,
+        useAnimationFrameWithResizeObserver: true,
     });
 
     const feedVirtualItems = feedVirtualizer.getVirtualItems();
@@ -133,18 +144,17 @@ export function Sessions() {
         );
     };
 
-    const scrollFeedToBottom = () => {
+    const scrollFeedToBottom = useCallback(() => {
         const container = liveFeedContainerReference.current;
         if (!container || feedRows.length === 0) {
             return;
         }
 
-        feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
-        container.scrollTo({ top: container.scrollHeight });
-        lastKnownFeedScrollTopReference.current = container.scrollTop;
         shouldStickFeedToBottomReference.current = true;
         setIsFeedAtBottom(true);
-    };
+        feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
+        lastKnownFeedScrollTopReference.current = container.scrollTop;
+    }, [feedRows.length, feedVirtualizer]);
 
     const handleFeedScroll = () => {
         const container = liveFeedContainerReference.current;
@@ -158,50 +168,39 @@ export function Sessions() {
     };
 
     useLayoutEffect(() => {
-        feedVirtualizer.measure();
-    }, [feedRows.length, feedVirtualizer]);
+        const filterKey = `${feedRoleFilter}:${feedSessionFilter}:${feedTypeFilter}`;
+        const filterChanged = previousFeedFilterKeyReference.current !== filterKey;
+        const rowsWereAdded = feedRows.length > previousFeedRowsLengthReference.current;
 
-    useLayoutEffect(() => {
+        previousFeedFilterKeyReference.current = filterKey;
+        previousFeedRowsLengthReference.current = feedRows.length;
+
         if (feedRows.length === 0) {
             return;
         }
 
-        if (!shouldStickFeedToBottomReference.current) {
-            const restoreScrollTop = () => {
-                const container = liveFeedContainerReference.current;
-                if (!container || shouldStickFeedToBottomReference.current) {
-                    return;
-                }
+        if (filterChanged) {
+            shouldStickFeedToBottomReference.current = true;
+            scrollFeedToBottom();
+            return;
+        }
 
-                container.scrollTop = lastKnownFeedScrollTopReference.current;
-            };
-
-            restoreScrollTop();
-            const restoreFrame = requestAnimationFrame(restoreScrollTop);
-            return () => cancelAnimationFrame(restoreFrame);
+        if (!rowsWereAdded || !shouldStickFeedToBottomReference.current) {
+            return;
         }
 
         scrollFeedToBottom();
 
-        const firstFrame = requestAnimationFrame(() => {
-            feedVirtualizer.measure();
-            scrollFeedToBottom();
-        });
-        const delayedScroll = window.setTimeout(() => {
-            feedVirtualizer.measure();
-            scrollFeedToBottom();
-        }, 100);
+        const scrollFrame = requestAnimationFrame(scrollFeedToBottom);
 
-        return () => {
-            cancelAnimationFrame(firstFrame);
-            window.clearTimeout(delayedScroll);
-        };
+        return () => cancelAnimationFrame(scrollFrame);
     }, [
         feedRows.length,
         feedVirtualizer,
         feedRoleFilter,
         feedSessionFilter,
         feedTypeFilter,
+        scrollFeedToBottom,
     ]);
 
     const roleCount = (role: string) =>
@@ -251,7 +250,6 @@ export function Sessions() {
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                         Live Feed (cross-session)
                     </h2>
-                    <span className="text-xs text-primary-400">Auto-refresh: 5s</span>
                 </div>
 
                 <div className="mb-3 flex flex-wrap gap-2">

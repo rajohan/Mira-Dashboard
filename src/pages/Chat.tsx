@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -101,6 +101,9 @@ export function Chat() {
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const liveHistoryRefreshTimerReference = useRef<number | null>(null);
     const loadedHistorySessionReference = useRef("");
+    const previousChatRowsLengthReference = useRef(0);
+    const previousSelectedSessionKeyReference = useRef("");
+    const previousSelectedStreamTextReference = useRef("");
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -120,7 +123,7 @@ export function Chat() {
         () => readStoredChatDiagnosticVisibility().tools
     );
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
-    const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
+    const [, setHistoryLoadVersion] = useState(0);
 
     const { data: sessions = [] } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -178,7 +181,7 @@ export function Chat() {
         selectedSessionHasActiveMarker ||
         Boolean(selectedStreamText);
     const chatRows: ChatRow[] = messages.map((message, index) => ({
-        key: `${message.timestamp || index}-${index}`,
+        key: message.runId || `${message.timestamp || "no-time"}-${index}`,
         kind: "message",
         message,
     }));
@@ -350,6 +353,10 @@ export function Chat() {
         }
 
         const refreshHistory = async () => {
+            if (!shouldStickToBottomReference.current) {
+                return;
+            }
+
             try {
                 const result = (await request("chat.history", {
                     sessionKey: selectedSessionKey,
@@ -420,6 +427,10 @@ export function Chat() {
         let cancelled = false;
 
         const refreshDiagnosticHistory = async () => {
+            if (!shouldStickToBottomReference.current) {
+                return;
+            }
+
             try {
                 const result = (await request("chat.history", {
                     sessionKey: selectedSessionKey,
@@ -485,6 +496,7 @@ export function Chat() {
         getScrollElement: () => messagesContainerReference.current,
         estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
         overscan: 12,
+        useAnimationFrameWithResizeObserver: true,
     });
 
     const checkIsAtBottom = () => {
@@ -511,86 +523,63 @@ export function Chat() {
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
-    const scrollMessagesToBottom = () => {
+    const scrollMessagesToBottom = useCallback(() => {
         const container = messagesContainerReference.current;
         if (!container || chatRows.length === 0) {
             return;
         }
 
-        messagesVirtualizer.scrollToIndex(chatRows.length - 1, { align: "end" });
-        container.scrollTo({ top: container.scrollHeight });
-        lastKnownMessagesScrollTopReference.current = container.scrollTop;
-        setIsAtBottom(true);
         shouldStickToBottomReference.current = true;
-    };
+        setIsAtBottom(true);
+        messagesVirtualizer.scrollToIndex(chatRows.length - 1, { align: "end" });
+        lastKnownMessagesScrollTopReference.current = container.scrollTop;
+    }, [chatRows.length, messagesVirtualizer]);
 
     const handleDynamicRowContentLoad = () => {
-        messagesVirtualizer.measure();
-
         if (shouldStickToBottomReference.current) {
-            requestAnimationFrame(() => {
-                scrollMessagesToBottom();
-            });
+            requestAnimationFrame(scrollMessagesToBottom);
         }
     };
 
     useLayoutEffect(() => {
-        messagesVirtualizer.measure();
-    }, [
-        chatRows.length,
-        selectedStreamText,
-        shouldShowTypingIndicator,
-        messagesVirtualizer,
-    ]);
+        const sessionChanged =
+            previousSelectedSessionKeyReference.current !== selectedSessionKey;
+        const rowsWereAdded = chatRows.length > previousChatRowsLengthReference.current;
+        const streamTextChanged =
+            previousSelectedStreamTextReference.current !== selectedStreamText;
 
-    useLayoutEffect(() => {
+        previousSelectedSessionKeyReference.current = selectedSessionKey;
+        previousChatRowsLengthReference.current = chatRows.length;
+        previousSelectedStreamTextReference.current = selectedStreamText;
+
         if (chatRows.length === 0) {
             return;
         }
 
-        if (!shouldStickToBottomReference.current) {
-            const restoreScrollTop = () => {
-                const container = messagesContainerReference.current;
-                if (!container || shouldStickToBottomReference.current) {
-                    return;
-                }
+        if (sessionChanged) {
+            shouldStickToBottomReference.current = true;
+            scrollMessagesToBottom();
+            return;
+        }
 
-                container.scrollTop = lastKnownMessagesScrollTopReference.current;
-            };
-
-            restoreScrollTop();
-            const restoreFrame = requestAnimationFrame(restoreScrollTop);
-            return () => cancelAnimationFrame(restoreFrame);
+        if (
+            !shouldStickToBottomReference.current ||
+            (!rowsWereAdded && !streamTextChanged)
+        ) {
+            return;
         }
 
         scrollMessagesToBottom();
 
-        const firstFrame = requestAnimationFrame(() => {
-            messagesVirtualizer.measure();
-            scrollMessagesToBottom();
-        });
-        const secondFrame = requestAnimationFrame(() => {
-            messagesVirtualizer.measure();
-            scrollMessagesToBottom();
-        });
-        const delayedScroll = window.setTimeout(() => {
-            messagesVirtualizer.measure();
-            scrollMessagesToBottom();
-        }, 150);
+        const scrollFrame = requestAnimationFrame(scrollMessagesToBottom);
 
-        return () => {
-            cancelAnimationFrame(firstFrame);
-            cancelAnimationFrame(secondFrame);
-            window.clearTimeout(delayedScroll);
-        };
+        return () => cancelAnimationFrame(scrollFrame);
     }, [
         chatRows.length,
         selectedStreamText,
-        shouldShowTypingIndicator,
-        isAtBottom,
         messagesVirtualizer,
         selectedSessionKey,
-        historyLoadVersion,
+        scrollMessagesToBottom,
     ]);
 
     const sessionOptions = sortedSessions.map((session) => ({

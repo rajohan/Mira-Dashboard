@@ -83,6 +83,10 @@ export function useChatRuntimeEvents({
             liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
                 liveHistoryRefreshTimerReference.current = null;
 
+                if (!shouldStickToBottomReference.current) {
+                    return;
+                }
+
                 try {
                     const result = await request<{ messages?: RawChatHistoryMessage[] }>(
                         "chat.history",
@@ -236,6 +240,10 @@ export function useChatRuntimeEvents({
 
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
+                    if (!shouldStickToBottomReference.current) {
+                        return;
+                    }
+
                     try {
                         const result = await request<{
                             messages?: RawChatHistoryMessage[];
