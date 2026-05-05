@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { WifiOff } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -34,6 +34,7 @@ export function Sessions() {
     const [feedTypeFilter, setFeedTypeFilter] = useState<string>("ALL");
     const [liveFeed, setLiveFeed] = useState<FeedItem[]>([]);
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
+    const shouldStickFeedToBottomReference = useRef(true);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -59,12 +60,12 @@ export function Sessions() {
 
             for (const item of latestFeedItems) {
                 if (!seen.has(item.id)) {
-                    next.unshift(item);
+                    next.push(item);
                     seen.add(item.id);
                 }
             }
 
-            return next.sort((a, b) => b.timestamp - a.timestamp).slice(0, 500);
+            return next.sort((a, b) => a.timestamp - b.timestamp).slice(-500);
         });
     }, [latestFeedItems]);
 
@@ -107,9 +108,71 @@ export function Sessions() {
         overscan: 8,
     });
 
-    useEffect(() => {
+    const feedVirtualItems = feedVirtualizer.getVirtualItems();
+    const firstFeedVirtualItem = feedVirtualItems[0];
+    const lastFeedVirtualItem = feedVirtualItems.at(-1);
+    const feedPaddingTop = firstFeedVirtualItem?.start ?? 0;
+    const feedPaddingBottom = lastFeedVirtualItem
+        ? Math.max(feedVirtualizer.getTotalSize() - lastFeedVirtualItem.end, 0)
+        : 0;
+
+    const checkFeedIsAtBottom = () => {
+        const container = liveFeedContainerReference.current;
+
+        if (!container) {
+            return true;
+        }
+
+        return (
+            container.scrollHeight - container.scrollTop - container.clientHeight < 120
+        );
+    };
+
+    const scrollFeedToBottom = () => {
+        const container = liveFeedContainerReference.current;
+        if (!container || feedRows.length === 0) {
+            return;
+        }
+
+        feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
+        container.scrollTo({ top: container.scrollHeight });
+    };
+
+    const handleFeedScroll = () => {
+        shouldStickFeedToBottomReference.current = checkFeedIsAtBottom();
+    };
+
+    useLayoutEffect(() => {
         feedVirtualizer.measure();
     }, [feedRows.length, feedVirtualizer]);
+
+    useLayoutEffect(() => {
+        if (feedRows.length === 0 || !shouldStickFeedToBottomReference.current) {
+            return;
+        }
+
+        scrollFeedToBottom();
+
+        const firstFrame = requestAnimationFrame(() => {
+            feedVirtualizer.measure();
+            scrollFeedToBottom();
+        });
+        const delayedScroll = window.setTimeout(() => {
+            feedVirtualizer.measure();
+            scrollFeedToBottom();
+        }, 100);
+
+        return () => {
+            cancelAnimationFrame(firstFrame);
+            window.clearTimeout(delayedScroll);
+        };
+    }, [
+        feedRows.length,
+        feedVirtualizer,
+        feedRoleFilter,
+        feedSessionFilter,
+        feedTypeFilter,
+    ]);
 
     const roleCount = (role: string) =>
         liveFeed.filter((item) => item.role === role).length;
@@ -189,13 +252,14 @@ export function Sessions() {
                 ) : (
                     <div
                         ref={liveFeedContainerReference}
+                        onScroll={handleFeedScroll}
                         className="max-h-96 overflow-y-auto pr-1"
                     >
-                        <div
-                            className="relative w-full"
-                            style={{ height: `${feedVirtualizer.getTotalSize()}px` }}
-                        >
-                            {feedVirtualizer.getVirtualItems().map((virtualItem) => {
+                        <div className="w-full">
+                            {feedPaddingTop > 0 ? (
+                                <div style={{ height: feedPaddingTop }} />
+                            ) : null}
+                            {feedVirtualItems.map((virtualItem) => {
                                 const row = feedRows[virtualItem.index];
 
                                 if (!row) return null;
@@ -205,10 +269,7 @@ export function Sessions() {
                                         key={row.key}
                                         ref={feedVirtualizer.measureElement}
                                         data-index={virtualItem.index}
-                                        className="absolute left-0 top-0 w-full"
-                                        style={{
-                                            transform: `translateY(${virtualItem.start}px)`,
-                                        }}
+                                        className="w-full"
                                     >
                                         {row.kind === "separator" ? (
                                             <div className="my-1 border-t border-primary-700 pt-1 text-center text-[11px] uppercase tracking-wide text-primary-500">
@@ -222,6 +283,9 @@ export function Sessions() {
                                     </div>
                                 );
                             })}
+                            {feedPaddingBottom > 0 ? (
+                                <div style={{ height: feedPaddingBottom }} />
+                            ) : null}
                         </div>
                     </div>
                 )}
