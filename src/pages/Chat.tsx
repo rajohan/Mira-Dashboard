@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -652,7 +652,7 @@ export function Chat() {
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
-    const scrollMessagesToBottom = useCallback(() => {
+    const scrollMessagesToBottom = () => {
         const container = messagesContainerReference.current;
         if (!container || chatRows.length === 0) {
             return;
@@ -662,7 +662,7 @@ export function Chat() {
         setIsAtBottom(true);
         messagesVirtualizer.scrollToIndex(chatRows.length - 1, { align: "end" });
         lastKnownMessagesScrollTopReference.current = container.scrollTop;
-    }, [chatRows.length, messagesVirtualizer]);
+    };
 
     const handleDynamicRowContentLoad = () => {
         if (shouldStickToBottomReference.current) {

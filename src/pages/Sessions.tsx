@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { WifiOff } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -144,7 +144,7 @@ export function Sessions() {
         );
     };
 
-    const scrollFeedToBottom = useCallback(() => {
+    const scrollFeedToBottom = () => {
         const container = liveFeedContainerReference.current;
         if (!container || feedRows.length === 0) {
             return;
@@ -154,7 +154,7 @@ export function Sessions() {
         setIsFeedAtBottom(true);
         feedVirtualizer.scrollToIndex(feedRows.length - 1, { align: "end" });
         lastKnownFeedScrollTopReference.current = container.scrollTop;
-    }, [feedRows.length, feedVirtualizer]);
+    };
 
     const handleFeedScroll = () => {
         const container = liveFeedContainerReference.current;
