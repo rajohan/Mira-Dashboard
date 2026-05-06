@@ -2,8 +2,10 @@ import {
     createContext,
     createElement,
     type ReactNode,
+    useCallback,
     useContext,
     useEffect,
+    useMemo,
     useRef,
     useState,
 } from "react";
@@ -37,7 +39,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const [connectionId, setConnectionId] = useState(0);
 
-    const connect = () => {
+    const connect = useCallback(() => {
         if (!isAuthenticated) {
             setError("Not authenticated");
             return;
@@ -75,24 +77,24 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         }
 
         clientRef.current.connect();
-    };
+    }, [isAuthenticated]);
 
-    const disconnect = () => {
+    const disconnect = useCallback(() => {
         clientRef.current?.disconnect();
         clientRef.current = null;
         setIsConnected(false);
-    };
+    }, []);
 
-    const request = <T = unknown>(
-        method: string,
-        params?: Record<string, unknown>
-    ): Promise<T> => {
-        if (!clientRef.current) {
-            return Promise.reject(new Error("WebSocket not connected"));
-        }
+    const request = useCallback(
+        <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
+            if (!clientRef.current) {
+                return Promise.reject(new Error("WebSocket not connected"));
+            }
 
-        return clientRef.current.request<T>(method, params);
-    };
+            return clientRef.current.request<T>(method, params);
+        },
+        []
+    );
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -101,7 +103,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             disconnect();
             setError(null);
         }
-    }, [isAuthenticated]);
+    }, [connect, disconnect, isAuthenticated]);
 
     useEffect(() => {
         if (!isConnected) {
@@ -125,27 +127,32 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 disconnect();
             }
         };
-    }, []);
+    }, [disconnect]);
 
-    const subscribe = (listener: (data: unknown) => void) => {
+    const subscribe = useCallback((listener: (data: unknown) => void) => {
         listenersRef.current.add(listener);
         return () => {
             listenersRef.current.delete(listener);
         };
-    };
+    }, []);
+
+    const value = useMemo(
+        () => ({
+            isConnected,
+            error,
+            connectionId,
+            connect,
+            disconnect,
+            request,
+            subscribe,
+        }),
+        [isConnected, error, connectionId, connect, disconnect, request, subscribe]
+    );
 
     return createElement(
         OpenClawSocketContext.Provider,
         {
-            value: {
-                isConnected,
-                error,
-                connectionId,
-                connect,
-                disconnect,
-                request,
-                subscribe,
-            },
+            value,
         },
         children
     );

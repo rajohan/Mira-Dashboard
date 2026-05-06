@@ -321,7 +321,7 @@ export function ChatMessagesList({
                 </button>
             ) : null}
 
-            {isLoadingHistory ? (
+            {isLoadingHistory && chatRows.length === 0 ? (
                 <div className="flex items-center justify-center py-10 text-primary-400">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading chat…
                 </div>
