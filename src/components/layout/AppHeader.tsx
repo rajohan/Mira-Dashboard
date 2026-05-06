@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { Menu } from "lucide-react";
 
 import { useHealth } from "../../hooks";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
@@ -8,9 +9,17 @@ import { NotificationBell } from "./NotificationBell";
 
 interface AppHeaderProps {
     title: string;
+    isSidebarOpen: boolean;
+    sidebarId: string;
+    onOpenSidebar: () => void;
 }
 
-export function AppHeader({ title }: AppHeaderProps) {
+export function AppHeader({
+    title,
+    isSidebarOpen,
+    sidebarId,
+    onOpenSidebar,
+}: AppHeaderProps) {
     const navigate = useNavigate();
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();
@@ -24,17 +33,31 @@ export function AppHeader({ title }: AppHeaderProps) {
         backendCommit !== frontendCommit;
 
     return (
-        <header className="sticky top-0 z-20 border-b border-primary-700 bg-primary-950/95 px-6 py-4 backdrop-blur">
-            <div className="flex items-center justify-between gap-4">
-                <h1 className="text-2xl font-bold text-primary-50">{title}</h1>
+        <header className="sticky top-0 z-20 border-b border-primary-700 bg-primary-950/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4">
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <button
+                        type="button"
+                        className="rounded-lg p-2 text-primary-300 transition-colors hover:bg-primary-800 hover:text-primary-50 md:hidden"
+                        aria-controls={sidebarId}
+                        aria-expanded={isSidebarOpen}
+                        aria-label="Open navigation menu"
+                        onClick={onOpenSidebar}
+                    >
+                        <Menu size={22} />
+                    </button>
+                    <h1 className="truncate text-xl font-bold text-primary-50 sm:text-2xl">
+                        {title}
+                    </h1>
+                </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex shrink-0 items-center gap-2 sm:gap-4">
                     {hasVersionMismatch && (
                         <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
                             Version mismatch (FE {frontendCommit} / BE {backendCommit})
                         </span>
                     )}
-                    <div className="flex items-center gap-2 text-xs">
+                    <div className="hidden items-center gap-2 text-xs sm:flex">
                         <span
                             className={[
                                 "inline-flex items-center gap-1 rounded-md border px-2 py-1",
