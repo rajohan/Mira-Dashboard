@@ -19,8 +19,8 @@ export function LogRotationCard() {
     return (
         <Card className="overflow-hidden">
             <div className="border-b border-primary-700 px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                    <div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                         <div className="flex items-center gap-2 text-lg font-semibold">
                             <RotateCw className="h-4 w-4 text-accent-400" />
                             Log rotation
@@ -30,11 +30,12 @@ export function LogRotationCard() {
                             /opt/docker/data.
                         </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                         <Button
                             size="sm"
                             onClick={() => dryRun.mutate()}
                             disabled={dryRun.isPending || realRun.isPending}
+                            className="w-full sm:w-auto"
                         >
                             {dryRun.isPending ? "Running..." : "Run dry-run now"}
                         </Button>
@@ -43,6 +44,7 @@ export function LogRotationCard() {
                             variant="danger"
                             onClick={() => realRun.mutate()}
                             disabled={dryRun.isPending || realRun.isPending}
+                            className="w-full sm:w-auto"
                         >
                             {realRun.isPending ? "Running..." : "Run real now"}
                         </Button>

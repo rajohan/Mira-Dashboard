@@ -57,7 +57,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                             className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
                         >
                             <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
+                                <div className="min-w-0 flex-1">
                                     <div className="text-sm font-medium text-primary-100">
                                         {item.label}
                                     </div>
@@ -70,7 +70,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                 </Badge>
                             </div>
 
-                            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-primary-300">
+                            <div className="mt-3 flex flex-col gap-3 text-xs text-primary-300 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0">
                                     <div>
                                         Last update:{" "}
@@ -91,7 +91,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                 </div>
                                 <button
                                     type="button"
-                                    className="inline-flex items-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                     disabled={isRefreshing}
                                     onClick={() => refreshCache.mutate(refreshToken)}
                                 >

@@ -197,10 +197,10 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                         key={provider.key}
                         className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2"
                     >
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                            <div className="inline-flex items-center gap-2 text-sm text-primary-100">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                            <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
                                 {provider.icon}
-                                <span>{provider.label}</span>
+                                <span className="truncate">{provider.label}</span>
                             </div>
                             {provider.percent !== null && (
                                 <Badge variant={getSeverity(provider.percent)}>
@@ -208,9 +208,11 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                                 </Badge>
                             )}
                         </div>
-                        <div className="text-xs text-primary-300">{provider.line1}</div>
+                        <div className="break-words text-xs text-primary-300">
+                            {provider.line1}
+                        </div>
                         {provider.line2 && (
-                            <div className="text-xs text-primary-400">
+                            <div className="break-words text-xs text-primary-400">
                                 {provider.line2}
                             </div>
                         )}

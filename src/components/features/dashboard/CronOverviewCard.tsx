@@ -62,8 +62,8 @@ export function CronOverviewCard() {
                     <span className="text-yellow-300">{disabledCount}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                    <span>Last run</span>
-                    <span className="truncate text-right text-primary-100">
+                    <span className="shrink-0">Last run</span>
+                    <span className="min-w-0 truncate text-right text-primary-100">
                         {formatCronTimestamp(
                             latestRunJob
                                 ? getCronStateValue(latestRunJob, "lastRunAtMs")
@@ -73,8 +73,8 @@ export function CronOverviewCard() {
                     </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                    <span>Next run</span>
-                    <span className="truncate text-right text-primary-100">
+                    <span className="shrink-0">Next run</span>
+                    <span className="min-w-0 truncate text-right text-primary-100">
                         {formatCronTimestamp(
                             nextRunJob
                                 ? getCronStateValue(nextRunJob, "nextRunAtMs")

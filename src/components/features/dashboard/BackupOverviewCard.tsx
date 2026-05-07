@@ -134,8 +134,8 @@ export function BackupOverviewCard() {
 
             <div className="mb-4 space-y-3">
                 <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <div className="text-sm font-medium text-primary-100">
                                 Run Postgres backup
                             </div>
@@ -151,6 +151,7 @@ export function BackupOverviewCard() {
                             onClick={() => {
                                 void handleRunWalgBackup();
                             }}
+                            className="w-full sm:w-auto"
                         >
                             {isWalgRunning ? (
                                 <>
@@ -168,8 +169,8 @@ export function BackupOverviewCard() {
                 </div>
 
                 <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <div className="text-sm font-medium text-primary-100">
                                 Run Kopia filesystem backup
                             </div>
@@ -183,6 +184,7 @@ export function BackupOverviewCard() {
                             size="sm"
                             disabled={isRunning || runBackup.isPending}
                             onClick={() => setIsConfirmOpen(true)}
+                            className="w-full sm:w-auto"
                         >
                             {isRunning ? (
                                 <>
@@ -236,7 +238,7 @@ export function BackupOverviewCard() {
                 </div>
             ) : null}
 
-            <div className="mb-4 grid grid-cols-2 gap-3">
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                     <div className="text-xs uppercase tracking-wide text-primary-400">
                         Sources
@@ -286,7 +288,7 @@ export function BackupOverviewCard() {
                             <div className="text-xs uppercase tracking-wide text-primary-400">
                                 Latest Postgres backup
                             </div>
-                            <div className="mt-1 font-mono text-xs">
+                            <div className="mt-1 break-all font-mono text-xs">
                                 {walgEntry.data.latest.backupName || "Unknown"}
                             </div>
                         </div>
@@ -304,7 +306,7 @@ export function BackupOverviewCard() {
                             <div className="text-xs uppercase tracking-wide text-primary-400">
                                 WAL file
                             </div>
-                            <div className="mt-1 font-mono text-xs">
+                            <div className="mt-1 break-all font-mono text-xs">
                                 {walgEntry.data.latest.walFileName || "Unknown"}
                             </div>
                         </div>

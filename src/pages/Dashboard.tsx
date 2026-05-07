@@ -88,8 +88,8 @@ function WeatherTimeCard() {
 
     return (
         <Card>
-            <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="min-w-0">
                     <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-primary-400">
                         <Clock className="h-3.5 w-3.5" />
                         {weather?.location || "Spydeberg"}
@@ -100,13 +100,13 @@ function WeatherTimeCard() {
                     <div className="text-sm text-primary-300">{localDate}</div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 rounded-lg border border-primary-700 bg-primary-900/30 p-3 sm:border-0 sm:bg-transparent sm:p-0">
                     <CurrentWeatherIcon className="h-7 w-7 text-amber-300" />
-                    <div>
+                    <div className="min-w-0">
                         <div className="text-2xl font-semibold text-primary-50">
                             {formatTemp(weather?.temperatureC)}°C
                         </div>
-                        <div className="text-xs text-primary-300">
+                        <div className="truncate text-xs text-primary-300">
                             {isLoading
                                 ? "Loading weather..."
                                 : weather?.description || "Unknown"}
@@ -114,18 +114,22 @@ function WeatherTimeCard() {
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 text-sm text-primary-200">
-                    <span className="inline-flex items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
+                <div className="grid grid-cols-3 gap-2 text-xs text-primary-200 sm:flex sm:flex-wrap sm:items-center sm:gap-3 sm:text-sm">
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
                         <Cloud className="h-4 w-4 text-primary-400" />
-                        Feels {formatTemp(weather?.feelsLikeC)}°
+                        <span className="truncate">
+                            Feels {formatTemp(weather?.feelsLikeC)}°
+                        </span>
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
                         <Droplets className="h-4 w-4 text-accent-300" />
-                        {weather?.humidityPercent ?? "--"}%
+                        <span className="truncate">
+                            {weather?.humidityPercent ?? "--"}%
+                        </span>
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
                         <Wind className="h-4 w-4 text-primary-400" />
-                        {weather?.windKph ?? "--"} km/h
+                        <span className="truncate">{weather?.windKph ?? "--"} km/h</span>
                     </span>
                 </div>
             </div>
@@ -136,7 +140,7 @@ function WeatherTimeCard() {
                 </div>
             )}
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {(weather?.forecast || []).slice(0, 3).map((day, index) => {
                     const dayLabel = formatWeekdayShort(new Date(day.date));
                     const ForecastIcon = getWeatherIcon(day.description);
@@ -144,7 +148,7 @@ function WeatherTimeCard() {
                     return (
                         <div
                             key={day.date}
-                            className="inline-flex items-center gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm"
+                            className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm sm:justify-start"
                         >
                             <span className="text-primary-400">
                                 {index === 0 ? "Today" : dayLabel}
@@ -167,91 +171,83 @@ export function Dashboard() {
     const { data: quotas } = useQuotas(AUTO_REFRESH_MS);
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
             {error && <Alert variant="error">{error}</Alert>}
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
                 <WeatherTimeCard />
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="grid gap-4">
-                        <MetricCard
-                            title="CPU"
-                            subtitle={
-                                metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."
-                            }
-                            percent={metrics?.cpu.loadPercent}
-                            showValue={false}
-                            icon={<Cpu className="h-5 w-5" />}
-                        />
-                        <MetricCard
-                            title="Memory"
-                            subtitle={
-                                metrics
-                                    ? metrics.memory.usedGB +
-                                      " GB of " +
-                                      metrics.memory.totalGB +
-                                      " GB"
-                                    : "Loading..."
-                            }
-                            percent={metrics?.memory.percent}
-                            showValue={false}
-                            icon={<MemoryStick className="h-5 w-5" />}
-                        />
-                    </div>
-
-                    <div className="grid gap-4">
-                        <MetricCard
-                            title="Disk"
-                            subtitle={
-                                metrics
-                                    ? metrics.disk.usedGB +
-                                      " GB of " +
-                                      metrics.disk.totalGB +
-                                      " GB"
-                                    : "Loading..."
-                            }
-                            percent={metrics?.disk.percent}
-                            showValue={false}
-                            icon={<HardDrive className="h-5 w-5" />}
-                        />
-                        <MetricCard
-                            title="Uptime"
-                            value={metrics ? formatUptime(metrics.system.uptime) : "—"}
-                            subtitle={metrics ? metrics.system.hostname : "Loading..."}
-                            color="green"
-                            icon={<Clock className="h-5 w-5" />}
-                        />
-                    </div>
-
-                    <div className="grid gap-4">
-                        <MetricCard
-                            title="Download"
-                            value={
-                                metrics?.network
-                                    ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s`
-                                    : "—"
-                            }
-                            subtitle="Current throughput"
-                            color="blue"
-                            icon={<ArrowDown className="h-5 w-5" />}
-                        />
-                        <MetricCard
-                            title="Upload"
-                            value={
-                                metrics?.network
-                                    ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s`
-                                    : "—"
-                            }
-                            subtitle="Current throughput"
-                            color="blue"
-                            icon={<ArrowUp className="h-5 w-5" />}
-                        />
-                    </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
+                    <MetricCard
+                        title="CPU"
+                        subtitle={
+                            metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."
+                        }
+                        percent={metrics?.cpu.loadPercent}
+                        showValue={false}
+                        icon={<Cpu className="h-5 w-5" />}
+                    />
+                    <MetricCard
+                        title="Memory"
+                        subtitle={
+                            metrics
+                                ? metrics.memory.usedGB +
+                                  " GB of " +
+                                  metrics.memory.totalGB +
+                                  " GB"
+                                : "Loading..."
+                        }
+                        percent={metrics?.memory.percent}
+                        showValue={false}
+                        icon={<MemoryStick className="h-5 w-5" />}
+                    />
+                    <MetricCard
+                        title="Disk"
+                        subtitle={
+                            metrics
+                                ? metrics.disk.usedGB +
+                                  " GB of " +
+                                  metrics.disk.totalGB +
+                                  " GB"
+                                : "Loading..."
+                        }
+                        percent={metrics?.disk.percent}
+                        showValue={false}
+                        icon={<HardDrive className="h-5 w-5" />}
+                    />
+                    <MetricCard
+                        title="Uptime"
+                        value={metrics ? formatUptime(metrics.system.uptime) : "—"}
+                        subtitle={metrics ? metrics.system.hostname : "Loading..."}
+                        color="green"
+                        icon={<Clock className="h-5 w-5" />}
+                    />
+                    <MetricCard
+                        title="Download"
+                        value={
+                            metrics?.network
+                                ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s`
+                                : "—"
+                        }
+                        subtitle="Current throughput"
+                        color="blue"
+                        icon={<ArrowDown className="h-5 w-5" />}
+                    />
+                    <MetricCard
+                        title="Upload"
+                        value={
+                            metrics?.network
+                                ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s`
+                                : "—"
+                        }
+                        subtitle="Current throughput"
+                        color="blue"
+                        icon={<ArrowUp className="h-5 w-5" />}
+                    />
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4 xl:gap-6">
                 <QuotaOverviewCard quotas={quotas} />
                 <GitOverviewCard />
                 <CronOverviewCard />
@@ -310,7 +306,7 @@ export function Dashboard() {
                 />
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
                 <BackupOverviewCard />
                 <ServiceActionsCard />
             </div>
