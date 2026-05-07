@@ -1,6 +1,6 @@
 import { Boxes, History, RefreshCw } from "lucide-react";
 import type { ChangeEvent } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import {
@@ -58,6 +58,7 @@ export function Docker() {
     } | null>(null);
     const [actionOutput, setActionOutput] = useState<string>("");
     const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
+    const actionOutputRef = useRef<HTMLDivElement>(null);
 
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
@@ -107,37 +108,117 @@ export function Docker() {
         (service) => service.updateAvailable
     );
 
+    function formatActionError(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
+    }
+
+    function showActionOutput(output: string) {
+        setActionOutput(output);
+        requestAnimationFrame(() => {
+            actionOutputRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        });
+    }
+
     async function handleContainerAction(
         containerId: string,
         action: "start" | "stop" | "restart" | "update"
     ) {
-        const result = await dockerAction.mutateAsync({ containerId, action });
-        setActionOutput(result.output || "Done");
+        showActionOutput(`${action} requested for container...`);
+        try {
+            const result = await dockerAction.mutateAsync({ containerId, action });
+            showActionOutput(result.output || `${action} completed.`);
+        } catch (error) {
+            showActionOutput(
+                `Failed to ${action} container.\n\n${formatActionError(error)}`
+            );
+        }
     }
 
     async function handleStackRestart(service?: string) {
-        const response = await fetch("/api/docker/stack/action", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ action: "restart", service }),
-        });
-        const result = (await response.json()) as { output?: string; error?: string };
-        if (!response.ok) {
-            throw new Error(result.error || "Failed to restart stack");
+        showActionOutput(
+            service ? `Restarting ${service}...` : "Restarting Docker stack..."
+        );
+        try {
+            const response = await fetch("/api/docker/stack/action", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ action: "restart", service }),
+            });
+            const result = (await response.json()) as { output?: string; error?: string };
+            if (!response.ok) {
+                throw new Error(result.error || "Failed to restart stack");
+            }
+            showActionOutput(result.output || "Docker stack restart completed.");
+        } catch (error) {
+            showActionOutput(
+                `Failed to restart Docker stack.\n\n${formatActionError(error)}`
+            );
         }
-        setActionOutput(result.output || "Done");
     }
 
     async function handleManualUpdate(serviceId: number) {
-        const result = await dockerManualUpdate.mutateAsync(serviceId);
-        const updatedCount = result.result?.summary?.updated ?? 0;
-        const failedCount = result.result?.summary?.failed ?? 0;
-        setActionOutput(
-            `Manual updater run finished. updated=${updatedCount} failed=${failedCount}` +
-                (result.stderr ? `\n\n${result.stderr}` : "")
-        );
+        showActionOutput("Running manual Docker update...");
+        try {
+            const result = await dockerManualUpdate.mutateAsync(serviceId);
+            const updatedCount = result.result?.summary?.updated ?? 0;
+            const failedCount = result.result?.summary?.failed ?? 0;
+            showActionOutput(
+                `Manual updater run finished. updated=${updatedCount} failed=${failedCount}` +
+                    (result.stderr ? `\n\n${result.stderr}` : "")
+            );
+        } catch (error) {
+            showActionOutput(`Manual update failed.\n\n${formatActionError(error)}`);
+        }
+    }
+
+    async function handlePrune(target: "images" | "volumes") {
+        setPruningTarget(target);
+        showActionOutput(`Removing unused Docker ${target}...`);
+        try {
+            const result = await dockerPrune.mutateAsync(target);
+            showActionOutput(result.output || `Unused Docker ${target} removed.`);
+        } catch (error) {
+            showActionOutput(
+                `Failed to remove unused Docker ${target}.\n\n${formatActionError(error)}`
+            );
+        } finally {
+            setPruningTarget(null);
+        }
+    }
+
+    async function handleDangerousDelete() {
+        if (!dangerousDelete || deleteImage.isPending || deleteVolume.isPending) {
+            return;
+        }
+
+        const target = dangerousDelete;
+        showActionOutput(`Deleting Docker ${target.type} ${target.label}...`);
+        try {
+            await (target.type === "image"
+                ? deleteImage.mutateAsync(target.id)
+                : deleteVolume.mutateAsync(target.id));
+            setDangerousDelete(null);
+            showActionOutput(`Deleted Docker ${target.type} ${target.label}.`);
+        } catch (error) {
+            showActionOutput(
+                `Failed to delete Docker ${target.type} ${target.label}.\n\n${formatActionError(error)}`
+            );
+        }
+    }
+
+    async function handleRunDockerUpdater() {
+        showActionOutput("Running Docker updater...");
+        try {
+            const result = await runDockerUpdater.mutateAsync();
+            showActionOutput(JSON.stringify(result, null, 2));
+        } catch (error) {
+            showActionOutput(`Docker updater failed.\n\n${formatActionError(error)}`);
+        }
     }
 
     async function handleStartConsole(containerId: string) {
@@ -179,7 +260,25 @@ export function Docker() {
             </div>
 
             {actionOutput ? (
-                <Card className="p-3 sm:p-4">
+                <Card
+                    ref={actionOutputRef}
+                    role="status"
+                    aria-live="polite"
+                    className="p-3 sm:p-4"
+                >
+                    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-sm font-semibold text-primary-100">
+                            Docker action status
+                        </div>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setActionOutput("")}
+                            className="w-full sm:w-auto"
+                        >
+                            Dismiss
+                        </Button>
+                    </div>
                     <pre className="max-h-80 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
                         {actionOutput}
                     </pre>
@@ -208,7 +307,7 @@ export function Docker() {
                         </div>
                         <Button
                             size="sm"
-                            onClick={() => runDockerUpdater.mutate()}
+                            onClick={() => void handleRunDockerUpdater()}
                             disabled={runDockerUpdater.isPending}
                             className="w-full sm:w-auto"
                         >
@@ -438,15 +537,7 @@ export function Docker() {
                         })
                     }
                     onPruneUnused={() => {
-                        setPruningTarget("images");
-                        void dockerPrune
-                            .mutateAsync("images")
-                            .then((result) => {
-                                setActionOutput(result.output || "Unused images removed");
-                            })
-                            .finally(() => {
-                                setPruningTarget(null);
-                            });
+                        void handlePrune("images");
                     }}
                 />
 
@@ -461,17 +552,7 @@ export function Docker() {
                         })
                     }
                     onPruneUnused={() => {
-                        setPruningTarget("volumes");
-                        void dockerPrune
-                            .mutateAsync("volumes")
-                            .then((result) => {
-                                setActionOutput(
-                                    result.output || "Unused volumes removed"
-                                );
-                            })
-                            .finally(() => {
-                                setPruningTarget(null);
-                            });
+                        void handlePrune("volumes");
                     }}
                 />
             </div>
@@ -670,22 +751,7 @@ export function Docker() {
                 loading={deleteImage.isPending || deleteVolume.isPending}
                 danger
                 onConfirm={() => {
-                    if (
-                        !dangerousDelete ||
-                        deleteImage.isPending ||
-                        deleteVolume.isPending
-                    ) {
-                        return;
-                    }
-
-                    const mutation =
-                        dangerousDelete.type === "image"
-                            ? deleteImage.mutateAsync(dangerousDelete.id)
-                            : deleteVolume.mutateAsync(dangerousDelete.id);
-
-                    void mutation.then(() => {
-                        setDangerousDelete(null);
-                    });
+                    void handleDangerousDelete();
                 }}
             />
             <ConfirmModal
