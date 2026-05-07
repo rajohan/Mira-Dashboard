@@ -152,13 +152,13 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     return (
                         <div
                             key={day.date}
-                            className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm sm:justify-start"
+                            className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm"
                         >
                             <span className="text-primary-400">
                                 {index === 0 ? "Today" : dayLabel}
                             </span>
-                            <ForecastIcon className="h-4 w-4 text-primary-300" />
-                            <span className="text-primary-100">
+                            <span className="inline-flex items-center gap-2 text-primary-100">
+                                <ForecastIcon className="h-4 w-4 text-primary-300" />
                                 {formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°
                             </span>
                         </div>
