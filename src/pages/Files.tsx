@@ -43,8 +43,8 @@ export function Files() {
         : "";
 
     return (
-        <div className="flex h-full flex-col p-6">
-            <div className="mb-6 flex items-center justify-end">
+        <div className="flex h-full min-h-0 flex-col p-3 sm:p-4 lg:p-6">
+            <div className="mb-3 flex items-center justify-end sm:mb-4 lg:mb-6">
                 <RefreshButton
                     onClick={handleRefresh}
                     isLoading={isLoading}
@@ -66,7 +66,7 @@ export function Files() {
                 </Alert>
             )}
 
-            <div className="flex min-h-0 flex-1 gap-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-4">
                 <FilesSidebar
                     files={files}
                     rootLoading={rootLoading}

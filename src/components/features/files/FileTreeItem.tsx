@@ -81,7 +81,7 @@ export function FileTreeItem({
         <div>
             <div
                 className={
-                    "flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-primary-700/50 " +
+                    "flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 hover:bg-primary-700/50 sm:py-1 " +
                     (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")
                 }
                 style={{ paddingLeft: depth * 12 + 8 }}
@@ -97,27 +97,33 @@ export function FileTreeItem({
                     <>
                         {hasChildren ? (
                             isExpanded ? (
-                                <ChevronDown size={14} className="text-primary-400" />
+                                <ChevronDown
+                                    size={14}
+                                    className="shrink-0 text-primary-400"
+                                />
                             ) : (
-                                <ChevronRight size={14} className="text-primary-400" />
+                                <ChevronRight
+                                    size={14}
+                                    className="shrink-0 text-primary-400"
+                                />
                             )
                         ) : isLoading ? (
                             <RefreshCw
                                 size={14}
-                                className="animate-spin text-primary-400"
+                                className="shrink-0 animate-spin text-primary-400"
                             />
                         ) : (
-                            <span className="w-3.5" />
+                            <span className="w-3.5 shrink-0" />
                         )}
                         {getFileIcon(node.name, node.type)}
                     </>
                 ) : (
                     <>
-                        <span className="w-3.5" />
+                        <span className="w-3.5 shrink-0" />
                         {getFileIcon(node.name, node.type)}
                     </>
                 )}
-                <span className="truncate text-sm">{node.name}</span>
+                <span className="min-w-0 truncate text-sm">{node.name}</span>
             </div>
             {node.type === "directory" && isExpanded && node.children && (
                 <div>

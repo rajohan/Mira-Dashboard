@@ -3,7 +3,7 @@ import JSON5 from "json5";
 
 export function JsonPreview({ content }: { content: string }) {
     return (
-        <div className="overflow-auto p-4">
+        <div className="min-w-0 overflow-auto p-3 sm:p-4">
             <ReactJsonView
                 src={(() => {
                     try {
@@ -26,7 +26,7 @@ export function JsonPreview({ content }: { content: string }) {
                 displayObjectSize={false}
                 indentWidth={4}
                 style={{
-                    fontSize: "13px",
+                    fontSize: "12px",
                     backgroundColor: "transparent",
                 }}
             />

@@ -8,7 +8,7 @@ interface CodePreviewProps {
 
 export function CodePreview({ language, content }: CodePreviewProps) {
     return (
-        <div className="h-full overflow-auto">
+        <div className="h-full min-w-0 overflow-auto">
             <SyntaxHighlighter
                 language={language}
                 style={monokai}
@@ -16,7 +16,7 @@ export function CodePreview({ language, content }: CodePreviewProps) {
                     margin: 0,
                     padding: "1rem",
                     background: "transparent",
-                    fontSize: "13px",
+                    fontSize: "12px",
                     height: "100%",
                 }}
                 showLineNumbers={true}

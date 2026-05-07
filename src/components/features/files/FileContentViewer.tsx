@@ -49,8 +49,8 @@ export function FileContentViewer({
     return (
         <div className="flex h-full min-h-0 flex-col">
             {largeFileWarning && (
-                <div className="flex items-center gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-4 py-2 text-sm text-yellow-400">
-                    <AlertTriangle size={14} />
+                <div className="flex items-start gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-3 py-2 text-sm text-yellow-400 sm:items-center sm:px-4">
+                    <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 sm:mt-0" />
                     Large file ({formatSize(fileContent.size)}) - preview only, editing
                     disabled
                 </div>
@@ -65,7 +65,7 @@ export function FileContentViewer({
                     </div>
                 </div>
             ) : fileContent.isImage ? (
-                <div className="flex h-full items-center justify-center p-4">
+                <div className="flex h-full items-center justify-center p-3 sm:p-4">
                     <img
                         src={
                             "data:" +
@@ -124,7 +124,10 @@ export function FileContentViewer({
                 />
             ) : (
                 <pre
-                    className={"whitespace-pre-wrap p-4 font-mono text-sm " + syntaxClass}
+                    className={
+                        "overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs sm:p-4 sm:text-sm " +
+                        syntaxClass
+                    }
                 >
                     {editedContent}
                 </pre>

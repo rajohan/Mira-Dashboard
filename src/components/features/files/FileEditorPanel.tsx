@@ -57,14 +57,17 @@ export function FileEditorPanel({
     onCodePreviewChange,
 }: FileEditorPanelProps) {
     return (
-        <Card variant="bordered" className="flex flex-1 flex-col overflow-hidden p-0">
+        <Card
+            variant="bordered"
+            className="flex min-h-[32rem] min-w-0 flex-1 flex-col overflow-hidden p-0 lg:min-h-0"
+        >
             {selectedPath ? (
                 <>
-                    <div className="flex items-center justify-between gap-4 border-b border-primary-700 p-3">
+                    <div className="flex flex-col gap-3 border-b border-primary-700 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <div className="flex min-w-0 items-center gap-2">
                             <File size={16} className="flex-shrink-0 text-primary-400" />
                             <span
-                                className="truncate font-mono text-sm"
+                                className="min-w-0 break-all font-mono text-xs sm:truncate sm:text-sm"
                                 title={selectedPath}
                             >
                                 {selectedPath}
@@ -75,7 +78,7 @@ export function FileEditorPanel({
                                 </span>
                             )}
                         </div>
-                        <div className="flex flex-shrink-0 items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0 sm:justify-end">
                             {fileContent &&
                                 isMarkdownFile(fileContent.path) &&
                                 isEditable && (
@@ -168,7 +171,7 @@ export function FileEditorPanel({
 
                     {fileContent && (
                         <div className="flex items-center justify-between border-t border-primary-700 px-4 py-2 text-xs text-primary-400">
-                            <span>
+                            <span className="break-words">
                                 Modified:{" "}
                                 {fileContent.modified
                                     ? formatDate(fileContent.modified)

@@ -16,16 +16,16 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
         <div className="p-2">
             {/* cron/ subdirectory */}
             <div
-                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
+                className="flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm text-primary-200 hover:bg-primary-700/50 sm:py-1"
                 onClick={() => setCronDirExpanded(!cronDirExpanded)}
             >
                 {cronDirExpanded ? (
-                    <ChevronDown size={14} className="text-primary-400" />
+                    <ChevronDown size={14} className="shrink-0 text-primary-400" />
                 ) : (
-                    <ChevronRight size={14} className="text-primary-400" />
+                    <ChevronRight size={14} className="shrink-0 text-primary-400" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
-                <span className="truncate">cron</span>
+                <span className="min-w-0 truncate">cron</span>
             </div>
             {cronDirExpanded &&
                 CRON_DIR_FILES.map((file) => {
@@ -34,7 +34,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         <div
                             key={file.path}
                             className={
-                                "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
+                                "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
                                 (isSelected
                                     ? "bg-accent-500/20 text-accent-400"
                                     : "text-primary-200")
@@ -43,33 +43,35 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             onClick={() => onSelect(file.path)}
                         >
                             <File size={14} className="flex-shrink-0 text-primary-400" />
-                            <span className="truncate font-mono">{file.label}</span>
+                            <span className="min-w-0 truncate font-mono">
+                                {file.label}
+                            </span>
                         </div>
                     );
                 })}
 
             {/* hooks/ subdirectory */}
             <div
-                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-primary-200 hover:bg-primary-700/50"
+                className="flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm text-primary-200 hover:bg-primary-700/50 sm:py-1"
                 onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
             >
                 {hooksDirExpanded ? (
-                    <ChevronDown size={14} className="text-primary-400" />
+                    <ChevronDown size={14} className="shrink-0 text-primary-400" />
                 ) : (
-                    <ChevronRight size={14} className="text-primary-400" />
+                    <ChevronRight size={14} className="shrink-0 text-primary-400" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
-                <span className="truncate">hooks</span>
+                <span className="min-w-0 truncate">hooks</span>
             </div>
             {hooksDirExpanded && (
                 <>
                     <div
-                        className="flex items-center gap-1 px-2 py-1 text-sm text-primary-200"
+                        className="flex min-w-0 items-center gap-1 px-2 py-1.5 text-sm text-primary-200 sm:py-1"
                         style={{ paddingLeft: 20 }}
                     >
-                        <ChevronDown size={14} className="text-primary-400" />
+                        <ChevronDown size={14} className="shrink-0 text-primary-400" />
                         <Folder size={14} className="flex-shrink-0 text-yellow-400" />
-                        <span className="truncate">transforms</span>
+                        <span className="min-w-0 truncate">transforms</span>
                     </div>
                     {HOOKS_DIR_FILES.map((file) => {
                         const isSelected = selectedPath === file.path;
@@ -77,7 +79,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             <div
                                 key={file.path}
                                 className={
-                                    "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
+                                    "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
                                     (isSelected
                                         ? "bg-accent-500/20 text-accent-400"
                                         : "text-primary-200")
@@ -89,7 +91,9 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                                     size={14}
                                     className="flex-shrink-0 text-primary-400"
                                 />
-                                <span className="truncate font-mono">{file.label}</span>
+                                <span className="min-w-0 truncate font-mono">
+                                    {file.label}
+                                </span>
                             </div>
                         );
                     })}
@@ -103,7 +107,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                     <div
                         key={file.path}
                         className={
-                            "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-primary-700/50 " +
+                            "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
                             (isSelected
                                 ? "bg-accent-500/20 text-accent-400"
                                 : "text-primary-200")
@@ -112,7 +116,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         onClick={() => onSelect(file.path)}
                     >
                         <File size={14} className="flex-shrink-0 text-primary-400" />
-                        <span className="truncate font-mono">{file.label}</span>
+                        <span className="min-w-0 truncate font-mono">{file.label}</span>
                     </div>
                 );
             })}
