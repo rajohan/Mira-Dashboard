@@ -32,6 +32,7 @@ import {
     type ChatModelOption,
     clearActiveRunMarker,
     dataUrlToBase64,
+    dedupeMessages,
     displayMimeType,
     hasActiveRunMarker,
     markActiveRun,
@@ -290,7 +291,7 @@ export function Chat() {
         selectedSessionIsRunning ||
         selectedSessionHasActiveMarker ||
         Boolean(selectedStreamText);
-    const visibleMessagesForRows = messages.filter(
+    const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) => !deletedMessageKeys.has(messageDeleteKey(message))
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
@@ -993,7 +994,7 @@ export function Chat() {
             timestamp: new Date().toISOString(),
         };
 
-        setMessages((previous) => [...previous, userMessage]);
+        setMessages((previous) => dedupeMessages([...previous, userMessage]));
         setDraft("");
         setAttachments([]);
         setSendError(null);
