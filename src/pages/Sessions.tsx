@@ -244,32 +244,32 @@ export function Sessions() {
     const filterOptions = SESSION_TYPES.map((type) => ({ value: type, label: type }));
 
     return (
-        <div className="p-6">
+        <div className="p-3 sm:p-4 lg:p-6">
             <Card className="mb-4 bg-transparent p-0">
-                <div className="mb-3 flex items-center justify-between">
+                <div className="mb-3 flex items-center justify-between gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                         Live Feed (cross-session)
                     </h2>
                 </div>
 
-                <div className="mb-3 flex flex-wrap gap-2">
+                <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <Select
                         value={feedRoleFilter}
                         onChange={setFeedRoleFilter}
                         options={feedRoleOptions}
-                        width="min-w-[150px]"
+                        width="w-full"
                     />
                     <Select
                         value={feedTypeFilter}
                         onChange={setFeedTypeFilter}
                         options={feedTypeOptions}
-                        width="min-w-[150px]"
+                        width="w-full"
                     />
                     <Select
                         value={feedSessionFilter}
                         onChange={setFeedSessionFilter}
                         options={feedSessionOptions}
-                        width="min-w-[280px]"
+                        width="w-full"
                     />
                 </div>
 
@@ -281,7 +281,7 @@ export function Sessions() {
                     <div
                         ref={liveFeedContainerReference}
                         onScroll={handleFeedScroll}
-                        className="h-96 overflow-y-auto pr-1"
+                        className="h-[32rem] max-h-[60vh] overflow-y-auto pr-1 sm:h-96 sm:max-h-none"
                         style={{ overflowAnchor: "none" }}
                     >
                         {!isFeedAtBottom && feedRows.length > 0 ? (
@@ -330,7 +330,7 @@ export function Sessions() {
                 )}
             </Card>
 
-            <div className="mb-4">
+            <div className="mb-4 overflow-x-auto pb-1">
                 <FilterButtonGroup
                     options={filterOptions}
                     value={typeFilter}

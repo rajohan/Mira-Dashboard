@@ -18,7 +18,7 @@ export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) 
                     : "border border-primary-600/50 bg-primary-700/50")
             }
         >
-            <div className="mb-1 flex items-center justify-between">
+            <div className="mb-1 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <span
                     className={
                         "text-xs font-medium uppercase " +
@@ -28,7 +28,7 @@ export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) 
                     {role}
                 </span>
                 {timestamp && (
-                    <span className="text-xs text-primary-500">
+                    <span className="text-xs text-primary-500 sm:text-right">
                         {formatDate(timestamp)}
                     </span>
                 )}

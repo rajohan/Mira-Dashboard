@@ -130,64 +130,133 @@ export function SessionsTable({
 
     return (
         <Card>
-            <table className="w-full">
-                <thead className="bg-primary-800/50">
-                    {table.getHeaderGroups().map((headerGroup) => (
-                        <tr key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                                <th
-                                    key={header.id}
-                                    className={
-                                        "px-4 py-3 text-xs font-medium uppercase text-primary-400 " +
-                                        (header.column.getCanSort()
-                                            ? "cursor-pointer select-none hover:text-primary-200"
-                                            : "") +
-                                        (header.id === "actions"
-                                            ? " text-right"
-                                            : " text-left")
-                                    }
-                                    onClick={header.column.getToggleSortingHandler()}
-                                >
-                                    <div className="flex items-center gap-1">
-                                        {flexRender(
-                                            header.column.columnDef.header,
-                                            header.getContext()
-                                        )}
-                                        {header.column.getCanSort() && (
-                                            <span className="text-primary-500">
-                                                {header.column.getIsSorted() === "asc" ? (
-                                                    <ChevronDown className="h-3 w-3" />
-                                                ) : header.column.getIsSorted() ===
-                                                  "desc" ? (
-                                                    <ChevronDown className="h-3 w-3 rotate-180" />
-                                                ) : null}
-                                            </span>
-                                        )}
-                                    </div>
-                                </th>
-                            ))}
-                        </tr>
-                    ))}
-                </thead>
-                <tbody>
-                    {table.getRowModel().rows.map((row) => (
-                        <tr
+            <div className="space-y-3 md:hidden">
+                {table.getRowModel().rows.map((row) => {
+                    const session = row.original;
+                    const current = session.tokenCount || 0;
+                    const max = session.maxTokens || 200_000;
+                    const percent = getTokenPercent(current, max);
+                    const name =
+                        session.displayLabel ||
+                        session.label ||
+                        session.displayName ||
+                        session.id ||
+                        "unknown";
+
+                    return (
+                        <div
                             key={row.id}
-                            className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
-                            onClick={() => onSelectSession(row.original)}
+                            role="button"
+                            tabIndex={0}
+                            className="cursor-pointer rounded-lg border border-primary-700 bg-primary-900/60 p-3 transition hover:border-primary-600 hover:bg-primary-800/80"
+                            onClick={() => onSelectSession(session)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    onSelectSession(session);
+                                }
+                            }}
                         >
-                            {row.getVisibleCells().map((cell) => (
-                                <td key={cell.id} className="px-4 py-3">
-                                    {flexRender(
-                                        cell.column.columnDef.cell,
-                                        cell.getContext()
-                                    )}
-                                </td>
-                            ))}
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-1">
+                                    <Badge variant={getSessionTypeVariant(session.type)}>
+                                        {formatSessionType(session)}
+                                    </Badge>
+                                    <div className="line-clamp-2 break-words text-sm font-medium text-primary-100">
+                                        {name}
+                                    </div>
+                                </div>
+                                <div
+                                    className="shrink-0"
+                                    onClick={(event) => event.stopPropagation()}
+                                >
+                                    <SessionActionsDropdown
+                                        onCompact={() => onCompact(session.key)}
+                                        onReset={() => onReset(session.key)}
+                                        onDelete={() => onDelete(session)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 text-xs text-primary-400">
+                                <div className="min-w-0 truncate">
+                                    Model: {session.model || "Unknown"}
+                                </div>
+                                <div>
+                                    <div className="mb-1 flex items-center justify-between gap-2">
+                                        <span>{formatTokens(current, max)}</span>
+                                        <span>{percent}%</span>
+                                    </div>
+                                    <ProgressBar percent={percent} size="sm" />
+                                </div>
+                                <div>Last active {formatDuration(session.updatedAt)}</div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[760px]">
+                    <thead className="bg-primary-800/50">
+                        {table.getHeaderGroups().map((headerGroup) => (
+                            <tr key={headerGroup.id}>
+                                {headerGroup.headers.map((header) => (
+                                    <th
+                                        key={header.id}
+                                        className={
+                                            "px-4 py-3 text-xs font-medium uppercase text-primary-400 " +
+                                            (header.column.getCanSort()
+                                                ? "cursor-pointer select-none hover:text-primary-200"
+                                                : "") +
+                                            (header.id === "actions"
+                                                ? " text-right"
+                                                : " text-left")
+                                        }
+                                        onClick={header.column.getToggleSortingHandler()}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            {flexRender(
+                                                header.column.columnDef.header,
+                                                header.getContext()
+                                            )}
+                                            {header.column.getCanSort() && (
+                                                <span className="text-primary-500">
+                                                    {header.column.getIsSorted() ===
+                                                    "asc" ? (
+                                                        <ChevronDown className="h-3 w-3" />
+                                                    ) : header.column.getIsSorted() ===
+                                                      "desc" ? (
+                                                        <ChevronDown className="h-3 w-3 rotate-180" />
+                                                    ) : null}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </th>
+                                ))}
+                            </tr>
+                        ))}
+                    </thead>
+                    <tbody>
+                        {table.getRowModel().rows.map((row) => (
+                            <tr
+                                key={row.id}
+                                className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
+                                onClick={() => onSelectSession(row.original)}
+                            >
+                                {row.getVisibleCells().map((cell) => (
+                                    <td key={cell.id} className="px-4 py-3">
+                                        {flexRender(
+                                            cell.column.columnDef.cell,
+                                            cell.getContext()
+                                        )}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </Card>
     );
 }

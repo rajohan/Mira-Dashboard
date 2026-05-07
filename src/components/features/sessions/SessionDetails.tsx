@@ -45,10 +45,10 @@ export function SessionDetails({
 
     return (
         <Modal isOpen={!!session} onClose={onClose} size="3xl">
-            <div className="flex flex-col" style={{ maxHeight: "85vh" }}>
+            <div className="flex max-h-[85vh] flex-col">
                 {/* Header */}
-                <div className="flex flex-shrink-0 items-center justify-between border-b border-primary-700 pb-4">
-                    <div className="flex min-w-0 items-center gap-3">
+                <div className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-primary-700 pb-4">
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                         <Badge variant={getSessionTypeVariant(session.type)}>
                             {formatSessionType(session)}
                         </Badge>
@@ -56,7 +56,7 @@ export function SessionDetails({
                             {displayName}
                         </h2>
                     </div>
-                    <div className="flex flex-shrink-0 items-center gap-2">
+                    <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
                         <SessionActionsDropdown
                             onCompact={onCompact}
                             onReset={onReset}
@@ -77,7 +77,7 @@ export function SessionDetails({
 
                 {/* Message History */}
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <div className="flex flex-shrink-0 items-center justify-between border-b border-primary-700 py-3">
+                    <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-primary-700 py-3">
                         <h3 className="flex items-center gap-2 text-sm font-medium text-primary-300">
                             <MessageSquare className="h-4 w-4" /> Message History
                         </h3>
@@ -92,7 +92,7 @@ export function SessionDetails({
                             />
                         </Button>
                     </div>
-                    <div className="flex-1 overflow-auto py-4">
+                    <div className="flex-1 overflow-auto py-3 sm:py-4">
                         {isLoading ? (
                             <div className="flex items-center justify-center py-8">
                                 <RefreshCw className="h-5 w-5 animate-spin text-primary-400" />

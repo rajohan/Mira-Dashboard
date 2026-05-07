@@ -33,12 +33,14 @@ export function LiveFeedRow({ item }: LiveFeedRowProps) {
     return (
         <div className="rounded-lg border border-primary-700 p-3">
             <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <span className="truncate text-primary-300">{item.sessionLabel}</span>
-                <span className="text-primary-500">
+                <span className="min-w-0 truncate text-primary-300">
+                    {item.sessionLabel}
+                </span>
+                <span className="shrink-0 text-primary-500">
                     {formatOsloTime(new Date(item.timestamp))}
                 </span>
             </div>
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Badge variant={getRoleVariant(item.role)}>{item.role}</Badge>
                 <Badge variant={getSessionTypeVariant(item.sessionType)}>
                     {item.sessionType || "unknown"}
