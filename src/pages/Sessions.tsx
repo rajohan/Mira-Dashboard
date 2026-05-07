@@ -117,7 +117,7 @@ export function Sessions() {
         count: feedRows.length,
         getItemKey: (index) => feedRows[index]?.key ?? `row-${index}`,
         getScrollElement: () => liveFeedContainerReference.current,
-        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 88),
+        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 112),
         measureElement: (element) => element.getBoundingClientRect().height,
         overscan: 8,
         useAnimationFrameWithResizeObserver: true,

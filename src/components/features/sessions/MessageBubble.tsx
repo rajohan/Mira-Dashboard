@@ -1,3 +1,4 @@
+import { cn } from "../../../utils/cn";
 import { formatDate } from "../../../utils/format";
 
 interface MessageBubbleProps {
@@ -7,36 +8,31 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) {
-    const isUser = role === "user";
+    const normalizedRole = role.toLowerCase();
+    const isUser = normalizedRole === "user";
 
     return (
-        <div
-            className={
-                "rounded-lg p-3 " +
-                (isUser
-                    ? "border border-blue-500/20 bg-blue-500/10"
-                    : "border border-primary-600/50 bg-primary-700/50")
-            }
-        >
-            <div className="mb-1 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <span
-                    className={
-                        "text-xs font-medium uppercase " +
-                        (isUser ? "text-blue-400" : "text-green-400")
-                    }
-                >
-                    {role}
-                </span>
-                {timestamp && (
-                    <span className="text-xs text-primary-500 sm:text-right">
-                        {formatDate(timestamp)}
-                    </span>
+        <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+            <div
+                className={cn(
+                    "min-w-0 max-w-[94%] rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[86%] lg:max-w-[80%]",
+                    isUser
+                        ? "bg-accent-500 text-white"
+                        : "border border-primary-700 bg-primary-800 text-primary-100"
                 )}
+            >
+                <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide opacity-70">
+                    <span className="min-w-0 truncate">{role}</span>
+                    {timestamp ? (
+                        <span className="shrink-0 text-right">
+                            {formatDate(timestamp)}
+                        </span>
+                    ) : null}
+                </div>
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                    {content}
+                </p>
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm text-primary-200">
-                {content?.slice(0, 500)}
-                {content?.length > 500 && "..."}
-            </p>
         </div>
     );
 }
