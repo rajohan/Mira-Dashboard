@@ -113,11 +113,49 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            void clientRef.current.request("sessions.list").catch(() => {});
+            const client = clientRef.current;
+            void client.request("sessions.list").catch(() => {
+                if (clientRef.current !== client) {
+                    return;
+                }
+
+                setIsConnected(false);
+                client.disconnect();
+                client.connect();
+            });
         }, 10_000);
 
         return () => clearInterval(interval);
     }, [isConnected, connectionId]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        const resyncVisibleSocket = () => {
+            if (document.visibilityState === "hidden") {
+                return;
+            }
+
+            if (!clientRef.current?.isOpen()) {
+                connect();
+                return;
+            }
+
+            void clientRef.current.request("sessions.list").catch(() => {});
+        };
+
+        document.addEventListener("visibilitychange", resyncVisibleSocket);
+        window.addEventListener("focus", resyncVisibleSocket);
+        window.addEventListener("online", resyncVisibleSocket);
+
+        return () => {
+            document.removeEventListener("visibilitychange", resyncVisibleSocket);
+            window.removeEventListener("focus", resyncVisibleSocket);
+            window.removeEventListener("online", resyncVisibleSocket);
+        };
+    }, [isAuthenticated]);
 
     useEffect(() => {
         return () => {

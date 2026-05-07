@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useEffect } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef } from "react";
 
 import {
     type ActiveChatStreams,
@@ -30,6 +30,12 @@ import {
 
 interface MutableReference<T> {
     current: T;
+}
+
+interface PendingDeltaUpdate {
+    runId?: string;
+    aliases: string[];
+    deltas: ChatHistoryMessage[];
 }
 
 interface UseChatRuntimeEventsParams {
@@ -70,7 +76,77 @@ export function useChatRuntimeEvents({
     setIsAtBottom,
     setHistoryLoadVersion,
 }: UseChatRuntimeEventsParams) {
+    const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
+    const pendingDeltaFlushTimerReference = useRef<number | null>(null);
+
     useEffect(() => {
+        const flushPendingDeltaUpdates = () => {
+            if (pendingDeltaFlushTimerReference.current !== null) {
+                window.clearTimeout(pendingDeltaFlushTimerReference.current);
+                pendingDeltaFlushTimerReference.current = null;
+            }
+
+            const pendingUpdates = pendingDeltaUpdatesReference.current;
+            pendingDeltaUpdatesReference.current = {};
+
+            if (Object.keys(pendingUpdates).length === 0) {
+                return;
+            }
+
+            const next = { ...activeStreamsReference.current };
+
+            for (const [streamSessionKey, pending] of Object.entries(pendingUpdates)) {
+                const existing = next[streamSessionKey];
+                const runId = existing?.runId || pending.runId || streamSessionKey;
+                let text = existing?.text || "";
+                let message = existing?.message;
+
+                for (const deltaMessage of pending.deltas) {
+                    text = mergeStreamText(text, deltaMessage.text);
+                    message = mergeStreamMessage(message, deltaMessage, text, runId);
+                }
+
+                next[streamSessionKey] = {
+                    sessionKey: streamSessionKey,
+                    runId,
+                    aliases: uniqueStrings([
+                        ...(existing?.aliases || []),
+                        ...pending.aliases,
+                        runId,
+                    ]),
+                    text,
+                    message,
+                    updatedAt: new Date().toISOString(),
+                };
+            }
+
+            activeStreamsReference.current = next;
+            updateActiveStreams(() => next);
+        };
+
+        const queueDeltaUpdate = (
+            streamSessionKey: string,
+            runId: string,
+            deltaMessage: ChatHistoryMessage
+        ) => {
+            const pending = pendingDeltaUpdatesReference.current[streamSessionKey] || {
+                aliases: [],
+                deltas: [],
+            };
+
+            pending.runId ||= runId;
+            pending.aliases = uniqueStrings([...pending.aliases, runId]);
+            pending.deltas = [...pending.deltas, deltaMessage];
+            pendingDeltaUpdatesReference.current[streamSessionKey] = pending;
+
+            if (pendingDeltaFlushTimerReference.current === null) {
+                pendingDeltaFlushTimerReference.current = window.setTimeout(
+                    flushPendingDeltaUpdates,
+                    75
+                );
+            }
+        };
+
         const refreshSelectedHistorySoon = (delayMs = 450) => {
             if (!selectedSessionKey) {
                 return;
@@ -298,37 +374,15 @@ export function useChatRuntimeEvents({
                     deltaMessage.thinking?.length ||
                     deltaMessage.toolCalls?.length
                 ) {
-                    updateActiveStreams((previous) => {
-                        const existing = previous[streamSessionKey];
-                        const runId =
-                            payload.runId || existing?.runId || streamSessionKey;
-                        const text = mergeStreamText(existing?.text || "", nextText);
-                        return {
-                            ...previous,
-                            [streamSessionKey]: {
-                                sessionKey: streamSessionKey,
-                                runId,
-                                aliases: uniqueStrings([
-                                    ...(existing?.aliases || []),
-                                    payload.runId,
-                                    runId,
-                                ]),
-                                text,
-                                message: mergeStreamMessage(
-                                    existing?.message,
-                                    deltaMessage,
-                                    text,
-                                    runId
-                                ),
-                                updatedAt: new Date().toISOString(),
-                            },
-                        };
-                    });
+                    const existing = activeStreamsReference.current[streamSessionKey];
+                    const runId = payload.runId || existing?.runId || streamSessionKey;
+                    queueDeltaUpdate(streamSessionKey, runId, deltaMessage);
                 }
                 return;
             }
 
             if (payload.state === "final") {
+                flushPendingDeltaUpdates();
                 const finalMessage = finalMessageFromPayload(payload);
                 const bufferedText =
                     activeStreamsReference.current[streamSessionKey]?.text || "";
@@ -371,6 +425,7 @@ export function useChatRuntimeEvents({
             }
 
             if (payload.state === "aborted") {
+                flushPendingDeltaUpdates();
                 const bufferedText =
                     activeStreamsReference.current[streamSessionKey]?.text || "";
                 if (bufferedText.trim() && eventMatchesSelected) {
@@ -403,6 +458,7 @@ export function useChatRuntimeEvents({
             }
 
             if (payload.state === "error") {
+                flushPendingDeltaUpdates();
                 if (eventMatchesSelected) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
@@ -424,6 +480,11 @@ export function useChatRuntimeEvents({
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
                 liveHistoryRefreshTimerReference.current = null;
             }
+            if (pendingDeltaFlushTimerReference.current !== null) {
+                window.clearTimeout(pendingDeltaFlushTimerReference.current);
+                pendingDeltaFlushTimerReference.current = null;
+            }
+            pendingDeltaUpdatesReference.current = {};
         };
     }, [
         activeStreamsReference,

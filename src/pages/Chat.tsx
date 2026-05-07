@@ -1013,6 +1013,9 @@ export function Chat() {
         setSendError(null);
         setIsSending(true);
         setIsAssistantTyping(true);
+        shouldStickToBottomReference.current = true;
+        setIsAtBottom(true);
+        scheduleBottomFollow();
 
         const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         updateActiveStreams((previous) => ({
