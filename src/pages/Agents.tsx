@@ -15,9 +15,9 @@ export function Agents() {
     const offlineAgents = agents.filter((a) => a.status === "offline");
 
     return (
-        <div className="space-y-4 p-6">
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <Card className="space-y-6">
+        <div className="space-y-4 p-3 sm:p-4 lg:p-6">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6">
+                <Card className="space-y-5 sm:space-y-6">
                     {error && (
                         <div className="rounded-lg bg-red-500/20 p-4 text-red-300">
                             {error instanceof Error
@@ -36,7 +36,7 @@ export function Agents() {
                                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                                         Active ({activeAgents.length})
                                     </h2>
-                                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
                                         {activeAgents.map((agent) => (
                                             <AgentCard
                                                 key={agent.id}
@@ -59,7 +59,7 @@ export function Agents() {
                                         <span className="h-2 w-2 rounded-full bg-sky-300" />
                                         Idle ({idleAgents.length})
                                     </h2>
-                                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
                                         {idleAgents.map((agent) => (
                                             <AgentCard
                                                 key={agent.id}
@@ -82,7 +82,7 @@ export function Agents() {
                                         <span className="h-2 w-2 rounded-full bg-primary-600" />
                                         Offline ({offlineAgents.length})
                                     </h2>
-                                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
                                         {offlineAgents.map((agent) => (
                                             <AgentCard
                                                 key={agent.id}
@@ -113,7 +113,7 @@ export function Agents() {
                     )}
                 </Card>
 
-                <Card className="hidden xl:block">
+                <Card>
                     <TaskHistorySidebar />
                 </Card>
             </div>

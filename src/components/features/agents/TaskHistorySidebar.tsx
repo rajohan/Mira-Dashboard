@@ -6,7 +6,7 @@ export function TaskHistorySidebar() {
     const tasks = data?.tasks || [];
 
     return (
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
             <div>
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
                     Latest Tasks
@@ -24,18 +24,20 @@ export function TaskHistorySidebar() {
                                 <span className="absolute left-1/2 top-3 h-2.5 w-2.5 -translate-x-1/2 rounded-full border border-primary-700 bg-primary-300" />
                             </div>
 
-                            <div className="flex-1 rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
-                                <div className="mb-0.5 flex items-center justify-between gap-2">
-                                    <span className="text-xs font-medium text-primary-200">
+                            <div className="min-w-0 flex-1 rounded border border-primary-700/80 bg-primary-900/60 p-2.5">
+                                <div className="mb-0.5 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                                    <span className="truncate text-xs font-medium text-primary-200">
                                         {item.agentId}
                                     </span>
-                                    <span className="text-[11px] text-primary-500">
+                                    <span className="shrink-0 text-[11px] text-primary-500">
                                         {item.completedAt
                                             ? formatDate(item.completedAt)
                                             : "-"}
                                     </span>
                                 </div>
-                                <p className="text-sm text-primary-100">{item.task}</p>
+                                <p className="break-words text-sm text-primary-100">
+                                    {item.task}
+                                </p>
                                 <p className="mt-1 text-[11px] uppercase tracking-wide text-primary-500">
                                     {item.status}
                                 </p>

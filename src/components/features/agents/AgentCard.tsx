@@ -26,15 +26,16 @@ export function AgentCard({
 
     return (
         <Card className="relative flex h-full flex-col overflow-hidden border border-primary-700 bg-primary-900">
-            <div className="mb-4 flex items-start justify-between">
-                <div className="flex items-center gap-3">
+            <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                     <StatusIndicator status={status} />
-                    <div>
-                        <h3 className="font-semibold text-primary-50">{id}</h3>
-                        <p className="text-xs text-primary-400">{modelShort}</p>
+                    <div className="min-w-0">
+                        <h3 className="truncate font-semibold text-primary-50">{id}</h3>
+                        <p className="truncate text-xs text-primary-400">{modelShort}</p>
                     </div>
                 </div>
                 <Badge
+                    className="shrink-0"
                     variant={
                         status === "active"
                             ? "success"
@@ -52,7 +53,9 @@ export function AgentCard({
                     <div className="text-xs uppercase tracking-wide text-primary-500">
                         Task
                     </div>
-                    <div className={"mt-1 text-sm " + colors.text}>{currentTask}</div>
+                    <div className={"mt-1 break-words text-sm " + colors.text}>
+                        {currentTask}
+                    </div>
                 </div>
             )}
 
@@ -61,7 +64,9 @@ export function AgentCard({
                     <div className="text-xs uppercase tracking-wide text-primary-500">
                         Activity
                     </div>
-                    <div className="mt-1 text-sm text-primary-300">{currentActivity}</div>
+                    <div className="mt-1 break-words text-sm text-primary-300">
+                        {currentActivity}
+                    </div>
                 </div>
             )}
 
@@ -72,16 +77,16 @@ export function AgentCard({
             )}
 
             <div className="mt-auto flex items-center justify-between text-xs text-primary-400">
-                <div className="flex items-center gap-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-1">
                     {channel && (
                         <>
-                            <span className="rounded bg-primary-700 px-1.5 py-0.5">
+                            <span className="max-w-full truncate rounded bg-primary-700 px-1.5 py-0.5">
                                 {channel}
                             </span>
                             <span className="text-primary-600">•</span>
                         </>
                     )}
-                    <span>
+                    <span className="min-w-0 truncate">
                         Last active{" "}
                         {lastActivity
                             ? formatDuration(new Date(lastActivity).getTime())
