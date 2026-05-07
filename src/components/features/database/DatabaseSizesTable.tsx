@@ -100,5 +100,43 @@ interface Props {
 
 export function DatabasesTable({ databases, pools, stats }: Props) {
     const data = mergeWithPoolData(databases, pools, stats);
-    return <DatabaseTableShell data={data} columns={columns} />;
+    return (
+        <DatabaseTableShell
+            data={data}
+            columns={columns}
+            renderMobileCard={(row) => (
+                <div>
+                    <div className="break-words font-medium text-primary-50">
+                        {row.datname}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                        <div>
+                            <div className="text-primary-500">Size</div>
+                            {row.size_pretty}
+                        </div>
+                        <div>
+                            <div className="text-primary-500">Connections</div>
+                            {row.numbackends}
+                        </div>
+                        <div>
+                            <div className="text-primary-500">Cache hit</div>
+                            {row.cache_hit_ratio}%
+                        </div>
+                        <div>
+                            <div className="text-primary-500">Queries</div>
+                            {row.total_query_count > 0
+                                ? row.total_query_count.toLocaleString()
+                                : "—"}
+                        </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-400">
+                        <div>Clients: {row.cl_active}</div>
+                        <div>Waiting: {row.cl_waiting}</div>
+                        <div>Idle servers: {row.sv_idle}</div>
+                        <div>Active servers: {row.sv_active}</div>
+                    </div>
+                </div>
+            )}
+        />
+    );
 }

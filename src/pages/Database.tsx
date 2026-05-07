@@ -15,14 +15,14 @@ export function Database() {
 
     if (error || !data) {
         return (
-            <div className="space-y-6 p-6">
+            <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
                 <EmptyState message="Failed to load database metrics." />
             </div>
         );
     }
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
             <DatabaseOverviewCards overview={data.overview} />
 
             <div className="border-b border-primary-700 pb-2">

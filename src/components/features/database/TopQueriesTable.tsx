@@ -77,6 +77,34 @@ export function TopQueriesTable({
                 columns={columns}
                 maxHeight="520px"
                 onRowClick={(row) => setSelectedQuery(row)}
+                renderMobileCard={(row) => (
+                    <div>
+                        <div className="line-clamp-4 break-words font-mono text-xs text-primary-100">
+                            {truncateQuery(row.query, 220)}
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                            <div>
+                                <div className="text-primary-500">Calls</div>
+                                {row.calls}
+                            </div>
+                            <div>
+                                <div className="text-primary-500">Mean ms</div>
+                                {row.mean_exec_time}
+                            </div>
+                            <div>
+                                <div className="text-primary-500">Total ms</div>
+                                {row.total_exec_time}
+                            </div>
+                            <div>
+                                <div className="text-primary-500">Rows</div>
+                                {row.rows}
+                            </div>
+                        </div>
+                        <div className="mt-3 text-xs text-accent-300">
+                            Tap for full query
+                        </div>
+                    </div>
+                )}
             />
 
             <Modal
@@ -89,26 +117,27 @@ export function TopQueriesTable({
                 size="3xl"
             >
                 {selectedQuery ? (
-                    <div className="space-y-4">
-                        <div className="flex flex-wrap gap-4 text-sm text-primary-400">
+                    <div className="space-y-3 sm:space-y-4">
+                        <div className="grid grid-cols-2 gap-2 text-sm text-primary-400 sm:flex sm:flex-wrap sm:gap-4">
                             <span>Calls: {selectedQuery.calls}</span>
                             <span>Total ms: {selectedQuery.total_exec_time}</span>
                             <span>Mean ms: {selectedQuery.mean_exec_time}</span>
                             <span>Rows: {selectedQuery.rows}</span>
                         </div>
 
-                        <div className="flex justify-end">
+                        <div className="flex justify-stretch sm:justify-end">
                             <Button
                                 variant="secondary"
                                 size="sm"
                                 onClick={() => void handleCopy()}
+                                className="w-full sm:w-auto"
                             >
                                 <Copy className="mr-2 h-4 w-4" />
                                 {copied ? "Copied" : "Copy query"}
                             </Button>
                         </div>
 
-                        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-primary-700 bg-primary-900/50 p-4 text-sm text-primary-100">
+                        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-primary-700 bg-primary-900/50 p-3 text-xs text-primary-100 sm:p-4 sm:text-sm">
                             <code>{selectedQuery.query}</code>
                         </pre>
                     </div>
