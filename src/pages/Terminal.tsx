@@ -363,7 +363,7 @@ export function Terminal() {
                                 onChange={(e) => setCommand(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Enter command..."
-                                className="w-full bg-black font-mono text-sm"
+                                className="w-full bg-black font-mono text-base sm:text-sm"
                                 disabled={startCommand.isPending}
                                 autoFocus
                                 autoComplete="off"
