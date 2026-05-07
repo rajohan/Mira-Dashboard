@@ -1,4 +1,5 @@
 import { useLiveQuery } from "@tanstack/react-db";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -189,6 +190,7 @@ function supportedAudioRecordingMimeType(): string | undefined {
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
+    const messagesBottomReference = useRef<HTMLDivElement | null>(null);
     const fileInputReference = useRef<HTMLInputElement | null>(null);
     const shouldStickToBottomReference = useRef(true);
     const lastKnownMessagesScrollTopReference = useRef(0);
@@ -620,6 +622,15 @@ export function Chat() {
         setHistoryLoadVersion,
     });
 
+    const messagesVirtualizer = useVirtualizer({
+        count: chatRows.length,
+        getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
+        getScrollElement: () => messagesContainerReference.current,
+        estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
+        overscan: 12,
+        useAnimationFrameWithResizeObserver: true,
+    });
+
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
 
@@ -650,6 +661,7 @@ export function Chat() {
             return;
         }
 
+        messagesBottomReference.current?.scrollIntoView({ block: "end" });
         container.scrollTop = container.scrollHeight;
         lastKnownMessagesScrollTopReference.current = container.scrollTop;
         shouldStickToBottomReference.current = true;
@@ -1073,7 +1085,9 @@ export function Chat() {
                         isLoadingHistory={isLoadingHistory}
                         isAtBottom={isAtBottom}
                         chatRows={chatRows}
+                        messagesBottomReference={messagesBottomReference}
                         messagesContainerReference={messagesContainerReference}
+                        messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
                         onFollow={scrollMessagesToBottom}
                         onPreview={setPreviewItem}
