@@ -27,8 +27,23 @@ export function getTypeSortOrder(type: string | null | undefined): number {
     }
 }
 
+function getInteractionSortOrder(session: Session): number {
+    const channel = (session.channel || "unknown").toLowerCase();
+
+    if (channel !== "unknown") {
+        return 0;
+    }
+
+    return 1;
+}
+
 export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
     return [...sessions].sort((a, b) => {
+        const interactionOrder = getInteractionSortOrder(a) - getInteractionSortOrder(b);
+        if (interactionOrder !== 0) {
+            return interactionOrder;
+        }
+
         const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
         if (typeOrder !== 0) {
             return typeOrder;
