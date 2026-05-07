@@ -276,13 +276,13 @@ export function Terminal() {
     };
 
     return (
-        <div className="flex h-full flex-col p-4">
-            <Card className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-6">
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
                 {/* Terminal Output */}
                 <div
                     ref={outputRef}
                     onScroll={handleScroll}
-                    className="relative flex-1 overflow-auto bg-black p-4 font-mono text-sm"
+                    className="relative min-h-0 flex-1 overflow-auto bg-black p-3 font-mono text-xs sm:p-4 sm:text-sm"
                 >
                     {/* Scroll to bottom button - sticky to always show when scrolled up */}
                     {!isAtBottom && (
@@ -322,15 +322,18 @@ export function Terminal() {
                                     <span className="text-accent-400">
                                         {shortenPath(cwd)}
                                     </span>
-                                    <span className="text-primary-500">$</span> {command}
+                                    <span className="text-primary-500">$</span>{" "}
+                                    <span className="break-all text-primary-100">
+                                        {command}
+                                    </span>
                                 </div>
                                 {jobData.stdout && (
-                                    <pre className="mt-1 whitespace-pre-wrap text-primary-100">
+                                    <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-primary-100">
                                         {jobData.stdout}
                                     </pre>
                                 )}
                                 {jobData.stderr && (
-                                    <pre className="mt-1 whitespace-pre-wrap text-red-400">
+                                    <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-red-400">
                                         {jobData.stderr}
                                     </pre>
                                 )}
@@ -344,12 +347,15 @@ export function Terminal() {
                 {/* Command Input */}
                 <div className="border-t border-primary-700 bg-primary-900 p-3">
                     {/* Current directory display */}
-                    <div className="mb-2 flex items-center gap-2 font-mono text-sm text-accent-400">
-                        <span>{shortenPath(cwd)}</span>
-                        <span className="text-primary-500">$</span>
+                    <div className="mb-2 flex min-w-0 items-center gap-2 font-mono text-xs text-accent-400 sm:text-sm">
+                        <span className="min-w-0 truncate">{shortenPath(cwd)}</span>
+                        <span className="shrink-0 text-primary-500">$</span>
                     </div>
-                    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-                        <div className="flex-1">
+                    <form
+                        onSubmit={handleSubmit}
+                        className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                    >
+                        <div className="min-w-0 flex-1">
                             <Input
                                 ref={inputRef}
                                 type="text"
@@ -357,7 +363,7 @@ export function Terminal() {
                                 onChange={(e) => setCommand(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Enter command..."
-                                className="w-full bg-black font-mono"
+                                className="w-full bg-black font-mono text-sm"
                                 disabled={startCommand.isPending}
                                 autoFocus
                                 autoComplete="off"
@@ -366,38 +372,43 @@ export function Terminal() {
                                 spellCheck="false"
                             />
                         </div>
-                        {jobData?.status === "running" && currentJobId ? (
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                            {jobData?.status === "running" && currentJobId ? (
+                                <Button
+                                    type="button"
+                                    variant="danger"
+                                    className="w-full sm:w-auto"
+                                    onClick={async () => {
+                                        try {
+                                            await stopTerminalJob(currentJobId);
+                                        } catch {
+                                            // Ignore errors - process might already be stopped
+                                        }
+                                    }}
+                                >
+                                    ■ Stop
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="submit"
+                                    className="w-full sm:w-auto"
+                                    disabled={!command.trim() || startCommand.isPending}
+                                >
+                                    <Send size={16} />
+                                    Run
+                                </Button>
+                            )}
                             <Button
+                                variant="secondary"
                                 type="button"
-                                variant="danger"
-                                onClick={async () => {
-                                    try {
-                                        await stopTerminalJob(currentJobId);
-                                    } catch {
-                                        // Ignore errors - process might already be stopped
-                                    }
-                                }}
+                                className="w-full sm:w-auto"
+                                onClick={clearHistory}
+                                disabled={history.length === 0}
                             >
-                                ■ Stop
+                                <Trash2 size={16} />
+                                Clear
                             </Button>
-                        ) : (
-                            <Button
-                                type="submit"
-                                disabled={!command.trim() || startCommand.isPending}
-                            >
-                                <Send size={16} />
-                                Run
-                            </Button>
-                        )}
-                        <Button
-                            variant="secondary"
-                            type="button"
-                            onClick={clearHistory}
-                            disabled={history.length === 0}
-                        >
-                            <Trash2 size={16} />
-                            Clear
-                        </Button>
+                        </div>
                     </form>
                 </div>
             </Card>
@@ -411,9 +422,11 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
     return (
         <div className={cn("mb-4", entry.status === "running" && "opacity-80")}>
             {/* Command line */}
-            <div className="flex items-center gap-2 text-primary-400">
-                <span className="text-accent-400">{entry.cwd}$</span>
-                <span>{entry.command}</span>
+            <div className="flex flex-wrap items-start gap-x-2 gap-y-1 text-primary-400">
+                <span className="shrink-0 text-accent-400">{entry.cwd}$</span>
+                <span className="min-w-0 break-all text-primary-100">
+                    {entry.command}
+                </span>
                 {entry.status === "running" && (
                     <span className="animate-pulse text-accent-400">●</span>
                 )}
@@ -421,14 +434,14 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
 
             {/* stdout */}
             {entry.stdout && (
-                <pre className="mt-1 whitespace-pre-wrap text-primary-100">
+                <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-primary-100">
                     {entry.stdout}
                 </pre>
             )}
 
             {/* stderr */}
             {entry.stderr && (
-                <pre className="mt-1 whitespace-pre-wrap text-red-400">
+                <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-red-400">
                     {entry.stderr}
                 </pre>
             )}
@@ -443,7 +456,7 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
                 >
                     Exit code: {entry.code ?? "unknown"}
                     {entry.endedAt && (
-                        <span className="ml-2 text-primary-600">
+                        <span className="ml-0 block text-primary-600 sm:ml-2 sm:inline">
                             ({((entry.endedAt - entry.startedAt) / 1000).toFixed(2)}s)
                         </span>
                     )}
