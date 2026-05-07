@@ -10,20 +10,20 @@ interface FeedPostCardProps {
 
 export function FeedPostCard({ post }: FeedPostCardProps) {
     return (
-        <Card className="p-3">
-            <div className="flex items-center gap-3">
-                <div className="flex min-w-[2.5rem] items-center justify-center">
+        <Card className="p-3 sm:p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <div className="flex w-fit min-w-[2.5rem] items-center justify-center rounded-full bg-primary-900/60 px-3 py-1 sm:bg-transparent sm:px-0 sm:py-0">
                     <span className="text-sm font-medium text-primary-300">
                         {post.upvotes - post.downvotes}
                     </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex items-center gap-2 text-xs text-primary-500">
+                    <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-primary-500">
                         <a
                             href={getMoltbookUrl("/m/" + post.submolt_name)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="font-medium text-indigo-400 hover:text-indigo-300"
+                            className="break-all font-medium text-indigo-400 hover:text-indigo-300"
                         >
                             m/{post.submolt_name}
                         </a>
@@ -32,7 +32,7 @@ export function FeedPostCard({ post }: FeedPostCardProps) {
                             href={getMoltbookUrl("/u/" + post.author.name)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary-400 hover:text-primary-300"
+                            className="break-all text-primary-400 hover:text-primary-300"
                         >
                             {post.author.name}
                         </a>
@@ -45,14 +45,14 @@ export function FeedPostCard({ post }: FeedPostCardProps) {
                         rel="noopener noreferrer"
                         className="group block"
                     >
-                        <h3 className="line-clamp-2 text-base font-medium text-primary-100 transition group-hover:text-indigo-300">
+                        <h3 className="line-clamp-3 break-words text-base font-medium text-primary-100 transition group-hover:text-indigo-300 sm:line-clamp-2">
                             {post.title}
                         </h3>
-                        <p className="mt-1 line-clamp-2 text-sm text-primary-400 transition group-hover:text-primary-300">
+                        <p className="mt-1 line-clamp-3 break-words text-sm text-primary-400 transition group-hover:text-primary-300 sm:line-clamp-2">
                             {post.content_preview || post.content}
                         </p>
                     </a>
-                    <div className="mt-2 flex items-center gap-4 text-xs text-primary-500">
+                    <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-primary-500">
                         <a
                             href={getMoltbookUrl("/post/" + post.id)}
                             target="_blank"

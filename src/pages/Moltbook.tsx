@@ -40,7 +40,7 @@ export function Moltbook() {
 
     if (error) {
         return (
-            <div className="flex h-64 flex-col items-center justify-center gap-4 p-6">
+            <div className="flex h-64 flex-col items-center justify-center gap-4 p-3 sm:p-4 lg:p-6">
                 <p className="text-red-400">{error}</p>
                 <Button variant="secondary" size="sm" onClick={() => refetch()}>
                     <RefreshCw className="h-4 w-4" />
@@ -51,10 +51,10 @@ export function Moltbook() {
     }
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
             {/* Profile Stats Card */}
             {profile && (
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                     <ProfileCard profile={profile} unreadCount={unreadCount} />
                 </Card>
             )}
@@ -64,6 +64,7 @@ export function Moltbook() {
                 options={TAB_OPTIONS}
                 value={activeTab}
                 onChange={(v) => setActiveTab(v)}
+                className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
             />
 
             {/* Feed Tab */}
@@ -73,6 +74,7 @@ export function Moltbook() {
                         options={SORT_OPTIONS}
                         value={sort}
                         onChange={(v) => setSort(v)}
+                        className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
                     />
 
                     <div className="space-y-3">
