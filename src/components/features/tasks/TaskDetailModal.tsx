@@ -143,8 +143,8 @@ export function TaskDetailModal({
     return (
         <Modal isOpen={!!task} onClose={onClose} size="2xl">
             <div className="space-y-4">
-                <div className="flex items-start justify-between">
-                    <div className="flex-1">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                             <span
                                 className={
@@ -185,7 +185,7 @@ export function TaskDetailModal({
                                     <label className="mb-1.5 block text-sm font-medium text-primary-300">
                                         Priority
                                     </label>
-                                    <div className="flex gap-2">
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                         {(["low", "medium", "high"] as const).map((p) => (
                                             <Button
                                                 key={p}
@@ -204,7 +204,7 @@ export function TaskDetailModal({
                                 </div>
                             </div>
                         ) : (
-                            <h2 className="text-lg font-semibold text-primary-100">
+                            <h2 className="break-words text-lg font-semibold text-primary-100">
                                 #{task.number}: {task.title}
                             </h2>
                         )}
@@ -214,7 +214,7 @@ export function TaskDetailModal({
                     </Button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 text-sm text-primary-400">
+                <div className="flex flex-col gap-1 text-sm text-primary-400 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                     {assigneeLogin && (
                         <span>
                             Assigned:{" "}
@@ -270,8 +270,8 @@ export function TaskDetailModal({
                                         key={update.id}
                                         className="rounded border border-primary-700 bg-primary-900/40 p-2"
                                     >
-                                        <div className="mb-1 flex items-center justify-between text-xs text-primary-500">
-                                            <span>
+                                        <div className="mb-1 flex flex-col gap-2 text-xs text-primary-500 sm:flex-row sm:items-center sm:justify-between">
+                                            <span className="min-w-0 break-words">
                                                 <a
                                                     href={authorMeta.githubUrl}
                                                     target="_blank"
@@ -281,7 +281,7 @@ export function TaskDetailModal({
                                                 </a>{" "}
                                                 · {formatDate(update.createdAt)}
                                             </span>
-                                            <div className="flex gap-2">
+                                            <div className="grid grid-cols-2 gap-2 sm:flex">
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
@@ -314,7 +314,7 @@ export function TaskDetailModal({
                                                     }
                                                     rows={3}
                                                 />
-                                                <div className="flex gap-2">
+                                                <div className="grid grid-cols-1 gap-2 sm:flex">
                                                     <Button
                                                         size="sm"
                                                         variant="primary"
@@ -356,14 +356,18 @@ export function TaskDetailModal({
                             rows={3}
                             placeholder="Markdown supported"
                         />
-                        <Button variant="secondary" onClick={handleAddUpdate}>
+                        <Button
+                            variant="secondary"
+                            onClick={handleAddUpdate}
+                            className="w-full sm:w-auto"
+                        >
                             Add Update
                         </Button>
                     </div>
                 </div>
 
                 <div className="space-y-3 pt-2">
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                         {currentColumn !== "todo" && (
                             <Button
                                 variant="secondary"
@@ -395,7 +399,7 @@ export function TaskDetailModal({
                         )}
                     </div>
 
-                    <div className="flex flex-wrap gap-2 border-t border-primary-700 pt-3">
+                    <div className="grid grid-cols-1 gap-2 border-t border-primary-700 pt-3 sm:flex sm:flex-wrap">
                         {isEditingTask ? (
                             <>
                                 <Button variant="primary" onClick={handleSaveTask}>
@@ -440,7 +444,7 @@ export function TaskDetailModal({
                             variant="danger"
                             onClick={handleDeleteTask}
                             disabled={isDeleting}
-                            className="ml-auto"
+                            className="w-full sm:ml-auto sm:w-auto"
                         >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete

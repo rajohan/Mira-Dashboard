@@ -95,7 +95,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                             <label className="mb-1.5 block text-sm font-medium text-primary-300">
                                 Priority
                             </label>
-                            <div className="flex gap-2">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                 {(["low", "medium", "high"] as const).map((p) => (
                                     <Button
                                         key={p}
@@ -107,9 +107,10 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                         type="button"
                                         onClick={() => field.handleChange(p)}
                                         className={
-                                            field.state.value === p
+                                            "w-full " +
+                                            (field.state.value === p
                                                 ? PRIORITY_COLORS[p] + " border-current"
-                                                : ""
+                                                : "")
                                         }
                                     >
                                         {p.charAt(0).toUpperCase() + p.slice(1)}
@@ -126,7 +127,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                             <label className="mb-1.5 block text-sm font-medium text-primary-300">
                                 Assignee
                             </label>
-                            <div className="flex gap-2">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <Button
                                     type="button"
                                     variant={
@@ -137,6 +138,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                     onClick={() =>
                                         field.handleChange(TASK_ASSIGNEES.mira.id)
                                     }
+                                    className="w-full"
                                 >
                                     Mira
                                 </Button>
@@ -150,6 +152,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                     onClick={() =>
                                         field.handleChange(TASK_ASSIGNEES.raymond.id)
                                     }
+                                    className="w-full"
                                 >
                                     Raymond
                                 </Button>
@@ -158,12 +161,13 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                     )}
                 </form.Field>
 
-                <div className="flex justify-end gap-2 pt-2">
+                <div className="grid grid-cols-1 gap-2 pt-2 sm:flex sm:justify-end">
                     <Button
                         type="button"
                         variant="secondary"
                         onClick={onClose}
                         disabled={form.state.isSubmitting}
+                        className="w-full sm:w-auto"
                     >
                         Cancel
                     </Button>
@@ -171,6 +175,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                         type="submit"
                         variant="primary"
                         disabled={form.state.isSubmitting}
+                        className="w-full sm:w-auto"
                     >
                         {form.state.isSubmitting ? (
                             <>

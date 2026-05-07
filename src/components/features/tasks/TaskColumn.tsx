@@ -19,7 +19,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
     if (!config) return null;
 
     return (
-        <div className="flex min-w-[280px] flex-1 flex-col">
+        <div className="flex min-w-0 flex-col lg:min-w-[280px] lg:flex-1">
             <div className="mb-2 flex items-center gap-2">
                 <div className={"h-2 w-2 rounded-full " + config.dotColor} />
                 <h2 className="text-sm font-medium text-primary-300">{config.title}</h2>
@@ -31,7 +31,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) 
                 ref={setNodeRef}
                 data-column={id}
                 className={
-                    "flex min-h-[400px] flex-1 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors " +
+                    "flex min-h-28 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-[400px] lg:flex-1 " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
                         : "border-primary-700/50 bg-primary-800/30")

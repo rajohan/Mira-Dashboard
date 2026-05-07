@@ -41,15 +41,17 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
         >
             <button
                 {...listeners}
-                className="-tranprimary-y-1/2 absolute left-1.5 top-1/2 cursor-grab text-primary-600 opacity-0 transition-opacity hover:text-primary-400 group-hover:opacity-100"
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 cursor-grab text-primary-500 transition-opacity hover:text-primary-300 md:text-primary-600 md:opacity-0 md:group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
             </button>
 
-            <div className="ml-3">
-                <div className="mb-1.5 flex items-center gap-2">
-                    <span className="text-xs text-primary-500">#{task.number}</span>
+            <div className="ml-3 min-w-0">
+                <div className="mb-1.5 flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-xs text-primary-500">
+                        #{task.number}
+                    </span>
                     <span
                         className={
                             "rounded border px-1.5 py-0.5 text-[10px] font-medium " +
@@ -60,12 +62,12 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                     </span>
                 </div>
 
-                <h3 className="mb-1.5 line-clamp-2 text-sm font-medium text-primary-200">
+                <h3 className="mb-1.5 line-clamp-2 break-words text-sm font-medium text-primary-200">
                     {task.title}
                 </h3>
 
-                <div className="flex items-center justify-between">
-                    <span className="text-xs text-primary-500">
+                <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs text-primary-500">
                         {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                     {assignee && (

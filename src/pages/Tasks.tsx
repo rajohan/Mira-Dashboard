@@ -270,9 +270,9 @@ export function Tasks() {
                 onDragOver={handleDragOver}
                 onDragEnd={handleDragEnd}
             >
-                <div className="flex h-full flex-col p-6">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4">
+                <div className="flex h-full min-h-0 flex-col p-3 sm:p-4 lg:p-6">
+                    <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:gap-4">
                             <SearchInput
                                 value={search}
                                 onChange={setSearch}
@@ -285,11 +285,12 @@ export function Tasks() {
                             />
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="grid grid-cols-[1fr_auto] items-center gap-2 sm:flex sm:justify-end">
                             <Button
                                 variant="primary"
                                 size="sm"
                                 onClick={() => setIsNewTaskOpen(true)}
+                                className="w-full sm:w-auto"
                             >
                                 <Plus className="h-4 w-4" />
                                 New Task
@@ -303,7 +304,7 @@ export function Tasks() {
                         </div>
                     </div>
 
-                    <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
+                    <div className="flex flex-1 flex-col gap-4 overflow-y-auto pb-4 lg:flex-row lg:overflow-x-auto">
                         {COLUMN_CONFIG.map((column) => (
                             <TaskColumn
                                 key={column.id}
