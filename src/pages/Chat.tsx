@@ -201,6 +201,7 @@ export function Chat() {
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
+    const sendInFlightReference = useRef(false);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -961,18 +962,22 @@ export function Chat() {
     });
 
     const handleSend = async () => {
-        if (!selectedSessionKey || isSending) {
+        if (!selectedSessionKey || isSending || sendInFlightReference.current) {
             return;
         }
 
+        sendInFlightReference.current = true;
+
         const text = draft.trim();
         if (!text && attachments.length === 0) {
+            sendInFlightReference.current = false;
             return;
         }
 
         if (text.startsWith("/")) {
             const handledCommand = await handleSlashCommand(text);
             if (handledCommand) {
+                sendInFlightReference.current = false;
                 return;
             }
         }
@@ -1047,6 +1052,7 @@ export function Chat() {
             });
             clearActiveRunMarker(selectedSessionKey);
         } finally {
+            sendInFlightReference.current = false;
             setIsSending(false);
         }
     };
