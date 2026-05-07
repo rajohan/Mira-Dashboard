@@ -27,10 +27,8 @@ export function getTypeSortOrder(type: string | null | undefined): number {
     }
 }
 
-function getInteractionSortOrder(session: Session): number {
-    const channel = (session.channel || "unknown").toLowerCase();
-
-    if (channel !== "unknown") {
+function getDefaultChatSortOrder(session: Session): number {
+    if (session.key === "agent:main:main") {
         return 0;
     }
 
@@ -39,9 +37,9 @@ function getInteractionSortOrder(session: Session): number {
 
 export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
     return [...sessions].sort((a, b) => {
-        const interactionOrder = getInteractionSortOrder(a) - getInteractionSortOrder(b);
-        if (interactionOrder !== 0) {
-            return interactionOrder;
+        const defaultChatOrder = getDefaultChatSortOrder(a) - getDefaultChatSortOrder(b);
+        if (defaultChatOrder !== 0) {
+            return defaultChatOrder;
         }
 
         const typeOrder = getTypeSortOrder(a.type) - getTypeSortOrder(b.type);
