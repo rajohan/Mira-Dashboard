@@ -203,6 +203,7 @@ export function Chat() {
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
+    const bottomFollowFrameReference = useRef<number | null>(null);
     const sendInFlightReference = useRef(false);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
@@ -622,15 +623,6 @@ export function Chat() {
         setHistoryLoadVersion,
     });
 
-    const messagesVirtualizer = useVirtualizer({
-        count: chatRows.length,
-        getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
-        getScrollElement: () => messagesContainerReference.current,
-        estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
-        overscan: 12,
-        useAnimationFrameWithResizeObserver: true,
-    });
-
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
 
@@ -668,9 +660,34 @@ export function Chat() {
         setIsAtBottom(true);
     };
 
+    const scheduleBottomFollow = () => {
+        if (bottomFollowFrameReference.current !== null) {
+            return;
+        }
+
+        bottomFollowFrameReference.current = requestAnimationFrame(() => {
+            bottomFollowFrameReference.current = null;
+            scrollMessagesToBottom();
+        });
+    };
+
+    const messagesVirtualizer = useVirtualizer({
+        count: chatRows.length,
+        getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
+        getScrollElement: () => messagesContainerReference.current,
+        estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
+        overscan: 12,
+        useAnimationFrameWithResizeObserver: true,
+        onChange: (_instance, sync) => {
+            if (!sync && shouldStickToBottomReference.current) {
+                scheduleBottomFollow();
+            }
+        },
+    });
+
     const handleDynamicRowContentLoad = () => {
         if (shouldStickToBottomReference.current) {
-            requestAnimationFrame(scrollMessagesToBottom);
+            scheduleBottomFollow();
         }
     };
 
