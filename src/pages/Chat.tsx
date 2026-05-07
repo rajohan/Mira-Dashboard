@@ -1,5 +1,4 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -55,7 +54,6 @@ import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessi
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
-const CHAT_BOTTOM_SETTLE_FRAMES = 4;
 const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
 
 function deletedMessagesStorageKey(sessionKey: string): string {
@@ -203,7 +201,6 @@ export function Chat() {
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
-    const bottomScrollSettleFramesReference = useRef(0);
     const sendInFlightReference = useRef(false);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
@@ -623,15 +620,6 @@ export function Chat() {
         setHistoryLoadVersion,
     });
 
-    const messagesVirtualizer = useVirtualizer({
-        count: chatRows.length,
-        getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
-        getScrollElement: () => messagesContainerReference.current,
-        estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
-        overscan: 12,
-        useAnimationFrameWithResizeObserver: true,
-    });
-
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
 
@@ -651,42 +639,9 @@ export function Chat() {
             lastKnownMessagesScrollTopReference.current = container.scrollTop;
         }
 
-        if (bottomScrollSettleFramesReference.current > 0) {
-            shouldStickToBottomReference.current = true;
-            setIsAtBottom(true);
-            return;
-        }
-
         const atBottom = checkIsAtBottom();
         shouldStickToBottomReference.current = atBottom;
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
-    };
-
-    const getMessagesBottomScrollTop = (container: HTMLDivElement) =>
-        Math.max(
-            0,
-            Math.max(container.scrollHeight, messagesVirtualizer.getTotalSize()) -
-                container.clientHeight
-        );
-
-    const settleMessagesBottomScroll = () => {
-        const container = messagesContainerReference.current;
-        if (!container) {
-            bottomScrollSettleFramesReference.current = 0;
-            return;
-        }
-
-        container.scrollTop = getMessagesBottomScrollTop(container);
-        lastKnownMessagesScrollTopReference.current = container.scrollTop;
-
-        if (bottomScrollSettleFramesReference.current <= 0) {
-            shouldStickToBottomReference.current = checkIsAtBottom();
-            setIsAtBottom(shouldStickToBottomReference.current);
-            return;
-        }
-
-        bottomScrollSettleFramesReference.current -= 1;
-        requestAnimationFrame(settleMessagesBottomScroll);
     };
 
     const scrollMessagesToBottom = () => {
@@ -695,16 +650,10 @@ export function Chat() {
             return;
         }
 
+        container.scrollTop = container.scrollHeight;
+        lastKnownMessagesScrollTopReference.current = container.scrollTop;
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
-        bottomScrollSettleFramesReference.current = Math.max(
-            bottomScrollSettleFramesReference.current,
-            CHAT_BOTTOM_SETTLE_FRAMES
-        );
-        messagesVirtualizer.scrollToIndex(chatRows.length - 1, { align: "end" });
-        container.scrollTop = getMessagesBottomScrollTop(container);
-        lastKnownMessagesScrollTopReference.current = container.scrollTop;
-        requestAnimationFrame(settleMessagesBottomScroll);
     };
 
     const handleDynamicRowContentLoad = () => {
@@ -746,13 +695,7 @@ export function Chat() {
         const scrollFrame = requestAnimationFrame(scrollMessagesToBottom);
 
         return () => cancelAnimationFrame(scrollFrame);
-    }, [
-        chatRows.length,
-        selectedStreamText,
-        messagesVirtualizer,
-        selectedSessionKey,
-        scrollMessagesToBottom,
-    ]);
+    }, [chatRows.length, selectedStreamText, selectedSessionKey]);
 
     const sessionOptions = sortedSessions.map((session) => ({
         value: session.key,
@@ -1131,7 +1074,6 @@ export function Chat() {
                         isAtBottom={isAtBottom}
                         chatRows={chatRows}
                         messagesContainerReference={messagesContainerReference}
-                        messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
                         onFollow={scrollMessagesToBottom}
                         onPreview={setPreviewItem}

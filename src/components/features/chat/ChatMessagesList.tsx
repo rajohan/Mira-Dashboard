@@ -1,4 +1,3 @@
-import type { Virtualizer } from "@tanstack/react-virtual";
 import {
     FileText,
     Image as ImageIcon,
@@ -26,7 +25,6 @@ interface ChatMessagesListProps {
     isAtBottom: boolean;
     chatRows: ChatRow[];
     messagesContainerReference: RefObject<HTMLDivElement | null>;
-    messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
     onPreview: (preview: ChatPreviewItem) => void;
@@ -221,7 +219,6 @@ export function ChatMessagesList({
     isAtBottom,
     chatRows,
     messagesContainerReference,
-    messagesVirtualizer,
     onDynamicContentLoad,
     onFollow,
     onPreview,
@@ -296,14 +293,6 @@ export function ChatMessagesList({
             setLoadingMessageKey(null);
         }
     };
-    const virtualItems = messagesVirtualizer.getVirtualItems();
-    const firstVirtualItem = virtualItems[0];
-    const lastVirtualItem = virtualItems.at(-1);
-    const paddingTop = firstVirtualItem?.start ?? 0;
-    const paddingBottom = lastVirtualItem
-        ? Math.max(messagesVirtualizer.getTotalSize() - lastVirtualItem.end, 0)
-        : 0;
-
     return (
         <div
             ref={messagesContainerReference}
@@ -329,22 +318,10 @@ export function ChatMessagesList({
                 <EmptyState message="No chat history yet. Send the first message to this session." />
             ) : (
                 <div className="w-full">
-                    {paddingTop > 0 ? <div style={{ height: paddingTop }} /> : null}
-                    {virtualItems.map((virtualItem) => {
-                        const row = chatRows[virtualItem.index];
-
-                        if (!row) {
-                            return null;
-                        }
-
+                    {chatRows.map((row) => {
                         if (row.kind === "typing") {
                             return (
-                                <div
-                                    key={virtualItem.key}
-                                    data-index={virtualItem.index}
-                                    ref={messagesVirtualizer.measureElement}
-                                    className="w-full pb-3"
-                                >
+                                <div key={row.key} className="w-full pb-3">
                                     <TypingIndicator />
                                 </div>
                             );
@@ -367,12 +344,7 @@ export function ChatMessagesList({
                         );
 
                         return (
-                            <div
-                                key={virtualItem.key}
-                                data-index={virtualItem.index}
-                                ref={messagesVirtualizer.measureElement}
-                                className="w-full pb-3"
-                            >
+                            <div key={row.key} className="w-full pb-3">
                                 <div
                                     className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                                 >
@@ -526,7 +498,6 @@ export function ChatMessagesList({
                             </div>
                         );
                     })}
-                    {paddingBottom > 0 ? <div style={{ height: paddingBottom }} /> : null}
                 </div>
             )}
         </div>
