@@ -111,7 +111,7 @@ export function Cron() {
             loading={<LoadingState size="lg" />}
             error={error?.message ?? null}
             errorView={
-                <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-6">
+                <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
                     <p className="text-red-400">{error?.message}</p>
                     <Button variant="secondary" onClick={() => void refetch()}>
                         Retry
@@ -120,7 +120,7 @@ export function Cron() {
             }
             isEmpty={sortedJobs.length === 0}
             empty={
-                <div className="p-6">
+                <div className="p-3 sm:p-6">
                     <Card variant="bordered">
                         <CardTitle>No cron jobs found</CardTitle>
                         <p className="mt-2 text-sm text-primary-300">
@@ -130,8 +130,8 @@ export function Cron() {
                 </div>
             }
         >
-            <div className="space-y-4 p-6">
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px_1fr]">
+            <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
+                <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_1fr]">
                     <CronJobList
                         jobs={sortedJobs}
                         selectedId={selectedId}

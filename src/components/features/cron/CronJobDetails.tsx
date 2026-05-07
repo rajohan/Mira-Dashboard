@@ -75,13 +75,18 @@ export function CronJobDetails({
     formatDate,
 }: CronJobDetailsProps) {
     return (
-        <Card variant="bordered" className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+        <Card variant="bordered" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
                     <CardTitle className="text-base">{getCronJobName(job)}</CardTitle>
-                    <p className="mt-1 text-xs text-primary-400">{getCronJobId(job)}</p>
+                    <p className="mt-1 break-all text-xs text-primary-400">
+                        {getCronJobId(job)}
+                    </p>
                 </div>
-                <Badge variant={job.enabled === false ? "warning" : "success"}>
+                <Badge
+                    className="shrink-0"
+                    variant={job.enabled === false ? "warning" : "success"}
+                >
                     {job.enabled === false ? "Disabled" : "Enabled"}
                 </Badge>
             </div>
@@ -90,18 +95,20 @@ export function CronJobDetails({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
                     Controls
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                     <Switch
                         checked={job.enabled !== false}
                         onChange={(enabled) => onToggle(job, enabled)}
                         label="Enabled"
                         disabled={togglePending}
+                        className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
                     />
                     <Button
                         size="sm"
                         variant="primary"
                         disabled={runPending}
                         onClick={() => onRunNow(job)}
+                        className="w-full sm:w-auto"
                     >
                         <Play
                             className={[
@@ -125,7 +132,7 @@ export function CronJobDetails({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
                     Last / next run
                 </div>
-                <div className="grid grid-cols-1 gap-3 text-sm text-primary-200 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 text-sm text-primary-200 sm:grid-cols-3">
                     <div>
                         <div className="text-xs text-primary-400">Last run</div>
                         <div>
@@ -168,6 +175,7 @@ export function CronJobDetails({
                                 size="sm"
                                 variant="secondary"
                                 onClick={() => onEditModeChange(false)}
+                                className="px-3"
                             >
                                 Cancel
                             </Button>
@@ -176,6 +184,7 @@ export function CronJobDetails({
                             size="sm"
                             variant="secondary"
                             disabled={updatePending || (isEditMode && hasInvalidJson)}
+                            className="px-3"
                             onClick={() => {
                                 if (isEditMode) {
                                     onSave(job);
@@ -207,13 +216,13 @@ export function CronJobDetails({
                             />
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                             <div>
                                 <label className="mb-1 block text-xs text-primary-300">
                                     Schedule (JSON)
                                 </label>
                                 <Textarea
-                                    className="h-48 font-mono text-xs"
+                                    className="h-40 font-mono text-xs sm:h-48"
                                     value={scheduleDraft}
                                     onChange={(event) =>
                                         onScheduleDraftChange(event.target.value)
@@ -236,7 +245,7 @@ export function CronJobDetails({
                                     Payload (JSON)
                                 </label>
                                 <Textarea
-                                    className="h-48 font-mono text-xs"
+                                    className="h-40 font-mono text-xs sm:h-48"
                                     value={payloadDraft}
                                     onChange={(event) =>
                                         onPayloadDraftChange(event.target.value)
@@ -259,7 +268,7 @@ export function CronJobDetails({
                                     Delivery (JSON)
                                 </label>
                                 <Textarea
-                                    className="h-48 font-mono text-xs"
+                                    className="h-40 font-mono text-xs sm:h-48"
                                     value={deliveryDraft}
                                     onChange={(event) =>
                                         onDeliveryDraftChange(event.target.value)
@@ -280,8 +289,8 @@ export function CronJobDetails({
                         </div>
                     </>
                 ) : (
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                        <Card className="bg-primary-900/40">
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
                             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary-300">
                                 Schedule
                             </div>
@@ -289,7 +298,7 @@ export function CronJobDetails({
                                 {JSON.stringify(job.schedule || {}, null, 2)}
                             </pre>
                         </Card>
-                        <Card className="bg-primary-900/40">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
                             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary-300">
                                 Payload
                             </div>
@@ -297,7 +306,7 @@ export function CronJobDetails({
                                 {JSON.stringify(job.payload || {}, null, 2)}
                             </pre>
                         </Card>
-                        <Card className="bg-primary-900/40">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
                             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary-300">
                                 Delivery
                             </div>
