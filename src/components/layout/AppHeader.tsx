@@ -53,7 +53,7 @@ export function AppHeader({
 
                 <div className="flex shrink-0 items-center gap-2 sm:gap-4">
                     {hasVersionMismatch && (
-                        <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+                        <span className="hidden rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200 sm:inline-flex">
                             Version mismatch (FE {frontendCommit} / BE {backendCommit})
                         </span>
                     )}
