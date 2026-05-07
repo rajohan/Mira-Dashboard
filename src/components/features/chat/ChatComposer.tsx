@@ -1,5 +1,5 @@
-import { Mic, Paperclip, Send, Square, X } from "lucide-react";
-import type { RefObject } from "react";
+import { Mic, Paperclip, Send, Smile, Square, X } from "lucide-react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
@@ -7,6 +7,33 @@ import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import { base64ToText } from "./chatUtils";
 import type { SlashCommandSuggestion } from "./slashCommands";
+
+const CHAT_EMOJIS = [
+    "😀",
+    "😄",
+    "😂",
+    "😊",
+    "😍",
+    "🥳",
+    "😎",
+    "🤔",
+    "😅",
+    "😭",
+    "👍",
+    "👎",
+    "🙏",
+    "🙌",
+    "👏",
+    "💪",
+    "🔥",
+    "✨",
+    "💡",
+    "✅",
+    "❌",
+    "⚠️",
+    "❤️",
+    "🚀",
+];
 
 interface ChatComposerProps {
     attachments: ChatSendAttachment[];
@@ -47,8 +74,64 @@ export function ChatComposer({
     onSend,
     onToggleRecording,
 }: ChatComposerProps) {
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const composerReference = useRef<HTMLDivElement | null>(null);
+    const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+
+    useEffect(() => {
+        if (!showEmojiPicker) {
+            return;
+        }
+
+        const handlePointerDown = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                composerReference.current?.contains(event.target)
+            ) {
+                return;
+            }
+
+            setShowEmojiPicker(false);
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                setShowEmojiPicker(false);
+            }
+        };
+
+        document.addEventListener("pointerdown", handlePointerDown);
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("pointerdown", handlePointerDown);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [showEmojiPicker]);
+
+    const insertEmoji = (emoji: string) => {
+        const textarea = textareaReference.current;
+        const selectionStart = textarea?.selectionStart ?? draft.length;
+        const selectionEnd = textarea?.selectionEnd ?? draft.length;
+        const nextDraft = `${draft.slice(0, selectionStart)}${emoji}${draft.slice(
+            selectionEnd
+        )}`;
+        const nextCursor = selectionStart + emoji.length;
+
+        onChangeDraft(nextDraft);
+        setShowEmojiPicker(false);
+
+        window.setTimeout(() => {
+            textarea?.focus();
+            textarea?.setSelectionRange(nextCursor, nextCursor);
+        }, 0);
+    };
+
     return (
-        <div className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4">
+        <div
+            ref={composerReference}
+            className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4"
+        >
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
@@ -149,6 +232,7 @@ export function ChatComposer({
                         </div>
                     ) : null}
                     <Textarea
+                        ref={textareaReference}
                         value={draft}
                         onChange={(event) => onChangeDraft(event.target.value)}
                         onKeyDown={(event) => {
@@ -182,7 +266,34 @@ export function ChatComposer({
                         className="min-h-24 resize-y sm:min-h-32"
                     />
                 </div>
-                <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:flex md:flex-col">
+                    <div className="relative">
+                        {showEmojiPicker ? (
+                            <div className="absolute bottom-full right-0 z-20 mb-2 grid w-64 grid-cols-6 gap-1 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:w-72">
+                                {CHAT_EMOJIS.map((emoji) => (
+                                    <button
+                                        key={emoji}
+                                        type="button"
+                                        onClick={() => insertEmoji(emoji)}
+                                        className="rounded-lg p-2 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
+                                        aria-label={`Insert ${emoji}`}
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+                        <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => setShowEmojiPicker((previous) => !previous)}
+                            disabled={!isConnected || !selectedSessionKey || isSending}
+                            title="Insert emoji"
+                            className="w-full px-2 sm:px-4"
+                        >
+                            <Smile className="mr-1 h-4 w-4 sm:mr-2" /> Emoji
+                        </Button>
+                    </div>
                     <Button
                         variant={isRecording ? "primary" : "secondary"}
                         size="md"
