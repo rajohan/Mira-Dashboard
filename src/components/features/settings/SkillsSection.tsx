@@ -84,7 +84,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                     )}
                 </div>
 
-                <div className="grid gap-2 md:grid-cols-4">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {(
                         ["all", "workspace", "builtin", "extra"] as SkillSourceFilter[]
                     ).map((filter) => (
@@ -117,11 +117,11 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                         filteredSkills.map((skill) => (
                             <div
                                 key={skill.name}
-                                className="flex items-center justify-between gap-3 rounded-lg border border-primary-800 bg-primary-900/40 px-3 py-2"
+                                className="flex flex-col gap-3 rounded-lg border border-primary-800 bg-primary-900/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                             >
                                 <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <p className="truncate text-sm font-medium text-primary-200">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <p className="break-all text-sm font-medium text-primary-200 sm:truncate">
                                             {skill.name}
                                         </p>
                                         <span className="rounded-full bg-primary-800 px-2 py-0.5 text-xs text-primary-400">
@@ -142,6 +142,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                                 <Switch
                                     checked={skill.enabled}
                                     onChange={(checked) => onToggle(skill.name, checked)}
+                                    className="self-end sm:self-auto"
                                 />
                             </div>
                         ))

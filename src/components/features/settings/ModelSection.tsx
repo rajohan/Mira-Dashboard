@@ -73,6 +73,7 @@ export function ModelSection({
 
                 <div className="flex justify-end">
                     <Button
+                        className="w-full sm:w-auto"
                         variant="primary"
                         onClick={() =>
                             onSave({

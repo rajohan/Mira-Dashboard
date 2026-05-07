@@ -89,7 +89,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
     return (
         <ExpandableCard title="Agent access control" icon={ShieldCheck}>
             <div className="space-y-5">
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap">
                     {draftAgents.map((agent) => {
                         const enabledCount = TOOL_CATALOG.filter((tool) =>
                             toolEnabled(agent, tool.id)
@@ -100,7 +100,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                 type="button"
                                 onClick={() => setActiveAgentId(agent.id)}
                                 className={cn(
-                                    "rounded-xl border px-4 py-3 text-left transition",
+                                    "rounded-xl border px-3 py-3 text-left transition sm:px-4",
                                     activeAgent?.id === agent.id
                                         ? "border-accent-500 bg-accent-500/10 text-accent-200"
                                         : "border-primary-700 bg-primary-900/40 text-primary-300 hover:border-primary-600"
@@ -137,7 +137,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                             />
                         </div>
 
-                        <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="grid gap-3 xl:grid-cols-2 xl:gap-4">
                             {(
                                 ["read", "standard", "elevated", "critical"] as ToolRisk[]
                             ).map((risk) => {
@@ -160,7 +160,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                             riskStyles[risk]
                                         )}
                                     >
-                                        <div className="border-current/10 flex items-center justify-between border-b px-4 py-3">
+                                        <div className="border-current/10 flex items-center justify-between border-b px-3 py-3 sm:px-4">
                                             <div>
                                                 <h5 className="font-semibold text-primary-100">
                                                     {TOOL_RISK_LABELS[risk]}
@@ -176,16 +176,16 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                                 return (
                                                     <div
                                                         key={tool.id}
-                                                        className="flex items-center gap-3 px-4 py-3"
+                                                        className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:px-4"
                                                     >
-                                                        <div className="rounded-lg bg-primary-800 p-2 text-accent-300">
+                                                        <div className="self-start rounded-lg bg-primary-800 p-2 text-accent-300 sm:self-auto">
                                                             <Icon className="h-5 w-5" />
                                                         </div>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="font-medium text-primary-100">
+                                                            <div className="break-words font-medium text-primary-100">
                                                                 {tool.label}
                                                             </div>
-                                                            <div className="text-sm text-primary-500">
+                                                            <div className="break-words text-sm text-primary-500">
                                                                 {tool.description}
                                                             </div>
                                                         </div>
@@ -194,6 +194,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                                                 activeAgent,
                                                                 tool.id
                                                             )}
+                                                            className="self-end sm:self-auto"
                                                             onChange={(checked) =>
                                                                 updateAgent(
                                                                     activeAgent.id,
@@ -219,6 +220,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
 
                 <div className="flex justify-end">
                     <Button
+                        className="w-full sm:w-auto"
                         variant="primary"
                         onClick={() => onSave(draftAgents)}
                         disabled={saving}

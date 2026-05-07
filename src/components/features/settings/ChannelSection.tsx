@@ -67,6 +67,7 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps
 
                 <div className="flex justify-end">
                     <Button
+                        className="w-full sm:w-auto"
                         variant="primary"
                         onClick={() => onSave(draftChannels)}
                         disabled={saving}

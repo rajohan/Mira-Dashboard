@@ -42,13 +42,18 @@ export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionPr
                                 }
                                 min={0}
                                 max={1440}
-                                className="w-32"
+                                className="w-full sm:w-32"
                             />
                         )}
                     </form.Field>
                 </div>
                 <div className="flex justify-end">
-                    <Button type="submit" variant="primary" disabled={saving}>
+                    <Button
+                        type="submit"
+                        variant="primary"
+                        className="w-full sm:w-auto"
+                        disabled={saving}
+                    >
                         {saving ? (
                             <>
                                 <Loader2 className="h-4 w-4 animate-spin" />

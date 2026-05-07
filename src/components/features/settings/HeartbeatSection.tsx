@@ -48,7 +48,7 @@ export function HeartbeatSection({
                                 }
                                 min={60}
                                 max={3600}
-                                className="w-32"
+                                className="w-full sm:w-32"
                             />
                         )}
                     </form.Field>
@@ -64,13 +64,18 @@ export function HeartbeatSection({
                                 value={field.state.value}
                                 onChange={(e) => field.handleChange(e.target.value)}
                                 placeholder="Channel ID or name"
-                                className="w-64"
+                                className="w-full sm:w-64"
                             />
                         )}
                     </form.Field>
                 </div>
                 <div className="flex justify-end">
-                    <Button type="submit" variant="primary" disabled={saving}>
+                    <Button
+                        type="submit"
+                        variant="primary"
+                        className="w-full sm:w-auto"
+                        disabled={saving}
+                    >
                         {saving ? (
                             <>
                                 <Loader2 className="h-4 w-4 animate-spin" />

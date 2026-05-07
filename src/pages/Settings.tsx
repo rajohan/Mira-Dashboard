@@ -295,9 +295,9 @@ export function Settings() {
     };
 
     return (
-        <div className="p-6">
-            <div className="mb-6 flex justify-end">
-                <div className="flex gap-2">
+        <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
+            <div className="flex justify-end">
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
                     <Button
                         variant="secondary"
                         onClick={handleBackup}
@@ -383,27 +383,27 @@ export function Settings() {
             />
 
             {/* Server Info */}
-            <div className="mb-4 rounded-lg border border-primary-700 bg-primary-800/50 p-4">
+            <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-3 sm:p-4">
                 <div className="mb-2 flex items-center gap-2">
                     <Server className="h-4 w-4 text-accent-400" />
                     <h3 className="text-sm font-medium text-primary-200">Server</h3>
                 </div>
                 <div className="space-y-2">
-                    <div className="flex items-center justify-between py-1">
+                    <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <span className="text-sm text-primary-400">Version</span>
-                        <span className="font-mono text-sm text-primary-100">
+                        <span className="break-all font-mono text-sm text-primary-100 sm:text-right">
                             {serverInfo.version}
                         </span>
                     </div>
-                    <div className="flex items-center justify-between py-1">
+                    <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <span className="text-sm text-primary-400">Config hash</span>
-                        <span className="font-mono text-sm text-primary-100">
+                        <span className="break-all font-mono text-sm text-primary-100 sm:text-right">
                             {serverInfo.configHash}
                         </span>
                     </div>
-                    <div className="flex items-center justify-between py-1">
+                    <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <span className="text-sm text-primary-400">Last touched</span>
-                        <span className="font-mono text-sm text-primary-100">
+                        <span className="break-all font-mono text-sm text-primary-100 sm:text-right">
                             {serverInfo.lastTouched}
                         </span>
                     </div>
@@ -422,7 +422,7 @@ export function Settings() {
                         Are you sure you want to restart the gateway? This will
                         temporarily disconnect all sessions.
                     </p>
-                    <div className="flex justify-end gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
                         <Button
                             variant="secondary"
                             onClick={() => setShowRestartModal(false)}
