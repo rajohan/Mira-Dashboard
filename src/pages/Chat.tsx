@@ -55,7 +55,7 @@ import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessi
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
-const DIAGNOSTIC_HISTORY_POLL_MS = 2_000;
+const LIVE_HISTORY_POLL_MS = 2_000;
 
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
@@ -553,16 +553,23 @@ export function Chat() {
     ]);
 
     useEffect(() => {
-        if (!selectedSessionKey || (!showThinkingOutput && !showToolOutput)) {
+        if (!isConnected || !selectedSessionKey) {
             return;
         }
 
         let cancelled = false;
+        let refreshInFlight = false;
 
-        const refreshDiagnosticHistory = async () => {
-            if (!shouldStickToBottomReference.current) {
+        const refreshVisibleHistory = async () => {
+            if (
+                refreshInFlight ||
+                document.visibilityState === "hidden" ||
+                !shouldStickToBottomReference.current
+            ) {
                 return;
             }
+
+            refreshInFlight = true;
 
             try {
                 const result = (await request("chat.history", {
@@ -576,35 +583,46 @@ export function Chat() {
                     return;
                 }
 
-                setMessages((previous) =>
-                    mergeWithRecentOptimisticMessages(
-                        previous,
-                        visibleHistoryMessages(
-                            result.messages,
-                            createChatVisibility(showThinkingOutput, showToolOutput)
-                        )
-                    )
+                const nextMessages = visibleHistoryMessages(
+                    result.messages,
+                    createChatVisibility(showThinkingOutput, showToolOutput)
                 );
+
+                setMessages((previous) => {
+                    const previousLast = previous.at(-1)?.timestamp || "";
+                    const nextLast = nextMessages.at(-1)?.timestamp || "";
+
+                    if (
+                        previous.length === nextMessages.length &&
+                        previousLast === nextLast
+                    ) {
+                        return previous;
+                    }
+
+                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
+                });
 
                 if (shouldStickToBottomReference.current) {
                     setIsAtBottom(true);
                 }
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch {
-                // Diagnostics refresh is opportunistic; live events still handle the main path.
+                // Opportunistic live refresh; WebSocket events remain the primary path.
+            } finally {
+                refreshInFlight = false;
             }
         };
 
         const interval = window.setInterval(
-            () => void refreshDiagnosticHistory(),
-            DIAGNOSTIC_HISTORY_POLL_MS
+            () => void refreshVisibleHistory(),
+            LIVE_HISTORY_POLL_MS
         );
 
         return () => {
             cancelled = true;
             window.clearInterval(interval);
         };
-    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput]);
+    }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
 
     useChatRuntimeEvents({
         request,
