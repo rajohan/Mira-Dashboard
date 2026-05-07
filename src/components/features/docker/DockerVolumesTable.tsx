@@ -47,12 +47,15 @@ export function DockerVolumesTable({
             cell: (info) => {
                 const volume = info.row.original;
                 return (
-                    <div>
-                        <div className="font-medium text-primary-50" title={volume.name}>
+                    <div className="min-w-0">
+                        <div
+                            className="break-all font-medium text-primary-50"
+                            title={volume.name}
+                        >
                             {truncateMiddle(volume.name, 40)}
                         </div>
                         <div
-                            className="text-xs text-primary-400"
+                            className="break-all text-xs text-primary-400"
                             title={volume.mountpoint}
                         >
                             {volume.driver} · {truncateMiddle(volume.mountpoint, 54)}
@@ -111,7 +114,7 @@ export function DockerVolumesTable({
     if (volumes.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
                     Volumes
                 </div>
                 <EmptyState message="No volumes found." />
@@ -121,20 +124,69 @@ export function DockerVolumesTable({
 
     return (
         <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
+            <div className="flex flex-col gap-3 border-b border-primary-700 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Volumes</div>
                 <Button
                     size="sm"
                     variant="secondary"
                     onClick={onPruneUnused}
                     disabled={isPruning}
+                    className="w-full sm:w-auto"
                 >
                     <Trash2 className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
-            <div className="max-h-[420px] overflow-auto">
-                <table className="min-w-full text-sm">
+
+            <div className="space-y-3 p-3 md:hidden">
+                {table.getRowModel().rows.map((row) => {
+                    const volume = row.original;
+                    return (
+                        <Card key={row.id} className="p-3">
+                            <div
+                                className="break-all font-medium text-primary-50"
+                                title={volume.name}
+                            >
+                                {truncateMiddle(volume.name, 52)}
+                            </div>
+                            <div
+                                className="mt-1 break-all text-xs text-primary-400"
+                                title={volume.mountpoint}
+                            >
+                                {volume.driver} · {truncateMiddle(volume.mountpoint, 72)}
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                                <div>
+                                    <div className="text-primary-500">Status</div>
+                                    {volume.usedBy.length > 0 ? "Used" : "Unused"}
+                                </div>
+                                <div>
+                                    <div className="text-primary-500">Scope</div>
+                                    {volume.scope || "—"}
+                                </div>
+                            </div>
+                            {volume.usedBy.length > 0 ? (
+                                <div className="mt-2 break-words text-xs text-primary-400">
+                                    Used by: {volume.usedBy.join(", ")}
+                                </div>
+                            ) : null}
+                            <Button
+                                size="sm"
+                                variant="danger"
+                                disabled={volume.usedBy.length > 0}
+                                onClick={() => onDelete(volume.name)}
+                                className="mt-3 w-full"
+                            >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                            </Button>
+                        </Card>
+                    );
+                })}
+            </div>
+
+            <div className="hidden max-h-[420px] overflow-auto md:block">
+                <table className="min-w-[560px] text-sm lg:min-w-full">
                     <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>

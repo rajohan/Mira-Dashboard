@@ -54,11 +54,11 @@ export function DockerImagesTable({
             cell: (info) => {
                 const image = info.row.original;
                 return (
-                    <div>
-                        <div className="font-medium text-primary-50">
+                    <div className="min-w-0">
+                        <div className="break-all font-medium text-primary-50">
                             {image.repository}
                         </div>
-                        <div className="text-xs text-primary-400">
+                        <div className="break-all text-xs text-primary-400">
                             tag: {image.tag || "<none>"}
                         </div>
                     </div>
@@ -77,7 +77,7 @@ export function DockerImagesTable({
             cell: (info) => {
                 const image = info.row.original;
                 return (
-                    <div className="text-xs text-primary-300">
+                    <div className="break-words text-xs text-primary-300">
                         {image.inUseBy.length > 0 ? image.inUseBy.join(", ") : "Unused"}
                     </div>
                 );
@@ -124,7 +124,7 @@ export function DockerImagesTable({
     if (images.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
                     Images
                 </div>
                 <EmptyState message="No images found." />
@@ -134,20 +134,68 @@ export function DockerImagesTable({
 
     return (
         <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
+            <div className="flex flex-col gap-3 border-b border-primary-700 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Images</div>
                 <Button
                     size="sm"
                     variant="secondary"
                     onClick={onPruneUnused}
                     disabled={isPruning}
+                    className="w-full sm:w-auto"
                 >
                     <Trash2 className="mr-2 h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
-            <div className="max-h-[420px] overflow-auto">
-                <table className="min-w-full text-sm">
+
+            <div className="space-y-3 p-3 md:hidden">
+                {table.getRowModel().rows.map((row) => {
+                    const image = row.original;
+                    const label = `${image.repository}:${image.tag || "<none>"}`;
+                    return (
+                        <Card key={row.id} className="p-3">
+                            <div className="min-w-0">
+                                <div className="break-all font-medium text-primary-50">
+                                    {image.repository}
+                                </div>
+                                <div className="mt-1 break-all text-xs text-primary-400">
+                                    tag: {image.tag || "<none>"}
+                                </div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                                <div>
+                                    <div className="text-primary-500">Size</div>
+                                    {formatBytes(image.size)}
+                                </div>
+                                <div>
+                                    <div className="text-primary-500">Used by</div>
+                                    {image.inUseBy.length > 0
+                                        ? image.inUseBy.length
+                                        : "Unused"}
+                                </div>
+                            </div>
+                            {image.inUseBy.length > 0 ? (
+                                <div className="mt-2 break-words text-xs text-primary-400">
+                                    {image.inUseBy.join(", ")}
+                                </div>
+                            ) : null}
+                            <Button
+                                size="sm"
+                                variant="danger"
+                                disabled={image.inUseBy.length > 0}
+                                onClick={() => onDelete(image.id, label)}
+                                className="mt-3 w-full"
+                            >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                            </Button>
+                        </Card>
+                    );
+                })}
+            </div>
+
+            <div className="hidden max-h-[420px] overflow-auto md:block">
+                <table className="min-w-[640px] text-sm lg:min-w-full">
                     <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>

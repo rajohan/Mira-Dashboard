@@ -150,55 +150,57 @@ export function Docker() {
     }
 
     return (
-        <div className="space-y-6 p-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <Card className="p-4">
+        <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+                <Card className="p-3 sm:p-4">
                     <div className="text-sm text-primary-400">Running containers</div>
-                    <div className="mt-2 text-3xl font-semibold">{summary.running}</div>
+                    <div className="mt-2 text-2xl font-semibold sm:text-3xl">
+                        {summary.running}
+                    </div>
                 </Card>
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                     <div className="text-sm text-primary-400">Unhealthy</div>
-                    <div className="mt-2 text-3xl font-semibold text-red-400">
+                    <div className="mt-2 text-2xl font-semibold text-red-400 sm:text-3xl">
                         {summary.unhealthy}
                     </div>
                 </Card>
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                     <div className="text-sm text-primary-400">Compose managed</div>
-                    <div className="mt-2 text-3xl font-semibold">
+                    <div className="mt-2 text-2xl font-semibold sm:text-3xl">
                         {summary.composeManaged}
                     </div>
                 </Card>
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                     <div className="text-sm text-primary-400">Images size</div>
-                    <div className="mt-2 text-3xl font-semibold">
+                    <div className="mt-2 text-2xl font-semibold sm:text-3xl">
                         {formatBytes(summary.totalImageSize)}
                     </div>
                 </Card>
             </div>
 
             {actionOutput ? (
-                <Card className="p-4">
-                    <pre className="overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
+                <Card className="p-3 sm:p-4">
+                    <pre className="max-h-80 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
                         {actionOutput}
                     </pre>
                 </Card>
             ) : null}
 
             {runDockerUpdater.data ? (
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                     <div className="mb-2 text-sm font-semibold text-primary-100">
                         Last updater run
                     </div>
-                    <pre className="overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
+                    <pre className="max-h-80 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
                         {JSON.stringify(runDockerUpdater.data, null, 2)}
                     </pre>
                 </Card>
             ) : null}
 
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <div>
+                <div className="border-b border-primary-700 px-3 py-3 sm:px-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
                             <div className="text-lg font-semibold">Updater overview</div>
                             <div className="text-xs text-primary-400">
                                 Registry poll state from n8n, plus recent updater history.
@@ -208,6 +210,7 @@ export function Docker() {
                             size="sm"
                             onClick={() => runDockerUpdater.mutate()}
                             disabled={runDockerUpdater.isPending}
+                            className="w-full sm:w-auto"
                         >
                             {runDockerUpdater.isPending
                                 ? "Running..."
@@ -215,45 +218,45 @@ export function Docker() {
                         </Button>
                     </div>
                 </div>
-                <div className="grid gap-4 border-b border-primary-700 px-4 py-4 md:grid-cols-2 xl:grid-cols-5">
-                    <Card className="p-4">
+                <div className="grid gap-3 border-b border-primary-700 px-3 py-3 sm:grid-cols-2 sm:gap-4 sm:px-4 sm:py-4 xl:grid-cols-5">
+                    <Card className="p-3 sm:p-4">
                         <div className="text-sm text-primary-400">Tracked services</div>
                         <div className="mt-2 text-2xl font-semibold">
                             {updaterSummary?.total ?? "—"}
                         </div>
                     </Card>
-                    <Card className="p-4">
+                    <Card className="p-3 sm:p-4">
                         <div className="text-sm text-primary-400">Updates available</div>
                         <div className="mt-2 text-2xl font-semibold text-amber-300">
                             {updaterSummary?.updateAvailable ?? "—"}
                         </div>
                     </Card>
-                    <Card className="p-4">
+                    <Card className="p-3 sm:p-4">
                         <div className="text-sm text-primary-400">Auto policy</div>
                         <div className="mt-2 text-2xl font-semibold">
                             {updaterSummary?.autoPolicy ?? "—"}
                         </div>
                     </Card>
-                    <Card className="p-4">
+                    <Card className="p-3 sm:p-4">
                         <div className="text-sm text-primary-400">Notify policy</div>
                         <div className="mt-2 text-2xl font-semibold">
                             {updaterSummary?.notifyPolicy ?? "—"}
                         </div>
                     </Card>
-                    <Card className="p-4">
+                    <Card className="p-3 sm:p-4">
                         <div className="text-sm text-primary-400">Recent failures</div>
                         <div className="mt-2 text-2xl font-semibold text-red-400">
                             {updaterSummary?.failed ?? "—"}
                         </div>
                     </Card>
                 </div>
-                <div className="grid gap-6 px-4 py-4 xl:grid-cols-[1.3fr_1fr]">
-                    <div>
+                <div className="grid gap-4 px-3 py-3 sm:px-4 sm:py-4 xl:grid-cols-[1.3fr_1fr] xl:gap-6">
+                    <div className="min-w-0">
                         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary-100">
                             <RefreshCw className="h-4 w-4 text-accent-400" />
                             Pending or newer candidates
                         </div>
-                        <div className="max-h-[400px] overflow-y-auto pr-2">
+                        <div className="max-h-80 overflow-y-auto pr-1 sm:max-h-[400px] sm:pr-2">
                             {updaterServicesQuery.isLoading ? (
                                 <LoadingState
                                     message="Loading updater services..."
@@ -264,17 +267,17 @@ export function Docker() {
                             ) : (
                                 <div className="space-y-3">
                                     {servicesWithUpdates.map((service) => (
-                                        <Card key={service.id} className="p-4">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
-                                                    <div className="font-medium text-primary-50">
+                                        <Card key={service.id} className="p-3 sm:p-4">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                <div className="min-w-0">
+                                                    <div className="break-words font-medium text-primary-50">
                                                         {service.serviceName}
                                                     </div>
-                                                    <div className="mt-1 text-xs text-primary-400">
+                                                    <div className="mt-1 break-all text-xs text-primary-400">
                                                         {service.imageRepo}
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                                                     <div className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300">
                                                         {service.policy}
                                                     </div>
@@ -289,6 +292,7 @@ export function Docker() {
                                                         disabled={
                                                             dockerManualUpdate.isPending
                                                         }
+                                                        className="w-full sm:w-auto"
                                                     >
                                                         Update now
                                                     </Button>
@@ -296,6 +300,7 @@ export function Docker() {
                                             </div>
                                             <div className="mt-3 grid gap-2 text-xs text-primary-300 md:grid-cols-2">
                                                 <div
+                                                    className="min-w-0 break-all"
                                                     title={formatFullVersionDisplay(
                                                         service.currentTag,
                                                         service.currentDigest
@@ -308,6 +313,7 @@ export function Docker() {
                                                     )}
                                                 </div>
                                                 <div
+                                                    className="min-w-0 break-all"
                                                     title={formatFullVersionDisplay(
                                                         service.latestTag,
                                                         service.latestDigest
@@ -335,12 +341,12 @@ export function Docker() {
                             )}
                         </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary-100">
                             <History className="h-4 w-4 text-accent-400" />
                             Recent updater events
                         </div>
-                        <div className="max-h-[400px] overflow-y-auto pr-2">
+                        <div className="max-h-80 overflow-y-auto pr-1 sm:max-h-[400px] sm:pr-2">
                             {updaterEventsQuery.isLoading ? (
                                 <LoadingState
                                     message="Loading updater history..."
@@ -351,12 +357,12 @@ export function Docker() {
                             ) : (
                                 <div className="space-y-3">
                                     {updaterEvents.slice(0, 20).map((event) => (
-                                        <Card key={event.id} className="p-4">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="font-medium text-primary-50">
+                                        <Card key={event.id} className="p-3 sm:p-4">
+                                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                                                <div className="break-words font-medium text-primary-50">
                                                     {event.serviceName}
                                                 </div>
-                                                <div className="text-xs text-primary-500">
+                                                <div className="shrink-0 text-xs text-primary-500">
                                                     {formatTimestamp(event.createdAt)}
                                                 </div>
                                             </div>
@@ -364,7 +370,7 @@ export function Docker() {
                                                 {event.eventType}
                                             </div>
                                             <div
-                                                className="mt-2 font-mono text-xs text-primary-300"
+                                                className="mt-2 break-all font-mono text-xs text-primary-300"
                                                 title={`${formatFullVersionDisplay(event.fromTag, event.fromDigest)} → ${formatFullVersionDisplay(event.toTag, event.toDigest)}`}
                                             >
                                                 {formatUpdaterTransition(event)}
@@ -380,7 +386,7 @@ export function Docker() {
 
             {containersQuery.isError && containers.length === 0 ? (
                 <Card className="overflow-hidden">
-                    <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                    <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
                         Containers
                     </div>
                     <EmptyState message="Failed to load containers. Try refresh.">
@@ -393,7 +399,7 @@ export function Docker() {
                 </Card>
             ) : containers.length === 0 ? (
                 <Card className="overflow-hidden">
-                    <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                    <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
                         Containers
                     </div>
                     <EmptyState message="No containers found.">
@@ -420,7 +426,7 @@ export function Docker() {
                 />
             )}
 
-            <div className="grid gap-6 xl:grid-cols-2">
+            <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
                 <DockerImagesTable
                     images={images}
                     isPruning={pruningTarget === "images" && dockerPrune.isPending}
@@ -479,9 +485,9 @@ export function Docker() {
                 {containerDetailsQuery.isLoading ? (
                     <LoadingState message="Loading container details..." size="md" />
                 ) : containerDetailsQuery.data ? (
-                    <div className="space-y-4 text-sm">
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <Card className="p-4">
+                    <div className="space-y-3 text-sm sm:space-y-4">
+                        <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
+                            <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
                                 <div>
                                     Created:{" "}
@@ -497,7 +503,7 @@ export function Docker() {
                                 </div>
                                 <div>Status: {containerDetailsQuery.data.status}</div>
                             </Card>
-                            <Card className="p-4">
+                            <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Resources</div>
                                 <div>
                                     CPU: {containerDetailsQuery.data.stats?.cpu || "—"}
@@ -519,13 +525,13 @@ export function Docker() {
                             </Card>
                         </div>
 
-                        <Card className="p-4">
+                        <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Networks</div>
                             <div className="space-y-2 text-xs text-primary-300">
                                 {containerDetailsQuery.data.networks.map((network) => (
                                     <div
                                         key={network.name}
-                                        className="rounded bg-primary-900/50 p-2"
+                                        className="break-all rounded bg-primary-900/50 p-2"
                                     >
                                         <div className="font-medium text-primary-100">
                                             {network.name}
@@ -538,13 +544,13 @@ export function Docker() {
                             </div>
                         </Card>
 
-                        <Card className="p-4">
+                        <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Mounts</div>
                             <div className="space-y-2 text-xs text-primary-300">
                                 {containerDetailsQuery.data.mounts.map((mount) => (
                                     <div
                                         key={`${mount.source}:${mount.destination}`}
-                                        className="rounded bg-primary-900/50 p-2"
+                                        className="break-all rounded bg-primary-900/50 p-2"
                                     >
                                         <div>{mount.source}</div>
                                         <div className="text-primary-500">
@@ -574,7 +580,7 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-4 flex items-center gap-3">
+                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center">
                     <Select
                         value={String(logsTail)}
                         onChange={(value) => setLogsTail(Number(value))}
@@ -590,7 +596,7 @@ export function Docker() {
                         isLoading={logsQuery.isFetching}
                     />
                 </div>
-                <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-4 text-xs text-primary-100">
+                <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs text-primary-100 sm:p-4">
                     {logsQuery.data || "No logs"}
                 </pre>
             </Modal>
@@ -608,14 +614,14 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-4 flex items-center gap-3">
+                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center">
                     <Input
                         value={consoleCommand}
                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             setConsoleCommand(event.target.value)
                         }
                         placeholder="Command to run inside container"
-                        className="flex-1"
+                        className="min-w-0 flex-1"
                     />
                     <Button
                         onClick={() =>
@@ -636,7 +642,7 @@ export function Docker() {
                         </Button>
                     ) : null}
                 </div>
-                <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-4 text-xs text-primary-100">
+                <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs text-primary-100 sm:p-4">
                     {execJobQuery.data
                         ? `${execJobQuery.data.stdout}${execJobQuery.data.stderr ? `\n${execJobQuery.data.stderr}` : ""}`
                         : "Run a command to see output."}

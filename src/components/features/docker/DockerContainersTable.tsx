@@ -143,11 +143,13 @@ export function DockerContainersTable({
             cell: (info) => {
                 const container = info.row.original;
                 return (
-                    <div>
-                        <div className="font-medium text-primary-50">
+                    <div className="min-w-0">
+                        <div className="break-words font-medium text-primary-50">
                             {container.name}
                         </div>
-                        <div className="text-xs text-primary-400">{container.image}</div>
+                        <div className="break-all text-xs text-primary-400">
+                            {container.image}
+                        </div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs text-primary-500">
                             {container.service ? (
                                 <span>service: {container.service}</span>
@@ -295,7 +297,7 @@ export function DockerContainersTable({
     if (containers.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-4 py-3 text-lg font-semibold">
+                <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
                     Containers
                 </div>
                 <EmptyState message="No containers found." />
@@ -305,17 +307,110 @@ export function DockerContainersTable({
 
     return (
         <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-primary-700 px-4 py-3">
+            <div className="flex flex-col gap-3 border-b border-primary-700 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Containers</div>
-                <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="secondary" onClick={onRestartStack}>
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        Restart stack
-                    </Button>
-                </div>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onRestartStack}
+                    className="w-full sm:w-auto"
+                >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Restart stack
+                </Button>
             </div>
-            <div className="max-h-[520px] overflow-auto">
-                <table className="min-w-full text-sm">
+
+            <div className="space-y-3 p-3 md:hidden">
+                {table.getRowModel().rows.map((row) => {
+                    const container = row.original;
+                    return (
+                        <div
+                            key={row.id}
+                            role="button"
+                            tabIndex={0}
+                            className="w-full rounded-lg border border-primary-700 bg-primary-900/40 p-3 text-left hover:bg-primary-800/50"
+                            onClick={() => onDetails(container.id)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    onDetails(container.id);
+                                }
+                            }}
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="break-words font-medium text-primary-50">
+                                        {container.name}
+                                    </div>
+                                    <div className="mt-1 break-all text-xs text-primary-400">
+                                        {container.image}
+                                    </div>
+                                </div>
+                                <Badge variant={getStateVariant(container.state)}>
+                                    {container.state}
+                                </Badge>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                                <div>
+                                    <div className="text-primary-500">Health</div>
+                                    <Badge variant={getHealthVariant(container)}>
+                                        {container.health}
+                                    </Badge>
+                                </div>
+                                <div>
+                                    <div className="text-primary-500">Memory</div>
+                                    {formatMemoryUsedMb(container.stats?.memory)}
+                                </div>
+                                <div>
+                                    <div className="text-primary-500">CPU</div>
+                                    {container.stats?.cpu || "-"}
+                                </div>
+                                <div>
+                                    <div className="text-primary-500">Restarts</div>
+                                    {container.restartCount}
+                                </div>
+                            </div>
+                            {container.ports.length > 0 ? (
+                                <div className="mt-3 break-words text-xs text-primary-400">
+                                    Ports: {container.ports.join(", ")}
+                                </div>
+                            ) : null}
+                            <div
+                                className="mt-3 grid grid-cols-3 gap-2"
+                                onClick={(event) => event.stopPropagation()}
+                            >
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    aria-label={`Show logs for ${container.name}`}
+                                    onClick={() => onLogs(container.id)}
+                                >
+                                    <FileText className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    aria-label={`Open console for ${container.name}`}
+                                    onClick={() => onConsole(container.id)}
+                                >
+                                    <SquareTerminal className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    aria-label={`Restart ${container.name}`}
+                                    onClick={() => onRestart(container.id)}
+                                >
+                                    <RotateCcw className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="hidden max-h-[520px] overflow-auto md:block">
+                <table className="min-w-[900px] text-sm lg:min-w-full">
                     <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
