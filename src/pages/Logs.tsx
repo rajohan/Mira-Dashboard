@@ -209,8 +209,8 @@ export function Logs() {
     };
 
     return (
-        <div className="flex h-full min-h-0 flex-col p-6">
-            <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex h-full min-h-0 flex-col p-3 sm:p-4 lg:p-6">
+            <div className="mb-3 grid grid-cols-1 gap-3 sm:mb-4 md:grid-cols-[minmax(0,1fr)_8rem] lg:grid-cols-[minmax(0,1fr)_8rem_minmax(12rem,24rem)] xl:grid-cols-[minmax(0,1fr)_8rem_minmax(12rem,24rem)_auto] xl:items-center">
                 <Select
                     value={selectedFile || ""}
                     onChange={(v) => setSelectedFile(v || null)}
@@ -220,7 +220,7 @@ export function Logs() {
                     }))}
                     placeholder="Select file..."
                     icon={<FileText className="h-4 w-4" />}
-                    width="min-w-[220px]"
+                    width="w-full"
                 />
 
                 <Select
@@ -230,34 +230,37 @@ export function Logs() {
                         value: n.toString(),
                         label: `${n} lines`,
                     }))}
-                    width="min-w-[100px]"
+                    width="w-full"
                 />
 
                 <Input
                     placeholder="Search logs..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="min-w-[200px] max-w-md"
+                    className="w-full min-w-0 md:col-span-2 lg:col-span-1"
                 />
 
-                <LevelFilter
-                    levels={LOG_LEVELS}
-                    activeLevels={levelFilter}
-                    onToggle={toggleLevel}
-                />
+                <div className="min-w-0 md:col-span-2 lg:col-span-3 xl:col-span-1">
+                    <LevelFilter
+                        levels={LOG_LEVELS}
+                        activeLevels={levelFilter}
+                        onToggle={toggleLevel}
+                    />
+                </div>
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-primary-400">
                     {isLoadingContent
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
                     <RefreshButton
                         onClick={() => void loadLogContent()}
                         isLoading={isLoadingContent}
+                        label="Reload"
                     />
                     <Button
                         variant="secondary"
@@ -279,11 +282,14 @@ export function Logs() {
                 </div>
             </div>
 
-            <Card className="flex-1 overflow-hidden" variant="bordered">
+            <Card
+                className="min-h-0 flex-1 overflow-hidden p-0 sm:p-4"
+                variant="bordered"
+            >
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-xs"
+                    className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-[11px] sm:text-xs"
                     style={{ overflowAnchor: "none" }}
                 >
                     {!isAtBottom && filteredLogs.length > 0 && (

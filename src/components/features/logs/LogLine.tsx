@@ -7,7 +7,7 @@ interface LogLineProps {
 
 export function LogLine({ log }: LogLineProps) {
     return (
-        <div className="flex items-start gap-2 px-4 py-0.5 hover:bg-primary-800/50">
+        <div className="flex flex-wrap items-start gap-x-2 gap-y-1 px-2 py-1 hover:bg-primary-800/50 sm:flex-nowrap sm:px-4 sm:py-0.5">
             {log.ts && (
                 <span className="flex-shrink-0 whitespace-nowrap text-primary-500">
                     {formatLogTime(log.ts)}
@@ -27,7 +27,7 @@ export function LogLine({ log }: LogLineProps) {
                     [{log.subsystem}]
                 </span>
             )}
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-primary-200">
+            <span className="min-w-full flex-1 whitespace-pre-wrap break-all text-primary-200 sm:min-w-0">
                 {log.msg}
             </span>
         </div>
