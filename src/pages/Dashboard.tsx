@@ -67,7 +67,11 @@ function formatTemp(value: number | null | undefined): string {
     return Math.round(value).toString();
 }
 
-function WeatherTimeCard() {
+interface WeatherTimeCardProps {
+    className?: string;
+}
+
+function WeatherTimeCard({ className }: WeatherTimeCardProps) {
     const [now, setNow] = useState(() => new Date());
     const { data: weather, isLoading, isError } = useWeather(AUTO_REFRESH_MS);
 
@@ -87,7 +91,7 @@ function WeatherTimeCard() {
     const CurrentWeatherIcon = getWeatherIcon(weather?.description);
 
     return (
-        <Card>
+        <Card className={className}>
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <div className="min-w-0">
                     <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-primary-400">
@@ -140,7 +144,7 @@ function WeatherTimeCard() {
                 </div>
             )}
 
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
                 {(weather?.forecast || []).slice(0, 3).map((day, index) => {
                     const dayLabel = formatWeekdayShort(new Date(day.date));
                     const ForecastIcon = getWeatherIcon(day.description);
@@ -174,77 +178,72 @@ export function Dashboard() {
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
             {error && <Alert variant="error">{error}</Alert>}
 
-            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
-                <WeatherTimeCard />
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
-                    <MetricCard
-                        title="CPU"
-                        subtitle={
-                            metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."
-                        }
-                        percent={metrics?.cpu.loadPercent}
-                        showValue={false}
-                        icon={<Cpu className="h-5 w-5" />}
-                    />
-                    <MetricCard
-                        title="Memory"
-                        subtitle={
-                            metrics
-                                ? metrics.memory.usedGB +
-                                  " GB of " +
-                                  metrics.memory.totalGB +
-                                  " GB"
-                                : "Loading..."
-                        }
-                        percent={metrics?.memory.percent}
-                        showValue={false}
-                        icon={<MemoryStick className="h-5 w-5" />}
-                    />
-                    <MetricCard
-                        title="Disk"
-                        subtitle={
-                            metrics
-                                ? metrics.disk.usedGB +
-                                  " GB of " +
-                                  metrics.disk.totalGB +
-                                  " GB"
-                                : "Loading..."
-                        }
-                        percent={metrics?.disk.percent}
-                        showValue={false}
-                        icon={<HardDrive className="h-5 w-5" />}
-                    />
-                    <MetricCard
-                        title="Uptime"
-                        value={metrics ? formatUptime(metrics.system.uptime) : "—"}
-                        subtitle={metrics ? metrics.system.hostname : "Loading..."}
-                        color="green"
-                        icon={<Clock className="h-5 w-5" />}
-                    />
-                    <MetricCard
-                        title="Download"
-                        value={
-                            metrics?.network
-                                ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s`
-                                : "—"
-                        }
-                        subtitle="Current throughput"
-                        color="blue"
-                        icon={<ArrowDown className="h-5 w-5" />}
-                    />
-                    <MetricCard
-                        title="Upload"
-                        value={
-                            metrics?.network
-                                ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s`
-                                : "—"
-                        }
-                        subtitle="Current throughput"
-                        color="blue"
-                        icon={<ArrowUp className="h-5 w-5" />}
-                    />
-                </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-6">
+                <WeatherTimeCard className="sm:col-span-2 lg:col-span-3 xl:col-span-1 xl:row-span-2" />
+                <MetricCard
+                    title="CPU"
+                    subtitle={metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."}
+                    percent={metrics?.cpu.loadPercent}
+                    showValue={false}
+                    icon={<Cpu className="h-5 w-5" />}
+                />
+                <MetricCard
+                    title="Memory"
+                    subtitle={
+                        metrics
+                            ? metrics.memory.usedGB +
+                              " GB of " +
+                              metrics.memory.totalGB +
+                              " GB"
+                            : "Loading..."
+                    }
+                    percent={metrics?.memory.percent}
+                    showValue={false}
+                    icon={<MemoryStick className="h-5 w-5" />}
+                />
+                <MetricCard
+                    title="Disk"
+                    subtitle={
+                        metrics
+                            ? metrics.disk.usedGB +
+                              " GB of " +
+                              metrics.disk.totalGB +
+                              " GB"
+                            : "Loading..."
+                    }
+                    percent={metrics?.disk.percent}
+                    showValue={false}
+                    icon={<HardDrive className="h-5 w-5" />}
+                />
+                <MetricCard
+                    title="Uptime"
+                    value={metrics ? formatUptime(metrics.system.uptime) : "—"}
+                    subtitle={metrics ? metrics.system.hostname : "Loading..."}
+                    color="green"
+                    icon={<Clock className="h-5 w-5" />}
+                />
+                <MetricCard
+                    title="Download"
+                    value={
+                        metrics?.network
+                            ? `${metrics.network.downloadMbps.toFixed(2)} Mbit/s`
+                            : "—"
+                    }
+                    subtitle="Current throughput"
+                    color="blue"
+                    icon={<ArrowDown className="h-5 w-5" />}
+                />
+                <MetricCard
+                    title="Upload"
+                    value={
+                        metrics?.network
+                            ? `${metrics.network.uploadMbps.toFixed(2)} Mbit/s`
+                            : "—"
+                    }
+                    subtitle="Current throughput"
+                    color="blue"
+                    icon={<ArrowUp className="h-5 w-5" />}
+                />
             </div>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4 xl:gap-6">
