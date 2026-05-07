@@ -48,7 +48,7 @@ export function ChatComposer({
     onToggleRecording,
 }: ChatComposerProps) {
     return (
-        <div className="mt-4 border-t border-primary-700 pt-4">
+        <div className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4">
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
@@ -70,18 +70,18 @@ export function ChatComposer({
                                     sizeBytes: attachment.sizeBytes,
                                 })
                             }
-                            className="group flex max-w-full items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-700"
+                            className="group flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-700"
                         >
                             {attachment.kind === "image" && attachment.dataUrl ? (
                                 <img
                                     src={attachment.dataUrl}
                                     alt=""
-                                    className="h-8 w-8 rounded object-cover"
+                                    className="h-8 w-8 shrink-0 rounded object-cover"
                                 />
                             ) : (
                                 <Paperclip className="h-4 w-4 text-primary-400" />
                             )}
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                                 <div className="truncate">{attachment.fileName}</div>
                                 <div className="text-primary-400">
                                     {formatSize(attachment.sizeBytes)}
@@ -111,7 +111,7 @@ export function ChatComposer({
                 </div>
             ) : null}
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-2 sm:gap-3 md:flex-row">
                 <input
                     ref={fileInputReference}
                     type="file"
@@ -119,7 +119,7 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files)}
                 />
-                <div className="relative flex-1">
+                <div className="relative min-w-0 flex-1">
                     {slashCommandSuggestions.length > 0 ? (
                         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium uppercase tracking-wide text-primary-400">
@@ -178,10 +178,11 @@ export function ChatComposer({
                                 ? "Message, attach files, or use / commands (try /help)"
                                 : "Choose a session first"
                         }
-                        rows={5}
+                        rows={4}
+                        className="min-h-24 resize-y sm:min-h-32"
                     />
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
                     <Button
                         variant={isRecording ? "primary" : "secondary"}
                         size="md"
@@ -193,11 +194,12 @@ export function ChatComposer({
                             isTranscribing
                         }
                         title={isRecording ? "Stop recording" : "Record voice input"}
+                        className="w-full px-2 sm:px-4"
                     >
                         {isRecording ? (
-                            <Square className="mr-2 h-4 w-4" />
+                            <Square className="mr-1 h-4 w-4 sm:mr-2" />
                         ) : (
-                            <Mic className="mr-2 h-4 w-4" />
+                            <Mic className="mr-1 h-4 w-4 sm:mr-2" />
                         )}
                         {isRecording ? "Stop" : isTranscribing ? "STT…" : "Voice"}
                     </Button>
@@ -213,16 +215,18 @@ export function ChatComposer({
                             attachments.length >= 10
                         }
                         title="Attach files"
+                        className="w-full px-2 sm:px-4"
                     >
-                        <Paperclip className="mr-2 h-4 w-4" /> Attach
+                        <Paperclip className="mr-1 h-4 w-4 sm:mr-2" /> Attach
                     </Button>
                     <Button
                         variant="primary"
                         size="md"
                         onClick={onSend}
                         disabled={!canSend || isRecording || isTranscribing}
+                        className="w-full px-2 sm:px-4"
                     >
-                        <Send className="mr-2 h-4 w-4" /> Send
+                        <Send className="mr-1 h-4 w-4 sm:mr-2" /> Send
                     </Button>
                 </div>
             </div>

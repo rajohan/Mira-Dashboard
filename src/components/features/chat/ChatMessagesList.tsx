@@ -93,7 +93,7 @@ function AttachmentList({
     }
 
     return (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
             {attachments.map((attachment) => {
                 const preview = previewFromAttachment(attachment);
                 const content = (
@@ -112,7 +112,7 @@ function AttachmentList({
                     return (
                         <div
                             key={attachment.id}
-                            className="flex max-w-full items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-xs text-primary-100"
+                            className="flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-xs text-primary-100"
                             title={attachment.mimeType}
                         >
                             {content}
@@ -125,7 +125,7 @@ function AttachmentList({
                         key={attachment.id}
                         type="button"
                         onClick={() => onPreview(preview)}
-                        className="flex max-w-full items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-800"
+                        className="flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-800"
                         title={attachment.mimeType}
                     >
                         {content}
@@ -308,14 +308,14 @@ export function ChatMessagesList({
         <div
             ref={messagesContainerReference}
             onScroll={onScroll}
-            className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1"
+            className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}
         >
             {!isAtBottom && chatRows.length > 0 ? (
                 <button
                     type="button"
                     onClick={onFollow}
-                    className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                    className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600 sm:mr-2"
                 >
                     ↓ Follow
                 </button>
@@ -378,15 +378,17 @@ export function ChatMessagesList({
                                 >
                                     <div
                                         className={[
-                                            "max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+                                            "min-w-0 max-w-[94%] rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[86%] lg:max-w-[80%]",
                                             isUser
                                                 ? "bg-accent-500 text-white"
                                                 : "border border-primary-700 bg-primary-800 text-primary-100",
                                         ].join(" ")}
                                     >
                                         <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide opacity-70">
-                                            <span>{row.message.role}</span>
-                                            <div className="flex items-center gap-1">
+                                            <span className="min-w-0 truncate">
+                                                {row.message.role}
+                                            </span>
+                                            <div className="flex shrink-0 items-center gap-1">
                                                 {canDeleteMessage ? (
                                                     <DeleteMessageButton
                                                         messageKey={row.key}
@@ -449,7 +451,7 @@ export function ChatMessagesList({
                                                                     onLoad={
                                                                         onDynamicContentLoad
                                                                     }
-                                                                    className="max-h-56 max-w-full rounded-lg border border-primary-700 object-contain"
+                                                                    className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                                 />
                                                             </button>
                                                         );
@@ -491,7 +493,7 @@ export function ChatMessagesList({
                                                                 onLoad={
                                                                     onDynamicContentLoad
                                                                 }
-                                                                className="max-h-56 max-w-full rounded-lg border border-primary-700 object-contain"
+                                                                className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                             />
                                                         </button>
                                                     ))}

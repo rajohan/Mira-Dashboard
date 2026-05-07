@@ -82,10 +82,10 @@ export function ChatHeader({
     onSelectSession,
 }: ChatHeaderProps) {
     return (
-        <div className="border-b border-primary-700 pb-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="border-b border-primary-700 pb-2 sm:pb-3">
+            <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <p className="truncate text-sm text-primary-400">
+                    <p className="break-words text-xs text-primary-400 sm:truncate sm:text-sm">
                         {formatHeaderStatus(selectedSession)}
                     </p>
                 </div>

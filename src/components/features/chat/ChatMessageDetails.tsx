@@ -39,7 +39,9 @@ function DetailBlock({
               : "border-primary-600 bg-primary-900/70 text-primary-100";
 
     return (
-        <div className={`mt-1.5 rounded-lg border px-2 py-1.5 text-xs ${toneClass}`}>
+        <div
+            className={`mt-1.5 min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 text-xs ${toneClass}`}
+        >
             <div className="mb-0.5 font-medium uppercase tracking-wide opacity-70">
                 {label}
             </div>
