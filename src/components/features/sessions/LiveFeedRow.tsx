@@ -1,5 +1,5 @@
 import { formatOsloTime } from "../../../utils/format";
-import { Badge } from "../../ui/Badge";
+import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 
 interface LiveFeedRowProps {
     item: {
@@ -10,6 +10,23 @@ interface LiveFeedRowProps {
         content: string;
         timestamp: number;
     };
+}
+
+function getRoleVariant(role: string) {
+    switch (role.toLowerCase()) {
+        case "user":
+            return "info" as const;
+        case "assistant":
+            return "success" as const;
+        case "system":
+            return "warning" as const;
+        case "tool":
+        case "tool_result":
+        case "toolresult":
+            return "hook" as const;
+        default:
+            return "default" as const;
+    }
 }
 
 export function LiveFeedRow({ item }: LiveFeedRowProps) {
@@ -24,8 +41,10 @@ export function LiveFeedRow({ item }: LiveFeedRowProps) {
                 </span>
             </div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge>{item.role}</Badge>
-                <Badge>{item.sessionType || "unknown"}</Badge>
+                <Badge variant={getRoleVariant(item.role)}>{item.role}</Badge>
+                <Badge variant={getSessionTypeVariant(item.sessionType)}>
+                    {item.sessionType || "unknown"}
+                </Badge>
             </div>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-primary-100">
                 {item.content}
