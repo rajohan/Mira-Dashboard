@@ -231,6 +231,34 @@ export function ChatComposer({
                             </div>
                         </div>
                     ) : null}
+                    {showEmojiPicker ? (
+                        <div className="absolute bottom-full left-0 right-0 z-30 mb-2 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
+                            <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wide text-primary-400">
+                                <span>Emoji</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowEmojiPicker(false)}
+                                    className="rounded p-1 text-primary-400 hover:bg-primary-800 hover:text-primary-100"
+                                    aria-label="Close emoji picker"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="grid max-h-52 grid-cols-6 gap-1 overflow-y-auto sm:max-h-64">
+                                {CHAT_EMOJIS.map((emoji) => (
+                                    <button
+                                        key={emoji}
+                                        type="button"
+                                        onClick={() => insertEmoji(emoji)}
+                                        className="rounded-lg p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
+                                        aria-label={`Insert ${emoji}`}
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
                     <Textarea
                         ref={textareaReference}
                         value={draft}
@@ -263,37 +291,20 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y sm:min-h-32"
+                        className="min-h-24 resize-y pr-12 text-base sm:min-h-32 sm:text-sm"
                     />
+                    <button
+                        type="button"
+                        onClick={() => setShowEmojiPicker((previous) => !previous)}
+                        disabled={!isConnected || !selectedSessionKey || isSending}
+                        className="absolute bottom-2 right-2 rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                        title="Insert emoji"
+                        aria-label="Insert emoji"
+                    >
+                        <Smile className="h-5 w-5" />
+                    </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:flex md:flex-col">
-                    <div className="relative">
-                        {showEmojiPicker ? (
-                            <div className="absolute bottom-full right-0 z-20 mb-2 grid w-64 grid-cols-6 gap-1 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:w-72">
-                                {CHAT_EMOJIS.map((emoji) => (
-                                    <button
-                                        key={emoji}
-                                        type="button"
-                                        onClick={() => insertEmoji(emoji)}
-                                        className="rounded-lg p-2 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
-                                        aria-label={`Insert ${emoji}`}
-                                    >
-                                        {emoji}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : null}
-                        <Button
-                            variant="secondary"
-                            size="md"
-                            onClick={() => setShowEmojiPicker((previous) => !previous)}
-                            disabled={!isConnected || !selectedSessionKey || isSending}
-                            title="Insert emoji"
-                            className="w-full px-2 sm:px-4"
-                        >
-                            <Smile className="mr-1 h-4 w-4 sm:mr-2" /> Emoji
-                        </Button>
-                    </div>
+                <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
                     <Button
                         variant={isRecording ? "primary" : "secondary"}
                         size="md"
