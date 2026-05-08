@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
+import { useCacheEntry } from "../../hooks";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";
 
@@ -38,10 +39,18 @@ interface LayoutProps {
     children: ReactNode;
 }
 
+interface SystemHostCache {
+    version?: {
+        current?: string;
+    };
+}
+
 export function Layout({ children }: LayoutProps) {
     const location = useLocation();
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
+    const openClawVersion = systemHost?.data.version?.current;
 
     useEffect(() => {
         setIsSidebarOpen(false);
@@ -93,8 +102,10 @@ export function Layout({ children }: LayoutProps) {
 
             <div className="border-t border-primary-700 p-4">
                 <div className="text-xs text-primary-400">
-                    <div>OpenClaw Dashboard</div>
-                    <div className="text-primary-500">v1.0.0</div>
+                    <div>OpenClaw</div>
+                    <div className="text-primary-500">
+                        {openClawVersion ? `v${openClawVersion}` : "Version unknown"}
+                    </div>
                 </div>
             </div>
         </aside>
