@@ -16,6 +16,7 @@ import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
+let lastVisibleLogFiles: LogFile[] = [];
 
 function isNamedLogFile(file: unknown): file is LogFile {
     return (
@@ -53,7 +54,9 @@ export function Logs() {
     const liveLogs = Array.isArray(logs) ? logs : [];
 
     // Queries
-    const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>([]);
+    const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>(
+        () => lastVisibleLogFiles
+    );
     const { data: logFiles } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
@@ -75,7 +78,13 @@ export function Logs() {
 
             const previousKeys = previous.map((file) => file.name).join("\n");
             const nextKeys = nextLogFiles.map((file) => file.name).join("\n");
-            return previousKeys === nextKeys ? previous : nextLogFiles;
+            const resolvedLogFiles = previousKeys === nextKeys ? previous : nextLogFiles;
+
+            if (resolvedLogFiles.length > 0) {
+                lastVisibleLogFiles = resolvedLogFiles;
+            }
+
+            return resolvedLogFiles;
         });
     }, [logFiles]);
 
