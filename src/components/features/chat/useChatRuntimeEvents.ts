@@ -198,6 +198,18 @@ function runtimeProgressText(
     return undefined;
 }
 
+function isNewRunForStream(
+    existing: { runId?: string; aliases?: string[] } | undefined,
+    incomingRunId: string | undefined
+): boolean {
+    return Boolean(
+        existing &&
+        incomingRunId &&
+        existing.runId !== incomingRunId &&
+        !existing.aliases?.includes(incomingRunId)
+    );
+}
+
 function isRuntimeWorkEvent(
     eventName: string,
     stream: string,
@@ -272,9 +284,13 @@ export function useChatRuntimeEvents({
 
             for (const [streamSessionKey, pending] of Object.entries(pendingUpdates)) {
                 const existing = next[streamSessionKey];
-                const runId = existing?.runId || pending.runId || streamSessionKey;
-                let text = existing?.text || "";
-                let message = existing?.message;
+                const incomingRunId = pending.runId || streamSessionKey;
+                const startsNewRun = isNewRunForStream(existing, incomingRunId);
+                const runId = startsNewRun
+                    ? incomingRunId
+                    : existing?.runId || incomingRunId;
+                let text = startsNewRun ? "" : existing?.text || "";
+                let message = startsNewRun ? undefined : existing?.message;
 
                 for (const deltaMessage of pending.deltas) {
                     text = mergeStreamText(text, deltaMessage.text);
@@ -285,13 +301,17 @@ export function useChatRuntimeEvents({
                     sessionKey: streamSessionKey,
                     runId,
                     aliases: uniqueStrings([
-                        ...(existing?.aliases || []),
+                        ...(startsNewRun ? [] : existing?.aliases || []),
                         ...pending.aliases,
                         runId,
                     ]),
                     text,
                     message,
-                    statusText: text.trim() ? undefined : existing?.statusText,
+                    statusText: text.trim()
+                        ? undefined
+                        : startsNewRun
+                          ? undefined
+                          : existing?.statusText,
                     updatedAt: new Date().toISOString(),
                 };
             }
@@ -423,20 +443,28 @@ export function useChatRuntimeEvents({
             if (shouldTrackActivity) {
                 updateActiveStreamsReference.current((previous) => {
                     const existing = previous[selectedSessionKey];
-                    const runId = existing?.runId || eventRunId || selectedSessionKey;
+                    const incomingRunId =
+                        eventRunId || existing?.runId || selectedSessionKey;
+                    const startsNewRun = isNewRunForStream(existing, eventRunId);
+                    const runId = startsNewRun
+                        ? incomingRunId
+                        : existing?.runId || incomingRunId;
                     return {
                         ...previous,
                         [selectedSessionKey]: {
                             sessionKey: selectedSessionKey,
                             runId,
                             aliases: uniqueStrings([
-                                ...(existing?.aliases || []),
+                                ...(startsNewRun ? [] : existing?.aliases || []),
                                 eventRunId,
                                 runId,
                             ]),
-                            text: existing?.text || "",
-                            message: existing?.message,
-                            statusText: statusText || existing?.statusText || "Thinking",
+                            text: startsNewRun ? "" : existing?.text || "",
+                            message: startsNewRun ? undefined : existing?.message,
+                            statusText:
+                                statusText ||
+                                (startsNewRun ? undefined : existing?.statusText) ||
+                                "Thinking",
                             updatedAt: new Date().toISOString(),
                         },
                     };
