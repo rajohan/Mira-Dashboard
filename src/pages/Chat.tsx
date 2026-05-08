@@ -52,6 +52,7 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
+const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
@@ -288,8 +289,8 @@ export function Chat() {
             kind: "typing",
             message: {
                 role: "assistant",
-                content: selectedStream?.statusText || "Thinking…",
-                text: selectedStream?.statusText || "Thinking…",
+                content: selectedStream?.statusText || "Thinking",
+                text: selectedStream?.statusText || "Thinking",
             },
         });
     }
@@ -461,8 +462,14 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
                 const activeStream = activeStreamsReference.current[selectedSessionKey];
+                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
+                const activeStreamIsQuiet =
+                    activeStreamUpdatedAt === null ||
+                    Date.now() - activeStreamUpdatedAt >=
+                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
                 const recoveredStreamInHistory = Boolean(
                     activeStream &&
+                    activeStreamIsQuiet &&
                     ((activeStream.text &&
                         historyContainsRecoveredStream(
                             nextMessages,
@@ -1002,7 +1009,7 @@ export function Chat() {
                 runId: idempotencyKey,
                 aliases: [idempotencyKey],
                 text: "",
-                statusText: "Thinking…",
+                statusText: "Thinking",
                 updatedAt: new Date().toISOString(),
             },
         }));

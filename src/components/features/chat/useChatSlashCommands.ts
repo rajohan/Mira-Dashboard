@@ -371,7 +371,7 @@ export function useChatSlashCommands({
                     runId,
                     aliases: [runId],
                     text: "",
-                    statusText: "Compacting context…",
+                    statusText: "Compacting context",
                     updatedAt: new Date().toISOString(),
                 },
             }));

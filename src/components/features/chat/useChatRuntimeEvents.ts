@@ -112,7 +112,7 @@ function runtimeProgressText(
     data: Record<string, unknown>
 ): string | undefined {
     if (stream === "lifecycle") {
-        return phase === "start" ? "Thinking…" : undefined;
+        return phase === "start" ? "Thinking" : undefined;
     }
 
     if (stream === "tool" || eventName === "session.tool") {
@@ -152,7 +152,7 @@ function runtimeProgressText(
 
     if (stream === "plan") {
         return compactStatusText(
-            stringValue(data.explanation) || stringValue(data.title) || "Updating plan…"
+            stringValue(data.explanation) || stringValue(data.title) || "Updating plan"
         );
     }
 
@@ -161,13 +161,13 @@ function runtimeProgressText(
             stringValue(data.command) ||
                 stringValue(data.message) ||
                 stringValue(data.reason) ||
-                "Waiting for approval…"
+                "Waiting for approval"
         );
     }
 
     if (stream === "patch") {
         return compactStatusText(
-            stringValue(data.summary) || stringValue(data.title) || "Applying patch…"
+            stringValue(data.summary) || stringValue(data.title) || "Applying patch"
         );
     }
 
@@ -192,7 +192,7 @@ function runtimeProgressText(
     }
 
     if (stream === "compaction") {
-        return phase === "end" ? undefined : "Compacting context…";
+        return phase === "end" ? undefined : "Compacting context";
     }
 
     return undefined;
@@ -250,6 +250,9 @@ export function useChatRuntimeEvents({
 }: UseChatRuntimeEventsParams) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<number | null>(null);
+    const updateActiveStreamsReference = useRef(updateActiveStreams);
+
+    updateActiveStreamsReference.current = updateActiveStreams;
 
     useEffect(() => {
         const flushPendingDeltaUpdates = () => {
@@ -288,13 +291,13 @@ export function useChatRuntimeEvents({
                     ]),
                     text,
                     message,
-                    statusText: existing?.statusText,
+                    statusText: text.trim() ? undefined : existing?.statusText,
                     updatedAt: new Date().toISOString(),
                 };
             }
 
             activeStreamsReference.current = next;
-            updateActiveStreams(() => next);
+            updateActiveStreamsReference.current(() => next);
         };
 
         const queueDeltaUpdate = (
@@ -400,7 +403,7 @@ export function useChatRuntimeEvents({
                 stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase);
 
             if (isTerminalLifecycleEvent) {
-                updateActiveStreams((previous) => {
+                updateActiveStreamsReference.current((previous) => {
                     const next = { ...previous };
                     delete next[selectedSessionKey];
                     return next;
@@ -418,7 +421,7 @@ export function useChatRuntimeEvents({
             );
 
             if (shouldTrackActivity) {
-                updateActiveStreams((previous) => {
+                updateActiveStreamsReference.current((previous) => {
                     const existing = previous[selectedSessionKey];
                     const runId = existing?.runId || eventRunId || selectedSessionKey;
                     return {
@@ -433,7 +436,7 @@ export function useChatRuntimeEvents({
                             ]),
                             text: existing?.text || "",
                             message: existing?.message,
-                            statusText: statusText || existing?.statusText || "Thinking…",
+                            statusText: statusText || existing?.statusText || "Thinking",
                             updatedAt: new Date().toISOString(),
                         },
                     };
@@ -585,7 +588,7 @@ export function useChatRuntimeEvents({
                     );
                 }
 
-                updateActiveStreams((previous) => {
+                updateActiveStreamsReference.current((previous) => {
                     const next = { ...previous };
                     delete next[streamSessionKey];
                     return next;
@@ -614,7 +617,7 @@ export function useChatRuntimeEvents({
                         ])
                     );
                 }
-                updateActiveStreams((previous) => {
+                updateActiveStreamsReference.current((previous) => {
                     const next = { ...previous };
                     delete next[streamSessionKey];
                     return next;
@@ -628,7 +631,7 @@ export function useChatRuntimeEvents({
                 if (eventMatchesSelected) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
-                updateActiveStreams((previous) => {
+                updateActiveStreamsReference.current((previous) => {
                     const next = { ...previous };
                     delete next[streamSessionKey];
                     return next;
@@ -637,6 +640,7 @@ export function useChatRuntimeEvents({
         });
 
         return () => {
+            flushPendingDeltaUpdates();
             unsubscribe();
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
@@ -661,6 +665,5 @@ export function useChatRuntimeEvents({
         showThinkingOutput,
         showToolOutput,
         subscribe,
-        updateActiveStreams,
     ]);
 }

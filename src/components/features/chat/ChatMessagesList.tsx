@@ -197,7 +197,7 @@ function TtsButton({
     );
 }
 
-function TypingIndicator({ text = "Thinking…" }: { text?: string }) {
+function TypingIndicator({ text = "Thinking" }: { text?: string }) {
     return (
         <div className="flex justify-start pb-3">
             <div className="border-primary-700 bg-primary-800 text-primary-100 rounded-2xl border px-3 py-2 text-sm shadow-sm">
@@ -205,7 +205,7 @@ function TypingIndicator({ text = "Thinking…" }: { text?: string }) {
                     assistant
                 </div>
                 <div className="text-primary-300 flex items-center gap-2">
-                    <span className="min-w-0 break-words">{text || "Thinking…"}</span>
+                    <span className="min-w-0 break-words">{text || "Thinking"}</span>
                     <span
                         className="flex shrink-0 gap-1"
                         aria-label="Assistant is working"
