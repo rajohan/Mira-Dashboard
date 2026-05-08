@@ -16,6 +16,7 @@ import {
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
     clearActiveRunMarker,
+    markActiveRun,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtils";
 import {
@@ -149,6 +150,7 @@ export function useChatSlashCommands({
                     delete next[selectedSessionKey];
                     return next;
                 });
+                clearActiveRunMarker(selectedSessionKey);
                 setIsAssistantTyping(false);
                 await request("sessions.reset", { key: selectedSessionKey });
                 await reloadChatHistory();
@@ -166,6 +168,7 @@ export function useChatSlashCommands({
                     delete next[selectedSessionKey];
                     return next;
                 });
+                clearActiveRunMarker(selectedSessionKey);
                 setIsAssistantTyping(false);
                 addSystemMessage("Stopped current run.");
             });
@@ -364,19 +367,39 @@ export function useChatSlashCommands({
         }
 
         if (command === "/compact") {
-            await runSimpleCommand(async () => {
+            setDraft("");
+            setSendError(null);
+            setIsSending(true);
+            setIsAssistantTyping(true);
+            markActiveRun(selectedSessionKey);
+            shouldStickToBottomReference.current = true;
+            setIsAtBottom(true);
+
+            try {
                 const result = await request<{ compacted?: boolean; reason?: string }>(
                     "sessions.compact",
                     {
                         key: selectedSessionKey,
                     }
                 );
+
+                if (!result.compacted) {
+                    clearActiveRunMarker(selectedSessionKey);
+                    setIsAssistantTyping(false);
+                }
+
                 addSystemMessage(
                     result.compacted
                         ? "Context compacted successfully."
                         : `Compaction skipped${result.reason ? `: ${result.reason}` : "."}`
                 );
-            });
+            } catch (error_) {
+                clearActiveRunMarker(selectedSessionKey);
+                setIsAssistantTyping(false);
+                setSendError((error_ as Error).message || "Failed to run /compact");
+            } finally {
+                setIsSending(false);
+            }
             return true;
         }
 

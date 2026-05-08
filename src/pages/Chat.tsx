@@ -59,6 +59,27 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
+const TERMINAL_SESSION_STATUSES = new Set([
+    "aborted",
+    "cancelled",
+    "canceled",
+    "complete",
+    "completed",
+    "done",
+    "error",
+    "failed",
+    "idle",
+    "stopped",
+]);
+const RUNNING_SESSION_STATUSES = new Set([
+    "active",
+    "in-progress",
+    "pending",
+    "queued",
+    "running",
+    "streaming",
+    "thinking",
+]);
 
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
@@ -118,6 +139,38 @@ function sessionTimestampMs(value: unknown): number | null {
 function isRecentSessionActivity(value: unknown): boolean {
     const timestamp = sessionTimestampMs(value);
     return timestamp !== null && Date.now() - timestamp < ACTIVE_RUN_MARKER_IDLE_TTL_MS;
+}
+
+function isTerminalSessionStatus(value: unknown): boolean {
+    if (typeof value !== "string") {
+        return false;
+    }
+
+    return TERMINAL_SESSION_STATUSES.has(value.toLowerCase());
+}
+
+function isRunningSessionStatus(value: unknown): boolean {
+    if (typeof value !== "string") {
+        return false;
+    }
+
+    return RUNNING_SESSION_STATUSES.has(value.toLowerCase());
+}
+
+function shouldClearActiveMarkerForSession(
+    session: { endedAt?: unknown; status?: unknown } | null,
+    markerStartedAt: number | null,
+    isRunning: boolean
+): boolean {
+    if (!session || markerStartedAt === null || isRunning) {
+        return false;
+    }
+
+    const endedAt = sessionTimestampMs(session.endedAt);
+    return (
+        (endedAt !== null && endedAt >= markerStartedAt) ||
+        isTerminalSessionStatus(session.status)
+    );
 }
 
 function historyHasNewerAssistantMessage(
@@ -264,17 +317,35 @@ export function Chat() {
     const selectedSessionHasRecentActivity = isRecentSessionActivity(
         selectedSession?.updatedAt ?? selectedSession?.startedAt
     );
+    const selectedSessionHasTerminalStatus = isTerminalSessionStatus(
+        selectedSession?.status
+    );
+    const selectedSessionHasRunningStatus = isRunningSessionStatus(
+        selectedSession?.status
+    );
     const selectedSessionIsRunning = Boolean(
         selectedSession &&
-        selectedSessionHasRecentActivity &&
-        (selectedSession.isRunning ||
-            selectedSession.running ||
-            selectedSession.activeRunId ||
-            selectedSession.currentRunId) &&
-        selectedSession.endedAt == null
+        !selectedSessionHasTerminalStatus &&
+        selectedSession.endedAt == null &&
+        (selectedSessionHasRunningStatus ||
+            (selectedSessionHasRecentActivity &&
+                (selectedSession.isRunning ||
+                    selectedSession.running ||
+                    selectedSession.activeRunId ||
+                    selectedSession.currentRunId)))
+    );
+    const selectedSessionActiveMarkerStartedAt = selectedSessionKey
+        ? getActiveRunMarkerStartedAtMs(selectedSessionKey)
+        : null;
+    const shouldClearSelectedSessionActiveMarker = shouldClearActiveMarkerForSession(
+        selectedSession,
+        selectedSessionActiveMarkerStartedAt,
+        selectedSessionIsRunning
     );
     const selectedSessionHasActiveMarker = Boolean(
-        selectedSessionKey && hasActiveRunMarker(selectedSessionKey)
+        selectedSessionKey &&
+        !shouldClearSelectedSessionActiveMarker &&
+        hasActiveRunMarker(selectedSessionKey)
     );
     const selectedStream = selectedSessionKey
         ? activeStreams[selectedSessionKey]
@@ -343,19 +414,50 @@ export function Chat() {
             return;
         }
 
+        const syncMarkerState = () => {
+            const markerStartedAt = getActiveRunMarkerStartedAtMs(selectedSessionKey);
+
+            if (
+                shouldClearActiveMarkerForSession(
+                    selectedSession,
+                    markerStartedAt,
+                    selectedSessionIsRunning
+                )
+            ) {
+                clearActiveRunMarker(selectedSessionKey);
+                setIsAssistantTyping(false);
+                updateActiveStreams((previous) => {
+                    const stream = previous[selectedSessionKey];
+                    if (!stream || stream.text.trim()) {
+                        return previous;
+                    }
+
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+                return false;
+            }
+
+            const hasMarker = hasActiveRunMarker(selectedSessionKey);
+            setIsAssistantTyping(hasMarker);
+            return hasMarker;
+        };
+
         if (selectedSessionIsRunning) {
             markActiveRun(selectedSessionKey);
             setIsAssistantTyping(true);
             return;
         }
 
+        syncMarkerState();
+
         const interval = window.setInterval(() => {
-            const hasMarker = hasActiveRunMarker(selectedSessionKey);
-            setIsAssistantTyping(hasMarker);
+            syncMarkerState();
         }, 5_000);
 
         return () => window.clearInterval(interval);
-    }, [selectedSessionIsRunning, selectedSessionKey]);
+    }, [selectedSession, selectedSessionIsRunning, selectedSessionKey]);
 
     useEffect(() => {
         if (!isConnected) {

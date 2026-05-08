@@ -18,6 +18,18 @@ body {
     color: #e7e9ee;
 }
 
+/* Tailwind v4 no longer gives native controls an implicit hand cursor. */
+:where(button, [role="button"]):not(:disabled):not([aria-disabled="true"]),
+:where(a[href], summary, label[for], select),
+:where(input[type="checkbox"], input[type="radio"], input[type="file"]) {
+    cursor: pointer;
+}
+
+:where(button, [role="button"], select, input):disabled,
+:where([aria-disabled="true"]) {
+    cursor: not-allowed;
+}
+
 /* Custom scrollbar for dark neutral theme */
 ::-webkit-scrollbar {
     width: 8px;
