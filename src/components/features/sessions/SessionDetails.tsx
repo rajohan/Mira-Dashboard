@@ -18,13 +18,19 @@ interface SessionDetailsProps {
     onReset: () => void;
 }
 
-export function SessionDetails({
+export function SessionDetails(props: SessionDetailsProps) {
+    if (!props.session) return null;
+
+    return <OpenSessionDetails {...props} session={props.session} />;
+}
+
+function OpenSessionDetails({
     session,
     onClose,
     onDelete,
     onCompact,
     onReset,
-}: SessionDetailsProps) {
+}: SessionDetailsProps & { session: Session }) {
     const {
         data,
         isLoading,
@@ -33,15 +39,13 @@ export function SessionDetails({
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
-    } = useSessionHistory(session?.key || null);
+    } = useSessionHistory(session.key);
 
     // Flatten all pages into single array, tolerating partial history responses.
     const allMessages =
         data?.pages.flatMap((page) =>
             Array.isArray(page.messages) ? page.messages : []
         ) ?? [];
-
-    if (!session) return null;
 
     const displayName =
         session.displayLabel || session.label || session.displayName || session.id;
