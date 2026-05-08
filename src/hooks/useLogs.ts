@@ -12,6 +12,8 @@ interface LogContentResponse {
     content: string;
 }
 
+let lastKnownLogFiles: LogFile[] = [];
+
 // Query keys
 export const logKeys = {
     files: (): ["logs", "files"] => ["logs", "files"],
@@ -35,7 +37,13 @@ function isLogFile(file: unknown): file is LogFile {
 
 async function fetchLogFiles(): Promise<LogFile[]> {
     const data = await apiFetch<LogFilesResponse>("/logs/info");
-    return Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
+    const files = Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
+
+    if (files.length > 0) {
+        lastKnownLogFiles = files;
+    }
+
+    return files;
 }
 
 async function fetchLogContent(file: string, lines: number): Promise<string> {
@@ -50,6 +58,7 @@ export function useLogFiles() {
     return useQuery({
         queryKey: logKeys.files(),
         queryFn: fetchLogFiles,
+        placeholderData: () => lastKnownLogFiles,
         staleTime: 60_000, // 1 minute
     });
 }
