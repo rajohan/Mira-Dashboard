@@ -34,6 +34,7 @@ import {
     dataUrlToBase64,
     dedupeMessages,
     displayMimeType,
+    getActiveRunMarkerStartedAtMs,
     hasActiveRunMarker,
     markActiveRun,
     MAX_ATTACHMENT_BYTES,
@@ -258,7 +259,6 @@ export function Chat() {
     const selectedSession = selectedSessionKey
         ? sessionMap.get(selectedSessionKey) || null
         : null;
-    const selectedSessionStatus = selectedSession?.status?.toLowerCase() || "";
     const selectedSessionHasRecentActivity = isRecentSessionActivity(
         selectedSession?.updatedAt ?? selectedSession?.startedAt
     );
@@ -268,10 +268,7 @@ export function Chat() {
         (selectedSession.isRunning ||
             selectedSession.running ||
             selectedSession.activeRunId ||
-            selectedSession.currentRunId ||
-            ["active", "running", "thinking", "working"].includes(
-                selectedSessionStatus
-            )) &&
+            selectedSession.currentRunId) &&
         selectedSession.endedAt == null
     );
     const selectedSessionHasActiveMarker = Boolean(
@@ -519,6 +516,26 @@ export function Chat() {
                 );
                 const activeStream = activeStreamsReference.current[selectedSessionKey];
                 const lastHistoryMessage = nextMessages.at(-1);
+                const activeRunMarkerStartedAt =
+                    getActiveRunMarkerStartedAtMs(selectedSessionKey);
+                const historyHasAssistantAfterActiveMarker = Boolean(
+                    !selectedSessionIsRunning &&
+                    activeRunMarkerStartedAt !== null &&
+                    nextMessages.some((message) => {
+                        if (
+                            message.role.toLowerCase() !== "assistant" ||
+                            !message.text.trim()
+                        ) {
+                            return false;
+                        }
+
+                        const messageTimestamp = sessionTimestampMs(message.timestamp);
+                        return (
+                            messageTimestamp !== null &&
+                            messageTimestamp >= activeRunMarkerStartedAt
+                        );
+                    })
+                );
                 const recoveredStreamInHistory = Boolean(
                     !selectedSessionIsRunning &&
                     activeStream &&
@@ -553,7 +570,7 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
 
-                if (recoveredStreamInHistory) {
+                if (recoveredStreamInHistory || historyHasAssistantAfterActiveMarker) {
                     updateActiveStreams((previous) => {
                         const next = { ...previous };
                         delete next[selectedSessionKey];

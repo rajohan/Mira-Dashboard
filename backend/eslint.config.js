@@ -28,8 +28,12 @@ const eslintConfig = defineConfig(
             "simple-import-sort/imports": "error",
             "simple-import-sort/exports": "error",
             "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+            // Keep the dependency upgrade focused: these rules started flagging existing
+            // backend patterns after the ESLint 10 / Unicorn 64 update. Tighten them in
+            // a dedicated cleanup pass instead of mixing behavior-preserving upgrades
+            // with broad backend refactors.
             "@typescript-eslint/no-explicit-any": "off",
-            "@typescript-eslint/no-namespace": "off",
+            "@typescript-eslint/no-namespace": "off", // Express request declaration merging.
             "no-useless-escape": "off",
             "no-useless-assignment": "off",
             // Unicorn rules - relax aggressive defaults
@@ -45,6 +49,8 @@ const eslintConfig = defineConfig(
             "unicorn/switch-case-braces": "off",
             "unicorn/numeric-separators-style": "off",
             "unicorn/prefer-node-protocol": "off",
+            // Style/readability preferences newly enabled by Unicorn 64; existing code
+            // intentionally uses these patterns in a few operational routes.
             "unicorn/no-await-expression-member": "off",
             "unicorn/no-single-promise-in-promise-methods": "off",
             "unicorn/no-array-reduce": "off",

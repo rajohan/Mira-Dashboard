@@ -4,7 +4,7 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 export const CHAT_HISTORY_LIMIT = 1000;
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
-export const ACTIVE_RUN_MARKER_TTL_MS = 2 * 60 * 60 * 1000;
+export const ACTIVE_RUN_MARKER_TTL_MS = 10 * 60 * 1000;
 
 export interface ChatModelOption {
     id?: string;
@@ -195,25 +195,33 @@ export function activeRunStorageKey(sessionKey: string): string {
     return `mira-dashboard-chat-active-run:${sessionKey}`;
 }
 
-export function hasActiveRunMarker(sessionKey: string): boolean {
+export function getActiveRunMarkerStartedAtMs(sessionKey: string): number | null {
     const key = activeRunStorageKey(sessionKey);
     const raw = window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
 
     if (!raw) {
-        return false;
+        return null;
     }
 
     try {
         const parsed = JSON.parse(raw) as { startedAt?: string };
         const startedAt = parsed.startedAt ? new Date(parsed.startedAt).getTime() : 0;
-        if (
-            Number.isFinite(startedAt) &&
-            Date.now() - startedAt < ACTIVE_RUN_MARKER_TTL_MS
-        ) {
-            return true;
+        if (Number.isFinite(startedAt)) {
+            return startedAt;
         }
     } catch {
         // Legacy marker format; clear it below.
+    }
+
+    clearActiveRunMarker(sessionKey);
+    return null;
+}
+
+export function hasActiveRunMarker(sessionKey: string): boolean {
+    const startedAt = getActiveRunMarkerStartedAtMs(sessionKey);
+
+    if (startedAt !== null && Date.now() - startedAt < ACTIVE_RUN_MARKER_TTL_MS) {
+        return true;
     }
 
     clearActiveRunMarker(sessionKey);
