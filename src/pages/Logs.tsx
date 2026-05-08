@@ -11,10 +11,20 @@ import { Input } from "../components/ui/Input";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
+import type { LogFile } from "../types/log";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
+
+function isNamedLogFile(file: unknown): file is LogFile {
+    return (
+        Boolean(file) &&
+        typeof file === "object" &&
+        typeof (file as { name?: unknown }).name === "string" &&
+        (file as { name: string }).name.trim().length > 0
+    );
+}
 
 function compareLogFileNamesDescending(a: { name?: unknown }, b: { name?: unknown }) {
     return String(b.name || "").localeCompare(String(a.name || ""));
@@ -44,7 +54,9 @@ export function Logs() {
 
     // Queries
     const { data: logFiles = [] } = useLogFiles();
-    const availableLogFiles = Array.isArray(logFiles) ? logFiles : [];
+    const availableLogFiles = Array.isArray(logFiles)
+        ? logFiles.filter(isNamedLogFile)
+        : [];
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
         lineCount,
