@@ -37,7 +37,7 @@ function toResponse(row: NotificationRow) {
             ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
             : {};
     } catch {
-        metadata = {};
+        // Keep the default empty metadata for malformed historical rows.
     }
 
     return {

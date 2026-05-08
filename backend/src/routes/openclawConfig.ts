@@ -56,7 +56,7 @@ function readSkillDescription(skillPath: string): string | undefined {
         const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
         const description = content.match(/^description:\s*(.+)$/m)?.[1];
         if (description) {
-            return description.replaceAll(/^['\"]|['\"]$/g, "");
+            return description.replaceAll(/^['"]|['"]$/g, "");
         }
 
         return content

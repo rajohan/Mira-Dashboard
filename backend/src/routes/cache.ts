@@ -192,7 +192,8 @@ export async function refreshCacheKey(key: string) {
 
 export default function cacheRoutes(app: express.Application): void {
     app.get("/api/cache/heartbeat", (async (_req, res) => {
-        const mapped = (await getAllCacheEntries()).map(mapCacheRow);
+        const cacheEntries = await getAllCacheEntries();
+        const mapped = cacheEntries.map(mapCacheRow);
         res.json({
             generatedAt: new Date().toISOString(),
             count: mapped.length,

@@ -64,7 +64,7 @@ async function queryN8nCache(sql: string) {
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
     return runDockerExec(
         "postgres",
-        `psql \"${uri}\" -P footer=off -F $'\\t' --no-align -c \"${escapedSql}\"`
+        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
     );
 }
 

@@ -121,7 +121,7 @@ async function queryPostgres(sql: string, database = "postgres") {
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
     return runDockerExec(
         "postgres",
-        `psql \"${uri}\" -P footer=off -F $'\\t' --no-align -c \"${escapedSql}\"`
+        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
     );
 }
 
@@ -130,8 +130,16 @@ async function queryPgBouncer(sql: string) {
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
     return runDockerExec(
         "postgres",
-        `psql \"${uri}\" -P footer=off -F $'\\t' --no-align -c \"${escapedSql}\"`
+        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
     );
+}
+
+function sumBy<T>(rows: T[], selector: (row: T) => number): number {
+    let total = 0;
+    for (const row of rows) {
+        total += selector(row);
+    }
+    return total;
 }
 
 async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]> {
@@ -187,7 +195,7 @@ async function getTorrentCounts() {
 }
 
 async function getDatabaseOverview() {
-    const [torrentCounts] = await Promise.all([getTorrentCounts()]);
+    const torrentCounts = await getTorrentCounts();
 
     const databaseRows = parseTable<PostgresDatabaseRow>(
         await queryPostgres(`
@@ -223,8 +231,7 @@ async function getDatabaseOverview() {
         `)
     ) as ConnectionCountsRow[];
 
-    const deadTupleRows = (
-        await queryAllUserDatabases<DeadTupleRow>(`
+    const allDeadTupleRows = await queryAllUserDatabases<DeadTupleRow>(`
         SELECT
             schemaname,
             relname,
@@ -242,16 +249,15 @@ async function getDatabaseOverview() {
         WHERE n_live_tup > 0 OR n_dead_tup > 0
         ORDER BY n_dead_tup DESC
         LIMIT 25;
-    `)
-    )
+    `);
+    const deadTupleRows = allDeadTupleRows
         .sort((a, b) => Number(b.n_dead_tup || 0) - Number(a.n_dead_tup || 0))
         .slice(0, 25);
 
-    const pgStatStatementsEnabled = (
-        await queryPostgres(`
+    const pgStatStatementsResult = await queryPostgres(`
         SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
-    `)
-    ).includes("pg_stat_statements");
+    `);
+    const pgStatStatementsEnabled = pgStatStatementsResult.includes("pg_stat_statements");
 
     const topQueries = pgStatStatementsEnabled
         ? (parseTable<TopQueryRow>(
@@ -281,55 +287,41 @@ async function getDatabaseOverview() {
     const connections = Object.fromEntries(
         connectionRows.map((row) => [row.state || "unknown", Number(row.count || 0)])
     );
-    const totalDatabaseSizeBytes = databaseRows.reduce(
-        (sum, row) => sum + Number(row.size_bytes || 0),
-        0
+    const totalDatabaseSizeBytes = sumBy(databaseRows, (row) =>
+        Number(row.size_bytes || 0)
     );
-    const totalBackends = databaseRows.reduce(
-        (sum, row) => sum + Number(row.numbackends || 0),
-        0
-    );
+    const totalBackends = sumBy(databaseRows, (row) => Number(row.numbackends || 0));
     const averageCacheHitRatio =
         databaseRows.length > 0
-            ? databaseRows.reduce(
-                  (sum, row) => sum + Number(row.cache_hit_ratio || 0),
-                  0
-              ) / databaseRows.length
+            ? sumBy(databaseRows, (row) => Number(row.cache_hit_ratio || 0)) /
+              databaseRows.length
             : 0;
 
-    const waitingClients = pgBouncerPools.reduce(
-        (sum, row) => sum + Number(row.cl_waiting || 0),
-        0
+    const waitingClients = sumBy(pgBouncerPools, (row) => Number(row.cl_waiting || 0));
+    const clientConnections = sumBy(
+        pgBouncerPools,
+        (row) => Number(row.cl_active || 0) + Number(row.cl_waiting || 0)
     );
-    const clientConnections = pgBouncerPools.reduce(
-        (sum, row) => sum + Number(row.cl_active || 0) + Number(row.cl_waiting || 0),
-        0
-    );
-    const serverConnections = pgBouncerPools.reduce(
-        (sum, row) =>
-            sum +
+    const serverConnections = sumBy(
+        pgBouncerPools,
+        (row) =>
             Number(row.sv_active || 0) +
             Number(row.sv_idle || 0) +
-            Number(row.sv_used || 0),
-        0
+            Number(row.sv_used || 0)
     );
-    const maxWait = pgBouncerPools.reduce(
-        (max, row) => Math.max(max, Number(row.maxwait || 0)),
-        0
-    );
+    let maxWait = 0;
+    for (const row of pgBouncerPools) {
+        maxWait = Math.max(maxWait, Number(row.maxwait || 0));
+    }
     const avgQueryTime =
         pgBouncerStats.length > 0
-            ? pgBouncerStats.reduce(
-                  (sum, row) => sum + Number(row.avg_query_time || 0),
-                  0
-              ) / pgBouncerStats.length
+            ? sumBy(pgBouncerStats, (row) => Number(row.avg_query_time || 0)) /
+              pgBouncerStats.length
             : 0;
     const avgTransactionTime =
         pgBouncerStats.length > 0
-            ? pgBouncerStats.reduce(
-                  (sum, row) => sum + Number(row.avg_xact_time || 0),
-                  0
-              ) / pgBouncerStats.length
+            ? sumBy(pgBouncerStats, (row) => Number(row.avg_xact_time || 0)) /
+              pgBouncerStats.length
             : 0;
 
     return {

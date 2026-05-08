@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import path from "node:path";
 
 import express from "express";
 
@@ -36,7 +36,7 @@ function expandPath(inputPath: string, cwd: string): string {
     if (inputPath.startsWith("/")) return inputPath;
     if (inputPath.startsWith("~/")) return HOME_DIR + inputPath.slice(1);
     if (inputPath === "~") return HOME_DIR;
-    return join(cwd, inputPath);
+    return path.join(cwd, inputPath);
 }
 
 async function getCompletions(partial: string, cwd: string): Promise<CompletionResponse> {
@@ -72,7 +72,7 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
                 continue;
             }
 
-            const fullPath = join(searchDir, name);
+            const fullPath = path.join(searchDir, name);
             let type: "file" | "directory" | "executable" = "file";
 
             if (entry.isDirectory()) {
@@ -163,7 +163,7 @@ export default function terminalRoutes(app: express.Application): void {
         } else if (targetPath.startsWith("/")) {
             newPath = targetPath;
         } else {
-            newPath = join(resolvedCwd, targetPath);
+            newPath = path.join(resolvedCwd, targetPath);
         }
 
         // Resolve .. and .

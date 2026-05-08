@@ -100,6 +100,38 @@ interface DockerVolumeRow {
     Size: string;
 }
 
+interface DockerInspectMount {
+    Type?: string;
+    Source?: string;
+    Destination?: string;
+    Mode?: string;
+    RW?: boolean;
+    Name?: string;
+}
+
+interface DockerInspectRow {
+    Id?: string;
+    Image?: string;
+    Created?: string;
+    RestartCount?: number;
+    Config?: {
+        Env?: string[];
+        Labels?: Record<string, string>;
+    };
+    NetworkSettings?: {
+        Networks?: Record<
+            string,
+            { Gateway?: string; IPAddress?: string; MacAddress?: string }
+        >;
+    };
+    State?: {
+        StartedAt?: string;
+        FinishedAt?: string;
+        Health?: { Status?: string };
+    };
+    Mounts?: DockerInspectMount[];
+}
+
 interface DockerContainerSummary {
     id: string;
     name: string;
@@ -431,12 +463,15 @@ async function runCompose(args: string[]): Promise<{ stdout: string; stderr: str
 
 async function getContainerInspectMap(containerIds: string[]) {
     if (containerIds.length === 0) {
-        return new Map<string, any>();
+        return new Map<string, DockerInspectRow>();
     }
 
     const stdout = await runDocker(["inspect", ...containerIds]);
-    const inspectRows = JSON.parse(stdout) as any[];
-    const map = new Map<string, any>();
+    const parsedRows = JSON.parse(stdout) as unknown;
+    const inspectRows = Array.isArray(parsedRows)
+        ? (parsedRows as DockerInspectRow[])
+        : [];
+    const map = new Map<string, DockerInspectRow>();
 
     for (const row of inspectRows) {
         const fullId = String(row.Id || "");
@@ -494,7 +529,7 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
             ports: parsePorts(row.Ports),
             ipAddresses,
             mounts: Array.isArray(inspect?.Mounts)
-                ? inspect.Mounts.map((mount: any) => ({
+                ? inspect.Mounts.map((mount) => ({
                       type: String(mount.Type || ""),
                       source: String(mount.Source || ""),
                       destination: String(mount.Destination || ""),
@@ -538,9 +573,9 @@ async function getContainerDetails(
     const networks = Object.entries(inspect.NetworkSettings?.Networks || {}).map(
         ([name, value]) => ({
             name,
-            ipAddress: String((value as { IPAddress?: string }).IPAddress || ""),
-            gateway: String((value as { Gateway?: string }).Gateway || ""),
-            macAddress: String((value as { MacAddress?: string }).MacAddress || ""),
+            ipAddress: String(value.IPAddress || ""),
+            gateway: String(value.Gateway || ""),
+            macAddress: String(value.MacAddress || ""),
         })
     );
 
@@ -790,43 +825,31 @@ async function runUpdaterCommand(
 }
 
 async function runDockerUpdaterNow() {
-    const steps: DockerUpdaterRunResult[] = [];
+    const register = await runUpdaterCommand("register", [
+        "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
+    ]);
+    if (!register.ok) return [register];
 
-    steps.push(
-        await runUpdaterCommand("register", [
-            "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
-        ])
-    );
-    if (!steps.at(-1)?.ok) return steps;
+    const poll = await runUpdaterCommand("poll", [
+        "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs",
+    ]);
+    if (!poll.ok) return [register, poll];
 
-    steps.push(
-        await runUpdaterCommand("poll", [
-            "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs",
-        ])
-    );
-    if (!steps.at(-1)?.ok) return steps;
+    const autoUpdate = await runUpdaterCommand("auto-update", [
+        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+    ]);
+    if (!autoUpdate.ok) return [register, poll, autoUpdate];
 
-    steps.push(
-        await runUpdaterCommand("auto-update", [
-            "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
-        ])
-    );
-    if (!steps.at(-1)?.ok) return steps;
+    const notify = await runUpdaterCommand("notify", [
+        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+    ]);
+    if (!notify.ok) return [register, poll, autoUpdate, notify];
 
-    steps.push(
-        await runUpdaterCommand("notify", [
-            "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
-        ])
-    );
-    if (!steps.at(-1)?.ok) return steps;
+    const discord = await runUpdaterCommand("discord", [
+        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+    ]);
 
-    steps.push(
-        await runUpdaterCommand("discord", [
-            "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
-        ])
-    );
-
-    return steps;
+    return [register, poll, autoUpdate, notify, discord];
 }
 
 interface DockerUpdaterEventRow {
