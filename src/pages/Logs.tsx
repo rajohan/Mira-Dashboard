@@ -69,6 +69,10 @@ export function Logs() {
         const nextLogFiles = logFiles.filter(isNamedLogFile);
 
         setAvailableLogFiles((previous) => {
+            if (nextLogFiles.length === 0 && previous.length > 0) {
+                return previous;
+            }
+
             const previousKeys = previous.map((file) => file.name).join("\n");
             const nextKeys = nextLogFiles.map((file) => file.name).join("\n");
             return previousKeys === nextKeys ? previous : nextLogFiles;
