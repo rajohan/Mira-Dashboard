@@ -229,6 +229,45 @@ function asRecord(value: unknown): Record<string, unknown> | null {
         : null;
 }
 
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function sessionHasRunIdentifier(session: Session, runId: string): boolean {
+    return [
+        session.id,
+        session.key,
+        session.runId,
+        session.activeRunId,
+        session.currentRunId,
+    ].includes(runId);
+}
+
+function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
+    if (event !== "agent" && event !== "session.tool") {
+        return payload;
+    }
+
+    const record = asRecord(payload);
+    if (!record || stringField(record, "sessionKey")) {
+        return payload;
+    }
+
+    const runId = stringField(record, "runId");
+    if (!runId) {
+        return payload;
+    }
+
+    const matchingSession = sessionList.find((session) =>
+        sessionHasRunIdentifier(session, runId)
+    );
+
+    return matchingSession?.key
+        ? { ...record, sessionKey: matchingSession.key }
+        : payload;
+}
+
 function imageBlockHasOmittedData(block: Record<string, unknown>): boolean {
     if (block.type !== "image") {
         return false;
@@ -492,7 +531,11 @@ function init(token: string): void {
             });
         },
         onEvent: (evt) => {
-            broadcast({ type: "event", event: evt.event, payload: evt.payload });
+            broadcast({
+                type: "event",
+                event: evt.event,
+                payload: enrichRuntimeEventPayload(evt.event, evt.payload),
+            });
             if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
                 void refreshSessions().catch((error) => {
                     console.error(
