@@ -53,15 +53,29 @@ export function Logs() {
     const liveLogs = Array.isArray(logs) ? logs : [];
 
     // Queries
-    const { data: logFiles = [] } = useLogFiles();
-    const availableLogFiles = Array.isArray(logFiles)
-        ? logFiles.filter(isNamedLogFile)
-        : [];
+    const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>([]);
+    const { data: logFiles, isSuccess: logFilesLoaded } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
         lineCount,
         false
     );
+
+    useEffect(() => {
+        if (!logFilesLoaded) {
+            return;
+        }
+
+        const nextLogFiles = Array.isArray(logFiles)
+            ? logFiles.filter(isNamedLogFile)
+            : [];
+
+        setAvailableLogFiles((previous) => {
+            const previousKeys = previous.map((file) => file.name).join("\n");
+            const nextKeys = nextLogFiles.map((file) => file.name).join("\n");
+            return previousKeys === nextKeys ? previous : nextLogFiles;
+        });
+    }, [logFiles, logFilesLoaded]);
 
     // Auto-select today's file
     useEffect(() => {
