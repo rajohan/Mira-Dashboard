@@ -153,11 +153,21 @@ export default function sessionsRoutes(app: express.Application): void {
         }
     }) as RequestHandler);
 
-    // Kill a session
-    app.delete("/api/sessions/:id", (async (_req, res) => {
+    // Delete a session and archive its transcript through OpenClaw.
+    app.delete("/api/sessions/:id", (async (req, res) => {
+        const sessionKeyParam = req.params.id;
+        const sessionKey = Array.isArray(sessionKeyParam)
+            ? sessionKeyParam[0] || ""
+            : sessionKeyParam || "";
+
         try {
-            // This would need gateway integration to actually kill sessions
-            res.json({ success: true, message: "Session kill request sent" });
+            if (!sessionKey) {
+                res.status(400).json({ error: "Session id required" });
+                return;
+            }
+
+            const result = await gateway.deleteSession(sessionKey);
+            res.json({ success: true, result });
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });
         }

@@ -712,6 +712,16 @@ async function abortSessionRun(sessionKey: string): Promise<void> {
     });
 }
 
+async function deleteSession(sessionKey: string): Promise<unknown> {
+    const result = await sendRequestAsync("sessions.delete", {
+        key: sessionKey,
+        deleteTranscript: true,
+    });
+
+    await refreshSessions();
+    return result;
+}
+
 async function request(
     method: string,
     params: Record<string, unknown>
@@ -766,6 +776,7 @@ export default {
     getSessionHistory,
     sendSessionMessage,
     abortSessionRun,
+    deleteSession,
     request,
 };
 
