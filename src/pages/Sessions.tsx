@@ -232,12 +232,16 @@ export function Sessions() {
     ];
 
     const handleDeleteConfirm = async () => {
-        if (!deleteTarget || !deleteTarget.key) return;
+        if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
+
+        const target = deleteTarget;
+        setDeleteTarget(null);
+
         try {
-            await sessionActions.remove(deleteTarget.key);
-            setDeleteTarget(null);
+            await sessionActions.remove(target.key);
         } catch (error_) {
             console.error("Failed to delete session:", error_);
+            setDeleteTarget(target);
         }
     };
 
@@ -365,7 +369,9 @@ export function Sessions() {
                         ? `Are you sure you want to delete ${deleteTarget.displayLabel || deleteTarget.key}?`
                         : "Are you sure you want to delete this session?"
                 }
-                confirmLabel={sessionActions.isDeleting ? "Deleting..." : "Delete"}
+                confirmLabel="Delete"
+                confirmLoadingLabel="Deleting..."
+                loading={sessionActions.isDeleting}
                 danger
                 onCancel={() => setDeleteTarget(null)}
                 onConfirm={() => {
