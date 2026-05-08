@@ -4,7 +4,9 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 export const CHAT_HISTORY_LIMIT = 1000;
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
-export const ACTIVE_RUN_MARKER_TTL_MS = 10 * 60 * 1000;
+export const ACTIVE_RUN_MARKER_IDLE_TTL_MS = 30 * 60 * 1000;
+export const ACTIVE_RUN_MARKER_HARD_TTL_MS = 2 * 60 * 60 * 1000;
+export const ACTIVE_RUN_HISTORY_CLEAR_GRACE_MS = 2 * 60 * 1000;
 
 export interface ChatModelOption {
     id?: string;
@@ -195,7 +197,12 @@ export function activeRunStorageKey(sessionKey: string): string {
     return `mira-dashboard-chat-active-run:${sessionKey}`;
 }
 
-export function getActiveRunMarkerStartedAtMs(sessionKey: string): number | null {
+interface ActiveRunMarker {
+    startedAt: number;
+    lastSeenAt: number;
+}
+
+function readActiveRunMarker(sessionKey: string): ActiveRunMarker | null {
     const key = activeRunStorageKey(sessionKey);
     const raw = window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
 
@@ -204,10 +211,14 @@ export function getActiveRunMarkerStartedAtMs(sessionKey: string): number | null
     }
 
     try {
-        const parsed = JSON.parse(raw) as { startedAt?: string };
+        const parsed = JSON.parse(raw) as { startedAt?: string; lastSeenAt?: string };
         const startedAt = parsed.startedAt ? new Date(parsed.startedAt).getTime() : 0;
-        if (Number.isFinite(startedAt)) {
-            return startedAt;
+        const lastSeenAt = parsed.lastSeenAt
+            ? new Date(parsed.lastSeenAt).getTime()
+            : startedAt;
+
+        if (Number.isFinite(startedAt) && Number.isFinite(lastSeenAt)) {
+            return { startedAt, lastSeenAt };
         }
     } catch {
         // Legacy marker format; clear it below.
@@ -217,10 +228,26 @@ export function getActiveRunMarkerStartedAtMs(sessionKey: string): number | null
     return null;
 }
 
-export function hasActiveRunMarker(sessionKey: string): boolean {
-    const startedAt = getActiveRunMarkerStartedAtMs(sessionKey);
+export function getActiveRunMarkerStartedAtMs(sessionKey: string): number | null {
+    return readActiveRunMarker(sessionKey)?.startedAt ?? null;
+}
 
-    if (startedAt !== null && Date.now() - startedAt < ACTIVE_RUN_MARKER_TTL_MS) {
+export function getActiveRunMarkerLastSeenAtMs(sessionKey: string): number | null {
+    return readActiveRunMarker(sessionKey)?.lastSeenAt ?? null;
+}
+
+export function hasActiveRunMarker(sessionKey: string): boolean {
+    const marker = readActiveRunMarker(sessionKey);
+
+    if (!marker) {
+        return false;
+    }
+
+    const now = Date.now();
+    if (
+        now - marker.lastSeenAt < ACTIVE_RUN_MARKER_IDLE_TTL_MS &&
+        now - marker.startedAt < ACTIVE_RUN_MARKER_HARD_TTL_MS
+    ) {
         return true;
     }
 
@@ -229,9 +256,15 @@ export function hasActiveRunMarker(sessionKey: string): boolean {
 }
 
 export function markActiveRun(sessionKey: string): void {
+    const existing = readActiveRunMarker(sessionKey);
+    const now = new Date().toISOString();
+
     window.localStorage.setItem(
         activeRunStorageKey(sessionKey),
-        JSON.stringify({ startedAt: new Date().toISOString() })
+        JSON.stringify({
+            startedAt: existing ? new Date(existing.startedAt).toISOString() : now,
+            lastSeenAt: now,
+        })
     );
 }
 

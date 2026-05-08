@@ -27,13 +27,15 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
-    ACTIVE_RUN_MARKER_TTL_MS,
+    ACTIVE_RUN_HISTORY_CLEAR_GRACE_MS,
+    ACTIVE_RUN_MARKER_IDLE_TTL_MS,
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
     clearActiveRunMarker,
     dataUrlToBase64,
     dedupeMessages,
     displayMimeType,
+    getActiveRunMarkerLastSeenAtMs,
     getActiveRunMarkerStartedAtMs,
     hasActiveRunMarker,
     markActiveRun,
@@ -115,7 +117,7 @@ function sessionTimestampMs(value: unknown): number | null {
 
 function isRecentSessionActivity(value: unknown): boolean {
     const timestamp = sessionTimestampMs(value);
-    return timestamp !== null && Date.now() - timestamp < ACTIVE_RUN_MARKER_TTL_MS;
+    return timestamp !== null && Date.now() - timestamp < ACTIVE_RUN_MARKER_IDLE_TTL_MS;
 }
 
 function historyHasNewerAssistantMessage(
@@ -518,8 +520,16 @@ export function Chat() {
                 const lastHistoryMessage = nextMessages.at(-1);
                 const activeRunMarkerStartedAt =
                     getActiveRunMarkerStartedAtMs(selectedSessionKey);
+                const activeRunMarkerLastSeenAt =
+                    getActiveRunMarkerLastSeenAtMs(selectedSessionKey);
+                const activeRunMarkerIsQuiet = Boolean(
+                    activeRunMarkerLastSeenAt !== null &&
+                    Date.now() - activeRunMarkerLastSeenAt >=
+                        ACTIVE_RUN_HISTORY_CLEAR_GRACE_MS
+                );
                 const historyHasAssistantAfterActiveMarker = Boolean(
                     !selectedSessionIsRunning &&
+                    activeRunMarkerIsQuiet &&
                     activeRunMarkerStartedAt !== null &&
                     nextMessages.some((message) => {
                         if (
