@@ -35,8 +35,11 @@ export function SessionDetails({
         isFetchingNextPage,
     } = useSessionHistory(session?.key || null);
 
-    // Flatten all pages into single array
-    const allMessages = data?.pages.flatMap((page) => page.messages) ?? [];
+    // Flatten all pages into single array, tolerating partial history responses.
+    const allMessages =
+        data?.pages.flatMap((page) =>
+            Array.isArray(page.messages) ? page.messages : []
+        ) ?? [];
 
     if (!session) return null;
 

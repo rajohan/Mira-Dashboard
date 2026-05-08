@@ -4,13 +4,26 @@ import { createCollection } from "@tanstack/react-db";
 import { queryClient } from "../lib/queryClient";
 import type { Session } from "../types/session";
 
+function getSessionCollectionKey(item: Partial<Session>): string | null {
+    const key = item.key || item.id;
+    return typeof key === "string" && key.trim().length > 0 ? key : null;
+}
+
+function isWritableSession(item: unknown): item is Session {
+    return (
+        !!item &&
+        typeof item === "object" &&
+        getSessionCollectionKey(item as Partial<Session>) !== null
+    );
+}
+
 export const sessionsCollection = createCollection(
     queryCollectionOptions({
         queryKey: ["sessions"],
         queryFn: async () => [],
         queryClient,
         staleTime: Number.POSITIVE_INFINITY,
-        getKey: (item: Session) => item.key || item.id,
+        getKey: (item: Session) => getSessionCollectionKey(item) || "unknown-session",
     })
 );
 
@@ -37,13 +50,17 @@ export function deleteSessionFromCollection(key: string) {
     }
 }
 
-export function replaceSessionsFromWebSocket(sessions: Session[]) {
+export function replaceSessionsFromWebSocket(sessions: unknown) {
     if (!sessionsCollection.isReady()) {
         return;
     }
 
+    const writableSessions = Array.isArray(sessions)
+        ? sessions.filter(isWritableSession)
+        : [];
+
     const nextKeys = new Set<string>(
-        sessions.map((session) => String(session.key || session.id))
+        writableSessions.map((session) => String(getSessionCollectionKey(session)))
     );
 
     for (const [existingKey] of sessionsCollection) {
@@ -52,7 +69,7 @@ export function replaceSessionsFromWebSocket(sessions: Session[]) {
         }
     }
 
-    for (const session of sessions) {
+    for (const session of writableSessions) {
         sessionsCollection.utils.writeUpsert(
             session as unknown as Partial<Record<string, unknown>>
         );

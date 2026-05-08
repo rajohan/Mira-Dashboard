@@ -23,8 +23,19 @@ export const liveFeedKeys = {
         [...liveFeedKeys.all, sessionSignature, updatedSignature] as const,
 };
 
+function isFeedSession(session: unknown): session is Session {
+    return (
+        !!session &&
+        typeof session === "object" &&
+        typeof (session as Session).key === "string" &&
+        (session as Session).key.trim().length > 0
+    );
+}
+
 export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
-    const feedSessionCandidates = sessions.slice(0, 20);
+    const feedSessionCandidates = Array.isArray(sessions)
+        ? sessions.filter(isFeedSession).slice(0, 20)
+        : [];
     const sessionSignature = feedSessionCandidates.map((s) => s.key).join("|");
     const updatedSignature = feedSessionCandidates.map((s) => s.updatedAt || 0).join("|");
 
@@ -40,13 +51,17 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
                         `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
                     );
 
-                    return history.messages.map((message, index) => {
+                    const messages = Array.isArray(history.messages)
+                        ? history.messages
+                        : [];
+
+                    return messages.map((message, index) => {
                         const fallbackTimestamp = session.updatedAt || Date.now();
                         const parsedTimestamp = message.timestamp
                             ? new Date(message.timestamp).getTime()
                             : fallbackTimestamp;
 
-                        const rawRole = (message.role || "unknown").toLowerCase();
+                        const rawRole = String(message.role || "unknown").toLowerCase();
                         const normalizedRole =
                             rawRole === "toolresult" || rawRole === "tool-result"
                                 ? "tool_result"
@@ -61,7 +76,7 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
                                 session.key,
                             sessionType: (session.type || "unknown").toUpperCase(),
                             role: normalizedRole,
-                            content: (message.content || "").trim(),
+                            content: String(message.content || "").trim(),
                             timestamp: Number.isFinite(parsedTimestamp)
                                 ? parsedTimestamp
                                 : fallbackTimestamp,

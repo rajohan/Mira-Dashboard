@@ -36,6 +36,7 @@ export function SessionsTable({
     onDelete,
 }: SessionsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
+    const tableSessions = Array.isArray(sessions) ? sessions : [];
 
     const columns = [
         columnHelper.accessor("type", {
@@ -111,7 +112,7 @@ export function SessionsTable({
     ];
 
     const table = useReactTable({
-        data: sessions,
+        data: tableSessions,
         columns,
         state: { sorting },
         onSortingChange: setSorting,
@@ -120,7 +121,7 @@ export function SessionsTable({
         getFilteredRowModel: getFilteredRowModel(),
     });
 
-    if (sessions.length === 0) {
+    if (tableSessions.length === 0) {
         return (
             <Card className="py-8 text-center">
                 <p className="text-primary-400">No sessions found</p>

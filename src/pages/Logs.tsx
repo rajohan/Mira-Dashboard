@@ -16,6 +16,10 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 
+function compareLogFileNamesDescending(a: { name?: unknown }, b: { name?: unknown }) {
+    return String(b.name || "").localeCompare(String(a.name || ""));
+}
+
 export function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [lineCount, setLineCount] = useState<number>(100);
@@ -36,9 +40,11 @@ export function Logs() {
 
     // Logs from collection using live query
     const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
+    const liveLogs = Array.isArray(logs) ? logs : [];
 
     // Queries
     const { data: logFiles = [] } = useLogFiles();
+    const availableLogFiles = Array.isArray(logFiles) ? logFiles : [];
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || null,
         lineCount,
@@ -47,13 +53,13 @@ export function Logs() {
 
     // Auto-select today's file
     useEffect(() => {
-        if (logFiles.length > 0 && !selectedFile) {
-            const sorted = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
+        if (availableLogFiles.length > 0 && !selectedFile) {
+            const sorted = [...availableLogFiles].sort(compareLogFileNamesDescending);
             const today = formatDateStamp();
             const todayFile = sorted.find((f) => f.name.includes(today));
             setSelectedFile(todayFile?.name || sorted[0]?.name || "");
         }
-    }, [logFiles, selectedFile]);
+    }, [availableLogFiles, selectedFile]);
 
     // Subscribe to log stream once per connection
     useEffect(() => {
@@ -100,16 +106,19 @@ export function Logs() {
 
     // Load on mount and when file/lineCount changes
     useEffect(() => {
-        if (selectedFile && logFiles.length > 0) {
+        if (selectedFile && availableLogFiles.length > 0) {
             shouldStickToBottomRef.current = true;
             setIsAtBottom(true);
             void loadLogContent();
         }
-    }, [selectedFile, lineCount, logFiles.length]);
+    }, [selectedFile, lineCount, availableLogFiles.length]);
 
-    const filteredLogs = logs.filter((log) => {
-        if (log.level && !levelFilter.has(log.level.toLowerCase())) return false;
-        if (search && !log.raw.toLowerCase().includes(search.toLowerCase())) return false;
+    const filteredLogs = liveLogs.filter((log) => {
+        const level = typeof log.level === "string" ? log.level.toLowerCase() : null;
+        const raw = typeof log.raw === "string" ? log.raw : String(log.msg || "");
+
+        if (level && !levelFilter.has(level)) return false;
+        if (search && !raw.toLowerCase().includes(search.toLowerCase())) return false;
         return true;
     });
 
@@ -124,7 +133,9 @@ export function Logs() {
     };
 
     const handleExport = () => {
-        const content = filteredLogs.map((l) => l.raw).join("\n");
+        const content = filteredLogs
+            .map((log) => (typeof log.raw === "string" ? log.raw : String(log.msg || "")))
+            .join("\n");
         const blob = new Blob([content], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -199,7 +210,7 @@ export function Logs() {
         return () => cancelAnimationFrame(followFrame);
     }, [filteredLogs.length, rowVirtualizer]);
 
-    const sortedLogFiles = [...logFiles].sort((a, b) => b.name.localeCompare(a.name));
+    const sortedLogFiles = [...availableLogFiles].sort(compareLogFileNamesDescending);
 
     const clearLogs = () => {
         const existingKeys = Array.from(logsCollection, ([key]) => String(key));
@@ -253,7 +264,7 @@ export function Logs() {
                 <div className="text-primary-400 text-sm">
                     {isLoadingContent
                         ? "Loading..."
-                        : `${filteredLogs.length} of ${logs.length} entries`}
+                        : `${filteredLogs.length} of ${liveLogs.length} entries`}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
@@ -275,7 +286,7 @@ export function Logs() {
                         variant="secondary"
                         size="sm"
                         onClick={clearLogs}
-                        disabled={logs.length === 0}
+                        disabled={liveLogs.length === 0}
                     >
                         Clear
                     </Button>
@@ -304,7 +315,7 @@ export function Logs() {
 
                     {filteredLogs.length === 0 ? (
                         <div className="text-primary-400 py-8 text-center">
-                            {logs.length === 0
+                            {liveLogs.length === 0
                                 ? "Waiting for logs..."
                                 : "No logs match your filter."}
                         </div>
@@ -318,6 +329,8 @@ export function Logs() {
                         >
                             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                                 const log = filteredLogs[virtualRow.index];
+                                if (!log) return null;
+
                                 return (
                                     <div
                                         key={virtualRow.key}

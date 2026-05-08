@@ -24,16 +24,25 @@ export const logKeys = {
 };
 
 // Fetchers
+function isLogFile(file: unknown): file is LogFile {
+    return (
+        !!file &&
+        typeof file === "object" &&
+        typeof (file as LogFile).name === "string" &&
+        (file as LogFile).name.trim().length > 0
+    );
+}
+
 async function fetchLogFiles(): Promise<LogFile[]> {
     const data = await apiFetch<LogFilesResponse>("/logs/info");
-    return data.logs || [];
+    return Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
 }
 
 async function fetchLogContent(file: string, lines: number): Promise<string> {
     const data = await apiFetch<LogContentResponse>(
         `/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
     );
-    return data.content || "";
+    return typeof data.content === "string" ? data.content : "";
 }
 
 // Hooks

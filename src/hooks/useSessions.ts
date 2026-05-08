@@ -26,9 +26,14 @@ async function fetchSessionHistory(
     offset = 0,
     limit = 50
 ): Promise<SessionHistoryResponse> {
-    return apiFetch<SessionHistoryResponse>(
+    const data = await apiFetch<SessionHistoryResponse>(
         `/sessions/${encodeURIComponent(key)}/history?offset=${offset}&limit=${limit}`
     );
+
+    return {
+        ...data,
+        messages: Array.isArray(data.messages) ? data.messages : [],
+    };
 }
 
 async function sessionAction(

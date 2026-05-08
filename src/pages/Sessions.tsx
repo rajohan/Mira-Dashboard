@@ -48,7 +48,8 @@ export function Sessions() {
         q.from({ session: sessionsCollection })
     );
 
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
+    const sessionRows = Array.isArray(sessions) ? sessions : [];
+    const sortedSessions = sortSessionsByTypeAndActivity(sessionRows);
     const filteredSessions =
         typeFilter === "ALL"
             ? sortedSessions

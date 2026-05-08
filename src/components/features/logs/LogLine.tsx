@@ -6,6 +6,10 @@ interface LogLineProps {
 }
 
 export function LogLine({ log }: LogLineProps) {
+    const level = typeof log.level === "string" ? log.level : "";
+    const subsystem = typeof log.subsystem === "string" ? log.subsystem : "";
+    const message = typeof log.msg === "string" ? log.msg : String(log.raw || "");
+
     return (
         <div className="hover:bg-primary-800/50 flex flex-wrap items-start gap-x-2 gap-y-1 px-2 py-1 sm:flex-nowrap sm:px-4 sm:py-0.5">
             {log.ts && (
@@ -13,22 +17,22 @@ export function LogLine({ log }: LogLineProps) {
                     {formatLogTime(log.ts)}
                 </span>
             )}
-            {log.level && (
+            {level && (
                 <span
-                    className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(log.level)}`}
+                    className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(level)}`}
                 >
-                    {log.level.toUpperCase()?.slice(0, 5) || log.level}
+                    {level.toUpperCase().slice(0, 5) || level}
                 </span>
             )}
-            {log.subsystem && (
+            {subsystem && (
                 <span
-                    className={`flex-shrink-0 whitespace-nowrap ${getSubsystemColor(log.subsystem)}`}
+                    className={`flex-shrink-0 whitespace-nowrap ${getSubsystemColor(subsystem)}`}
                 >
-                    [{log.subsystem}]
+                    [{subsystem}]
                 </span>
             )}
             <span className="text-primary-200 min-w-full flex-1 break-all whitespace-pre-wrap sm:min-w-0">
-                {log.msg}
+                {message}
             </span>
         </div>
     );
