@@ -16,6 +16,27 @@ export const sessionsCollection = createCollection(
 
 void sessionsCollection.preload();
 
+export function deleteSessionFromCollection(key: string) {
+    if (!sessionsCollection.isReady()) {
+        return;
+    }
+
+    for (const [existingKey] of sessionsCollection) {
+        if (String(existingKey) !== key) {
+            continue;
+        }
+
+        try {
+            sessionsCollection.utils.writeDelete(key);
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("does not exist"))) {
+                throw error;
+            }
+        }
+        return;
+    }
+}
+
 export function replaceSessionsFromWebSocket(sessions: Session[]) {
     if (!sessionsCollection.isReady()) {
         return;
@@ -27,7 +48,7 @@ export function replaceSessionsFromWebSocket(sessions: Session[]) {
 
     for (const [existingKey] of sessionsCollection) {
         if (!nextKeys.has(String(existingKey))) {
-            sessionsCollection.utils.writeDelete(String(existingKey));
+            deleteSessionFromCollection(String(existingKey));
         }
     }
 

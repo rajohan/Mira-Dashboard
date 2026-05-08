@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 
-import { sessionsCollection } from "../collections/sessions";
+import { deleteSessionFromCollection } from "../collections/sessions";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 // Types
@@ -70,7 +70,7 @@ export function useDeleteSession() {
     return useMutation({
         mutationFn: deleteSessionRequest,
         onSuccess: (_, key) => {
-            sessionsCollection.utils.writeDelete(key);
+            deleteSessionFromCollection(key);
         },
     });
 }
