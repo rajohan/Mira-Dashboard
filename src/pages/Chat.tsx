@@ -360,6 +360,28 @@ export function Chat() {
 
     useEffect(() => {
         if (!isConnected) {
+            sendInFlightReference.current = false;
+            setIsSending(false);
+            setIsAssistantTyping(false);
+
+            if (selectedSessionKey) {
+                clearActiveRunMarker(selectedSessionKey);
+                updateActiveStreams((previous) => {
+                    if (!previous[selectedSessionKey]) {
+                        return previous;
+                    }
+
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+            }
+
+            if (liveHistoryRefreshTimerReference.current !== null) {
+                window.clearTimeout(liveHistoryRefreshTimerReference.current);
+                liveHistoryRefreshTimerReference.current = null;
+            }
+
             return;
         }
 
@@ -386,7 +408,7 @@ export function Chat() {
         return () => {
             cancelled = true;
         };
-    }, [isConnected, request]);
+    }, [isConnected, request, selectedSessionKey]);
 
     useEffect(() => {
         writeStoredChatDiagnosticVisibility({
@@ -409,6 +431,11 @@ export function Chat() {
         if (!selectedSessionKey) {
             loadedHistorySessionReference.current = "";
             setMessages([]);
+            return;
+        }
+
+        if (!isConnected) {
+            setIsLoadingHistory(false);
             return;
         }
 
@@ -467,8 +494,7 @@ export function Chat() {
         return () => {
             cancelled = true;
         };
-    }, [request, selectedSessionKey, showThinkingOutput, showToolOutput]);
-
+    }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
     useEffect(() => {
         if (!selectedSessionKey || !selectedSessionUpdatedAt || isLoadingHistory) {
             return;
