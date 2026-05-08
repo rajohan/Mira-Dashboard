@@ -260,7 +260,7 @@ export function Chat() {
         createChatVisibility(showThinkingOutput, showToolOutput)
     );
     const shouldShowTypingIndicator = Boolean(
-        selectedStream && !shouldShowSelectedStreamRow
+        selectedStream && (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) => !deletedMessageKeys.has(messageDeleteKey(message))
@@ -285,7 +285,7 @@ export function Chat() {
 
     if (shouldShowTypingIndicator) {
         chatRows.push({
-            key: `typing-${selectedSessionKey || "none"}`,
+            key: `typing-${selectedSessionKey || "none"}-${selectedStream?.statusText || "working"}`,
             kind: "typing",
             message: {
                 role: "assistant",
