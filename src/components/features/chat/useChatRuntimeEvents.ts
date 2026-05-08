@@ -22,9 +22,7 @@ import {
 } from "./chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
-    clearActiveRunMarker,
     dedupeMessages,
-    markActiveRun,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtils";
 
@@ -36,6 +34,182 @@ interface PendingDeltaUpdate {
     runId?: string;
     aliases: string[];
     deltas: ChatHistoryMessage[];
+}
+
+const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
+const WORK_STREAMS = new Set(["tool", "item", "plan", "approval", "patch", "compaction"]);
+const NON_WORK_TOOL_NAMES = new Set([
+    "message",
+    "messages",
+    "reply",
+    "send",
+    "reaction",
+    "react",
+    "typing",
+]);
+
+function compactStatusText(value: string): string {
+    const normalized = value.replaceAll(/\s+/g, " ").trim();
+    return normalized.length > 120
+        ? `${normalized.slice(0, 119).trimEnd()}…`
+        : normalized;
+}
+
+function stringValue(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function formatToolName(value: string): string {
+    const withoutNamespace = value.startsWith("functions.")
+        ? value.slice("functions.".length)
+        : value;
+    const normalized = withoutNamespace
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .replaceAll(/\s+/g, " ")
+        .trim();
+
+    return normalized
+        ? `${normalized[0].toUpperCase()}${normalized.slice(1)}`
+        : normalized;
+}
+
+function detailFromArgs(value: unknown): string | undefined {
+    if (!isRecord(value)) {
+        return stringValue(value);
+    }
+
+    const keys = [
+        "command",
+        "query",
+        "url",
+        "path",
+        "filePath",
+        "message",
+        "text",
+        "title",
+        "name",
+    ];
+
+    for (const key of keys) {
+        const detail = stringValue(value[key]);
+        if (detail) {
+            return detail;
+        }
+    }
+
+    return undefined;
+}
+
+function normalizeRuntimeStream(value: string): string {
+    return value === "command_output" ? "command-output" : value;
+}
+
+function runtimeProgressText(
+    eventName: string,
+    stream: string,
+    phase: string,
+    data: Record<string, unknown>
+): string | undefined {
+    if (stream === "lifecycle") {
+        return phase === "start" ? "Thinking…" : undefined;
+    }
+
+    if (stream === "tool" || eventName === "session.tool") {
+        const toolName = stringValue(data.name) || "tool";
+        if (NON_WORK_TOOL_NAMES.has(toolName.toLowerCase())) {
+            return undefined;
+        }
+
+        const detail =
+            detailFromArgs(data.args) ||
+            stringValue(data.title) ||
+            stringValue(data.summary) ||
+            stringValue(data.progressText);
+        return compactStatusText(
+            detail ? `${formatToolName(toolName)}: ${detail}` : formatToolName(toolName)
+        );
+    }
+
+    if (stream === "item") {
+        const itemName = stringValue(data.name) || stringValue(data.itemKind);
+        const detail =
+            stringValue(data.meta) ||
+            stringValue(data.summary) ||
+            stringValue(data.progressText) ||
+            stringValue(data.title);
+
+        if (!itemName && !detail) {
+            return undefined;
+        }
+
+        return compactStatusText(
+            [itemName ? formatToolName(itemName) : undefined, detail]
+                .filter(Boolean)
+                .join(": ")
+        );
+    }
+
+    if (stream === "plan") {
+        return compactStatusText(
+            stringValue(data.explanation) || stringValue(data.title) || "Updating plan…"
+        );
+    }
+
+    if (stream === "approval") {
+        return compactStatusText(
+            stringValue(data.command) ||
+                stringValue(data.message) ||
+                stringValue(data.reason) ||
+                "Waiting for approval…"
+        );
+    }
+
+    if (stream === "patch") {
+        return compactStatusText(
+            stringValue(data.summary) || stringValue(data.title) || "Applying patch…"
+        );
+    }
+
+    if (stream === "command-output") {
+        if (phase && phase !== "end") {
+            return undefined;
+        }
+
+        const exitCode = typeof data.exitCode === "number" ? data.exitCode : undefined;
+        let status = stringValue(data.status);
+        if (exitCode === 0) {
+            status = "completed";
+        } else if (exitCode !== undefined) {
+            status = `exit ${exitCode}`;
+        }
+        const title = stringValue(data.title);
+        return compactStatusText(
+            [formatToolName(stringValue(data.name) || "exec"), status, title]
+                .filter(Boolean)
+                .join(": ")
+        );
+    }
+
+    if (stream === "compaction") {
+        return phase === "end" ? undefined : "Compacting context…";
+    }
+
+    return undefined;
+}
+
+function isRuntimeWorkEvent(
+    eventName: string,
+    stream: string,
+    phase: string,
+    statusText: string | undefined
+): boolean {
+    return (
+        Boolean(statusText) ||
+        eventName === "session.tool" ||
+        (stream === "lifecycle" && phase === "start") ||
+        WORK_STREAMS.has(stream)
+    );
 }
 
 interface UseChatRuntimeEventsParams {
@@ -55,7 +229,6 @@ interface UseChatRuntimeEventsParams {
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setSendError: Dispatch<SetStateAction<string | null>>;
-    setIsAssistantTyping: Dispatch<SetStateAction<boolean>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
 }
@@ -72,7 +245,6 @@ export function useChatRuntimeEvents({
     updateActiveStreams,
     setMessages,
     setSendError,
-    setIsAssistantTyping,
     setIsAtBottom,
     setHistoryLoadVersion,
 }: UseChatRuntimeEventsParams) {
@@ -116,6 +288,7 @@ export function useChatRuntimeEvents({
                     ]),
                     text,
                     message,
+                    statusText: existing?.statusText,
                     updatedAt: new Date().toISOString(),
                 };
             }
@@ -218,40 +391,36 @@ export function useChatRuntimeEvents({
                 return;
             }
 
-            const stream = typeof payload.stream === "string" ? payload.stream : "";
+            const stream = normalizeRuntimeStream(
+                typeof payload.stream === "string" ? payload.stream : ""
+            );
             const data = isRecord(payload.data) ? payload.data : {};
             const phase = typeof data.phase === "string" ? data.phase : "";
-            const shouldRefreshDiagnostics =
-                showThinkingOutput ||
-                showToolOutput ||
-                eventName === "session.tool" ||
-                stream === "tool" ||
-                stream === "item";
-
-            if (!shouldRefreshDiagnostics) {
-                return;
-            }
-
             const isTerminalLifecycleEvent =
-                stream === "lifecycle" && (phase === "end" || phase === "error");
+                stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase);
 
             if (isTerminalLifecycleEvent) {
-                setIsAssistantTyping(false);
                 updateActiveStreams((previous) => {
                     const next = { ...previous };
                     delete next[selectedSessionKey];
                     return next;
                 });
-                clearActiveRunMarker(selectedSessionKey);
-            } else {
-                setIsAssistantTyping(true);
-                markActiveRun(selectedSessionKey);
+                refreshSelectedHistorySoon(150);
+                return;
             }
 
-            if (eventRunId) {
+            const statusText = runtimeProgressText(eventName, stream, phase, data);
+            const shouldTrackActivity = isRuntimeWorkEvent(
+                eventName,
+                stream,
+                phase,
+                statusText
+            );
+
+            if (shouldTrackActivity) {
                 updateActiveStreams((previous) => {
                     const existing = previous[selectedSessionKey];
-                    const runId = existing?.runId || eventRunId;
+                    const runId = existing?.runId || eventRunId || selectedSessionKey;
                     return {
                         ...previous,
                         [selectedSessionKey]: {
@@ -264,13 +433,22 @@ export function useChatRuntimeEvents({
                             ]),
                             text: existing?.text || "",
                             message: existing?.message,
+                            statusText: statusText || existing?.statusText || "Thinking…",
                             updatedAt: new Date().toISOString(),
                         },
                     };
                 });
             }
 
-            refreshSelectedHistorySoon(phase === "end" ? 150 : 500);
+            if (
+                showThinkingOutput ||
+                showToolOutput ||
+                eventName === "session.tool" ||
+                stream === "tool" ||
+                stream === "item"
+            ) {
+                refreshSelectedHistorySoon(500);
+            }
         };
 
         const unsubscribe = subscribe((raw) => {
@@ -364,10 +542,6 @@ export function useChatRuntimeEvents({
                     payload.message ?? payload.delta ?? payload.content ?? payload.text
                 );
                 const nextText = deltaMessage.text;
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(true);
-                }
-                markActiveRun(streamSessionKey);
 
                 if (
                     nextText.trim() ||
@@ -416,10 +590,6 @@ export function useChatRuntimeEvents({
                     delete next[streamSessionKey];
                     return next;
                 });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -449,10 +619,6 @@ export function useChatRuntimeEvents({
                     delete next[streamSessionKey];
                     return next;
                 });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -467,10 +633,6 @@ export function useChatRuntimeEvents({
                     delete next[streamSessionKey];
                     return next;
                 });
-                if (eventMatchesSelected) {
-                    setIsAssistantTyping(false);
-                }
-                clearActiveRunMarker(streamSessionKey);
             }
         });
 
@@ -492,7 +654,6 @@ export function useChatRuntimeEvents({
         request,
         selectedSessionKey,
         setHistoryLoadVersion,
-        setIsAssistantTyping,
         setIsAtBottom,
         setMessages,
         setSendError,

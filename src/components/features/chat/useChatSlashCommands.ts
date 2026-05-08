@@ -15,8 +15,6 @@ import type {
 import {
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
-    clearActiveRunMarker,
-    markActiveRun,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtils";
 import {
@@ -46,7 +44,6 @@ interface UseChatSlashCommandsParams {
     setDraft: Dispatch<SetStateAction<string>>;
     setSendError: Dispatch<SetStateAction<string | null>>;
     setIsSending: Dispatch<SetStateAction<boolean>>;
-    setIsAssistantTyping: Dispatch<SetStateAction<boolean>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
     shouldStickToBottomReference: { current: boolean };
@@ -65,7 +62,6 @@ export function useChatSlashCommands({
     setDraft,
     setSendError,
     setIsSending,
-    setIsAssistantTyping,
     setIsAtBottom,
     setHistoryLoadVersion,
     shouldStickToBottomReference,
@@ -150,8 +146,6 @@ export function useChatSlashCommands({
                     delete next[selectedSessionKey];
                     return next;
                 });
-                clearActiveRunMarker(selectedSessionKey);
-                setIsAssistantTyping(false);
                 await request("sessions.reset", { key: selectedSessionKey });
                 await reloadChatHistory();
                 addSystemMessage("Session reset.");
@@ -168,8 +162,6 @@ export function useChatSlashCommands({
                     delete next[selectedSessionKey];
                     return next;
                 });
-                clearActiveRunMarker(selectedSessionKey);
-                setIsAssistantTyping(false);
                 addSystemMessage("Stopped current run.");
             });
 
@@ -186,8 +178,6 @@ export function useChatSlashCommands({
                 delete next[selectedSessionKey];
                 return next;
             });
-            setIsAssistantTyping(false);
-            clearActiveRunMarker(selectedSessionKey);
             addSystemMessage("Local chat view cleared. Session history was not reset.");
             return true;
         }
@@ -370,10 +360,21 @@ export function useChatSlashCommands({
             setDraft("");
             setSendError(null);
             setIsSending(true);
-            setIsAssistantTyping(true);
-            markActiveRun(selectedSessionKey);
             shouldStickToBottomReference.current = true;
             setIsAtBottom(true);
+
+            const runId = `compact-${Date.now()}`;
+            updateActiveStreams((previous) => ({
+                ...previous,
+                [selectedSessionKey]: {
+                    sessionKey: selectedSessionKey,
+                    runId,
+                    aliases: [runId],
+                    text: "",
+                    statusText: "Compacting context…",
+                    updatedAt: new Date().toISOString(),
+                },
+            }));
 
             try {
                 const result = await request<{ compacted?: boolean; reason?: string }>(
@@ -383,21 +384,19 @@ export function useChatSlashCommands({
                     }
                 );
 
-                if (!result.compacted) {
-                    clearActiveRunMarker(selectedSessionKey);
-                    setIsAssistantTyping(false);
-                }
-
                 addSystemMessage(
                     result.compacted
                         ? "Context compacted successfully."
                         : `Compaction skipped${result.reason ? `: ${result.reason}` : "."}`
                 );
             } catch (error_) {
-                clearActiveRunMarker(selectedSessionKey);
-                setIsAssistantTyping(false);
                 setSendError((error_ as Error).message || "Failed to run /compact");
             } finally {
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
                 setIsSending(false);
             }
             return true;

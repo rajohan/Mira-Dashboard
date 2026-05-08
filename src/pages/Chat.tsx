@@ -27,18 +27,11 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
-    ACTIVE_RUN_HISTORY_CLEAR_GRACE_MS,
-    ACTIVE_RUN_MARKER_IDLE_TTL_MS,
     CHAT_HISTORY_LIMIT,
     type ChatModelOption,
-    clearActiveRunMarker,
     dataUrlToBase64,
     dedupeMessages,
     displayMimeType,
-    getActiveRunMarkerLastSeenAtMs,
-    getActiveRunMarkerStartedAtMs,
-    hasActiveRunMarker,
-    markActiveRun,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
@@ -59,27 +52,6 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
-const TERMINAL_SESSION_STATUSES = new Set([
-    "aborted",
-    "cancelled",
-    "canceled",
-    "complete",
-    "completed",
-    "done",
-    "error",
-    "failed",
-    "idle",
-    "stopped",
-]);
-const RUNNING_SESSION_STATUSES = new Set([
-    "active",
-    "in-progress",
-    "pending",
-    "queued",
-    "running",
-    "streaming",
-    "thinking",
-]);
 
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
@@ -134,43 +106,6 @@ function sessionTimestampMs(value: unknown): number | null {
     }
 
     return null;
-}
-
-function isRecentSessionActivity(value: unknown): boolean {
-    const timestamp = sessionTimestampMs(value);
-    return timestamp !== null && Date.now() - timestamp < ACTIVE_RUN_MARKER_IDLE_TTL_MS;
-}
-
-function isTerminalSessionStatus(value: unknown): boolean {
-    if (typeof value !== "string") {
-        return false;
-    }
-
-    return TERMINAL_SESSION_STATUSES.has(value.toLowerCase());
-}
-
-function isRunningSessionStatus(value: unknown): boolean {
-    if (typeof value !== "string") {
-        return false;
-    }
-
-    return RUNNING_SESSION_STATUSES.has(value.toLowerCase());
-}
-
-function shouldClearActiveMarkerForSession(
-    session: { endedAt?: unknown; status?: unknown } | null,
-    markerStartedAt: number | null,
-    isRunning: boolean
-): boolean {
-    if (!session || markerStartedAt === null || isRunning) {
-        return false;
-    }
-
-    const endedAt = sessionTimestampMs(session.endedAt);
-    return (
-        (endedAt !== null && endedAt >= markerStartedAt) ||
-        isTerminalSessionStatus(session.status)
-    );
 }
 
 function historyHasNewerAssistantMessage(
@@ -279,7 +214,6 @@ export function Chat() {
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
-    const [isAssistantTyping, setIsAssistantTyping] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
     const [showThinkingOutput, setShowThinkingOutput] = useState(
         () => readStoredChatDiagnosticVisibility().thinking
@@ -314,39 +248,6 @@ export function Chat() {
     const selectedSession = selectedSessionKey
         ? sessionMap.get(selectedSessionKey) || null
         : null;
-    const selectedSessionHasRecentActivity = isRecentSessionActivity(
-        selectedSession?.updatedAt ?? selectedSession?.startedAt
-    );
-    const selectedSessionHasTerminalStatus = isTerminalSessionStatus(
-        selectedSession?.status
-    );
-    const selectedSessionHasRunningStatus = isRunningSessionStatus(
-        selectedSession?.status
-    );
-    const selectedSessionIsRunning = Boolean(
-        selectedSession &&
-        !selectedSessionHasTerminalStatus &&
-        selectedSession.endedAt == null &&
-        (selectedSessionHasRunningStatus ||
-            (selectedSessionHasRecentActivity &&
-                (selectedSession.isRunning ||
-                    selectedSession.running ||
-                    selectedSession.activeRunId ||
-                    selectedSession.currentRunId)))
-    );
-    const selectedSessionActiveMarkerStartedAt = selectedSessionKey
-        ? getActiveRunMarkerStartedAtMs(selectedSessionKey)
-        : null;
-    const shouldClearSelectedSessionActiveMarker = shouldClearActiveMarkerForSession(
-        selectedSession,
-        selectedSessionActiveMarkerStartedAt,
-        selectedSessionIsRunning
-    );
-    const selectedSessionHasActiveMarker = Boolean(
-        selectedSessionKey &&
-        !shouldClearSelectedSessionActiveMarker &&
-        hasActiveRunMarker(selectedSessionKey)
-    );
     const selectedStream = selectedSessionKey
         ? activeStreams[selectedSessionKey]
         : undefined;
@@ -357,12 +258,9 @@ export function Chat() {
         selectedStreamMessage,
         createChatVisibility(showThinkingOutput, showToolOutput)
     );
-    const shouldShowTypingIndicator =
-        isSending ||
-        isAssistantTyping ||
-        selectedSessionIsRunning ||
-        selectedSessionHasActiveMarker ||
-        Boolean(selectedStreamText);
+    const shouldShowTypingIndicator = Boolean(
+        selectedStream && !shouldShowSelectedStreamRow
+    );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) => !deletedMessageKeys.has(messageDeleteKey(message))
     );
@@ -390,8 +288,8 @@ export function Chat() {
             kind: "typing",
             message: {
                 role: "assistant",
-                content: "",
-                text: "",
+                content: selectedStream?.statusText || "Thinking…",
+                text: selectedStream?.statusText || "Thinking…",
             },
         });
     }
@@ -410,63 +308,11 @@ export function Chat() {
     }, [selectedSessionKey]);
 
     useEffect(() => {
-        if (!selectedSessionKey) {
-            return;
-        }
-
-        const syncMarkerState = () => {
-            const markerStartedAt = getActiveRunMarkerStartedAtMs(selectedSessionKey);
-
-            if (
-                shouldClearActiveMarkerForSession(
-                    selectedSession,
-                    markerStartedAt,
-                    selectedSessionIsRunning
-                )
-            ) {
-                clearActiveRunMarker(selectedSessionKey);
-                setIsAssistantTyping(false);
-                updateActiveStreams((previous) => {
-                    const stream = previous[selectedSessionKey];
-                    if (!stream || stream.text.trim()) {
-                        return previous;
-                    }
-
-                    const next = { ...previous };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
-                return false;
-            }
-
-            const hasMarker = hasActiveRunMarker(selectedSessionKey);
-            setIsAssistantTyping(hasMarker);
-            return hasMarker;
-        };
-
-        if (selectedSessionIsRunning) {
-            markActiveRun(selectedSessionKey);
-            setIsAssistantTyping(true);
-            return;
-        }
-
-        syncMarkerState();
-
-        const interval = window.setInterval(() => {
-            syncMarkerState();
-        }, 5_000);
-
-        return () => window.clearInterval(interval);
-    }, [selectedSession, selectedSessionIsRunning, selectedSessionKey]);
-
-    useEffect(() => {
         if (!isConnected) {
             sendInFlightReference.current = false;
             setIsSending(false);
-            setIsAssistantTyping(false);
 
             if (selectedSessionKey) {
-                clearActiveRunMarker(selectedSessionKey);
                 updateActiveStreams((previous) => {
                     if (!previous[selectedSessionKey]) {
                         return previous;
@@ -525,10 +371,6 @@ export function Chat() {
             setIsAtBottom(true);
             setAttachments([]);
         }
-        setIsAssistantTyping(
-            Boolean(selectedSessionKey && hasActiveRunMarker(selectedSessionKey))
-        );
-
         if (!selectedSessionKey) {
             loadedHistorySessionReference.current = "";
             setMessages([]);
@@ -619,37 +461,7 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
                 const activeStream = activeStreamsReference.current[selectedSessionKey];
-                const lastHistoryMessage = nextMessages.at(-1);
-                const activeRunMarkerStartedAt =
-                    getActiveRunMarkerStartedAtMs(selectedSessionKey);
-                const activeRunMarkerLastSeenAt =
-                    getActiveRunMarkerLastSeenAtMs(selectedSessionKey);
-                const activeRunMarkerIsQuiet = Boolean(
-                    activeRunMarkerLastSeenAt !== null &&
-                    Date.now() - activeRunMarkerLastSeenAt >=
-                        ACTIVE_RUN_HISTORY_CLEAR_GRACE_MS
-                );
-                const historyHasAssistantAfterActiveMarker = Boolean(
-                    !selectedSessionIsRunning &&
-                    activeRunMarkerIsQuiet &&
-                    activeRunMarkerStartedAt !== null &&
-                    nextMessages.some((message) => {
-                        if (
-                            message.role.toLowerCase() !== "assistant" ||
-                            !message.text.trim()
-                        ) {
-                            return false;
-                        }
-
-                        const messageTimestamp = sessionTimestampMs(message.timestamp);
-                        return (
-                            messageTimestamp !== null &&
-                            messageTimestamp >= activeRunMarkerStartedAt
-                        );
-                    })
-                );
                 const recoveredStreamInHistory = Boolean(
-                    !selectedSessionIsRunning &&
                     activeStream &&
                     ((activeStream.text &&
                         historyContainsRecoveredStream(
@@ -659,9 +471,7 @@ export function Chat() {
                         historyHasNewerAssistantMessage(
                             nextMessages,
                             activeStream.updatedAt
-                        ) ||
-                        (!activeStream.text &&
-                            lastHistoryMessage?.role.toLowerCase() === "assistant"))
+                        ))
                 );
 
                 setMessages((previous) => {
@@ -682,14 +492,12 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
 
-                if (recoveredStreamInHistory || historyHasAssistantAfterActiveMarker) {
+                if (recoveredStreamInHistory) {
                     updateActiveStreams((previous) => {
                         const next = { ...previous };
                         delete next[selectedSessionKey];
                         return next;
                     });
-                    clearActiveRunMarker(selectedSessionKey);
-                    setIsAssistantTyping(false);
                 }
             } catch {
                 // Ignore background refresh failures.
@@ -700,7 +508,6 @@ export function Chat() {
     }, [
         isLoadingHistory,
         request,
-        selectedSessionIsRunning,
         selectedSessionKey,
         selectedSessionUpdatedAt,
         showThinkingOutput,
@@ -791,7 +598,6 @@ export function Chat() {
         updateActiveStreams,
         setMessages,
         setSendError,
-        setIsAssistantTyping,
         setIsAtBottom,
         setHistoryLoadVersion,
     });
@@ -1142,7 +948,6 @@ export function Chat() {
         setDraft,
         setSendError,
         setIsSending,
-        setIsAssistantTyping,
         setIsAtBottom,
         setHistoryLoadVersion,
         shouldStickToBottomReference,
@@ -1185,7 +990,6 @@ export function Chat() {
         setAttachments([]);
         setSendError(null);
         setIsSending(true);
-        setIsAssistantTyping(true);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
         scheduleBottomFollow();
@@ -1198,10 +1002,10 @@ export function Chat() {
                 runId: idempotencyKey,
                 aliases: [idempotencyKey],
                 text: "",
+                statusText: "Thinking…",
                 updatedAt: new Date().toISOString(),
             },
         }));
-        markActiveRun(selectedSessionKey);
 
         try {
             const result = (await request("chat.send", {
@@ -1234,13 +1038,11 @@ export function Chat() {
             }
         } catch (error_) {
             setSendError((error_ as Error).message || "Failed to send message");
-            setIsAssistantTyping(false);
             updateActiveStreams((previous) => {
                 const next = { ...previous };
                 delete next[selectedSessionKey];
                 return next;
             });
-            clearActiveRunMarker(selectedSessionKey);
         } finally {
             sendInFlightReference.current = false;
             setIsSending(false);

@@ -14,6 +14,7 @@ export interface ActiveChatStream {
     aliases: string[];
     text: string;
     message?: ChatHistoryMessage;
+    statusText?: string;
     updatedAt: string;
 }
 

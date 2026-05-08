@@ -197,7 +197,7 @@ function TtsButton({
     );
 }
 
-function TypingIndicator() {
+function TypingIndicator({ text = "Thinking…" }: { text?: string }) {
     return (
         <div className="flex justify-start pb-3">
             <div className="border-primary-700 bg-primary-800 text-primary-100 rounded-2xl border px-3 py-2 text-sm shadow-sm">
@@ -205,8 +205,11 @@ function TypingIndicator() {
                     assistant
                 </div>
                 <div className="text-primary-300 flex items-center gap-2">
-                    <span>Typing</span>
-                    <span className="flex gap-1" aria-label="Assistant is typing">
+                    <span className="min-w-0 break-words">{text || "Thinking…"}</span>
+                    <span
+                        className="flex shrink-0 gap-1"
+                        aria-label="Assistant is working"
+                    >
                         <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.24s]" />
                         <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.12s]" />
                         <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full" />
@@ -347,7 +350,7 @@ export function ChatMessagesList({
                                     ref={messagesVirtualizer.measureElement}
                                     className="w-full pb-3"
                                 >
-                                    <TypingIndicator />
+                                    <TypingIndicator text={row.message.text} />
                                 </div>
                             );
                         }
