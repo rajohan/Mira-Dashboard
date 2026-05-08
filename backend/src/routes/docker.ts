@@ -1,7 +1,8 @@
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import express, { type RequestHandler } from "express";
 import { promisify } from "node:util";
+
+import express, { type RequestHandler } from "express";
 
 import { parseTable } from "../lib/cacheStore.js";
 
@@ -283,7 +284,7 @@ async function queryN8nTsvRows<T extends object>(
 ): Promise<T[]> {
     // Simple approach: use tab-separated output without header
     const tempFile = `/tmp/updater-events-${Date.now()}.tsv`;
-    const copySql = `COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\\t', NULL '');`;
+    const copySql = String.raw`COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\t', NULL '');`;
 
     await execFileAsync(
         "docker",

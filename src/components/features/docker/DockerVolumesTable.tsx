@@ -49,13 +49,13 @@ export function DockerVolumesTable({
                 return (
                     <div className="min-w-0">
                         <div
-                            className="break-all font-medium text-primary-50"
+                            className="text-primary-50 font-medium break-all"
                             title={volume.name}
                         >
                             {truncateMiddle(volume.name, 40)}
                         </div>
                         <div
-                            className="break-all text-xs text-primary-400"
+                            className="text-primary-400 text-xs break-all"
                             title={volume.mountpoint}
                         >
                             {volume.driver} · {truncateMiddle(volume.mountpoint, 54)}
@@ -70,7 +70,7 @@ export function DockerVolumesTable({
             cell: (info) => {
                 const volume = info.row.original;
                 return (
-                    <div className="text-xs text-primary-300">
+                    <div className="text-primary-300 text-xs">
                         {volume.usedBy.length > 0 ? "Used" : "Unused"}
                     </div>
                 );
@@ -114,7 +114,7 @@ export function DockerVolumesTable({
     if (volumes.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
+                <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
                     Volumes
                 </div>
                 <EmptyState message="No volumes found." />
@@ -124,7 +124,7 @@ export function DockerVolumesTable({
 
     return (
         <Card className="overflow-hidden">
-            <div className="flex flex-col gap-3 border-b border-primary-700 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Volumes</div>
                 <Button
                     size="sm"
@@ -144,18 +144,18 @@ export function DockerVolumesTable({
                     return (
                         <Card key={row.id} className="p-3">
                             <div
-                                className="break-all font-medium text-primary-50"
+                                className="text-primary-50 font-medium break-all"
                                 title={volume.name}
                             >
                                 {truncateMiddle(volume.name, 52)}
                             </div>
                             <div
-                                className="mt-1 break-all text-xs text-primary-400"
+                                className="text-primary-400 mt-1 text-xs break-all"
                                 title={volume.mountpoint}
                             >
                                 {volume.driver} · {truncateMiddle(volume.mountpoint, 72)}
                             </div>
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                            <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
                                 <div>
                                     <div className="text-primary-500">Status</div>
                                     {volume.usedBy.length > 0 ? "Used" : "Unused"}
@@ -166,7 +166,7 @@ export function DockerVolumesTable({
                                 </div>
                             </div>
                             {volume.usedBy.length > 0 ? (
-                                <div className="mt-2 break-words text-xs text-primary-400">
+                                <div className="text-primary-400 mt-2 text-xs break-words">
                                     Used by: {volume.usedBy.join(", ")}
                                 </div>
                             ) : null}
@@ -187,7 +187,7 @@ export function DockerVolumesTable({
 
             <div className="hidden max-h-[420px] overflow-auto md:block">
                 <table className="min-w-[560px] text-sm lg:min-w-full">
-                    <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
+                    <thead className="bg-primary-900/95 text-primary-300 sticky top-0 z-10 text-left backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
@@ -196,7 +196,7 @@ export function DockerVolumesTable({
                                         className={
                                             "px-4 py-3 align-top " +
                                             (header.column.getCanSort()
-                                                ? "cursor-pointer select-none hover:text-primary-100"
+                                                ? "hover:text-primary-100 cursor-pointer select-none"
                                                 : "")
                                         }
                                         onClick={header.column.getToggleSortingHandler()}
@@ -227,7 +227,7 @@ export function DockerVolumesTable({
                         {table.getRowModel().rows.map((row) => (
                             <tr
                                 key={row.id}
-                                className="border-b border-primary-700/50 align-top hover:bg-primary-700/30"
+                                className="border-primary-700/50 hover:bg-primary-700/30 border-b align-top"
                             >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">

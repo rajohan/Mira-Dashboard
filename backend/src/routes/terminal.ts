@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+
 import express from "express";
 
 interface CompletionRequest {
@@ -40,17 +41,17 @@ function expandPath(inputPath: string, cwd: string): string {
 
 async function getCompletions(partial: string, cwd: string): Promise<CompletionResponse> {
     const trimmed = partial.trim();
-    
+
     // Extract the path part being completed (after last space for commands)
     const lastSpaceIndex = trimmed.lastIndexOf(" ");
-    const pathPart = lastSpaceIndex >= 0 ? trimmed.slice(lastSpaceIndex + 1) : trimmed;
+    const pathPart = lastSpaceIndex === -1 ? trimmed : trimmed.slice(lastSpaceIndex + 1);
     const prefix = lastSpaceIndex >= 0 ? trimmed.slice(0, lastSpaceIndex + 1) : "";
-    
+
     // Determine directory to search in
     let searchDir: string;
     let searchPrefix: string;
     let dirPart = "";
-    
+
     if (pathPart.includes("/")) {
         const lastSlashIndex = pathPart.lastIndexOf("/");
         dirPart = pathPart.slice(0, lastSlashIndex + 1);
@@ -60,20 +61,20 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
         searchDir = cwd;
         searchPrefix = pathPart;
     }
-    
+
     try {
         const entries = await readdir(searchDir, { withFileTypes: true });
         const matches: CompletionItem[] = [];
-        
+
         for (const entry of entries) {
             const name = entry.name;
             if (!name.startsWith(searchPrefix) || name.startsWith(".")) {
                 continue;
             }
-            
+
             const fullPath = join(searchDir, name);
             let type: "file" | "directory" | "executable" = "file";
-            
+
             if (entry.isDirectory()) {
                 type = "directory";
             } else if (entry.isFile()) {
@@ -86,18 +87,16 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
                     // ignore
                 }
             }
-            
-            const completion = prefix + (pathPart.includes("/") 
-                ? dirPart + name 
-                : name);
-            
+
+            const completion = prefix + (pathPart.includes("/") ? dirPart + name : name);
+
             matches.push({
                 completion,
                 type,
                 display: name + (type === "directory" ? "/" : ""),
             });
         }
-        
+
         // Sort: directories first, then executables, then files
         matches.sort((a, b) => {
             const typeOrder = { directory: 0, executable: 1, file: 2 };
@@ -106,7 +105,7 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
             }
             return a.display.localeCompare(b.display);
         });
-        
+
         // Find common prefix
         let commonPrefix = "";
         if (matches.length > 0) {
@@ -114,14 +113,14 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
             let i = first.length;
             while (i > searchPrefix.length) {
                 const candidate = first.slice(0, i);
-                if (matches.every(m => m.completion.startsWith(candidate))) {
+                if (matches.every((m) => m.completion.startsWith(candidate))) {
                     commonPrefix = candidate;
                     break;
                 }
                 i--;
             }
         }
-        
+
         return { completions: matches.slice(0, 20), commonPrefix };
     } catch {
         return { completions: [], commonPrefix: "" };
@@ -131,12 +130,12 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
 export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/complete", express.json(), async (req, res) => {
         const { partial, cwd } = req.body as CompletionRequest;
-        
+
         if (!partial || typeof partial !== "string") {
             res.status(400).json({ error: "Missing or invalid partial" });
             return;
         }
-        
+
         const resolvedCwd = cwd || HOME_DIR;
         const result = await getCompletions(partial, resolvedCwd);
         res.json(result);
@@ -144,7 +143,7 @@ export default function terminalRoutes(app: express.Application): void {
 
     app.post("/api/terminal/cd", express.json(), async (req, res) => {
         const { path: targetPath, cwd } = req.body as CdRequest;
-        
+
         const resolvedCwd = cwd || HOME_DIR;
 
         if (!targetPath || typeof targetPath !== "string") {
@@ -183,19 +182,19 @@ export default function terminalRoutes(app: express.Application): void {
         try {
             const stats = await stat(newPath);
             if (!stats.isDirectory()) {
-                res.status(400).json({ 
-                    success: false, 
+                res.status(400).json({
+                    success: false,
                     newCwd: resolvedCwd,
-                    error: `Not a directory: ${targetPath}` 
+                    error: `Not a directory: ${targetPath}`,
                 } satisfies CdResponse);
                 return;
             }
             res.json({ success: true, newCwd: newPath } satisfies CdResponse);
         } catch {
-            res.status(400).json({ 
-                success: false, 
+            res.status(400).json({
+                success: false,
                 newCwd: resolvedCwd,
-                error: `No such file or directory: ${targetPath}` 
+                error: `No such file or directory: ${targetPath}`,
             } satisfies CdResponse);
         }
     });

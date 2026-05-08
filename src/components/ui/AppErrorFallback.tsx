@@ -6,7 +6,7 @@ import { Button } from "./Button";
 export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
     return (
         <div className="flex min-h-screen items-center justify-center p-6">
-            <div className="w-full max-w-xl rounded-xl border border-red-500/40 bg-primary-900 p-6 text-primary-100">
+            <div className="bg-primary-900 text-primary-100 w-full max-w-xl rounded-xl border border-red-500/40 p-6">
                 <div className="mb-3 flex items-center gap-2 text-red-300">
                     <AlertTriangle className="h-5 w-5" />
                     <h1 className="text-lg font-semibold">
@@ -14,11 +14,11 @@ export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
                     </h1>
                 </div>
 
-                <p className="mb-4 text-sm text-primary-300">
+                <p className="text-primary-300 mb-4 text-sm">
                     Try reloading this view. If the error persists, check the console.
                 </p>
 
-                <pre className="mb-4 max-h-40 overflow-auto rounded bg-primary-950/70 p-3 text-xs text-red-200">
+                <pre className="bg-primary-950/70 mb-4 max-h-40 overflow-auto rounded p-3 text-xs text-red-200">
                     {error instanceof Error ? error.message : "Unknown error"}
                 </pre>
 

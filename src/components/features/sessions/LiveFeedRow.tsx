@@ -31,12 +31,12 @@ function getRoleVariant(role: string) {
 
 export function LiveFeedRow({ item }: LiveFeedRowProps) {
     return (
-        <div className="w-full rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
+        <div className="border-primary-700 bg-primary-800 text-primary-100 w-full rounded-2xl border px-3 py-2 text-sm shadow-sm">
             <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <span className="min-w-0 truncate text-primary-300">
+                <span className="text-primary-300 min-w-0 truncate">
                     {item.sessionLabel}
                 </span>
-                <span className="shrink-0 text-primary-500">
+                <span className="text-primary-500 shrink-0">
                     {formatOsloTime(new Date(item.timestamp))}
                 </span>
             </div>
@@ -46,7 +46,7 @@ export function LiveFeedRow({ item }: LiveFeedRowProps) {
                     {item.sessionType || "unknown"}
                 </Badge>
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-primary-100">
+            <p className="text-primary-100 text-sm leading-relaxed break-words whitespace-pre-wrap">
                 {item.content}
             </p>
         </div>

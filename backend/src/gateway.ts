@@ -6,10 +6,10 @@ import Path from "node:path";
 import WebSocket from "ws";
 
 import {
-    OpenClawGatewayClient,
     type DeviceIdentity,
-    type OpenClawGatewayClientInstance,
     loadOrCreateDeviceIdentity,
+    OpenClawGatewayClient,
+    type OpenClawGatewayClientInstance,
 } from "./lib/openclawGatewayClient.js";
 
 const DASHBOARD_OPENCLAW_HOME =

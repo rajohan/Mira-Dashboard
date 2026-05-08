@@ -182,7 +182,7 @@ export function TaskDetailModal({
                                     rows={4}
                                 />
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                                         Priority
                                     </label>
                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -204,7 +204,7 @@ export function TaskDetailModal({
                                 </div>
                             </div>
                         ) : (
-                            <h2 className="break-words text-lg font-semibold text-primary-100">
+                            <h2 className="text-primary-100 text-lg font-semibold break-words">
                                 #{task.number}: {task.title}
                             </h2>
                         )}
@@ -214,7 +214,7 @@ export function TaskDetailModal({
                     </Button>
                 </div>
 
-                <div className="flex flex-col gap-1 text-sm text-primary-400 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                <div className="text-primary-400 flex flex-col gap-1 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                     {assigneeLogin && (
                         <span>
                             Assigned:{" "}
@@ -238,11 +238,11 @@ export function TaskDetailModal({
                 </div>
 
                 {task.body && !isEditingTask && (
-                    <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
-                        <h3 className="mb-2 text-sm font-semibold text-primary-300">
+                    <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-4">
+                        <h3 className="text-primary-300 mb-2 text-sm font-semibold">
                             Description
                         </h3>
-                        <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
+                        <div className="prose prose-invert prose-p:my-1 max-w-none text-sm">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {task.body}
                             </ReactMarkdown>
@@ -250,13 +250,13 @@ export function TaskDetailModal({
                     </div>
                 )}
 
-                <div className="rounded-lg border border-primary-700 bg-primary-800/30 p-4">
-                    <h3 className="mb-2 text-sm font-semibold text-primary-300">
+                <div className="border-primary-700 bg-primary-800/30 rounded-lg border p-4">
+                    <h3 className="text-primary-300 mb-2 text-sm font-semibold">
                         Progress updates
                     </h3>
                     <div className="mb-3 space-y-2">
                         {updates.length === 0 ? (
-                            <p className="text-sm text-primary-500">No updates yet.</p>
+                            <p className="text-primary-500 text-sm">No updates yet.</p>
                         ) : (
                             updates.map((update) => {
                                 const authorMeta =
@@ -268,9 +268,9 @@ export function TaskDetailModal({
                                 return (
                                     <div
                                         key={update.id}
-                                        className="rounded border border-primary-700 bg-primary-900/40 p-2"
+                                        className="border-primary-700 bg-primary-900/40 rounded border p-2"
                                     >
-                                        <div className="mb-1 flex flex-col gap-2 text-xs text-primary-500 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="text-primary-500 mb-1 flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
                                             <span className="min-w-0 break-words">
                                                 <a
                                                     href={authorMeta.githubUrl}
@@ -334,7 +334,7 @@ export function TaskDetailModal({
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="prose prose-invert max-w-none text-sm prose-p:my-1">
+                                            <div className="prose prose-invert prose-p:my-1 max-w-none text-sm">
                                                 <ReactMarkdown
                                                     remarkPlugins={[remarkGfm]}
                                                 >
@@ -399,7 +399,7 @@ export function TaskDetailModal({
                         )}
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 border-t border-primary-700 pt-3 sm:flex sm:flex-wrap">
+                    <div className="border-primary-700 grid grid-cols-1 gap-2 border-t pt-3 sm:flex sm:flex-wrap">
                         {isEditingTask ? (
                             <>
                                 <Button variant="primary" onClick={handleSaveTask}>

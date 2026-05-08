@@ -289,7 +289,7 @@ export function Terminal() {
                         <button
                             type="button"
                             onClick={scrollToBottom}
-                            className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                            className="bg-accent-500 hover:bg-accent-600 sticky top-2 z-10 float-right mb-2 rounded-full px-3 py-1 text-xs text-white shadow-lg"
                         >
                             ↓ Follow
                         </button>
@@ -323,33 +323,33 @@ export function Terminal() {
                                         {shortenPath(cwd)}
                                     </span>
                                     <span className="text-primary-500">$</span>{" "}
-                                    <span className="break-all text-primary-100">
+                                    <span className="text-primary-100 break-all">
                                         {command}
                                     </span>
                                 </div>
                                 {jobData.stdout && (
-                                    <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-primary-100">
+                                    <pre className="text-primary-100 mt-1 max-w-full break-words whitespace-pre-wrap">
                                         {jobData.stdout}
                                     </pre>
                                 )}
                                 {jobData.stderr && (
-                                    <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-red-400">
+                                    <pre className="mt-1 max-w-full break-words whitespace-pre-wrap text-red-400">
                                         {jobData.stderr}
                                     </pre>
                                 )}
                                 {jobData.status === "running" && (
-                                    <div className="mt-1 text-accent-400">Running...</div>
+                                    <div className="text-accent-400 mt-1">Running...</div>
                                 )}
                             </div>
                         )}
                 </div>
 
                 {/* Command Input */}
-                <div className="border-t border-primary-700 bg-primary-900 p-3">
+                <div className="border-primary-700 bg-primary-900 border-t p-3">
                     {/* Current directory display */}
-                    <div className="mb-2 flex min-w-0 items-center gap-2 font-mono text-xs text-accent-400 sm:text-sm">
+                    <div className="text-accent-400 mb-2 flex min-w-0 items-center gap-2 font-mono text-xs sm:text-sm">
                         <span className="min-w-0 truncate">{shortenPath(cwd)}</span>
-                        <span className="shrink-0 text-primary-500">$</span>
+                        <span className="text-primary-500 shrink-0">$</span>
                     </div>
                     <form
                         onSubmit={handleSubmit}
@@ -422,26 +422,26 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
     return (
         <div className={cn("mb-4", entry.status === "running" && "opacity-80")}>
             {/* Command line */}
-            <div className="flex flex-wrap items-start gap-x-2 gap-y-1 text-primary-400">
-                <span className="shrink-0 text-accent-400">{entry.cwd}$</span>
-                <span className="min-w-0 break-all text-primary-100">
+            <div className="text-primary-400 flex flex-wrap items-start gap-x-2 gap-y-1">
+                <span className="text-accent-400 shrink-0">{entry.cwd}$</span>
+                <span className="text-primary-100 min-w-0 break-all">
                     {entry.command}
                 </span>
                 {entry.status === "running" && (
-                    <span className="animate-pulse text-accent-400">●</span>
+                    <span className="text-accent-400 animate-pulse">●</span>
                 )}
             </div>
 
             {/* stdout */}
             {entry.stdout && (
-                <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-primary-100">
+                <pre className="text-primary-100 mt-1 max-w-full break-words whitespace-pre-wrap">
                     {entry.stdout}
                 </pre>
             )}
 
             {/* stderr */}
             {entry.stderr && (
-                <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-red-400">
+                <pre className="mt-1 max-w-full break-words whitespace-pre-wrap text-red-400">
                     {entry.stderr}
                 </pre>
             )}
@@ -456,7 +456,7 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
                 >
                     Exit code: {entry.code ?? "unknown"}
                     {entry.endedAt && (
-                        <span className="ml-0 block text-primary-600 sm:ml-2 sm:inline">
+                        <span className="text-primary-600 ml-0 block sm:ml-2 sm:inline">
                             ({((entry.endedAt - entry.startedAt) / 1000).toFixed(2)}s)
                         </span>
                     )}

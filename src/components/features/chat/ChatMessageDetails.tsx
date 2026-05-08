@@ -42,7 +42,7 @@ function DetailBlock({
         <div
             className={`mt-1.5 min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 text-xs ${toneClass}`}
         >
-            <div className="mb-0.5 font-medium uppercase tracking-wide opacity-70">
+            <div className="mb-0.5 font-medium tracking-wide uppercase opacity-70">
                 {label}
             </div>
             {children}
@@ -72,7 +72,7 @@ export function ChatMessageDetails({
             {shouldShowThinking
                 ? message.thinking?.map((block, index) => (
                       <DetailBlock key={`thinking-${index}`} label="Thinking / working">
-                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal text-primary-200">
+                          <pre className="text-primary-200 max-h-64 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
                               {block.text}
                           </pre>
                       </DetailBlock>
@@ -89,7 +89,7 @@ export function ChatMessageDetails({
                               tone="warning"
                           >
                               {formattedArguments ? (
-                                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal">
+                                  <pre className="max-h-64 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
                                       {formattedArguments}
                                   </pre>
                               ) : (
@@ -106,7 +106,7 @@ export function ChatMessageDetails({
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
-                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-normal">
+                        <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
                             {message.toolResult.content}
                         </pre>
                     ) : (

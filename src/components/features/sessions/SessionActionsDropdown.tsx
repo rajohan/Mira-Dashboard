@@ -18,12 +18,12 @@ export function SessionActionsDropdown({
     const items: DropdownItem[] = [
         {
             label: "Compact",
-            icon: <Database className="h-4 w-4 text-primary-400" />,
+            icon: <Database className="text-primary-400 h-4 w-4" />,
             onClick: onCompact,
         },
         {
             label: "Reset",
-            icon: <RotateCcw className="h-4 w-4 text-primary-400" />,
+            icon: <RotateCcw className="text-primary-400 h-4 w-4" />,
             onClick: onReset,
         },
     ];

@@ -131,13 +131,13 @@ export function ServiceActionsCard() {
         <>
             <Card>
                 <div className="mb-3 flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                         Actions
                     </h3>
                 </div>
 
                 {versionInfo?.updateAvailable ? (
-                    <div className="mb-3 rounded border border-primary-700 bg-primary-900/30 px-3 py-2 text-xs text-amber-200">
+                    <div className="border-primary-700 bg-primary-900/30 mb-3 rounded border px-3 py-2 text-xs text-amber-200">
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="h-3.5 w-3.5" />
                             New OpenClaw version available ({versionInfo.current} →{" "}
@@ -150,9 +150,9 @@ export function ServiceActionsCard() {
                     {(["system", "openclaw"] as const).map((scope) => (
                         <div
                             key={scope}
-                            className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
+                            className="border-primary-700 bg-primary-900/30 rounded-lg border p-3"
                         >
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
+                            <div className="text-primary-300 mb-2 text-xs font-semibold tracking-wide uppercase">
                                 {scope === "system"
                                     ? "System Actions"
                                     : "OpenClaw Actions"}
@@ -165,28 +165,28 @@ export function ServiceActionsCard() {
                                     <button
                                         key={action.id}
                                         type="button"
-                                        className="flex h-full flex-col rounded-lg border border-primary-700 bg-primary-800/40 p-3 text-left transition hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="border-primary-700 bg-primary-800/40 hover:border-primary-500 flex h-full flex-col rounded-lg border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60"
                                         onClick={() => setPendingAction(action)}
                                         disabled={isAnyActionPending}
                                     >
                                         <div className="mb-1 flex items-center justify-between gap-2">
-                                            <span className="text-sm text-primary-100">
+                                            <span className="text-primary-100 text-sm">
                                                 {action.label}
                                             </span>
                                             {action.danger ? (
                                                 <Badge variant="error">Caution</Badge>
                                             ) : null}
                                         </div>
-                                        <div className="min-h-[2.5rem] text-xs text-primary-400">
+                                        <div className="text-primary-400 min-h-[2.5rem] text-xs">
                                             {action.description}
                                         </div>
                                         {runningActionId === action.id ? (
-                                            <div className="mt-auto inline-flex items-center gap-1 pt-2 text-xs text-primary-300">
+                                            <div className="text-primary-300 mt-auto inline-flex items-center gap-1 pt-2 text-xs">
                                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                 Running...
                                             </div>
                                         ) : (
-                                            <div className="mt-auto inline-flex items-center gap-1 pt-2 text-xs text-primary-300">
+                                            <div className="text-primary-300 mt-auto inline-flex items-center gap-1 pt-2 text-xs">
                                                 <Play className="h-3.5 w-3.5" />
                                                 Run
                                             </div>
@@ -199,15 +199,15 @@ export function ServiceActionsCard() {
                 </div>
 
                 {outputMeta && (
-                    <div className="mt-4 rounded-lg border border-primary-700 bg-primary-900/60 p-3">
-                        <div className="mb-2 text-xs text-primary-400">
+                    <div className="border-primary-700 bg-primary-900/60 mt-4 rounded-lg border p-3">
+                        <div className="text-primary-400 mb-2 text-xs">
                             {outputMeta.running ? "Running" : "Last run"}:{" "}
                             {outputMeta.action} · {formatDate(new Date(outputMeta.ranAt))}
                             {outputMeta.running
                                 ? " · in progress"
                                 : ` · exit code ${String(outputMeta.code)}`}
                         </div>
-                        <div className="mb-1 inline-flex items-center gap-1 text-xs text-primary-300">
+                        <div className="text-primary-300 mb-1 inline-flex items-center gap-1 text-xs">
                             <Terminal className="h-3.5 w-3.5" />
                             Output
                         </div>
@@ -224,7 +224,7 @@ export function ServiceActionsCard() {
                                     previous === isAtBottom ? previous : isAtBottom
                                 );
                             }}
-                            className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-xs text-primary-200"
+                            className="text-primary-200 max-h-52 overflow-auto rounded bg-black/30 p-2 text-xs whitespace-pre-wrap"
                         >
                             {logs || "No output"}
                         </pre>

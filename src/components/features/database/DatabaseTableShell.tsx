@@ -56,9 +56,9 @@ export function DatabaseTableShell<T extends object>({
                                     role={onRowClick ? "button" : undefined}
                                     tabIndex={onRowClick ? 0 : undefined}
                                     className={[
-                                        "rounded-lg border border-primary-700 bg-primary-900/40 p-3",
+                                        "border-primary-700 bg-primary-900/40 rounded-lg border p-3",
                                         onRowClick
-                                            ? "cursor-pointer hover:bg-primary-800/50"
+                                            ? "hover:bg-primary-800/50 cursor-pointer"
                                             : "",
                                     ].join(" ")}
                                     onClick={
@@ -94,7 +94,7 @@ export function DatabaseTableShell<T extends object>({
                         style={{ maxHeight }}
                     >
                         <table className="min-w-[760px] text-sm lg:min-w-full">
-                            <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
+                            <thead className="bg-primary-900/95 text-primary-300 sticky top-0 z-10 text-left backdrop-blur">
                                 {table.getHeaderGroups().map((headerGroup) => (
                                     <tr key={headerGroup.id}>
                                         {headerGroup.headers.map((header) => (
@@ -105,7 +105,7 @@ export function DatabaseTableShell<T extends object>({
                                                 {header.column.getCanSort() ? (
                                                     <button
                                                         type="button"
-                                                        className="flex select-none items-center gap-1 hover:text-primary-100"
+                                                        className="hover:text-primary-100 flex items-center gap-1 select-none"
                                                         onClick={header.column.getToggleSortingHandler()}
                                                     >
                                                         {flexRender(
@@ -142,7 +142,7 @@ export function DatabaseTableShell<T extends object>({
                                     <tr
                                         key={row.id}
                                         className={[
-                                            "border-b border-primary-700/50 hover:bg-primary-700/30",
+                                            "border-primary-700/50 hover:bg-primary-700/30 border-b",
                                             onRowClick ? "cursor-pointer" : "",
                                         ].join(" ")}
                                         onClick={

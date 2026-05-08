@@ -123,7 +123,7 @@ export function Cron() {
                 <div className="p-3 sm:p-6">
                     <Card variant="bordered">
                         <CardTitle>No cron jobs found</CardTitle>
-                        <p className="mt-2 text-sm text-primary-300">
+                        <p className="text-primary-300 mt-2 text-sm">
                             Create jobs first, then manage them here.
                         </p>
                     </Card>

@@ -51,7 +51,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                 className="space-y-4"
             >
                 <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-primary-100">New Task</h2>
+                    <h2 className="text-primary-100 text-lg font-semibold">New Task</h2>
                     <Button
                         variant="ghost"
                         size="sm"
@@ -92,7 +92,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                 <form.Field name="priority">
                     {(field) => (
                         <div>
-                            <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                            <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                                 Priority
                             </label>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -124,7 +124,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                 <form.Field name="assignee">
                     {(field) => (
                         <div>
-                            <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                            <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                                 Assignee
                             </label>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

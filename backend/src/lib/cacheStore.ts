@@ -31,7 +31,9 @@ export function parseTable<T extends object>(output: string): T[] {
     const headers = lines[0].split("\t");
     return lines.slice(1).map((line) => {
         const cells = line.split("\t");
-        return Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""])) as T;
+        return Object.fromEntries(
+            headers.map((header, index) => [header, cells[index] ?? ""])
+        ) as T;
     });
 }
 
@@ -41,7 +43,11 @@ async function runDockerExec(container: string, command: string) {
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
     };
-    const { stdout } = await execFileAsync("docker", ["exec", container, "bash", "-lc", command], options);
+    const { stdout } = await execFileAsync(
+        "docker",
+        ["exec", container, "bash", "-lc", command],
+        options
+    );
     return stdout;
 }
 
@@ -55,8 +61,11 @@ function buildPostgresUri(database = "n8n") {
 
 async function queryN8nCache(sql: string) {
     const uri = buildPostgresUri("n8n");
-    const escapedSql = sql.replaceAll('"', '\\"');
-    return runDockerExec("postgres", `psql \"${uri}\" -P footer=off -F $'\\t' --no-align -c \"${escapedSql}\"`);
+    const escapedSql = sql.replaceAll('"', String.raw`\"`);
+    return runDockerExec(
+        "postgres",
+        `psql \"${uri}\" -P footer=off -F $'\\t' --no-align -c \"${escapedSql}\"`
+    );
 }
 
 export function parseJsonField<T>(value: string): T | null {
@@ -73,7 +82,8 @@ export function parseJsonField<T>(value: string): T | null {
 
 export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> {
     const escapedKey = key.replaceAll("'", "''");
-    const rows = parseTable<CacheEntryRow>(await queryN8nCache(`
+    const rows = parseTable<CacheEntryRow>(
+        await queryN8nCache(`
         SELECT
             key,
             data::text AS data,
@@ -89,13 +99,15 @@ export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> 
         FROM cache_entries
         WHERE key = '${escapedKey}'
         LIMIT 1;
-    `));
+    `)
+    );
 
     return rows[0] || null;
 }
 
 export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
-    return parseTable<CacheEntryRow>(await queryN8nCache(`
+    return parseTable<CacheEntryRow>(
+        await queryN8nCache(`
         SELECT
             key,
             data::text AS data,
@@ -110,5 +122,6 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
             meta::text AS meta
         FROM cache_entries
         ORDER BY key ASC;
-    `));
+    `)
+    );
 }

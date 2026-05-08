@@ -39,22 +39,22 @@ export function Select({
         >
             <MenuButton
                 className={cn(
-                    "flex items-center gap-2 rounded border border-primary-700 bg-primary-800 px-3 py-1.5 text-sm outline-none transition-colors",
-                    "hover:border-indigo-500 hover:bg-primary-700 focus:outline-none data-[focus]:outline-none",
+                    "border-primary-700 bg-primary-800 flex items-center gap-2 rounded border px-3 py-1.5 text-sm transition-colors outline-none",
+                    "hover:bg-primary-700 hover:border-indigo-500 focus:outline-none data-[focus]:outline-none",
                     width,
                     className
                 )}
             >
-                {icon && <span className="flex-shrink-0 text-primary-400">{icon}</span>}
+                {icon && <span className="text-primary-400 flex-shrink-0">{icon}</span>}
                 <span className="flex-1 truncate text-left">
                     {selectedOption?.label || placeholder}
                 </span>
-                <ChevronDown className="h-4 w-4 flex-shrink-0 text-primary-400 transition-transform data-[open]:rotate-180" />
+                <ChevronDown className="text-primary-400 h-4 w-4 flex-shrink-0 transition-transform data-[open]:rotate-180" />
             </MenuButton>
             <MenuItems
                 anchor={{ to: "bottom start", gap: 8 }}
                 className={cn(
-                    "z-10 max-h-60 min-w-[var(--button-width)] max-w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded border border-primary-700 bg-primary-800 shadow-lg outline-none focus:outline-none data-[focus]:outline-none",
+                    "border-primary-700 bg-primary-800 z-10 max-h-60 max-w-[min(36rem,calc(100vw-2rem))] min-w-[var(--button-width)] overflow-y-auto rounded border shadow-lg outline-none focus:outline-none data-[focus]:outline-none",
                     menuWidth || "w-max"
                 )}
             >
@@ -63,14 +63,14 @@ export function Select({
                         <button
                             onClick={() => onChange(option.value)}
                             className={cn(
-                                "flex w-full flex-col px-3 py-2 text-left text-sm outline-none transition-colors",
-                                "hover:bg-primary-700 focus:outline-none data-[focus]:bg-primary-700 data-[focus]:outline-none",
+                                "flex w-full flex-col px-3 py-2 text-left text-sm transition-colors outline-none",
+                                "hover:bg-primary-700 data-[focus]:bg-primary-700 focus:outline-none data-[focus]:outline-none",
                                 value === option.value && "text-indigo-400"
                             )}
                         >
                             <span>{option.label}</span>
                             {option.description && (
-                                <span className="text-xs text-primary-500">
+                                <span className="text-primary-500 text-xs">
                                     {option.description}
                                 </span>
                             )}

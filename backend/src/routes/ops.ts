@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import express, { type RequestHandler } from "express";
 import { promisify } from "node:util";
+
+import express, { type RequestHandler } from "express";
 
 const execFileAsync = promisify(execFile);
 

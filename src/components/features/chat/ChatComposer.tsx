@@ -130,7 +130,7 @@ export function ChatComposer({
     return (
         <div
             ref={composerReference}
-            className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4"
+            className="border-primary-700 mt-3 border-t pt-3 sm:mt-4 sm:pt-4"
         >
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
@@ -153,7 +153,7 @@ export function ChatComposer({
                                     sizeBytes: attachment.sizeBytes,
                                 })
                             }
-                            className="group flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-700"
+                            className="group border-primary-700 bg-primary-800 text-primary-100 hover:border-primary-500 hover:bg-primary-700 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-left text-xs"
                         >
                             {attachment.kind === "image" && attachment.dataUrl ? (
                                 <img
@@ -162,7 +162,7 @@ export function ChatComposer({
                                     className="h-8 w-8 shrink-0 rounded object-cover"
                                 />
                             ) : (
-                                <Paperclip className="h-4 w-4 text-primary-400" />
+                                <Paperclip className="text-primary-400 h-4 w-4" />
                             )}
                             <div className="min-w-0 flex-1">
                                 <div className="truncate">{attachment.fileName}</div>
@@ -184,7 +184,7 @@ export function ChatComposer({
                                         onRemoveAttachment(attachment.id);
                                     }
                                 }}
-                                className="rounded p-1 text-primary-400 hover:bg-primary-700 hover:text-primary-100"
+                                className="text-primary-400 hover:bg-primary-700 hover:text-primary-100 rounded p-1"
                                 aria-label={`Remove ${attachment.fileName}`}
                             >
                                 <X className="h-3.5 w-3.5" />
@@ -204,8 +204,8 @@ export function ChatComposer({
                 />
                 <div className="relative min-w-0 flex-1">
                     {slashCommandSuggestions.length > 0 ? (
-                        <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
-                            <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium uppercase tracking-wide text-primary-400">
+                        <div className="border-primary-700 bg-primary-900 absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border shadow-2xl">
+                            <div className="border-primary-700 text-primary-400 border-b px-3 py-2 text-xs font-medium tracking-wide uppercase">
                                 Slash commands
                             </div>
                             <div className="max-h-72 overflow-y-auto py-1">
@@ -216,13 +216,13 @@ export function ChatComposer({
                                         onClick={() =>
                                             onApplySlashSuggestion(suggestion.value)
                                         }
-                                        className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
+                                        className="hover:bg-primary-800 focus:bg-primary-800 flex w-full items-start gap-3 px-3 py-2 text-left focus:outline-none"
                                     >
                                         <span className="min-w-0 flex-1">
-                                            <span className="block truncate font-mono text-sm text-primary-100">
+                                            <span className="text-primary-100 block truncate font-mono text-sm">
                                                 {suggestion.title}
                                             </span>
-                                            <span className="mt-0.5 block truncate text-xs text-primary-400">
+                                            <span className="text-primary-400 mt-0.5 block truncate text-xs">
                                                 {suggestion.description}
                                             </span>
                                         </span>
@@ -232,13 +232,13 @@ export function ChatComposer({
                         </div>
                     ) : null}
                     {showEmojiPicker ? (
-                        <div className="absolute bottom-full left-0 right-0 z-30 mb-2 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
-                            <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wide text-primary-400">
+                        <div className="border-primary-700 bg-primary-900 absolute right-0 bottom-full left-0 z-30 mb-2 rounded-xl border p-2 shadow-2xl sm:left-auto sm:w-80">
+                            <div className="text-primary-400 mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide uppercase">
                                 <span>Emoji</span>
                                 <button
                                     type="button"
                                     onClick={() => setShowEmojiPicker(false)}
-                                    className="rounded p-1 text-primary-400 hover:bg-primary-800 hover:text-primary-100"
+                                    className="text-primary-400 hover:bg-primary-800 hover:text-primary-100 rounded p-1"
                                     aria-label="Close emoji picker"
                                 >
                                     <X className="h-4 w-4" />
@@ -250,7 +250,7 @@ export function ChatComposer({
                                         key={emoji}
                                         type="button"
                                         onClick={() => insertEmoji(emoji)}
-                                        className="rounded-lg p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
+                                        className="hover:bg-primary-800 focus:bg-primary-800 rounded-lg p-2.5 text-xl focus:outline-none"
                                         aria-label={`Insert ${emoji}`}
                                     >
                                         {emoji}
@@ -297,7 +297,7 @@ export function ChatComposer({
                         type="button"
                         onClick={() => setShowEmojiPicker((previous) => !previous)}
                         disabled={!isConnected || !selectedSessionKey || isSending}
-                        className="absolute bottom-2 right-2 rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                        className="text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 absolute right-2 bottom-2 rounded-full p-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                         title="Insert emoji"
                         aria-label="Insert emoji"
                     >

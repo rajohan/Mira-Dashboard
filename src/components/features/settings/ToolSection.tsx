@@ -78,7 +78,7 @@ export function ToolSection({
             <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-3">
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Tool profile
                         </label>
                         <Input
@@ -93,7 +93,7 @@ export function ToolSection({
                         />
                     </div>
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Exec security
                         </label>
                         <Select
@@ -113,7 +113,7 @@ export function ToolSection({
                         />
                     </div>
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Exec approval
                         </label>
                         <Select
@@ -142,7 +142,7 @@ export function ToolSection({
                         }
                         label="Web search"
                         description="Allow web_search with the configured provider"
-                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
+                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
                         checked={draft.webFetchEnabled}
@@ -154,7 +154,7 @@ export function ToolSection({
                         }
                         label="Web fetch"
                         description="Allow fetching and extracting URLs"
-                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
+                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
                         checked={draft.elevatedEnabled}
@@ -166,7 +166,7 @@ export function ToolSection({
                         }
                         label="Elevated tools"
                         description="Allow privileged/elevated command surfaces"
-                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
+                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
                         checked={draft.agentToAgentEnabled}
@@ -178,13 +178,13 @@ export function ToolSection({
                         }
                         label="Agent-to-agent"
                         description="Allow agents to communicate with other sessions"
-                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
+                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-2">
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Web search provider
                         </label>
                         <Input
@@ -199,7 +199,7 @@ export function ToolSection({
                         />
                     </div>
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Sessions visibility
                         </label>
                         <Input

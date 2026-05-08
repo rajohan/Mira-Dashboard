@@ -27,12 +27,12 @@ export function Switch({
             {(label || description) && (
                 <div className="flex min-w-0 flex-1 flex-col">
                     {label && (
-                        <Label className="break-words text-sm font-medium text-primary-200">
+                        <Label className="text-primary-200 text-sm font-medium break-words">
                             {label}
                         </Label>
                     )}
                     {description && (
-                        <Description className="break-words text-xs text-primary-400">
+                        <Description className="text-primary-400 text-xs break-words">
                             {description}
                         </Description>
                     )}
@@ -43,7 +43,7 @@ export function Switch({
                 onChange={onChange}
                 className={cn(
                     "inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus:outline-none",
-                    "data-focus:ring-2 data-focus:ring-accent-500 ring-offset-2 ring-offset-primary-800",
+                    "data-focus:ring-accent-500 ring-offset-primary-800 ring-offset-2 data-focus:ring-2",
                     checked ? "bg-accent-500" : "bg-primary-600",
                     disabled ? "cursor-not-allowed opacity-50" : ""
                 )}

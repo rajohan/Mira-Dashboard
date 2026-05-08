@@ -128,7 +128,7 @@ export default function filesRoutes(
     }) as RequestHandler);
 
     // Read file content
-    app.get("/api/files/*", (async (req, res) => {
+    app.get(/^\/api\/files\/(.*)$/, (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
 
         try {
@@ -208,7 +208,7 @@ export default function filesRoutes(
     }) as RequestHandler);
 
     // Write file
-    app.put("/api/files/*", express.json(), (async (req, res) => {
+    app.put(/^\/api\/files\/(.*)$/, express.json(), (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
         const { content } = req.body as { content?: string };
 

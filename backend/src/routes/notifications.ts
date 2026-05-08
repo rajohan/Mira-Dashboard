@@ -33,7 +33,9 @@ function listNotifications(limit: number): NotificationRow[] {
 function toResponse(row: NotificationRow) {
     let metadata: Record<string, unknown> = {};
     try {
-        metadata = row.metadata_json ? (JSON.parse(row.metadata_json) as Record<string, unknown>) : {};
+        metadata = row.metadata_json
+            ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
+            : {};
     } catch {
         metadata = {};
     }
@@ -61,9 +63,14 @@ export default function notificationsRoutes(app: express.Application): void {
             : 100;
 
         const rows = listNotifications(limit);
-        const unreadCount = (db
-            .prepare("SELECT COUNT(*) as count FROM notifications WHERE is_read = 0")
-            .get() as { count?: number })?.count || 0;
+        const unreadCount =
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) as count FROM notifications WHERE is_read = 0"
+                    )
+                    .get() as { count?: number }
+            )?.count || 0;
 
         res.json({
             items: rows.map(toResponse),
@@ -77,8 +84,13 @@ export default function notificationsRoutes(app: express.Application): void {
         const type = (req.body?.type || "info").toString() as NotificationType;
         const source = req.body?.source ? String(req.body.source) : null;
         const dedupeKey = req.body?.dedupeKey ? String(req.body.dedupeKey) : null;
-        const metadata = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
-        const occurredAt = req.body?.occurredAt ? String(req.body.occurredAt) : new Date().toISOString();
+        const metadata =
+            req.body?.metadata && typeof req.body.metadata === "object"
+                ? req.body.metadata
+                : {};
+        const occurredAt = req.body?.occurredAt
+            ? String(req.body.occurredAt)
+            : new Date().toISOString();
 
         if (!title) {
             res.status(400).json({ error: "title is required" });
@@ -128,9 +140,9 @@ export default function notificationsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/notifications/mark-all-read", ((_, res) => {
-        db.prepare("UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0").run(
-            new Date().toISOString()
-        );
+        db.prepare(
+            "UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0"
+        ).run(new Date().toISOString());
         res.json({ ok: true });
     }) as RequestHandler);
 
@@ -146,10 +158,9 @@ export default function notificationsRoutes(app: express.Application): void {
             return;
         }
 
-        db.prepare("UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?").run(
-            new Date().toISOString(),
-            id
-        );
+        db.prepare(
+            "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
+        ).run(new Date().toISOString(), id);
 
         res.json({ ok: true });
     }) as RequestHandler);

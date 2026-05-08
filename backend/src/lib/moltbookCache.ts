@@ -49,7 +49,9 @@ export interface MoltbookCacheResponse<T> {
     meta: Record<string, unknown>;
 }
 
-async function fetchCachedMoltbookEntry<T>(key: string): Promise<MoltbookCacheResponse<T>> {
+async function fetchCachedMoltbookEntry<T>(
+    key: string
+): Promise<MoltbookCacheResponse<T>> {
     const row = await getCacheEntry(key);
     if (!row || row.status !== "fresh") {
         throw new Error(`Moltbook cache entry not found or not fresh: ${key}`);

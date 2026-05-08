@@ -73,11 +73,7 @@ function isLoopbackAddress(address?: string | null): boolean {
         return false;
     }
 
-    return (
-        address === "127.0.0.1" ||
-        address === "::1" ||
-        address === "::ffff:127.0.0.1"
-    );
+    return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
@@ -108,7 +104,9 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 }
 
 export function getUserCount(): number {
-    const row = db.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number };
+    const row = db.prepare("SELECT COUNT(*) AS count FROM users").get() as {
+        count: number;
+    };
     return row.count;
 }
 
@@ -198,7 +196,9 @@ export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
     return row || null;
 }
 
-export function getAuthUserFromRequest(request: express.Request | IncomingMessage): AuthUser | null {
+export function getAuthUserFromRequest(
+    request: express.Request | IncomingMessage
+): AuthUser | null {
     if (isLoopbackRequest(request)) {
         return LOOPBACK_USER;
     }
@@ -210,7 +210,11 @@ export function getAuthUserFromRequest(request: express.Request | IncomingMessag
     return getAuthUserFromSessionId(sessionId);
 }
 
-export function setSessionCookie(response: express.Response, sessionId: string, request: express.Request): void {
+export function setSessionCookie(
+    response: express.Response,
+    sessionId: string,
+    request: express.Request
+): void {
     const maxAge = Math.floor(SESSION_TTL_MS / 1000);
     const secure = isProduction(request);
     const cookieParts = [
@@ -228,7 +232,10 @@ export function setSessionCookie(response: express.Response, sessionId: string, 
     response.setHeader("Set-Cookie", cookieParts.join("; "));
 }
 
-export function clearSessionCookie(response: express.Response, request: express.Request): void {
+export function clearSessionCookie(
+    response: express.Response,
+    request: express.Request
+): void {
     const secure = isProduction(request);
     const cookieParts = [
         `${SESSION_COOKIE}=`,

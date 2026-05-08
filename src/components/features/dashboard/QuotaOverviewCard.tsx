@@ -90,7 +90,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
     if (!quotas) {
         return (
             <Card>
-                <div className="text-sm text-primary-300">Loading usage limits…</div>
+                <div className="text-primary-300 text-sm">Loading usage limits…</div>
             </Card>
         );
     }
@@ -186,7 +186,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     Usage Limits
                 </h3>
             </div>
@@ -195,10 +195,10 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 {providers.map((provider) => (
                     <div
                         key={provider.key}
-                        className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2"
+                        className="border-primary-700 bg-primary-800/40 rounded-lg border px-3 py-2"
                     >
                         <div className="mb-1 flex items-start justify-between gap-2">
-                            <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
+                            <div className="text-primary-100 inline-flex min-w-0 items-center gap-2 text-sm">
                                 {provider.icon}
                                 <span className="truncate">{provider.label}</span>
                             </div>
@@ -208,16 +208,16 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                                 </Badge>
                             )}
                         </div>
-                        <div className="break-words text-xs text-primary-300">
+                        <div className="text-primary-300 text-xs break-words">
                             {provider.line1}
                         </div>
                         {provider.line2 && (
-                            <div className="break-words text-xs text-primary-400">
+                            <div className="text-primary-400 text-xs break-words">
                                 {provider.line2}
                             </div>
                         )}
                         {provider.resetAt && provider.resetAt !== "unknown" && (
-                            <div className="text-xs text-primary-500">
+                            <div className="text-primary-500 text-xs">
                                 Reset {formatDate(new Date(provider.resetAt))}
                             </div>
                         )}

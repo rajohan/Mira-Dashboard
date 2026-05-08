@@ -16,12 +16,12 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         return (
             <Field className={cn(variant === "code" && "h-full")}>
                 {label && (
-                    <Label className="mb-1.5 block text-sm font-medium text-primary-300">
+                    <Label className="text-primary-300 mb-1.5 block text-sm font-medium">
                         {label}
                     </Label>
                 )}
                 {description && (
-                    <Description className="mb-1 text-xs text-primary-400">
+                    <Description className="text-primary-400 mb-1 text-xs">
                         {description}
                     </Description>
                 )}
@@ -29,7 +29,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                     ref={ref}
                     className={cn(
                         variant === "default" && [
-                            "w-full rounded-lg border border-primary-600 bg-primary-700 px-3 py-2",
+                            "border-primary-600 bg-primary-700 w-full rounded-lg border px-3 py-2",
                             "text-primary-100 placeholder-primary-500",
                             "focus:border-accent-500 focus:outline-none",
                             "hover:border-primary-500",

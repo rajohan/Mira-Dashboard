@@ -250,7 +250,7 @@ export function Logs() {
             </div>
 
             <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-primary-400">
+                <div className="text-primary-400 text-sm">
                     {isLoadingContent
                         ? "Loading..."
                         : `${filteredLogs.length} of ${logs.length} entries`}
@@ -289,21 +289,21 @@ export function Logs() {
                 <div
                     ref={logContainerRef}
                     onScroll={handleScroll}
-                    className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-[11px] sm:text-xs"
+                    className="bg-primary-900/50 relative h-full overflow-y-auto font-mono text-[11px] sm:text-xs"
                     style={{ overflowAnchor: "none" }}
                 >
                     {!isAtBottom && filteredLogs.length > 0 && (
                         <button
                             type="button"
                             onClick={scrollToBottom}
-                            className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                            className="bg-accent-500 hover:bg-accent-600 sticky top-2 z-10 float-right mr-2 mb-2 rounded-full px-3 py-1 text-xs text-white shadow-lg"
                         >
                             ↓ Follow
                         </button>
                     )}
 
                     {filteredLogs.length === 0 ? (
-                        <div className="py-8 text-center text-primary-400">
+                        <div className="text-primary-400 py-8 text-center">
                             {logs.length === 0
                                 ? "Waiting for logs..."
                                 : "No logs match your filter."}

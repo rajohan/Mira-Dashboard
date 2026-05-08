@@ -57,7 +57,7 @@ export function FileContentViewer({
             )}
 
             {fileContent.isBinary && !fileContent.isImage ? (
-                <div className="flex h-full items-center justify-center text-primary-400">
+                <div className="text-primary-400 flex h-full items-center justify-center">
                     <div className="text-center">
                         <File size={48} className="mx-auto mb-2 opacity-50" />
                         <p>Binary file</p>
@@ -80,7 +80,7 @@ export function FileContentViewer({
             ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
                 <Suspense
                     fallback={
-                        <div className="p-4 text-primary-400">Loading preview...</div>
+                        <div className="text-primary-400 p-4">Loading preview...</div>
                     }
                 >
                     <MarkdownPreview content={editedContent} />
@@ -88,7 +88,7 @@ export function FileContentViewer({
             ) : isJsonFile(fileContent.path) && jsonPreview ? (
                 <Suspense
                     fallback={
-                        <div className="p-4 text-primary-400">Loading preview...</div>
+                        <div className="text-primary-400 p-4">Loading preview...</div>
                     }
                 >
                     <JsonPreview content={editedContent} />
@@ -105,7 +105,7 @@ export function FileContentViewer({
                 ) : (
                     <Suspense
                         fallback={
-                            <div className="p-4 text-primary-400">Loading preview...</div>
+                            <div className="text-primary-400 p-4">Loading preview...</div>
                         }
                     >
                         <CodePreview
@@ -125,7 +125,7 @@ export function FileContentViewer({
             ) : (
                 <pre
                     className={
-                        "overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs sm:p-4 sm:text-sm " +
+                        "overflow-auto p-3 font-mono text-xs break-words whitespace-pre-wrap sm:p-4 sm:text-sm " +
                         syntaxClass
                     }
                 >

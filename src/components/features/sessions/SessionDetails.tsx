@@ -47,12 +47,12 @@ export function SessionDetails({
         <Modal isOpen={!!session} onClose={onClose} size="3xl">
             <div className="flex max-h-[85vh] flex-col">
                 {/* Header */}
-                <div className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-primary-700 pb-4">
+                <div className="border-primary-700 flex flex-shrink-0 items-start justify-between gap-3 border-b pb-4">
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                         <Badge variant={getSessionTypeVariant(session.type)}>
                             {formatSessionType(session)}
                         </Badge>
-                        <h2 className="truncate text-lg font-semibold text-primary-100">
+                        <h2 className="text-primary-100 truncate text-lg font-semibold">
                             {displayName}
                         </h2>
                     </div>
@@ -77,8 +77,8 @@ export function SessionDetails({
 
                 {/* Message History */}
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-primary-700 py-3">
-                        <h3 className="flex items-center gap-2 text-sm font-medium text-primary-300">
+                    <div className="border-primary-700 flex flex-shrink-0 items-center justify-between gap-3 border-b py-3">
+                        <h3 className="text-primary-300 flex items-center gap-2 text-sm font-medium">
                             <MessageSquare className="h-4 w-4" /> Message History
                         </h3>
                         <Button
@@ -95,8 +95,8 @@ export function SessionDetails({
                     <div className="flex-1 overflow-auto py-3 sm:py-4">
                         {isLoading ? (
                             <div className="flex items-center justify-center py-8">
-                                <RefreshCw className="h-5 w-5 animate-spin text-primary-400" />
-                                <span className="ml-2 text-primary-400">
+                                <RefreshCw className="text-primary-400 h-5 w-5 animate-spin" />
+                                <span className="text-primary-400 ml-2">
                                     Loading history...
                                 </span>
                             </div>
@@ -106,7 +106,7 @@ export function SessionDetails({
                             </div>
                         ) : allMessages.length === 0 ? (
                             <div className="py-8 text-center">
-                                <MessageSquare className="mx-auto mb-2 h-8 w-8 text-primary-500" />
+                                <MessageSquare className="text-primary-500 mx-auto mb-2 h-8 w-8" />
                                 <p className="text-primary-400">
                                     No message history available
                                 </p>

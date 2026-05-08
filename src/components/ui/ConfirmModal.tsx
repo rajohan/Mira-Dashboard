@@ -27,7 +27,7 @@ export function ConfirmModal({
     return (
         <Modal isOpen={isOpen} onClose={onCancel} title={title} size="md">
             <div className="space-y-4">
-                <p className="whitespace-pre-wrap break-words text-sm text-primary-300">
+                <p className="text-primary-300 text-sm break-words whitespace-pre-wrap">
                     {message}
                 </p>
                 <div className="flex justify-end gap-2">

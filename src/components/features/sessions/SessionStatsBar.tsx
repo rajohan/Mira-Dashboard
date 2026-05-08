@@ -19,26 +19,26 @@ export function SessionStatsBar({
     const tokenPercent = getTokenPercent(tokenCount, maxTokens);
 
     return (
-        <div className="grid flex-shrink-0 grid-cols-1 gap-3 border-b border-primary-700 bg-primary-800/30 py-3 sm:grid-cols-3 sm:gap-0 sm:py-4">
+        <div className="border-primary-700 bg-primary-800/30 grid flex-shrink-0 grid-cols-1 gap-3 border-b py-3 sm:grid-cols-3 sm:gap-0 sm:py-4">
             <div className="flex min-w-0 items-center gap-3">
-                <div className="rounded-lg bg-primary-700/50 p-2">
-                    <Cpu className="h-4 w-4 text-primary-400" />
+                <div className="bg-primary-700/50 rounded-lg p-2">
+                    <Cpu className="text-primary-400 h-4 w-4" />
                 </div>
                 <div className="min-w-0">
-                    <span className="block text-xs text-primary-400">Model</span>
-                    <p className="truncate text-sm font-medium text-primary-200 sm:max-w-[150px]">
+                    <span className="text-primary-400 block text-xs">Model</span>
+                    <p className="text-primary-200 truncate text-sm font-medium sm:max-w-[150px]">
                         {model}
                     </p>
                 </div>
             </div>
             <div className="flex min-w-0 items-center gap-3 sm:justify-center">
-                <div className="rounded-lg bg-primary-700/50 p-2">
-                    <Hash className="h-4 w-4 text-primary-400" />
+                <div className="bg-primary-700/50 rounded-lg p-2">
+                    <Hash className="text-primary-400 h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <span className="block text-xs text-primary-400">Tokens</span>
+                    <span className="text-primary-400 block text-xs">Tokens</span>
                     <div className="flex min-w-0 items-center gap-2">
-                        <p className="shrink-0 text-sm font-medium text-primary-200">
+                        <p className="text-primary-200 shrink-0 text-sm font-medium">
                             {formatTokens(tokenCount, maxTokens)}
                         </p>
                         <ProgressBar
@@ -50,12 +50,12 @@ export function SessionStatsBar({
                 </div>
             </div>
             <div className="flex min-w-0 items-center gap-3 sm:justify-end">
-                <div className="rounded-lg bg-primary-700/50 p-2">
-                    <Clock className="h-4 w-4 text-primary-400" />
+                <div className="bg-primary-700/50 rounded-lg p-2">
+                    <Clock className="text-primary-400 h-4 w-4" />
                 </div>
                 <div>
-                    <span className="block text-xs text-primary-400">Last Active</span>
-                    <p className="text-sm font-medium text-primary-200">
+                    <span className="text-primary-400 block text-xs">Last Active</span>
+                    <p className="text-primary-200 text-sm font-medium">
                         {formatDuration(updatedAt)}
                     </p>
                 </div>

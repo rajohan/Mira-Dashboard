@@ -36,7 +36,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     {title}
                 </h3>
             </div>
@@ -54,14 +54,14 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                     return (
                         <div
                             key={item.key}
-                            className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
+                            className="border-primary-700 bg-primary-900/30 rounded-lg border p-3"
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                    <div className="text-sm font-medium text-primary-100">
+                                    <div className="text-primary-100 text-sm font-medium">
                                         {item.label}
                                     </div>
-                                    <div className="mt-1 text-xs text-primary-400">
+                                    <div className="text-primary-400 mt-1 text-xs">
                                         {item.description || item.key}
                                     </div>
                                 </div>
@@ -70,7 +70,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                 </Badge>
                             </div>
 
-                            <div className="mt-3 flex flex-col gap-3 text-xs text-primary-300 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="text-primary-300 mt-3 flex flex-col gap-3 text-xs sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0">
                                     <div>
                                         Last update:{" "}
@@ -91,7 +91,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                 </div>
                                 <button
                                     type="button"
-                                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                                    className="border-primary-600 text-primary-100 hover:border-primary-400 inline-flex w-full items-center justify-center gap-1 rounded-md border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                     disabled={isRefreshing}
                                     onClick={() => refreshCache.mutate(refreshToken)}
                                 >

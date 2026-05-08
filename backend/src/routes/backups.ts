@@ -1,5 +1,5 @@
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
 
 import express, { type RequestHandler } from "express";
 
@@ -179,7 +179,10 @@ function startWalgBackupJob() {
     );
 }
 
-export default function backupRoutes(app: express.Application, _express: typeof express): void {
+export default function backupRoutes(
+    app: express.Application,
+    _express: typeof express
+): void {
     app.get("/api/backups/kopia", ((_req, res) => {
         res.json({ job: mapJob(getCurrentKopiaJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
@@ -190,7 +193,10 @@ export default function backupRoutes(app: express.Application, _express: typeof 
             res.json({ ok: true, job: mapJob(job) });
         } catch (error) {
             res.status(500).json({
-                error: error instanceof Error ? error.message : "Failed to start Kopia backup",
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to start Kopia backup",
             });
         }
     }) as RequestHandler);
@@ -205,7 +211,10 @@ export default function backupRoutes(app: express.Application, _express: typeof 
             res.json({ ok: true, job: mapJob(job) });
         } catch (error) {
             res.status(500).json({
-                error: error instanceof Error ? error.message : "Failed to start WAL-G backup",
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to start WAL-G backup",
             });
         }
     }) as RequestHandler);

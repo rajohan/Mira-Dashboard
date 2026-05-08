@@ -42,7 +42,7 @@ export function ModelSection({
             <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-2">
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Default model
                         </label>
                         <Input
@@ -52,7 +52,7 @@ export function ModelSection({
                         />
                     </div>
                     <div>
-                        <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Fallback models
                         </label>
                         <Input
@@ -63,7 +63,7 @@ export function ModelSection({
                     </div>
                 </div>
 
-                <div className="rounded-lg border border-primary-800 bg-primary-900/50 px-3 py-2">
+                <div className="border-primary-800 bg-primary-900/50 rounded-lg border px-3 py-2">
                     <ReadOnlyField label="Image model" value={imageModel || "Not set"} />
                     <ReadOnlyField
                         label="Image generation model"

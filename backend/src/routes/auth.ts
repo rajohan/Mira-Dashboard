@@ -74,18 +74,23 @@ export default function authRoutes(app: express.Application): void {
 
     app.post("/api/auth/register-first-user", (request, response) => {
         if (!bootstrapRequired()) {
-            response.status(409).json({ error: "Bootstrap registration is no longer available" });
+            response
+                .status(409)
+                .json({ error: "Bootstrap registration is no longer available" });
             return;
         }
 
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
-        const gatewayToken = typeof request.body?.gatewayToken === "string"
-            ? request.body.gatewayToken.trim()
-            : "";
+        const gatewayToken =
+            typeof request.body?.gatewayToken === "string"
+                ? request.body.gatewayToken.trim()
+                : "";
 
         if (!username) {
-            response.status(400).json({ error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore" });
+            response.status(400).json({
+                error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
+            });
             return;
         }
 
@@ -95,7 +100,9 @@ export default function authRoutes(app: express.Application): void {
         }
 
         if (!gatewayToken) {
-            response.status(400).json({ error: "Gateway token is required for first-user setup" });
+            response
+                .status(400)
+                .json({ error: "Gateway token is required for first-user setup" });
             return;
         }
 
@@ -119,7 +126,9 @@ export default function authRoutes(app: express.Application): void {
 
     app.post("/api/auth/login", (request, response) => {
         if (bootstrapRequired()) {
-            response.status(409).json({ error: "Create the first user before logging in" });
+            response
+                .status(409)
+                .json({ error: "Create the first user before logging in" });
             return;
         }
 

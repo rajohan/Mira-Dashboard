@@ -94,23 +94,23 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
         <Card className={className}>
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                    <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-primary-400">
+                    <div className="text-primary-400 mb-1 flex items-center gap-2 text-xs tracking-wide uppercase">
                         <Clock className="h-3.5 w-3.5" />
                         {weather?.location || "Spydeberg"}
                     </div>
-                    <div className="text-2xl font-semibold text-primary-50">
+                    <div className="text-primary-50 text-2xl font-semibold">
                         {localTime}
                     </div>
-                    <div className="text-sm text-primary-300">{localDate}</div>
+                    <div className="text-primary-300 text-sm">{localDate}</div>
                 </div>
 
-                <div className="flex items-center gap-3 rounded-lg border border-primary-700 bg-primary-900/30 p-3 sm:border-0 sm:bg-transparent sm:p-0">
+                <div className="border-primary-700 bg-primary-900/30 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0">
                     <CurrentWeatherIcon className="h-7 w-7 text-amber-300" />
                     <div className="min-w-0">
-                        <div className="text-2xl font-semibold text-primary-50">
+                        <div className="text-primary-50 text-2xl font-semibold">
                             {formatTemp(weather?.temperatureC)}°C
                         </div>
-                        <div className="truncate text-xs text-primary-300">
+                        <div className="text-primary-300 truncate text-xs">
                             {isLoading
                                 ? "Loading weather..."
                                 : weather?.description || "Unknown"}
@@ -118,21 +118,21 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 text-xs text-primary-200 sm:flex sm:flex-wrap sm:items-center sm:gap-3 sm:text-sm">
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
-                        <Cloud className="h-4 w-4 text-primary-400" />
+                <div className="text-primary-200 grid grid-cols-3 gap-2 text-xs sm:flex sm:flex-wrap sm:items-center sm:gap-3 sm:text-sm">
+                    <span className="border-primary-700 inline-flex min-w-0 items-center gap-1 rounded-md border px-2 py-1">
+                        <Cloud className="text-primary-400 h-4 w-4" />
                         <span className="truncate">
                             Feels {formatTemp(weather?.feelsLikeC)}°
                         </span>
                     </span>
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
-                        <Droplets className="h-4 w-4 text-accent-300" />
+                    <span className="border-primary-700 inline-flex min-w-0 items-center gap-1 rounded-md border px-2 py-1">
+                        <Droplets className="text-accent-300 h-4 w-4" />
                         <span className="truncate">
                             {weather?.humidityPercent ?? "--"}%
                         </span>
                     </span>
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary-700 px-2 py-1">
-                        <Wind className="h-4 w-4 text-primary-400" />
+                    <span className="border-primary-700 inline-flex min-w-0 items-center gap-1 rounded-md border px-2 py-1">
+                        <Wind className="text-primary-400 h-4 w-4" />
                         <span className="truncate">{weather?.windKph ?? "--"} km/h</span>
                     </span>
                 </div>
@@ -152,13 +152,13 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     return (
                         <div
                             key={day.date}
-                            className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-primary-700 bg-primary-800/40 px-2 py-1 text-sm"
+                            className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-between gap-2 rounded-md border px-2 py-1 text-sm"
                         >
                             <span className="text-primary-400">
                                 {index === 0 ? "Today" : dayLabel}
                             </span>
-                            <span className="inline-flex items-center gap-2 text-primary-100">
-                                <ForecastIcon className="h-4 w-4 text-primary-300" />
+                            <span className="text-primary-100 inline-flex items-center gap-2">
+                                <ForecastIcon className="text-primary-300 h-4 w-4" />
                                 {formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°
                             </span>
                         </div>

@@ -11,7 +11,7 @@ interface MyPostCardProps {
 export function MyPostCard({ post }: MyPostCardProps) {
     return (
         <Card className="p-3 sm:p-4">
-            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-primary-500">
+            <div className="text-primary-500 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 <a
                     href={getMoltbookUrl("/m/" + post.submolt.name)}
                     target="_blank"
@@ -29,10 +29,10 @@ export function MyPostCard({ post }: MyPostCardProps) {
                 rel="noopener noreferrer"
                 className="group block"
             >
-                <h3 className="line-clamp-3 break-words text-base font-medium text-primary-100 transition group-hover:text-indigo-300 sm:line-clamp-2">
+                <h3 className="text-primary-100 line-clamp-3 text-base font-medium break-words transition group-hover:text-indigo-300 sm:line-clamp-2">
                     {post.title}
                 </h3>
-                <p className="mt-1 line-clamp-3 break-words text-sm text-primary-400 transition group-hover:text-primary-300 sm:line-clamp-2">
+                <p className="text-primary-400 group-hover:text-primary-300 mt-1 line-clamp-3 text-sm break-words transition sm:line-clamp-2">
                     {post.content_preview}
                 </p>
             </a>
@@ -43,7 +43,7 @@ export function MyPostCard({ post }: MyPostCardProps) {
                     href={getMoltbookUrl("/post/" + post.id)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-primary-400 hover:text-primary-200"
+                    className="text-primary-400 hover:text-primary-200 flex items-center gap-1"
                 >
                     <MessageSquare className="h-3 w-3" />
                     {post.comment_count}

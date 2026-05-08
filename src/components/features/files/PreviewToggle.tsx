@@ -16,7 +16,7 @@ export function PreviewToggle({
     editLabel = "Raw",
 }: PreviewToggleProps) {
     return (
-        <div className="flex min-w-0 items-center gap-1 rounded bg-primary-700 p-0.5">
+        <div className="bg-primary-700 flex min-w-0 items-center gap-1 rounded p-0.5">
             <Button
                 variant={preview ? "primary" : "ghost"}
                 size="sm"

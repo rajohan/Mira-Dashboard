@@ -36,7 +36,7 @@ function DiagnosticToggle({
             className={[
                 "gap-1.5 rounded-full border px-2.5 py-1.5 text-xs",
                 active
-                    ? "border-accent-400/40 bg-accent-500/20 text-accent-100 shadow-[0_0_0_1px_rgba(99,102,241,0.12)] hover:bg-accent-500/25"
+                    ? "border-accent-400/40 bg-accent-500/20 text-accent-100 hover:bg-accent-500/25 shadow-[0_0_0_1px_rgba(99,102,241,0.12)]"
                     : "border-primary-700/80 bg-primary-900/40 text-primary-300 hover:border-primary-600 hover:bg-primary-800/80 hover:text-primary-100",
             ].join(" ")}
             onClick={onClick}
@@ -82,10 +82,10 @@ export function ChatHeader({
     onSelectSession,
 }: ChatHeaderProps) {
     return (
-        <div className="border-b border-primary-700 pb-2 sm:pb-3">
+        <div className="border-primary-700 border-b pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <p className="break-words text-xs text-primary-400 sm:truncate sm:text-sm">
+                    <p className="text-primary-400 text-xs break-words sm:truncate sm:text-sm">
                         {formatHeaderStatus(selectedSession)}
                     </p>
                 </div>

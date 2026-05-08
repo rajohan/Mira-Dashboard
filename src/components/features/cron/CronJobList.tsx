@@ -24,7 +24,7 @@ export function CronJobList({
 }: CronJobListProps) {
     return (
         <Card variant="bordered" className="min-w-0 p-0">
-            <div className="border-b border-primary-700 px-3 py-2 text-sm font-semibold text-primary-200 sm:px-4 sm:py-3">
+            <div className="border-primary-700 text-primary-200 border-b px-3 py-2 text-sm font-semibold sm:px-4 sm:py-3">
                 Cron jobs
             </div>
             <div className="max-h-80 overflow-auto p-2 xl:max-h-[70vh]">
@@ -47,7 +47,7 @@ export function CronJobList({
                             ].join(" ")}
                         >
                             <div className="flex w-full min-w-0 items-center justify-between gap-2">
-                                <div className="min-w-0 flex-1 truncate text-sm font-medium text-primary-100">
+                                <div className="text-primary-100 min-w-0 flex-1 truncate text-sm font-medium">
                                     {getCronJobName(job)}
                                 </div>
                                 <Badge
@@ -59,10 +59,10 @@ export function CronJobList({
                                     {job.enabled === false ? "Disabled" : "Enabled"}
                                 </Badge>
                             </div>
-                            <div className="mt-1 w-full truncate text-xs text-primary-400">
+                            <div className="text-primary-400 mt-1 w-full truncate text-xs">
                                 {id}
                             </div>
-                            <div className="mt-2 grid w-full grid-cols-1 gap-x-2 gap-y-1 text-[11px] text-primary-400 sm:grid-cols-2">
+                            <div className="text-primary-400 mt-2 grid w-full grid-cols-1 gap-x-2 gap-y-1 text-[11px] sm:grid-cols-2">
                                 <span>
                                     Last:{" "}
                                     {formatCronTimestamp(

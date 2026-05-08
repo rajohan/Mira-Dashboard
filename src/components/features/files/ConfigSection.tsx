@@ -16,13 +16,13 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
         <div className="p-2">
             {/* cron/ subdirectory */}
             <div
-                className="flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm text-primary-200 hover:bg-primary-700/50 sm:py-1"
+                className="text-primary-200 hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm sm:py-1"
                 onClick={() => setCronDirExpanded(!cronDirExpanded)}
             >
                 {cronDirExpanded ? (
-                    <ChevronDown size={14} className="shrink-0 text-primary-400" />
+                    <ChevronDown size={14} className="text-primary-400 shrink-0" />
                 ) : (
-                    <ChevronRight size={14} className="shrink-0 text-primary-400" />
+                    <ChevronRight size={14} className="text-primary-400 shrink-0" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="min-w-0 truncate">cron</span>
@@ -34,7 +34,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         <div
                             key={file.path}
                             className={
-                                "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
+                                "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
                                 (isSelected
                                     ? "bg-accent-500/20 text-accent-400"
                                     : "text-primary-200")
@@ -42,7 +42,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             style={{ paddingLeft: 28 }}
                             onClick={() => onSelect(file.path)}
                         >
-                            <File size={14} className="flex-shrink-0 text-primary-400" />
+                            <File size={14} className="text-primary-400 flex-shrink-0" />
                             <span className="min-w-0 truncate font-mono">
                                 {file.label}
                             </span>
@@ -52,13 +52,13 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
 
             {/* hooks/ subdirectory */}
             <div
-                className="flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm text-primary-200 hover:bg-primary-700/50 sm:py-1"
+                className="text-primary-200 hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm sm:py-1"
                 onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
             >
                 {hooksDirExpanded ? (
-                    <ChevronDown size={14} className="shrink-0 text-primary-400" />
+                    <ChevronDown size={14} className="text-primary-400 shrink-0" />
                 ) : (
-                    <ChevronRight size={14} className="shrink-0 text-primary-400" />
+                    <ChevronRight size={14} className="text-primary-400 shrink-0" />
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="min-w-0 truncate">hooks</span>
@@ -66,10 +66,10 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
             {hooksDirExpanded && (
                 <>
                     <div
-                        className="flex min-w-0 items-center gap-1 px-2 py-1.5 text-sm text-primary-200 sm:py-1"
+                        className="text-primary-200 flex min-w-0 items-center gap-1 px-2 py-1.5 text-sm sm:py-1"
                         style={{ paddingLeft: 20 }}
                     >
-                        <ChevronDown size={14} className="shrink-0 text-primary-400" />
+                        <ChevronDown size={14} className="text-primary-400 shrink-0" />
                         <Folder size={14} className="flex-shrink-0 text-yellow-400" />
                         <span className="min-w-0 truncate">transforms</span>
                     </div>
@@ -79,7 +79,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             <div
                                 key={file.path}
                                 className={
-                                    "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
+                                    "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
                                     (isSelected
                                         ? "bg-accent-500/20 text-accent-400"
                                         : "text-primary-200")
@@ -89,7 +89,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             >
                                 <File
                                     size={14}
-                                    className="flex-shrink-0 text-primary-400"
+                                    className="text-primary-400 flex-shrink-0"
                                 />
                                 <span className="min-w-0 truncate font-mono">
                                     {file.label}
@@ -107,7 +107,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                     <div
                         key={file.path}
                         className={
-                            "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-primary-700/50 sm:py-1 " +
+                            "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
                             (isSelected
                                 ? "bg-accent-500/20 text-accent-400"
                                 : "text-primary-200")
@@ -115,7 +115,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                         style={{ paddingLeft: 22 }}
                         onClick={() => onSelect(file.path)}
                     >
-                        <File size={14} className="flex-shrink-0 text-primary-400" />
+                        <File size={14} className="text-primary-400 flex-shrink-0" />
                         <span className="min-w-0 truncate font-mono">{file.label}</span>
                     </div>
                 );

@@ -144,13 +144,13 @@ export function DockerContainersTable({
                 const container = info.row.original;
                 return (
                     <div className="min-w-0">
-                        <div className="break-words font-medium text-primary-50">
+                        <div className="text-primary-50 font-medium break-words">
                             {container.name}
                         </div>
-                        <div className="break-all text-xs text-primary-400">
+                        <div className="text-primary-400 text-xs break-all">
                             {container.image}
                         </div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-primary-500">
+                        <div className="text-primary-500 mt-1 flex flex-wrap gap-2 text-xs">
                             {container.service ? (
                                 <span>service: {container.service}</span>
                             ) : null}
@@ -172,7 +172,7 @@ export function DockerContainersTable({
                         <Badge variant={getStateVariant(container.state)}>
                             {container.state}
                         </Badge>
-                        <div className="mt-1 text-xs text-primary-400">
+                        <div className="text-primary-400 mt-1 text-xs">
                             {container.status}
                         </div>
                     </div>
@@ -197,7 +197,7 @@ export function DockerContainersTable({
                         <Badge variant={getHealthVariant(container)}>
                             {container.health}
                         </Badge>
-                        <div className="mt-1 text-xs text-primary-400">
+                        <div className="text-primary-400 mt-1 text-xs">
                             restarts: {container.restartCount}
                         </div>
                     </div>
@@ -212,7 +212,7 @@ export function DockerContainersTable({
             cell: (info) => {
                 const container = info.row.original;
                 return (
-                    <div className="text-xs text-primary-300">
+                    <div className="text-primary-300 text-xs">
                         {container.stats?.cpu || "-"}
                     </div>
                 );
@@ -224,7 +224,7 @@ export function DockerContainersTable({
             cell: (info) => {
                 const container = info.row.original;
                 return (
-                    <div className="text-xs text-primary-300">
+                    <div className="text-primary-300 text-xs">
                         {formatMemoryUsedMb(container.stats?.memory)}
                     </div>
                 );
@@ -236,7 +236,7 @@ export function DockerContainersTable({
             cell: (info) => {
                 const container = info.row.original;
                 return (
-                    <div className="break-words text-xs text-primary-300">
+                    <div className="text-primary-300 text-xs break-words">
                         {container.ports.length > 0 ? container.ports.join(", ") : "—"}
                     </div>
                 );
@@ -297,7 +297,7 @@ export function DockerContainersTable({
     if (containers.length === 0) {
         return (
             <Card className="overflow-hidden">
-                <div className="border-b border-primary-700 px-3 py-3 text-lg font-semibold sm:px-4">
+                <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
                     Containers
                 </div>
                 <EmptyState message="No containers found." />
@@ -307,7 +307,7 @@ export function DockerContainersTable({
 
     return (
         <Card className="overflow-hidden">
-            <div className="flex flex-col gap-3 border-b border-primary-700 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Containers</div>
                 <Button
                     size="sm"
@@ -328,7 +328,7 @@ export function DockerContainersTable({
                             key={row.id}
                             role="button"
                             tabIndex={0}
-                            className="w-full rounded-lg border border-primary-700 bg-primary-900/40 p-3 text-left hover:bg-primary-800/50"
+                            className="border-primary-700 bg-primary-900/40 hover:bg-primary-800/50 w-full rounded-lg border p-3 text-left"
                             onClick={() => onDetails(container.id)}
                             onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
@@ -339,10 +339,10 @@ export function DockerContainersTable({
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <div className="break-words font-medium text-primary-50">
+                                    <div className="text-primary-50 font-medium break-words">
                                         {container.name}
                                     </div>
-                                    <div className="mt-1 break-all text-xs text-primary-400">
+                                    <div className="text-primary-400 mt-1 text-xs break-all">
                                         {container.image}
                                     </div>
                                 </div>
@@ -350,7 +350,7 @@ export function DockerContainersTable({
                                     {container.state}
                                 </Badge>
                             </div>
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                            <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
                                 <div>
                                     <div className="text-primary-500">Health</div>
                                     <Badge variant={getHealthVariant(container)}>
@@ -371,7 +371,7 @@ export function DockerContainersTable({
                                 </div>
                             </div>
                             {container.ports.length > 0 ? (
-                                <div className="mt-3 break-words text-xs text-primary-400">
+                                <div className="text-primary-400 mt-3 text-xs break-words">
                                     Ports: {container.ports.join(", ")}
                                 </div>
                             ) : null}
@@ -411,7 +411,7 @@ export function DockerContainersTable({
 
             <div className="hidden max-h-[520px] overflow-auto md:block">
                 <table className="min-w-[900px] text-sm lg:min-w-full">
-                    <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
+                    <thead className="bg-primary-900/95 text-primary-300 sticky top-0 z-10 text-left backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
@@ -419,7 +419,7 @@ export function DockerContainersTable({
                                         {header.column.getCanSort() ? (
                                             <button
                                                 type="button"
-                                                className="flex select-none items-center gap-1 hover:text-primary-100"
+                                                className="hover:text-primary-100 flex items-center gap-1 select-none"
                                                 onClick={header.column.getToggleSortingHandler()}
                                             >
                                                 {flexRender(
@@ -453,7 +453,7 @@ export function DockerContainersTable({
                         {table.getRowModel().rows.map((row) => (
                             <tr
                                 key={row.id}
-                                className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
+                                className="border-primary-700/50 hover:bg-primary-700/30 cursor-pointer border-b"
                                 onClick={() => onDetails(row.original.id)}
                             >
                                 {row.getVisibleCells().map((cell) => (

@@ -37,10 +37,10 @@ export function AutovacuumHealthTable({
             emptyMessage="No autovacuum/dead tuple issues found right now."
             renderMobileCard={(row) => (
                 <div>
-                    <div className="break-all font-medium text-primary-50">
+                    <div className="text-primary-50 font-medium break-all">
                         {row.schemaname}.{row.relname}
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                    <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
                         <div>
                             <div className="text-primary-500">Dead tuples</div>
                             {row.n_dead_tup}
@@ -50,10 +50,10 @@ export function AutovacuumHealthTable({
                             {row.dead_pct}%
                         </div>
                     </div>
-                    <div className="mt-3 text-xs text-primary-400">
+                    <div className="text-primary-400 mt-3 text-xs">
                         Last autovacuum: {row.last_autovacuum || "—"}
                     </div>
-                    <div className="mt-1 text-xs text-primary-400">
+                    <div className="text-primary-400 mt-1 text-xs">
                         Last autoanalyze: {row.last_autoanalyze || "—"}
                     </div>
                 </div>

@@ -255,7 +255,7 @@ export function Sessions() {
         <div className="p-3 sm:p-4 lg:p-6">
             <Card className="mb-4 bg-transparent p-0">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                    <h2 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                         Live Feed (cross-session)
                     </h2>
                 </div>
@@ -282,8 +282,8 @@ export function Sessions() {
                 </div>
 
                 {filteredFeed.length === 0 ? (
-                    <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed border-primary-700 px-4 py-6">
-                        <p className="text-sm text-primary-400">No live messages yet.</p>
+                    <div className="border-primary-700 flex min-h-24 items-center justify-center rounded-lg border border-dashed px-4 py-6">
+                        <p className="text-primary-400 text-sm">No live messages yet.</p>
                     </div>
                 ) : (
                     <div
@@ -296,7 +296,7 @@ export function Sessions() {
                             <button
                                 type="button"
                                 onClick={scrollFeedToBottom}
-                                className="sticky top-2 z-10 float-right mb-2 mr-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
+                                className="bg-accent-500 hover:bg-accent-600 sticky top-2 z-10 float-right mr-2 mb-2 rounded-full px-3 py-1 text-xs text-white shadow-lg"
                             >
                                 ↓ Follow
                             </button>
@@ -319,7 +319,7 @@ export function Sessions() {
                                         className="w-full"
                                     >
                                         {row.kind === "separator" ? (
-                                            <div className="my-1 border-t border-primary-700 pt-1 text-center text-[11px] uppercase tracking-wide text-primary-500">
+                                            <div className="border-primary-700 text-primary-500 my-1 border-t pt-1 text-center text-[11px] tracking-wide uppercase">
                                                 {row.label}
                                             </div>
                                         ) : (
@@ -351,7 +351,7 @@ export function Sessions() {
 
             {!isConnected && !error && (
                 <div className="py-8 text-center">
-                    <WifiOff className="mx-auto mb-4 h-12 w-12 text-primary-400" />
+                    <WifiOff className="text-primary-400 mx-auto mb-4 h-12 w-12" />
                     <p className="text-primary-300">Connecting to OpenClaw...</p>
                 </div>
             )}

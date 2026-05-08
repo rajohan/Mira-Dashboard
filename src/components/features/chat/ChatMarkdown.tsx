@@ -87,7 +87,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     if (parsedJson) {
         return (
             <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-                <div className="border-b border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary-400">
+                <div className="text-primary-400 border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide uppercase">
                     {JSON_LANGUAGES.has(language) ? language : "json"}
                 </div>
                 <div className="max-w-full overflow-x-auto p-2">
@@ -112,7 +112,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 
     return (
         <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-            <div className="border-b border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary-400">
+            <div className="text-primary-400 border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide uppercase">
                 {language}
             </div>
             <SyntaxHighlighter
@@ -148,7 +148,7 @@ const markdownComponents: Components = {
                 target="_blank"
                 rel="noreferrer"
                 className={cn(
-                    "decoration-current/50 text-inherit underline underline-offset-2 hover:opacity-80",
+                    "text-inherit underline decoration-current/50 underline-offset-2 hover:opacity-80",
                     className
                 )}
             />
@@ -162,7 +162,7 @@ const markdownComponents: Components = {
             <blockquote
                 {...blockquoteProps}
                 className={cn(
-                    "border-current/30 my-1 border-l-2 pl-2 italic opacity-90",
+                    "my-1 border-l-2 border-current/30 pl-2 italic opacity-90",
                     className
                 )}
             />
@@ -195,7 +195,7 @@ const markdownComponents: Components = {
                 href={src}
                 target="_blank"
                 rel="noreferrer"
-                className="decoration-current/50 text-inherit underline underline-offset-2 hover:opacity-80"
+                className="text-inherit underline decoration-current/50 underline-offset-2 hover:opacity-80"
             >
                 {alt || src}
             </a>
@@ -245,7 +245,7 @@ const markdownComponents: Components = {
         return (
             <td
                 {...tdProps}
-                className={cn("border-current/20 border px-1.5 py-0.5", className)}
+                className={cn("border border-current/20 px-1.5 py-0.5", className)}
             />
         );
     },
@@ -257,7 +257,7 @@ const markdownComponents: Components = {
             <th
                 {...thProps}
                 className={cn(
-                    "border-current/20 border bg-white/5 px-1.5 py-0.5 font-semibold",
+                    "border border-current/20 bg-white/5 px-1.5 py-0.5 font-semibold",
                     className
                 )}
             />
@@ -269,7 +269,7 @@ export function ChatMarkdown({ text }: { text: string }) {
     return (
         <div
             className={cn(
-                "prose prose-invert max-w-none whitespace-pre-wrap break-words text-sm leading-normal text-inherit",
+                "prose prose-invert max-w-none text-sm leading-normal break-words whitespace-pre-wrap text-inherit",
                 "prose-headings:mb-1 prose-headings:mt-1.5 prose-headings:text-inherit prose-p:my-1 prose-ol:my-1 prose-ul:my-1 prose-li:m-0 prose-li:p-0",
                 "[&_li+li]:mt-0 [&_li>p]:my-0 [&_ol]:space-y-0 [&_ol]:whitespace-normal [&_ul]:space-y-0 [&_ul]:whitespace-normal",
                 "prose-strong:text-inherit prose-code:text-inherit prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0",

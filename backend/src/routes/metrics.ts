@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import express, { type RequestHandler } from "express";
-import { readFileSync, readdirSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import os from "os";
 
 import gateway from "../gateway.js";
@@ -65,9 +65,11 @@ interface MetricsResponse extends SystemMetricsResponse {
     tokens: TokenMetrics;
 }
 
-let previousNetworkSample:
-    | { timestamp: number; downloadBytes: number; uploadBytes: number }
-    | null = null;
+let previousNetworkSample: {
+    timestamp: number;
+    downloadBytes: number;
+    uploadBytes: number;
+} | null = null;
 
 function getNetworkMetrics(): NetworkMetrics {
     let downloadBytes = 0;
@@ -131,8 +133,10 @@ function getNetworkMetrics(): NetworkMetrics {
     previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
 
     return {
-        downloadMbps: Math.round(((downloadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
-        uploadMbps: Math.round(((uploadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
+        downloadMbps:
+            Math.round(((downloadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
+        uploadMbps:
+            Math.round(((uploadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
     };
 }
 

@@ -4,9 +4,13 @@ const READ_RETENTION_DAYS = 14;
 const MAX_READ_ITEMS = 300;
 
 export function pruneReadNotifications(): void {
-    const cutoff = new Date(Date.now() - READ_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+        Date.now() - READ_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
 
-    db.prepare("DELETE FROM notifications WHERE is_read = 1 AND occurred_at < ?").run(cutoff);
+    db.prepare("DELETE FROM notifications WHERE is_read = 1 AND occurred_at < ?").run(
+        cutoff
+    );
 
     db.prepare(
         `DELETE FROM notifications

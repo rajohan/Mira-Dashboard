@@ -57,7 +57,7 @@ export function SessionsTable({
                 id: "name",
                 header: "Name",
                 cell: (info) => (
-                    <span className="block max-w-xs truncate text-sm text-primary-200">
+                    <span className="text-primary-200 block max-w-xs truncate text-sm">
                         {info.getValue()?.slice(0, 40) || "unknown"}
                     </span>
                 ),
@@ -66,7 +66,7 @@ export function SessionsTable({
         columnHelper.accessor("model", {
             header: "Model",
             cell: (info) => (
-                <span className="text-sm text-primary-300">
+                <span className="text-primary-300 text-sm">
                     {info.getValue() || "Unknown"}
                 </span>
             ),
@@ -79,7 +79,7 @@ export function SessionsTable({
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-primary-300">
+                        <span className="text-primary-300 text-sm">
                             {formatTokens(current, max)}
                         </span>
                         <ProgressBar percent={percent} size="sm" className="w-16" />
@@ -90,7 +90,7 @@ export function SessionsTable({
         columnHelper.accessor("updatedAt", {
             header: "Last Active",
             cell: (info) => (
-                <span className="text-sm text-primary-400">
+                <span className="text-primary-400 text-sm">
                     {formatDuration(info.getValue())}
                 </span>
             ),
@@ -148,7 +148,7 @@ export function SessionsTable({
                             key={row.id}
                             role="button"
                             tabIndex={0}
-                            className="cursor-pointer rounded-lg border border-primary-700 bg-primary-900/60 p-3 transition hover:border-primary-600 hover:bg-primary-800/80"
+                            className="border-primary-700 bg-primary-900/60 hover:border-primary-600 hover:bg-primary-800/80 cursor-pointer rounded-lg border p-3 transition"
                             onClick={() => onSelectSession(session)}
                             onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
@@ -162,7 +162,7 @@ export function SessionsTable({
                                     <Badge variant={getSessionTypeVariant(session.type)}>
                                         {formatSessionType(session)}
                                     </Badge>
-                                    <div className="line-clamp-2 break-words text-sm font-medium text-primary-100">
+                                    <div className="text-primary-100 line-clamp-2 text-sm font-medium break-words">
                                         {name}
                                     </div>
                                 </div>
@@ -178,7 +178,7 @@ export function SessionsTable({
                                 </div>
                             </div>
 
-                            <div className="space-y-2 text-xs text-primary-400">
+                            <div className="text-primary-400 space-y-2 text-xs">
                                 <div className="min-w-0 truncate">
                                     Model: {session.model || "Unknown"}
                                 </div>
@@ -205,9 +205,9 @@ export function SessionsTable({
                                     <th
                                         key={header.id}
                                         className={
-                                            "px-4 py-3 text-xs font-medium uppercase text-primary-400 " +
+                                            "text-primary-400 px-4 py-3 text-xs font-medium uppercase " +
                                             (header.column.getCanSort()
-                                                ? "cursor-pointer select-none hover:text-primary-200"
+                                                ? "hover:text-primary-200 cursor-pointer select-none"
                                                 : "") +
                                             (header.id === "actions"
                                                 ? " text-right"
@@ -241,7 +241,7 @@ export function SessionsTable({
                         {table.getRowModel().rows.map((row) => (
                             <tr
                                 key={row.id}
-                                className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
+                                className="border-primary-700/50 hover:bg-primary-700/30 cursor-pointer border-b"
                                 onClick={() => onSelectSession(row.original)}
                             >
                                 {row.getVisibleCells().map((cell) => (

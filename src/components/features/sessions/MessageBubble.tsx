@@ -8,14 +8,14 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) {
     return (
-        <div className="w-full rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
-            <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide opacity-70">
+        <div className="border-primary-700 bg-primary-800 text-primary-100 w-full rounded-2xl border px-3 py-2 text-sm shadow-sm">
+            <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] tracking-wide uppercase opacity-70">
                 <span className="min-w-0 truncate">{role}</span>
                 {timestamp ? (
                     <span className="shrink-0 text-right">{formatDate(timestamp)}</span>
                 ) : null}
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
                 {content}
             </p>
         </div>

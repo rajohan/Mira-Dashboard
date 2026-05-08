@@ -56,7 +56,7 @@ function readSkillDescription(skillPath: string): string | undefined {
         const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
         const description = content.match(/^description:\s*(.+)$/m)?.[1];
         if (description) {
-            return description.replace(/^['\"]|['\"]$/g, "");
+            return description.replaceAll(/^['\"]|['\"]$/g, "");
         }
 
         return content
@@ -160,7 +160,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
     app.get("/api/config", (async (_req, res) => {
         try {
             const snapshot = await getConfigSnapshot();
-            res.json({ ...(snapshot.parsed || {}), __hash: snapshot.hash });
+            res.json({ ...snapshot.parsed, __hash: snapshot.hash });
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });
         }

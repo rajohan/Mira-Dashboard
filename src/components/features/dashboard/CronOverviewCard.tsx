@@ -42,16 +42,16 @@ export function CronOverviewCard() {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     Cron jobs
                 </h3>
-                <Clock3 className="h-4 w-4 text-primary-400" />
+                <Clock3 className="text-primary-400 h-4 w-4" />
             </div>
 
-            <div className="space-y-2 text-sm text-primary-200">
+            <div className="text-primary-200 space-y-2 text-sm">
                 <div className="flex items-center justify-between">
                     <span>Total</span>
-                    <span className="font-semibold text-primary-50">{jobs.length}</span>
+                    <span className="text-primary-50 font-semibold">{jobs.length}</span>
                 </div>
                 <div className="flex items-center justify-between">
                     <span>Enabled</span>
@@ -63,7 +63,7 @@ export function CronOverviewCard() {
                 </div>
                 <div className="flex items-center justify-between gap-2">
                     <span className="shrink-0">Last run</span>
-                    <span className="min-w-0 truncate text-right text-primary-100">
+                    <span className="text-primary-100 min-w-0 truncate text-right">
                         {formatCronTimestamp(
                             latestRunJob
                                 ? getCronStateValue(latestRunJob, "lastRunAtMs")
@@ -74,7 +74,7 @@ export function CronOverviewCard() {
                 </div>
                 <div className="flex items-center justify-between gap-2">
                     <span className="shrink-0">Next run</span>
-                    <span className="min-w-0 truncate text-right text-primary-100">
+                    <span className="text-primary-100 min-w-0 truncate text-right">
                         {formatCronTimestamp(
                             nextRunJob
                                 ? getCronStateValue(nextRunJob, "nextRunAtMs")

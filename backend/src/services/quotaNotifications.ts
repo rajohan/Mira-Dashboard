@@ -8,7 +8,10 @@ const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
-function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>): number | null {
+function getProviderPercent(
+    provider: ProviderKey,
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+): number | null {
     if (provider === "openrouter") {
         return hasQuotaStatus(quotas.openrouter) ? null : quotas.openrouter.percentUsed;
     }
@@ -20,7 +23,10 @@ function getProviderPercent(provider: ProviderKey, quotas: Awaited<ReturnType<ty
     if (provider === "zai") {
         return hasQuotaStatus(quotas.zai)
             ? null
-            : Math.max(quotas.zai.fiveHour.usedPercentage, quotas.zai.weekly.usedPercentage);
+            : Math.max(
+                  quotas.zai.fiveHour.usedPercentage,
+                  quotas.zai.weekly.usedPercentage
+              );
     }
 
     if (provider === "synthetic") {
@@ -88,7 +94,9 @@ function ensureStateRow(provider: ProviderKey, bucket: number): void {
 
 function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
     const state = db
-        .prepare("SELECT is_armed FROM quota_alert_state WHERE provider = ? AND bucket = ?")
+        .prepare(
+            "SELECT is_armed FROM quota_alert_state WHERE provider = ? AND bucket = ?"
+        )
         .get(provider, bucket) as { is_armed?: number } | undefined;
 
     return {
@@ -150,7 +158,13 @@ export async function runQuotaNotificationCheck(): Promise<void> {
     try {
         const quotas = await fetchCachedQuotas();
         const occurredAt = new Date(quotas.checkedAt).toISOString();
-        const providers: ProviderKey[] = ["openrouter", "elevenlabs", "zai", "synthetic", "openai"];
+        const providers: ProviderKey[] = [
+            "openrouter",
+            "elevenlabs",
+            "zai",
+            "synthetic",
+            "openai",
+        ];
 
         for (const provider of providers) {
             const percent = getProviderPercent(provider, quotas);
@@ -170,7 +184,14 @@ export async function runQuotaNotificationCheck(): Promise<void> {
                 let isArmed = state.is_armed;
 
                 if (isArmed === 1 && percent >= bucket) {
-                    insertNotification(provider, bucket, percent, occurredAt, payload.title, payload.description);
+                    insertNotification(
+                        provider,
+                        bucket,
+                        percent,
+                        occurredAt,
+                        payload.title,
+                        payload.description
+                    );
                     isArmed = 0;
                 } else if (percent < bucket - HYSTERESIS) {
                     isArmed = 1;
@@ -187,7 +208,10 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 }
 
 export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
-    const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : DEFAULT_INTERVAL_MS;
+    const safeInterval =
+        Number.isFinite(intervalMs) && intervalMs >= 60_000
+            ? intervalMs
+            : DEFAULT_INTERVAL_MS;
 
     void runQuotaNotificationCheck();
     setInterval(() => {

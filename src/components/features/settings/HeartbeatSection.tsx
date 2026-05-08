@@ -35,7 +35,7 @@ export function HeartbeatSection({
                 className="space-y-4"
             >
                 <div>
-                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                         Interval (seconds)
                     </label>
                     <form.Field name="every">
@@ -54,7 +54,7 @@ export function HeartbeatSection({
                     </form.Field>
                 </div>
                 <div>
-                    <label className="mb-1.5 block text-sm font-medium text-primary-300">
+                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
                         Target Channel
                     </label>
                     <form.Field name="target">

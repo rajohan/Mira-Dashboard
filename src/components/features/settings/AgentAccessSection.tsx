@@ -121,10 +121,10 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                     <div className="space-y-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <h4 className="text-lg font-semibold text-primary-100">
+                                <h4 className="text-primary-100 text-lg font-semibold">
                                     Tool toggles
                                 </h4>
-                                <p className="text-sm text-primary-400">
+                                <p className="text-primary-400 text-sm">
                                     Turning a tool off adds it to this agent’s deny list.
                                     Turning it back on clears that deny entry.
                                 </p>
@@ -160,17 +160,17 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                             riskStyles[risk]
                                         )}
                                     >
-                                        <div className="border-current/10 flex items-center justify-between border-b px-3 py-3 sm:px-4">
+                                        <div className="flex items-center justify-between border-b border-current/10 px-3 py-3 sm:px-4">
                                             <div>
-                                                <h5 className="font-semibold text-primary-100">
+                                                <h5 className="text-primary-100 font-semibold">
                                                     {TOOL_RISK_LABELS[risk]}
-                                                    <span className="ml-2 rounded-full bg-primary-800 px-2 py-0.5 text-sm text-current">
+                                                    <span className="bg-primary-800 ml-2 rounded-full px-2 py-0.5 text-sm text-current">
                                                         {enabledCount}/{riskTools.length}
                                                     </span>
                                                 </h5>
                                             </div>
                                         </div>
-                                        <div className="divide-y divide-primary-800 bg-primary-950/30">
+                                        <div className="divide-primary-800 bg-primary-950/30 divide-y">
                                             {riskTools.map((tool) => {
                                                 const Icon = tool.icon;
                                                 return (
@@ -178,14 +178,14 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                                         key={tool.id}
                                                         className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:px-4"
                                                     >
-                                                        <div className="self-start rounded-lg bg-primary-800 p-2 text-accent-300 sm:self-auto">
+                                                        <div className="bg-primary-800 text-accent-300 self-start rounded-lg p-2 sm:self-auto">
                                                             <Icon className="h-5 w-5" />
                                                         </div>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="break-words font-medium text-primary-100">
+                                                            <div className="text-primary-100 font-medium break-words">
                                                                 {tool.label}
                                                             </div>
-                                                            <div className="break-words text-sm text-primary-500">
+                                                            <div className="text-primary-500 text-sm break-words">
                                                                 {tool.description}
                                                             </div>
                                                         </div>

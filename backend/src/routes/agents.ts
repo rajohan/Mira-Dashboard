@@ -2,8 +2,9 @@ import express, { type RequestHandler } from "express";
 import FS from "fs";
 import JSON5 from "json5";
 import Path from "path";
-import gateway from "../gateway.js";
+
 import { db } from "../db.js";
+import gateway from "../gateway.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
@@ -126,7 +127,9 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
 
         if (Array.isArray(result.sessions) && result.sessions.length > 0) {
             return result.sessions
-                .filter((session) => typeof session.key === "string" && session.key.length > 0)
+                .filter(
+                    (session) => typeof session.key === "string" && session.key.length > 0
+                )
                 .map((session) => ({
                     key: session.key || "",
                     model: session.model || "Unknown",
@@ -154,13 +157,15 @@ function closeStaleActiveTasks(): void {
 }
 
 function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
-    const row = db.prepare(
-        `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
+    const row = db
+        .prepare(
+            `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
          FROM agent_task_history
          WHERE agent_id = ? AND status = 'active'
          ORDER BY started_at DESC
          LIMIT 1`
-    ).get(agentId) as
+        )
+        .get(agentId) as
         | {
               id: number;
               agent_id: string;
@@ -188,13 +193,15 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
 }
 
 function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
-    const rows = db.prepare(
-        `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
+    const rows = db
+        .prepare(
+            `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
          FROM agent_task_history
          WHERE status != 'active' AND completed_at IS NOT NULL
          ORDER BY completed_at DESC
          LIMIT ?`
-    ).all(limit) as Array<{
+        )
+        .all(limit) as Array<{
         id: number;
         agent_id: string;
         task: string;
@@ -249,7 +256,7 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
         }
         const content = FS.readFileSync(metadataPath, "utf8");
         return JSON5.parse(content) as AgentMetadata;
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -265,7 +272,10 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
     } catch (error) {
-        console.error("[Agents] Failed to read agent sessions.json:", (error as Error).message);
+        console.error(
+            "[Agents] Failed to read agent sessions.json:",
+            (error as Error).message
+        );
         return [];
     }
 }
@@ -278,7 +288,9 @@ interface ActivityInfo {
 }
 
 function summarizeToolActivity(toolName: string, raw: unknown): string {
-    const normalizedTool = toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+    const normalizedTool = toolName.includes(".")
+        ? toolName.split(".").pop() || toolName
+        : toolName;
 
     const parsed =
         typeof raw === "string"
@@ -303,16 +315,19 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
             ? (args.parameters as Record<string, unknown>)
             : {};
 
-    const path =
-        (args.path ||
-            args.file_path ||
-            args.filePath ||
-            (Array.isArray(args.paths) ? args.paths[0] : undefined) ||
-            (args.input && typeof args.input === "object" ? (args.input as Record<string, unknown>).path : undefined) ||
-            nested.path ||
-            nested.file_path ||
-            nested.filePath ||
-            (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as string | undefined;
+    const path = (args.path ||
+        args.file_path ||
+        args.filePath ||
+        (Array.isArray(args.paths) ? args.paths[0] : undefined) ||
+        (args.input && typeof args.input === "object"
+            ? (args.input as Record<string, unknown>).path
+            : undefined) ||
+        nested.path ||
+        nested.file_path ||
+        nested.filePath ||
+        (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
+        | string
+        | undefined;
     const command = (args.command || nested.command) as string | undefined;
     const action = (args.action || nested.action) as string | undefined;
     const url = (args.url || nested.url) as string | undefined;
@@ -322,12 +337,16 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (!path && typeof parsed.partialJson === "string") {
         try {
             const pj = JSON.parse(parsed.partialJson) as Record<string, unknown>;
-            fallbackPath =
-                (pj.path || pj.file_path || pj.filePath || (Array.isArray(pj.paths) ? pj.paths[0] : undefined)) as
-                    | string
-                    | undefined;
+            fallbackPath = (pj.path ||
+                pj.file_path ||
+                pj.filePath ||
+                (Array.isArray(pj.paths) ? pj.paths[0] : undefined)) as
+                | string
+                | undefined;
         } catch {
-            const match = parsed.partialJson.match(/"(?:path|file_path|filePath)"\s*:\s*"([^"]+)"/);
+            const match = parsed.partialJson.match(
+                /"(?:path|file_path|filePath)"\s*:\s*"([^"]+)"/
+            );
             fallbackPath = match ? match[1] : undefined;
         }
     }
@@ -383,54 +402,61 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
 
         const latestFile = files[0];
         const now = Date.now();
-        
+
         // If file hasn't been modified in 5 minutes, agent is idle
         if (now - latestFile.mtime > STALE_THRESHOLD) {
             return { task: null, activity: null, modTime: latestFile.mtime };
         }
-        
+
         // Read the file and find last user message and tool use
         const content = FS.readFileSync(latestFile.path, "utf8");
         const lines = content.trim().split("\n");
-        
+
         let lastTask: string | null = null;
         let lastActivity: string | null = null;
-        
+
         // Scan from end to find most recent user message and tool use
         for (let i = lines.length - 1; i >= 0; i--) {
             try {
                 const entry = JSON.parse(lines[i]);
                 const msg = entry.message || entry;
-                
+
                 // First user message from end = current task
                 if (msg.role === "user" && msg.content && !lastTask) {
-                    let text = typeof msg.content === "string" 
-                        ? msg.content 
-                        : Array.isArray(msg.content)
-                          ? msg.content
-                              .filter((c: { type?: string }) => c.type === "text")
-                              .map((c: { text?: string }) => c.text)
-                              .join(" ")
-                          : String(msg.content);
-                    
+                    let text =
+                        typeof msg.content === "string"
+                            ? msg.content
+                            : Array.isArray(msg.content)
+                              ? msg.content
+                                    .filter((c: { type?: string }) => c.type === "text")
+                                    .map((c: { text?: string }) => c.text)
+                                    .join(" ")
+                              : String(msg.content);
+
                     // Clean metadata and extract actual message
                     text = text
-                        .replace(/```json[\s\S]*?```/g, "")
-                        .replace(/```[\s\S]*?```/g, "")
-                        .replace(/\[media attached[^\]]*\]/g, "")
-                        .replace(/Conversation info[^\n]*/g, "")
-                        .replace(/Sender[^\n]*/g, "")
-                        .replace(/\n+/g, " ")
-                        .replace(/\s+/g, " ")
+                        .replaceAll(/```json[\s\S]*?```/g, "")
+                        .replaceAll(/```[\s\S]*?```/g, "")
+                        .replaceAll(/\[media attached[^\]]*\]/g, "")
+                        .replaceAll(/Conversation info[^\n]*/g, "")
+                        .replaceAll(/Sender[^\n]*/g, "")
+                        .replaceAll(/\n+/g, " ")
+                        .replaceAll(/\s+/g, " ")
                         .trim()
                         .slice(0, 100);
-                    
+
                     lastTask = text || null;
                 }
-                
+
                 // First tool use from end = current activity
-                if (msg.role === "assistant" && Array.isArray(msg.content) && !lastActivity) {
-                    const toolCalls = msg.content.filter((c: { type?: string }) => c.type === "toolCall");
+                if (
+                    msg.role === "assistant" &&
+                    Array.isArray(msg.content) &&
+                    !lastActivity
+                ) {
+                    const toolCalls = msg.content.filter(
+                        (c: { type?: string }) => c.type === "toolCall"
+                    );
                     if (toolCalls.length > 0) {
                         const toolCall = toolCalls[0] as {
                             name?: string;
@@ -442,7 +468,7 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
                         lastActivity = summarizeToolActivity(toolName, toolCall);
                     }
                 }
-                
+
                 // Stop if we found both
                 if (lastTask && lastActivity) break;
             } catch {
@@ -450,12 +476,12 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
             }
         }
 
-        return { 
-            task: lastTask, 
-            activity: lastActivity, 
-            modTime: latestFile.mtime 
+        return {
+            task: lastTask,
+            activity: lastActivity,
+            modTime: latestFile.mtime,
         };
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -528,7 +554,19 @@ function findBestSessionForAgent(
         return undefined;
     }
 
-    const preferredKinds = [":main", ":discord:", ":telegram:", ":signal:", ":whatsapp:", ":slack:", ":imessage:", ":line:", ":irc:", ":googlechat:", ":channel:"];
+    const preferredKinds = [
+        ":main",
+        ":discord:",
+        ":telegram:",
+        ":signal:",
+        ":whatsapp:",
+        ":slack:",
+        ":imessage:",
+        ":line:",
+        ":irc:",
+        ":googlechat:",
+        ":channel:",
+    ];
 
     return matches.sort((a, b) => {
         const timeA = a.updatedAt || 0;
@@ -569,7 +607,7 @@ function getAgentStatus(agentId: string): AgentStatus {
 
     // Get activity from JSONL file
     const activity = getLatestActivityFromFile(agentId);
-    
+
     // Determine status from file modification time
     const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
     const status = determineStatus(fileModTime);
@@ -578,7 +616,8 @@ function getAgentStatus(agentId: string): AgentStatus {
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
     const effectiveModTime = fileModTime || 0;
 
-    const currentTask = activeTask?.task || metadata?.currentTask || activity?.task || null;
+    const currentTask =
+        activeTask?.task || metadata?.currentTask || activity?.task || null;
 
     return {
         id: agentId,
@@ -586,7 +625,8 @@ function getAgentStatus(agentId: string): AgentStatus {
         model: "unknown", // Will be filled from config
         currentTask,
         currentActivity: activity?.activity || null,
-        lastActivity: effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
+        lastActivity:
+            effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
         sessionKey,
         channel,
     };
@@ -649,7 +689,9 @@ export default function agentsRoutes(app: express.Application): void {
     // Get single agent status
     app.get("/api/agents/:id/status", (async (req, res) => {
         try {
-            const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const agentId = Array.isArray(req.params.id)
+                ? req.params.id[0]
+                : req.params.id;
             const config = parseAgentsConfig();
 
             if (!config) {
@@ -700,7 +742,9 @@ export default function agentsRoutes(app: express.Application): void {
     // Update agent metadata (current task)
     app.put("/api/agents/:id/metadata", (async (req, res) => {
         try {
-            const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const agentId = Array.isArray(req.params.id)
+                ? req.params.id[0]
+                : req.params.id;
             const { currentTask } = req.body as { currentTask?: string };
 
             if (!currentTask || currentTask.trim().length === 0) {
@@ -708,7 +752,12 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
+            const metadataPath = Path.join(
+                AGENTS_DIR,
+                agentId,
+                "sessions",
+                "metadata.json"
+            );
             const metadataDir = Path.dirname(metadataPath);
 
             // Ensure directory exists
@@ -726,7 +775,10 @@ export default function agentsRoutes(app: express.Application): void {
                 }
             }
 
-            const safeTask = typeof currentTask === "string" ? currentTask.trim().slice(0, 100) : undefined;
+            const safeTask =
+                typeof currentTask === "string"
+                    ? currentTask.trim().slice(0, 100)
+                    : undefined;
             const currentActive = getActiveHistoryTask(agentId);
             const ts = nowIso();
 
@@ -737,7 +789,11 @@ export default function agentsRoutes(app: express.Application): void {
                         `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
                          VALUES (?, ?, 'active', ?, ?)`
                     ).run(agentId, safeTask, ts, ts);
-                } else if (currentActive.task !== safeTask) {
+                } else if (currentActive.task === safeTask) {
+                    db.prepare(
+                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                    ).run(ts, currentActive.id);
+                } else {
                     db.prepare(
                         `UPDATE agent_task_history
                          SET status = 'completed', completed_at = ?, last_activity_at = ?
@@ -748,10 +804,6 @@ export default function agentsRoutes(app: express.Application): void {
                         `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
                          VALUES (?, ?, 'active', ?, ?)`
                     ).run(agentId, safeTask, ts, ts);
-                } else {
-                    db.prepare(
-                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                    ).run(ts, currentActive.id);
                 }
 
                 metadata.currentTask = safeTask;

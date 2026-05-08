@@ -23,7 +23,7 @@ export default function staticRoutes(
         );
 
         // SPA fallback - serve index.html for all non-API routes
-        app.get("*", (req, res, next) => {
+        app.get(/^(?!\/api\/).*/, (req, res, next) => {
             // Skip API routes
             if (req.path.startsWith("/api/")) {
                 next();
@@ -41,7 +41,7 @@ export default function staticRoutes(
         });
     } else {
         // Frontend not built - serve a placeholder
-        app.get("*", (req, res, next) => {
+        app.get(/^(?!\/api\/).*/, (req, res, next) => {
             if (req.path.startsWith("/api/")) {
                 next();
                 return;

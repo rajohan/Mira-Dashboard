@@ -1,7 +1,8 @@
 import { execSync } from "node:child_process";
 
+import babel from "@rolldown/plugin-babel";
 import { devtools } from "@tanstack/devtools-vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const appCommit = (() => {
@@ -17,14 +18,7 @@ const appCommit = (() => {
 })();
 
 export default defineConfig({
-    plugins: [
-        devtools(),
-        react({
-            babel: {
-                plugins: [["babel-plugin-react-compiler", {}]],
-            },
-        }),
-    ],
+    plugins: [devtools(), react(), babel({ presets: [reactCompilerPreset()] })],
     define: {
         __APP_COMMIT__: JSON.stringify(appCommit),
     },
@@ -42,12 +36,28 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             output: {
-                manualChunks: {
-                    ui: ["@headlessui/react", "lucide-react"],
-                    router: ["@tanstack/react-router"],
-                    query: ["@tanstack/react-query"],
-                    markdown: ["react-markdown", "remark-gfm"],
-                    syntax: ["react-syntax-highlighter"],
+                manualChunks(id) {
+                    if (
+                        id.includes("node_modules/@headlessui/react") ||
+                        id.includes("node_modules/lucide-react")
+                    ) {
+                        return "ui";
+                    }
+                    if (id.includes("node_modules/@tanstack/react-router")) {
+                        return "router";
+                    }
+                    if (id.includes("node_modules/@tanstack/react-query")) {
+                        return "query";
+                    }
+                    if (
+                        id.includes("node_modules/react-markdown") ||
+                        id.includes("node_modules/remark-gfm")
+                    ) {
+                        return "markdown";
+                    }
+                    if (id.includes("node_modules/react-syntax-highlighter")) {
+                        return "syntax";
+                    }
                 },
             },
         },

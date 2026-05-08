@@ -54,7 +54,7 @@ export function MetricCard({
                         {icon}
                     </div>
                 )}
-                <div className="text-sm text-primary-300">{title}</div>
+                <div className="text-primary-300 text-sm">{title}</div>
             </div>
             <div className="flex items-end justify-between">
                 <div>
@@ -63,8 +63,8 @@ export function MetricCard({
                         <div
                             className={
                                 showValue
-                                    ? "mt-1 text-xs text-primary-400"
-                                    : "text-sm text-primary-300"
+                                    ? "text-primary-400 mt-1 text-xs"
+                                    : "text-primary-300 text-sm"
                             }
                         >
                             {subtitle}
@@ -72,13 +72,13 @@ export function MetricCard({
                     ) : null}
                 </div>
                 {percent !== undefined && showPercentLabel && (
-                    <div className="text-lg font-semibold text-primary-300">
+                    <div className="text-primary-300 text-lg font-semibold">
                         {percent}%
                     </div>
                 )}
             </div>
             {percent !== undefined && (
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary-700">
+                <div className="bg-primary-700 mt-3 h-2 overflow-hidden rounded-full">
                     <div
                         className={
                             "h-full transition-all duration-500 " +

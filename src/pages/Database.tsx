@@ -25,8 +25,8 @@ export function Database() {
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
             <DatabaseOverviewCards overview={data.overview} />
 
-            <div className="border-b border-primary-700 pb-2">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+            <div className="border-primary-700 border-b pb-2">
+                <h2 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     Databases
                 </h2>
             </div>
@@ -36,15 +36,15 @@ export function Database() {
                 stats={data.pgbouncerStats}
             />
 
-            <div className="border-b border-primary-700 pb-2">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+            <div className="border-primary-700 border-b pb-2">
+                <h2 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     Maintenance
                 </h2>
             </div>
             <AutovacuumHealthTable data={data.deadTuples} />
 
-            <div className="border-b border-primary-700 pb-2">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-300">
+            <div className="border-primary-700 border-b pb-2">
+                <h2 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
                     Query performance
                 </h2>
             </div>

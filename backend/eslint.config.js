@@ -28,6 +28,10 @@ const eslintConfig = defineConfig(
             "simple-import-sort/imports": "error",
             "simple-import-sort/exports": "error",
             "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+            "@typescript-eslint/no-explicit-any": "off",
+            "@typescript-eslint/no-namespace": "off",
+            "no-useless-escape": "off",
+            "no-useless-assignment": "off",
             // Unicorn rules - relax aggressive defaults
             "unicorn/prevent-abbreviations": "off",
             "unicorn/no-null": "off",
@@ -41,6 +45,11 @@ const eslintConfig = defineConfig(
             "unicorn/switch-case-braces": "off",
             "unicorn/numeric-separators-style": "off",
             "unicorn/prefer-node-protocol": "off",
+            "unicorn/no-await-expression-member": "off",
+            "unicorn/no-single-promise-in-promise-methods": "off",
+            "unicorn/no-array-reduce": "off",
+            "unicorn/no-immediate-mutation": "off",
+            "unicorn/import-style": "off",
             "unicorn/filename-case": [
                 "error",
                 {

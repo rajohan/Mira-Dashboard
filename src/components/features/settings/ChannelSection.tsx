@@ -30,12 +30,12 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps
     return (
         <ExpandableCard title="Channels" icon={MessageSquare}>
             <div className="space-y-4">
-                <p className="text-sm text-primary-400">
+                <p className="text-primary-400 text-sm">
                     {enabledCount}/{draftChannels.length} configured channels enabled
                 </p>
 
                 {draftChannels.length === 0 ? (
-                    <div className="rounded-lg border border-primary-800 bg-primary-900/50 p-3 text-sm text-primary-400">
+                    <div className="border-primary-800 bg-primary-900/50 text-primary-400 rounded-lg border p-3 text-sm">
                         No channels configured in OpenClaw config.
                     </div>
                 ) : (
@@ -59,7 +59,7 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps
                                         .filter(Boolean)
                                         .join(" · ") || "Configured channel"
                                 }
-                                className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
+                                className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                             />
                         ))}
                     </div>

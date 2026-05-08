@@ -32,7 +32,7 @@ export function Agents() {
                         <>
                             {activeAgents.length > 0 && (
                                 <div>
-                                    <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                                    <h2 className="text-primary-300 mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide uppercase">
                                         <span className="h-2 w-2 rounded-full bg-emerald-500" />
                                         Active ({activeAgents.length})
                                     </h2>
@@ -55,7 +55,7 @@ export function Agents() {
 
                             {idleAgents.length > 0 && (
                                 <div>
-                                    <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-300">
+                                    <h2 className="text-primary-300 mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide uppercase">
                                         <span className="h-2 w-2 rounded-full bg-sky-300" />
                                         Idle ({idleAgents.length})
                                     </h2>
@@ -78,8 +78,8 @@ export function Agents() {
 
                             {offlineAgents.length > 0 && (
                                 <div>
-                                    <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary-400">
-                                        <span className="h-2 w-2 rounded-full bg-primary-600" />
+                                    <h2 className="text-primary-400 mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide uppercase">
+                                        <span className="bg-primary-600 h-2 w-2 rounded-full" />
                                         Offline ({offlineAgents.length})
                                     </h2>
                                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
@@ -103,7 +103,7 @@ export function Agents() {
                                 <Card className="py-8 text-center">
                                     <p className="text-primary-400">
                                         No agents configured. Check{" "}
-                                        <code className="rounded bg-primary-700 px-1 py-0.5 text-primary-300">
+                                        <code className="bg-primary-700 text-primary-300 rounded px-1 py-0.5">
                                             ~/.openclaw/openclaw.json
                                         </code>
                                     </p>

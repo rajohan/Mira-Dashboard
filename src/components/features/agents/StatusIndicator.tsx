@@ -8,7 +8,7 @@ export function StatusIndicator({ status }: { status: keyof typeof agentStatusCo
     return (
         <div
             className={
-                "flex h-4 w-4 items-center justify-center rounded-full border ring-1 ring-primary-900/80 " +
+                "ring-primary-900/80 flex h-4 w-4 items-center justify-center rounded-full border ring-1 " +
                 colors.border +
                 " " +
                 colors.glow +

@@ -86,12 +86,12 @@ export function Login() {
     const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-primary-900 p-4">
+        <div className="bg-primary-900 flex min-h-screen items-center justify-center p-4">
             <Card className="w-full max-w-md" variant="bordered">
                 <div className="mb-4 text-center">
                     <div className="mb-2 text-4xl">👩‍💻</div>
                     <CardTitle className="text-center">Mira Dashboard</CardTitle>
-                    <p className="mt-2 text-primary-400">
+                    <p className="text-primary-400 mt-2">
                         {bootstrapRequired
                             ? "Create the first dashboard user and save the gateway token server-side"
                             : "Log in with your dashboard username and password"}
@@ -167,7 +167,7 @@ export function Login() {
                     </Button>
                 </form>
 
-                <p className="mt-4 text-center text-xs text-primary-500">
+                <p className="text-primary-500 mt-4 text-center text-xs">
                     {bootstrapRequired
                         ? "The gateway token is only required once during first-user setup."
                         : "Gateway access stays server-side after bootstrap."}

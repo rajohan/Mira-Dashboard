@@ -119,7 +119,9 @@ export default function sessionsRoutes(app: express.Application): void {
         const sessionKey = Array.isArray(sessionKeyParam)
             ? sessionKeyParam[0] || ""
             : sessionKeyParam || "";
-        const action = String(req.body?.action || "").trim().toLowerCase();
+        const action = String(req.body?.action || "")
+            .trim()
+            .toLowerCase();
 
         try {
             console.log("[Sessions] action request", { sessionKey, action });

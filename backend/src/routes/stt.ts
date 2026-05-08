@@ -116,7 +116,9 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
         }),
         (async (request, response) => {
             if (activeTranscription) {
-                response.status(429).json({ error: "Another transcription is already running" });
+                response
+                    .status(429)
+                    .json({ error: "Another transcription is already running" });
                 return;
             }
 

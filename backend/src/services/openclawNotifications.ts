@@ -77,7 +77,8 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
         const state = getState();
 
         if (version.updateAvailable && version.latest) {
-            const shouldNotify = state.is_armed === 1 || state.last_latest !== version.latest;
+            const shouldNotify =
+                state.is_armed === 1 || state.last_latest !== version.latest;
             if (shouldNotify) {
                 insertUpdateAvailableNotification(version.current, version.latest);
             }
@@ -100,7 +101,10 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
 }
 
 export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
-    const safeInterval = Number.isFinite(intervalMs) && intervalMs >= 60_000 ? intervalMs : DEFAULT_INTERVAL_MS;
+    const safeInterval =
+        Number.isFinite(intervalMs) && intervalMs >= 60_000
+            ? intervalMs
+            : DEFAULT_INTERVAL_MS;
 
     void runOpenClawNotificationCheck();
     setInterval(() => {

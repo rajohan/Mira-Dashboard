@@ -20,7 +20,7 @@ export function AttachmentPreviewModal({
         >
             {previewItem ? (
                 <div className="space-y-3">
-                    <div className="text-xs text-primary-400">
+                    <div className="text-primary-400 text-xs">
                         {previewItem.mimeType || "application/octet-stream"}
                         {previewItem.sizeBytes
                             ? ` · ${formatSize(previewItem.sizeBytes)}`
@@ -33,22 +33,22 @@ export function AttachmentPreviewModal({
                             className="max-h-[70vh] w-full rounded-lg object-contain"
                         />
                     ) : previewItem.kind === "text" && previewItem.text ? (
-                        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm text-primary-100">
+                        <pre className="border-primary-700 bg-primary-950 text-primary-100 max-h-[70vh] overflow-auto rounded-lg border p-4 text-sm whitespace-pre-wrap">
                             {previewItem.text}
                         </pre>
                     ) : previewItem.url ? (
-                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-200">
+                        <div className="border-primary-700 bg-primary-900/60 text-primary-200 rounded-lg border p-4 text-sm">
                             Preview is not available for this file type yet.
                             <a
                                 href={previewItem.url}
                                 download={previewItem.title}
-                                className="ml-2 text-accent-300 underline hover:text-accent-200"
+                                className="text-accent-300 hover:text-accent-200 ml-2 underline"
                             >
                                 Download file
                             </a>
                         </div>
                     ) : (
-                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
+                        <div className="border-primary-700 bg-primary-900/60 text-primary-300 rounded-lg border p-4 text-sm">
                             This historical attachment has no preview data available.
                         </div>
                     )}

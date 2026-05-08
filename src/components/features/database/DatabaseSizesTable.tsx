@@ -106,10 +106,10 @@ export function DatabasesTable({ databases, pools, stats }: Props) {
             columns={columns}
             renderMobileCard={(row) => (
                 <div>
-                    <div className="break-words font-medium text-primary-50">
+                    <div className="text-primary-50 font-medium break-words">
                         {row.datname}
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                    <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
                         <div>
                             <div className="text-primary-500">Size</div>
                             {row.size_pretty}
@@ -129,7 +129,7 @@ export function DatabasesTable({ databases, pools, stats }: Props) {
                                 : "—"}
                         </div>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-400">
+                    <div className="text-primary-400 mt-3 grid grid-cols-2 gap-2 text-xs">
                         <div>Clients: {row.cl_active}</div>
                         <div>Waiting: {row.cl_waiting}</div>
                         <div>Idle servers: {row.sv_idle}</div>

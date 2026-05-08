@@ -100,7 +100,10 @@ function derivePublicKeyRaw(publicKeyPem: string): Buffer {
 }
 
 function fingerprintPublicKey(publicKeyPem: string): string {
-    return crypto.createHash("sha256").update(derivePublicKeyRaw(publicKeyPem)).digest("hex");
+    return crypto
+        .createHash("sha256")
+        .update(derivePublicKeyRaw(publicKeyPem))
+        .digest("hex");
 }
 
 function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
@@ -128,7 +131,9 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     fs.mkdirSync(Path.dirname(filePath), { recursive: true });
 
     if (fs.existsSync(filePath)) {
-        const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<DeviceIdentity> & {
+        const parsed = JSON.parse(
+            fs.readFileSync(filePath, "utf8")
+        ) as Partial<DeviceIdentity> & {
             version?: number;
         };
 
@@ -155,9 +160,13 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     }
 
     const identity = generateIdentity();
-    fs.writeFileSync(filePath, `${JSON.stringify({ version: 1, ...identity }, null, 2)}\n`, {
-        mode: 0o600,
-    });
+    fs.writeFileSync(
+        filePath,
+        `${JSON.stringify({ version: 1, ...identity }, null, 2)}\n`,
+        {
+            mode: 0o600,
+        }
+    );
     return identity;
 }
 
@@ -167,7 +176,7 @@ function normalizeDeviceMetadataForAuth(value?: string): string {
     }
 
     const trimmed = value.trim();
-    return trimmed ? trimmed.replace(/[A-Z]/gu, (char) => char.toLowerCase()) : "";
+    return trimmed ? trimmed.replaceAll(/[A-Z]/gu, (char) => char.toLowerCase()) : "";
 }
 
 function buildDeviceAuthPayloadV3(params: {
@@ -256,7 +265,9 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         });
 
         ws.on("error", (error) => {
-            this.opts.onConnectError?.(error instanceof Error ? error : new Error(String(error)));
+            this.opts.onConnectError?.(
+                error instanceof Error ? error : new Error(String(error))
+            );
         });
     }
 
@@ -423,7 +434,8 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 this.backoffMs = 1_000;
                 this.lastTickAt = Date.now();
                 this.tickIntervalMs =
-                    (payload as GatewayHelloOk).policy?.tickIntervalMs || DEFAULT_TICK_INTERVAL_MS;
+                    (payload as GatewayHelloOk).policy?.tickIntervalMs ||
+                    DEFAULT_TICK_INTERVAL_MS;
                 this.startTickWatch();
                 this.opts.onHelloOk?.(payload as GatewayHelloOk);
             }
@@ -432,14 +444,18 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         }
 
         const errorMessage =
-            response.error?.message || response.error?.code || "Unknown gateway request error";
+            response.error?.message ||
+            response.error?.code ||
+            "Unknown gateway request error";
         pending.reject(new Error(errorMessage));
     }
 
     private sendConnect(challengePayload?: { nonce?: string }): void {
         const nonce = challengePayload?.nonce;
         if (!nonce || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            this.opts.onConnectError?.(new Error("gateway connect challenge missing nonce"));
+            this.opts.onConnectError?.(
+                new Error("gateway connect challenge missing nonce")
+            );
             this.ws?.close(1008, "connect challenge missing nonce");
             return;
         }
@@ -469,8 +485,13 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
                   return {
                       id: this.opts.deviceIdentity.deviceId,
-                      publicKey: publicKeyRawBase64UrlFromPem(this.opts.deviceIdentity.publicKeyPem),
-                      signature: signDevicePayload(this.opts.deviceIdentity.privateKeyPem, payload),
+                      publicKey: publicKeyRawBase64UrlFromPem(
+                          this.opts.deviceIdentity.publicKeyPem
+                      ),
+                      signature: signDevicePayload(
+                          this.opts.deviceIdentity.privateKeyPem,
+                          payload
+                      ),
                       signedAt: signedAtMs,
                       nonce,
                   };
@@ -494,7 +515,9 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             auth: token ? { token } : undefined,
             device,
         }).catch((error) => {
-            this.opts.onConnectError?.(error instanceof Error ? error : new Error(String(error)));
+            this.opts.onConnectError?.(
+                error instanceof Error ? error : new Error(String(error))
+            );
             this.ws?.close(1008, error instanceof Error ? error.message : String(error));
         });
     }

@@ -79,10 +79,10 @@ export function TopQueriesTable({
                 onRowClick={(row) => setSelectedQuery(row)}
                 renderMobileCard={(row) => (
                     <div>
-                        <div className="line-clamp-4 break-words font-mono text-xs text-primary-100">
+                        <div className="text-primary-100 line-clamp-4 font-mono text-xs break-words">
                             {truncateQuery(row.query, 220)}
                         </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
+                        <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
                             <div>
                                 <div className="text-primary-500">Calls</div>
                                 {row.calls}
@@ -100,7 +100,7 @@ export function TopQueriesTable({
                                 {row.rows}
                             </div>
                         </div>
-                        <div className="mt-3 text-xs text-accent-300">
+                        <div className="text-accent-300 mt-3 text-xs">
                             Tap for full query
                         </div>
                     </div>
@@ -118,7 +118,7 @@ export function TopQueriesTable({
             >
                 {selectedQuery ? (
                     <div className="space-y-3 sm:space-y-4">
-                        <div className="grid grid-cols-2 gap-2 text-sm text-primary-400 sm:flex sm:flex-wrap sm:gap-4">
+                        <div className="text-primary-400 grid grid-cols-2 gap-2 text-sm sm:flex sm:flex-wrap sm:gap-4">
                             <span>Calls: {selectedQuery.calls}</span>
                             <span>Total ms: {selectedQuery.total_exec_time}</span>
                             <span>Mean ms: {selectedQuery.mean_exec_time}</span>
@@ -137,7 +137,7 @@ export function TopQueriesTable({
                             </Button>
                         </div>
 
-                        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-primary-700 bg-primary-900/50 p-3 text-xs text-primary-100 sm:p-4 sm:text-sm">
+                        <pre className="border-primary-700 bg-primary-900/50 text-primary-100 max-h-[70vh] overflow-auto rounded-lg border p-3 text-xs break-words whitespace-pre-wrap sm:p-4 sm:text-sm">
                             <code>{selectedQuery.query}</code>
                         </pre>
                     </div>

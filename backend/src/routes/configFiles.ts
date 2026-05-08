@@ -85,7 +85,7 @@ export default function configFilesRoutes(
     }) as RequestHandler);
 
     // Read config file content
-    app.get("/api/config-files/*", (async (req, res) => {
+    app.get(/^\/api\/config-files\/(.*)$/, (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
 
         // Check if file is in whitelist
@@ -148,7 +148,7 @@ export default function configFilesRoutes(
     }) as RequestHandler);
 
     // Write config file
-    app.put("/api/config-files/*", express.json(), (async (req, res) => {
+    app.put(/^\/api\/config-files\/(.*)$/, express.json(), (async (req, res) => {
         const filePath = decodeURIComponent(req.params[0] || "");
         const { content } = req.body as { content?: string };
 
