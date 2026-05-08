@@ -18,6 +18,7 @@ import { Button } from "../components/ui/Button";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Modal } from "../components/ui/Modal";
 import {
+    useCacheEntry,
     useConfig,
     useCreateBackup,
     useRestartGateway,
@@ -65,6 +66,14 @@ function numberFromDuration(value: unknown, fallback: number): number {
     return amount * (factors[unit] || 1);
 }
 
+interface SystemHostCache {
+    version?: {
+        current?: string;
+        latest?: string | null;
+        updateAvailable?: boolean;
+    };
+}
+
 export function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -73,6 +82,7 @@ export function Settings() {
     // Queries
     const { data: config, isLoading: configLoading } = useConfig();
     const { data: skills = [], isLoading: skillsLoading } = useSkills();
+    const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
 
     // Mutations
     const updateConfig = useUpdateConfig();
@@ -286,6 +296,7 @@ export function Settings() {
 
     const serverInfo = {
         version:
+            systemHost?.data.version?.current ||
             config?.meta?.lastTouchedVersion ||
             config?.wizard?.lastRunVersion ||
             "Unknown",
