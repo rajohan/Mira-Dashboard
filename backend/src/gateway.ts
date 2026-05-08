@@ -718,7 +718,15 @@ async function deleteSession(sessionKey: string): Promise<unknown> {
         deleteTranscript: true,
     });
 
-    await refreshSessions();
+    try {
+        await refreshSessions();
+    } catch (error) {
+        console.warn(
+            "[Gateway] Failed to refresh sessions after delete:",
+            error instanceof Error ? error.message : String(error)
+        );
+    }
+
     return result;
 }
 

@@ -30,6 +30,7 @@ export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
     const sessionActions = useSessionActions();
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
     const [feedRoleFilter, setFeedRoleFilter] = useState<string>("ALL");
@@ -235,13 +236,16 @@ export function Sessions() {
         if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
 
         const target = deleteTarget;
+        setDeleteError(null);
         setDeleteTarget(null);
 
         try {
             await sessionActions.remove(target.key);
         } catch (error_) {
             console.error("Failed to delete session:", error_);
-            setDeleteTarget(target);
+            setDeleteError(
+                error_ instanceof Error ? error_.message : "Failed to delete session"
+            );
         }
     };
 
@@ -343,6 +347,7 @@ export function Sessions() {
             </div>
 
             {error && <Alert variant="error">{error}</Alert>}
+            {deleteError && <Alert variant="error">{deleteError}</Alert>}
 
             {!isConnected && !error && (
                 <div className="py-8 text-center">
@@ -354,7 +359,10 @@ export function Sessions() {
             {isConnected && (
                 <SessionsTable
                     sessions={filteredSessions}
-                    onSelectSession={setSelectedSession}
+                    onSelectSession={(session) => {
+                        setDeleteError(null);
+                        setSelectedSession(session);
+                    }}
                     onCompact={(sessionKey: string) => sessionActions.compact(sessionKey)}
                     onReset={(sessionKey: string) => sessionActions.reset(sessionKey)}
                     onDelete={setDeleteTarget}
