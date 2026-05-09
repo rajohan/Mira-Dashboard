@@ -1,73 +1,85 @@
-# React + TypeScript + Vite
+# Mira Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Node/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
-Currently, two official plugins are available:
+## What it includes
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Authenticated dashboard routes for chat, sessions, agents, tasks, logs, files, cron, Docker updater state, database checks, Moltbook, terminal access, and settings.
+- A backend API on port `3100` with route modules under `backend/src/routes`.
+- A shared WebSocket bridge for live OpenClaw Gateway updates.
+- Local SQLite storage for dashboard tasks, task updates, notifications, auth sessions, quota alert state, OpenClaw alert state, and agent task history.
+- Vite/TanStack Router frontend on port `5173` during development, proxying `/api` to the backend.
 
-## React Compiler
+## Repository layout
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-    globalIgnores(["dist"]),
-    {
-        files: ["**/*.{ts,tsx}"],
-        extends: [
-            // Other configs...
-
-            // Remove tseslint.configs.recommended and replace with this
-            tseslint.configs.recommendedTypeChecked,
-            // Alternatively, use this for stricter rules
-            tseslint.configs.strictTypeChecked,
-            // Optionally, add this for stylistic rules
-            tseslint.configs.stylisticTypeChecked,
-
-            // Other configs...
-        ],
-        languageOptions: {
-            parserOptions: {
-                project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-                tsconfigRootDir: import.meta.dirname,
-            },
-            // other options...
-        },
-    },
-]);
+```text
+src/                     React app, routes, hooks, stores, types, and UI components
+backend/src/             Express backend, Gateway bridge, route modules, services, DB setup
+backend/data/            Local runtime SQLite databases; do not commit runtime data changes
+dist/                    Production frontend build output
+vite.config.ts           Vite config, React Compiler preset, dev proxy, and build chunking
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Local development
 
-```js
-// eslint.config.js
-import reactX from "eslint-plugin-react-x";
-import reactDom from "eslint-plugin-react-dom";
+Install frontend dependencies from the repo root:
 
-export default defineConfig([
-    globalIgnores(["dist"]),
-    {
-        files: ["**/*.{ts,tsx}"],
-        extends: [
-            // Other configs...
-            // Enable lint rules for React
-            reactX.configs["recommended-typescript"],
-            // Enable lint rules for React DOM
-            reactDom.configs.recommended,
-        ],
-        languageOptions: {
-            parserOptions: {
-                project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-                tsconfigRootDir: import.meta.dirname,
-            },
-            // other options...
-        },
-    },
-]);
+```bash
+npm install
 ```
+
+Install backend dependencies separately:
+
+```bash
+cd backend
+npm install
+```
+
+Run the frontend dev server:
+
+```bash
+npm run dev
+```
+
+Run the backend dev server from `backend/`:
+
+```bash
+npm run dev
+```
+
+The backend scripts use Doppler (`rajohan` / `prd`) for runtime secrets. Do not commit `.env` files, tokens, database dumps, or generated runtime state.
+
+## Verification commands
+
+From the repo root:
+
+```bash
+npm run lint
+npm run build
+npm run format:check
+```
+
+From `backend/`:
+
+```bash
+npm run lint
+npm run build
+npm run format:check
+```
+
+Use the smallest meaningful gate for the change you are making. For docs-only changes, `git diff --check` is usually enough; for frontend/backend code changes, prefer lint plus the relevant build.
+
+## Runtime notes
+
+- Backend default port: `3100`.
+- Frontend dev port: `5173`.
+- Health endpoints: `/health` and `/api/health`.
+- Vite is configured with React Compiler via `reactCompilerPreset()`.
+- Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
+- Auth is enforced for API routes after `/api/auth/*`; route modules should assume authenticated access unless explicitly mounted before the auth middleware.
+
+## Safety notes for agents
+
+- Do not merge PRs, deploy, restart services, rotate secrets, or change gateway configuration from this repo without Raymond's explicit approval.
+- Keep changes small and reviewable; prefer existing hooks/components/utilities before introducing new patterns.
+- Avoid broad rewrites around auth, device pairing, Gateway bootstrap, migrations, terminal execution, or config writes unless the work is first captured as a proposal/task.
