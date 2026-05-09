@@ -94,6 +94,13 @@ export function Tasks() {
         tasksByColumn[col.id] = filteredTasks
             .filter((task) => col.filter(task))
             .sort((a, b) => {
+                const updatedDiff =
+                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+
+                if (col.id === "done") {
+                    return updatedDiff || b.number - a.number;
+                }
+
                 const rank = { high: 0, medium: 1, low: 2 };
                 const priorityDiff =
                     rank[getPriority(a.labels)] - rank[getPriority(b.labels)];
@@ -101,7 +108,7 @@ export function Tasks() {
                     return priorityDiff;
                 }
 
-                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                return updatedDiff || b.number - a.number;
             });
     }
 
