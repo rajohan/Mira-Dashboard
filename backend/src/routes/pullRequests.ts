@@ -102,6 +102,19 @@ function trimOutput(value: string): string {
     return value.slice(-20_000);
 }
 
+function buildCommandEnv(): NodeJS.ProcessEnv {
+    const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN;
+    return {
+        ...process.env,
+        ...(githubToken
+            ? {
+                  GH_TOKEN: githubToken,
+                  GITHUB_TOKEN: githubToken,
+              }
+            : {}),
+    };
+}
+
 async function runCommand(
     command: string,
     args: string[],
@@ -109,7 +122,7 @@ async function runCommand(
 ): Promise<CommandResult> {
     const { stdout, stderr } = await execFileAsync(command, args, {
         cwd: options.cwd || DASHBOARD_ROOT,
-        env: process.env,
+        env: buildCommandEnv(),
         maxBuffer: MAX_BUFFER,
         timeout: options.timeoutMs || 120_000,
     });
