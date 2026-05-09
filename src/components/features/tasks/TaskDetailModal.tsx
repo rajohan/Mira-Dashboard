@@ -428,9 +428,7 @@ export function TaskDetailModal({
                                 <dd className="text-primary-200">
                                     {automation.source === "cron"
                                         ? "Live cron state"
-                                        : automation.source === "body"
-                                          ? "Detected from body"
-                                          : "Stored metadata"}
+                                        : "Stored metadata"}
                                 </dd>
                             </div>
                         </dl>

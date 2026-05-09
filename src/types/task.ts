@@ -16,7 +16,7 @@ export interface TaskAutomation {
     lastRunAtMs?: number;
     lastRunStatus?: string;
     lastDurationMs?: number;
-    source?: "cron" | "stored" | "body";
+    source?: "cron" | "stored";
 }
 
 export interface Task {
