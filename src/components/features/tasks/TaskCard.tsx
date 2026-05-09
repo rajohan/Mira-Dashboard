@@ -5,6 +5,7 @@ import { GripVertical } from "lucide-react";
 import type { Task } from "../../../types/task";
 import { formatDuration } from "../../../utils/format";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { Badge } from "../../ui/Badge";
 
 interface TaskCardProps {
     task: Task;
@@ -48,7 +49,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
             </button>
 
             <div className="ml-3 min-w-0">
-                <div className="mb-1.5 flex min-w-0 items-center gap-2">
+                <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
                     <span className="text-primary-500 shrink-0 text-xs">
                         #{task.number}
                     </span>
@@ -60,6 +61,11 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                     >
                         {priority.toUpperCase()}
                     </span>
+                    {task.automation?.recurring && (
+                        <Badge variant="cron" className="px-1.5 text-[10px]">
+                            Recurring
+                        </Badge>
+                    )}
                 </div>
 
                 <h3 className="text-primary-200 mb-1.5 line-clamp-2 text-sm font-medium break-words">

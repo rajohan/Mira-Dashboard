@@ -27,9 +27,38 @@ interface DbTask {
     status: Status;
     priority: "low" | "medium" | "high";
     labels_json: string;
+    automation_json: string;
     assignee: Assignee | null;
     created_at: string;
     updated_at: string;
+}
+
+interface CronJob {
+    id?: string;
+    jobId?: string;
+    name?: string;
+    enabled?: boolean;
+    schedule?: Record<string, unknown>;
+    payload?: Record<string, unknown>;
+    state?: Record<string, unknown>;
+    sessionTarget?: string;
+    [key: string]: unknown;
+}
+
+interface CronListResponse {
+    jobs?: CronJob[];
+    items?: CronJob[];
+}
+
+interface TaskAutomationInput {
+    type?: string;
+    recurring?: boolean;
+    cronJobId?: string;
+    scheduleSummary?: string;
+    sessionTarget?: string;
+    model?: string;
+    thinking?: string;
+    [key: string]: unknown;
 }
 
 function isValidAssignee(value: unknown): value is Assignee {
@@ -74,8 +103,200 @@ function labelsFromTask(task: DbTask): string[] {
     return base;
 }
 
-function toFrontendTask(task: DbTask) {
+function parseRecordJson(value: string): Record<string, unknown> {
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
+    } catch {
+        return {};
+    }
+}
+
+function normalizeAutomationInput(value: unknown): string {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return "{}";
+    }
+
+    const input = value as TaskAutomationInput;
+    const cronJobId = typeof input.cronJobId === "string" ? input.cronJobId.trim() : "";
+    if (!cronJobId) {
+        return "{}";
+    }
+
+    const automation: TaskAutomationInput = {
+        type: "cron",
+        recurring: input.recurring ?? true,
+        cronJobId,
+    };
+
+    for (const key of ["scheduleSummary", "sessionTarget", "model", "thinking"]) {
+        const keyValue = input[key];
+        if (typeof keyValue === "string" && keyValue.trim()) {
+            automation[key] = keyValue.trim();
+        }
+    }
+
+    return JSON.stringify(automation);
+}
+
+function extractCronJobIdFromBody(body: string): string | null {
+    const labeledMatch = /cron job(?: id)?\s*:\s*`?([\w-]{8,})`?/i.exec(body);
+    if (labeledMatch?.[1]) {
+        return labeledMatch[1];
+    }
+
+    const uuidMatch =
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.exec(body);
+    return uuidMatch?.[0] ?? null;
+}
+
+function cleanBodyMetadataValue(value: string): string {
+    return value.replaceAll("`", "").trim();
+}
+
+function extractBodyLineValue(body: string, label: string): string | undefined {
+    const pattern = new RegExp(String.raw`^\s*-?\s*${label}\s*:\s*(.+)$`, "im");
+    const match = pattern.exec(body);
+    return match?.[1] ? cleanBodyMetadataValue(match[1]) : undefined;
+}
+
+function extractModelThinkingFromBody(body: string) {
+    const value = extractBodyLineValue(body, "Model/thinking");
+    if (!value) {
+        return {};
+    }
+
+    const [model, thinking] = value.split("/").map((part) => part.trim());
+    return { model, thinking };
+}
+
+function getCronJobId(job: CronJob): string {
+    return String(job.jobId || job.id || "");
+}
+
+function normalizeCronJobs(payload: unknown): CronJob[] {
+    if (!payload || typeof payload !== "object") {
+        return [];
+    }
+
+    const value = payload as CronListResponse;
+    if (Array.isArray(value.jobs)) {
+        return value.jobs;
+    }
+
+    if (Array.isArray(value.items)) {
+        return value.items;
+    }
+
+    return [];
+}
+
+async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
+    try {
+        const payload = await gateway.request("cron.list", { includeDisabled: true });
+        return new Map(
+            normalizeCronJobs(payload)
+                .map((job) => [getCronJobId(job), job] as const)
+                .filter(([id]) => id.length > 0)
+        );
+    } catch (error) {
+        console.warn("[Tasks] Failed to load cron jobs for task automation:", error);
+        return new Map();
+    }
+}
+
+function numberFromRecord(record: Record<string, unknown> | undefined, key: string) {
+    const value = record?.[key];
+    return typeof value === "number" ? value : undefined;
+}
+
+function stringFromRecord(record: Record<string, unknown> | undefined, key: string) {
+    const value = record?.[key];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
+    if (!schedule) {
+        return;
+    }
+
+    if (schedule.kind === "cron") {
+        const expr = stringFromRecord(schedule, "expr");
+        const tz = stringFromRecord(schedule, "tz");
+        if (expr && tz) return `${expr} (${tz})`;
+        return expr;
+    }
+
+    if (schedule.kind === "every") {
+        const everyMs = numberFromRecord(schedule, "everyMs");
+        if (everyMs) {
+            const minutes = Math.round(everyMs / 60_000);
+            if (minutes >= 60 && minutes % 60 === 0) return `Every ${minutes / 60}h`;
+            return `Every ${minutes}m`;
+        }
+    }
+
+    if (schedule.kind === "at") {
+        return stringFromRecord(schedule, "at");
+    }
+
+    return String(schedule.kind || "Scheduled");
+}
+
+function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>) {
+    const stored = parseRecordJson(task.automation_json);
+    const storedCronJobId = stringFromRecord(stored, "cronJobId");
+    const cronJobId = storedCronJobId || extractCronJobIdFromBody(task.body);
+    if (!cronJobId) {
+        return;
+    }
+
+    const job = cronJobsById?.get(cronJobId);
+    const schedule =
+        job?.schedule || (stored.schedule as Record<string, unknown> | undefined);
+    const payload = job?.payload;
+    const state = job?.state;
+    const bodyRuntime = extractModelThinkingFromBody(task.body);
+    const lastRunStatus =
+        stringFromRecord(state, "lastRunStatus") || stringFromRecord(state, "lastStatus");
+
+    return {
+        type: "cron",
+        recurring: true,
+        cronJobId,
+        jobName: job?.name || stringFromRecord(stored, "jobName"),
+        enabled: job?.enabled,
+        schedule,
+        scheduleSummary:
+            formatScheduleSummary(schedule) ||
+            stringFromRecord(stored, "scheduleSummary") ||
+            extractBodyLineValue(task.body, "Schedule"),
+        sessionTarget:
+            job?.sessionTarget ||
+            stringFromRecord(stored, "sessionTarget") ||
+            extractBodyLineValue(task.body, "Session"),
+        model:
+            stringFromRecord(payload, "model") ||
+            stringFromRecord(stored, "model") ||
+            bodyRuntime.model,
+        thinking:
+            stringFromRecord(payload, "thinking") ||
+            stringFromRecord(stored, "thinking") ||
+            bodyRuntime.thinking,
+        nextRunAtMs: numberFromRecord(state, "nextRunAtMs"),
+        runningAtMs: numberFromRecord(state, "runningAtMs"),
+        lastRunAtMs: numberFromRecord(state, "lastRunAtMs"),
+        lastRunStatus,
+        lastDurationMs: numberFromRecord(state, "lastDurationMs"),
+        source: job ? "cron" : storedCronJobId ? "stored" : "body",
+    };
+}
+
+function toFrontendTask(task: DbTask, cronJobsById?: Map<string, CronJob>) {
     const labels = labelsFromTask(task);
+    const automation = toFrontendAutomation(task, cronJobsById);
     return {
         number: task.id,
         title: task.title,
@@ -93,6 +314,7 @@ function toFrontendTask(task: DbTask) {
         createdAt: task.created_at,
         updatedAt: task.updated_at,
         url: `/tasks/${task.id}`,
+        automation,
     };
 }
 
@@ -127,24 +349,26 @@ export default function tasksRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
-    app.get("/api/tasks", (_req, res) => {
+    app.get("/api/tasks", (async (_req, res) => {
         const rows = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks
                  ORDER BY datetime(updated_at) DESC, id DESC`
             )
             .all() as unknown as DbTask[];
 
-        res.json(rows.map(toFrontendTask));
-    });
+        const cronJobsById = await fetchCronJobsById();
+        res.json(rows.map((task) => toFrontendTask(task, cronJobsById)));
+    }) as RequestHandler);
 
     app.post("/api/tasks", express.json(), (async (req, res) => {
-        const { title, body, labels, assignee } = req.body as {
+        const { title, body, labels, assignee, automation } = req.body as {
             title?: string;
             body?: string;
             labels?: string[];
             assignee?: Assignee;
+            automation?: TaskAutomationInput;
         };
 
         if (!title || !title.trim()) {
@@ -173,8 +397,8 @@ export default function tasksRoutes(
 
         const result = db
             .prepare(
-                `INSERT INTO tasks (title, body, status, priority, labels_json, assignee, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
                 title.trim(),
@@ -182,6 +406,7 @@ export default function tasksRoutes(
                 status,
                 priority,
                 JSON.stringify(labelList),
+                normalizeAutomationInput(automation),
                 safeAssignee,
                 now,
                 now
@@ -200,7 +425,7 @@ export default function tasksRoutes(
 
         const row = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask;
@@ -217,7 +442,7 @@ export default function tasksRoutes(
 
         const existing = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask | undefined;
@@ -231,6 +456,7 @@ export default function tasksRoutes(
             title?: string;
             body?: string;
             labels?: string[];
+            automation?: TaskAutomationInput | null;
         };
 
         const labels = updates.labels ?? labelsFromTask(existing);
@@ -247,11 +473,15 @@ export default function tasksRoutes(
 
         const title = updates.title?.trim() || existing.title;
         const body = updates.body ?? existing.body;
+        const automationJson =
+            updates.automation === undefined
+                ? existing.automation_json
+                : normalizeAutomationInput(updates.automation);
         const updatedAt = new Date().toISOString();
 
         db.prepare(
             `UPDATE tasks
-             SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, updated_at = ?
+             SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, automation_json = ?, updated_at = ?
              WHERE id = ?`
         ).run(
             title,
@@ -259,6 +489,7 @@ export default function tasksRoutes(
             nextStatus,
             nextPriority,
             JSON.stringify(labels),
+            automationJson,
             updatedAt,
             id
         );
@@ -275,7 +506,7 @@ export default function tasksRoutes(
 
         const row = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask;
@@ -299,7 +530,7 @@ export default function tasksRoutes(
 
         const existing = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask | undefined;
@@ -324,7 +555,7 @@ export default function tasksRoutes(
 
         const row = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask;
@@ -510,7 +741,7 @@ export default function tasksRoutes(
 
         const existing = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask | undefined;
@@ -540,7 +771,7 @@ export default function tasksRoutes(
 
         const row = db
             .prepare(
-                `SELECT id, title, body, status, priority, labels_json, assignee, created_at, updated_at
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
             .get(id) as unknown as DbTask;

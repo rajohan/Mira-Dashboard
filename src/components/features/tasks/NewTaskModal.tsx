@@ -2,6 +2,7 @@ import { useForm } from "@tanstack/react-form";
 import { Loader2, Plus, X } from "lucide-react";
 
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
+import type { TaskAutomation } from "../../../types/task";
 import { PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -15,7 +16,11 @@ interface NewTaskModalProps {
         title: string,
         body?: string,
         priority?: "high" | "medium" | "low",
-        assignee?: TaskAssigneeId
+        assignee?: TaskAssigneeId,
+        automation?: Pick<
+            TaskAutomation,
+            "cronJobId" | "scheduleSummary" | "sessionTarget"
+        >
     ) => Promise<void>;
 }
 
@@ -26,15 +31,26 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
             body: "",
             priority: "medium" as "high" | "medium" | "low",
             assignee: TASK_ASSIGNEES.mira.id as TaskAssigneeId,
+            cronJobId: "",
+            scheduleSummary: "",
+            sessionTarget: "",
         },
         onSubmit: async ({ value }) => {
             if (!value.title.trim()) return;
             const trimmedBody = value.body.trim();
+            const cronJobId = value.cronJobId.trim();
             await onSubmit(
                 value.title.trim(),
                 trimmedBody || undefined,
                 value.priority,
-                value.assignee
+                value.assignee,
+                cronJobId
+                    ? {
+                          cronJobId,
+                          scheduleSummary: value.scheduleSummary.trim(),
+                          sessionTarget: value.sessionTarget.trim(),
+                      }
+                    : undefined
             );
             form.reset();
             onClose();
@@ -160,6 +176,50 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                         </div>
                     )}
                 </form.Field>
+
+                <div className="border-primary-700 bg-primary-900/30 space-y-3 rounded-lg border p-3">
+                    <div>
+                        <h3 className="text-primary-200 text-sm font-semibold">
+                            Recurring automation (optional)
+                        </h3>
+                        <p className="text-primary-500 text-xs">
+                            Link the task to an OpenClaw cron job so cards and details can
+                            show live run state.
+                        </p>
+                    </div>
+                    <form.Field name="cronJobId">
+                        {(field) => (
+                            <Input
+                                label="Cron job ID"
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="1ae8a485-..."
+                            />
+                        )}
+                    </form.Field>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <form.Field name="scheduleSummary">
+                            {(field) => (
+                                <Input
+                                    label="Schedule summary"
+                                    value={field.state.value}
+                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    placeholder="Twice daily at 09:30 and 18:30"
+                                />
+                            )}
+                        </form.Field>
+                        <form.Field name="sessionTarget">
+                            {(field) => (
+                                <Input
+                                    label="Session target"
+                                    value={field.state.value}
+                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    placeholder="session:dashboard-autopilot"
+                                />
+                            )}
+                        </form.Field>
+                    </div>
+                </div>
 
                 <div className="grid grid-cols-1 gap-2 pt-2 sm:flex sm:justify-end">
                     <Button
