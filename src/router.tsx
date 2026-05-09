@@ -17,6 +17,7 @@ import { Files } from "./pages/Files";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Moltbook } from "./pages/Moltbook";
+import { PullRequests } from "./pages/PullRequests";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Tasks } from "./pages/Tasks";
@@ -97,6 +98,12 @@ const cronRoute = createRoute({
     component: Cron,
 });
 
+const pullRequestsRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/pull-requests",
+    component: PullRequests,
+});
+
 const filesRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/files",
@@ -143,6 +150,7 @@ const routeTree = rootRoute.addChildren([
         chatRoute,
         logsRoute,
         cronRoute,
+        pullRequestsRoute,
         filesRoute,
         dockerRoute,
         databaseRoute,

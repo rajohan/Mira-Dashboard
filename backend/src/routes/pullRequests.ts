@@ -1,0 +1,416 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
+
+import express, { type RequestHandler } from "express";
+
+const execFileAsync = promisify(execFile);
+
+const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
+const DASHBOARD_ROOT = "/home/ubuntu/projects/mira-dashboard";
+const DASHBOARD_SERVICE = "mira-dashboard.service";
+const MIRA_AUTHOR = "mira-2026";
+const DEFAULT_BASE = "master";
+const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
+const MAX_BUFFER = 20 * 1024 * 1024;
+
+interface CommandResult {
+    stdout: string;
+    stderr: string;
+}
+
+interface PullRequestAuthor {
+    login?: string;
+    name?: string;
+}
+
+interface PullRequestSummary {
+    number: number;
+    title: string;
+    body?: string;
+    url: string;
+    headRefName: string;
+    baseRefName: string;
+    author: PullRequestAuthor;
+    createdAt: string;
+    updatedAt: string;
+    isDraft: boolean;
+    mergeable?: string;
+    mergeStateStatus?: string;
+    reviewDecision?: string;
+    statusCheckRollup?: unknown[];
+    additions?: number;
+    deletions?: number;
+    changedFiles?: number;
+}
+
+interface DeploymentJob {
+    id: string;
+    status: "building" | "restart-scheduled" | "ok" | "failed";
+    startedAt: string;
+    updatedAt: string;
+    commit?: string;
+    note?: string;
+    stdout?: string;
+    stderr?: string;
+}
+
+function asyncRoute(handler: RequestHandler): RequestHandler {
+    return (req, res, next) => {
+        Promise.resolve(handler(req, res, next)).catch((error) => {
+            console.error("[pullRequestsRoutes]", error);
+            if (res.headersSent) {
+                next(error);
+                return;
+            }
+            res.status(500).json({
+                error:
+                    error instanceof Error ? error.message : "Pull request route failed",
+            });
+        });
+    };
+}
+
+function ensureDeploymentDir(): void {
+    fs.mkdirSync(DEPLOYMENT_DIR, { recursive: true });
+}
+
+function deploymentPath(jobId: string): string {
+    return path.join(DEPLOYMENT_DIR, `${jobId}.json`);
+}
+
+function writeDeploymentJob(job: DeploymentJob): void {
+    ensureDeploymentDir();
+    fs.writeFileSync(deploymentPath(job.id), JSON.stringify(job, null, 2));
+}
+
+function readDeploymentJobs(): DeploymentJob[] {
+    ensureDeploymentDir();
+    return fs
+        .readdirSync(DEPLOYMENT_DIR)
+        .filter((file) => file.endsWith(".json"))
+        .map((file) => {
+            const raw = fs.readFileSync(path.join(DEPLOYMENT_DIR, file), "utf8");
+            return JSON.parse(raw) as DeploymentJob;
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 10);
+}
+
+function trimOutput(value: string): string {
+    return value.slice(-20_000);
+}
+
+async function runCommand(
+    command: string,
+    args: string[],
+    options: { cwd?: string; timeoutMs?: number } = {}
+): Promise<CommandResult> {
+    const { stdout, stderr } = await execFileAsync(command, args, {
+        cwd: options.cwd || DASHBOARD_ROOT,
+        env: process.env,
+        maxBuffer: MAX_BUFFER,
+        timeout: options.timeoutMs || 120_000,
+    });
+
+    return {
+        stdout: trimOutput(String(stdout || "")),
+        stderr: trimOutput(String(stderr || "")),
+    };
+}
+
+async function runGhJson<T>(args: string[]): Promise<T> {
+    const { stdout } = await runCommand("gh", args, { timeoutMs: 60_000 });
+    return JSON.parse(stdout || "null") as T;
+}
+
+async function listMiraPullRequests(): Promise<PullRequestSummary[]> {
+    return runGhJson<PullRequestSummary[]>([
+        "pr",
+        "list",
+        "--repo",
+        DASHBOARD_REPO,
+        "--state",
+        "open",
+        "--author",
+        MIRA_AUTHOR,
+        "--limit",
+        "50",
+        "--json",
+        [
+            "number",
+            "title",
+            "body",
+            "url",
+            "headRefName",
+            "baseRefName",
+            "author",
+            "createdAt",
+            "updatedAt",
+            "isDraft",
+            "mergeable",
+            "mergeStateStatus",
+            "reviewDecision",
+            "statusCheckRollup",
+            "additions",
+            "deletions",
+            "changedFiles",
+        ].join(","),
+    ]);
+}
+
+async function getPullRequest(number: number): Promise<PullRequestSummary> {
+    return runGhJson<PullRequestSummary>([
+        "pr",
+        "view",
+        String(number),
+        "--repo",
+        DASHBOARD_REPO,
+        "--json",
+        [
+            "number",
+            "title",
+            "body",
+            "url",
+            "headRefName",
+            "baseRefName",
+            "author",
+            "createdAt",
+            "updatedAt",
+            "isDraft",
+            "mergeable",
+            "mergeStateStatus",
+            "reviewDecision",
+            "statusCheckRollup",
+            "additions",
+            "deletions",
+            "changedFiles",
+        ].join(","),
+    ]);
+}
+
+function validatePrNumber(value: unknown): number {
+    const number = Number(value);
+    if (!Number.isInteger(number) || number <= 0) {
+        throw new Error("Invalid pull request number");
+    }
+    return number;
+}
+
+function validateMiraPr(pr: PullRequestSummary): void {
+    if (pr.author?.login !== MIRA_AUTHOR) {
+        throw new Error("Only Mira-authored pull requests can be managed here");
+    }
+
+    if (pr.baseRefName !== DEFAULT_BASE) {
+        throw new Error(
+            `Only ${DEFAULT_BASE}-targeted pull requests can be managed here`
+        );
+    }
+
+    if (pr.isDraft) {
+        throw new Error("Draft pull requests cannot be approved from the dashboard");
+    }
+}
+
+async function ensureCleanWorktree(): Promise<void> {
+    const { stdout } = await runCommand("git", ["status", "--short"], {
+        timeoutMs: 30_000,
+    });
+    if (stdout.trim()) {
+        throw new Error("Dashboard worktree has local changes; refusing deploy/merge");
+    }
+}
+
+async function syncMaster(): Promise<void> {
+    await runCommand("git", ["fetch", "--prune", "origin"], { timeoutMs: 120_000 });
+    await runCommand("git", ["checkout", DEFAULT_BASE], { timeoutMs: 60_000 });
+    await runCommand("git", ["pull", "--ff-only", "origin", DEFAULT_BASE], {
+        timeoutMs: 120_000,
+    });
+}
+
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+}
+
+async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandResult> {
+    const jobPath = deploymentPath(job.id);
+    const okJob: DeploymentJob = {
+        ...job,
+        status: "ok",
+        updatedAt: new Date().toISOString(),
+        note: "Restarted service and health check passed",
+    };
+    const failedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        note: "Restart was triggered, but health check failed",
+    };
+
+    const script = [
+        "restart_status=0",
+        `systemctl restart ${DASHBOARD_SERVICE} || restart_status=$?`,
+        "sleep 4",
+        'if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health >/dev/null; then',
+        `  printf %s ${shellQuote(JSON.stringify(okJob, null, 2))} > ${shellQuote(jobPath)}`,
+        "else",
+        `  printf %s ${shellQuote(JSON.stringify(failedJob, null, 2))} > ${shellQuote(jobPath)}`,
+        "fi",
+    ].join("\n");
+
+    return runCommand(
+        "sudo",
+        [
+            "-n",
+            "systemd-run",
+            `--unit=mira-dashboard-deploy-${job.id}`,
+            "--description=Mira Dashboard deploy restart + health check",
+            "/bin/bash",
+            "-lc",
+            script,
+        ],
+        { timeoutMs: 30_000 }
+    );
+}
+
+async function deployLatest(): Promise<DeploymentJob> {
+    const now = new Date().toISOString();
+    const job: DeploymentJob = {
+        id: Date.now().toString(36),
+        status: "building",
+        startedAt: now,
+        updatedAt: now,
+        note: "Deploy started",
+    };
+    writeDeploymentJob(job);
+
+    try {
+        await ensureCleanWorktree();
+        await syncMaster();
+
+        await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
+        await runCommand("npm", ["--prefix", "backend", "run", "build"], {
+            timeoutMs: 120_000,
+        });
+        const { stdout: commit } = await runCommand(
+            "git",
+            ["rev-parse", "--short", "HEAD"],
+            {
+                timeoutMs: 30_000,
+            }
+        );
+
+        const restartScheduled: DeploymentJob = {
+            ...job,
+            status: "restart-scheduled",
+            updatedAt: new Date().toISOString(),
+            commit: commit.trim(),
+            note: "Build passed; restart + health check scheduled",
+        };
+        writeDeploymentJob(restartScheduled);
+        await scheduleRestartHealthCheck(restartScheduled);
+        return restartScheduled;
+    } catch (error) {
+        const failed: DeploymentJob = {
+            ...job,
+            status: "failed",
+            updatedAt: new Date().toISOString(),
+            note: error instanceof Error ? error.message : "Deploy failed",
+        };
+        writeDeploymentJob(failed);
+        throw error;
+    }
+}
+
+async function approvePullRequest(number: number, deploy: boolean) {
+    await ensureCleanWorktree();
+    const pr = await getPullRequest(number);
+    validateMiraPr(pr);
+
+    await runCommand(
+        "gh",
+        [
+            "pr",
+            "merge",
+            String(number),
+            "--squash",
+            "--delete-branch",
+            "--repo",
+            DASHBOARD_REPO,
+        ],
+        { timeoutMs: 120_000 }
+    );
+    await syncMaster();
+
+    return {
+        ok: true,
+        message: deploy ? `PR #${number} merged; deploy started` : `PR #${number} merged`,
+        deployment: deploy ? await deployLatest() : undefined,
+    };
+}
+
+async function rejectPullRequest(number: number, comment: string) {
+    const pr = await getPullRequest(number);
+    validateMiraPr(pr);
+
+    await runCommand(
+        "gh",
+        ["pr", "close", String(number), "--repo", DASHBOARD_REPO, "--comment", comment],
+        { timeoutMs: 60_000 }
+    );
+
+    return {
+        ok: true,
+        message: `PR #${number} closed`,
+    };
+}
+
+export default function pullRequestsRoutes(app: express.Application): void {
+    app.get(
+        "/api/pull-requests",
+        asyncRoute(async (_req, res) => {
+            res.json({ pullRequests: await listMiraPullRequests() });
+        })
+    );
+
+    app.get(
+        "/api/pull-requests/deployments",
+        asyncRoute(async (_req, res) => {
+            res.json({ deployments: readDeploymentJobs() });
+        })
+    );
+
+    app.post(
+        "/api/pull-requests/deploy",
+        express.json(),
+        asyncRoute(async (_req, res) => {
+            res.json({ ok: true, deployment: await deployLatest() });
+        })
+    );
+
+    app.post(
+        "/api/pull-requests/:number/approve",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const number = validatePrNumber(req.params.number);
+            const deploy = req.body?.deploy === true;
+            res.json(await approvePullRequest(number, deploy));
+        })
+    );
+
+    app.post(
+        "/api/pull-requests/:number/reject",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            const number = validatePrNumber(req.params.number);
+            const comment =
+                typeof req.body?.comment === "string" && req.body.comment.trim()
+                    ? req.body.comment.trim()
+                    : "Closed from Mira Dashboard after Raymond rejected it.";
+            res.json(await rejectPullRequest(number, comment));
+        })
+    );
+}
