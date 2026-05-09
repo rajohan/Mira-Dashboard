@@ -36,7 +36,7 @@ import {
     useUpdateTask,
     useUpdateTaskUpdate,
 } from "../hooks";
-import type { ColumnId, Task } from "../types/task";
+import type { ColumnId, Task, TaskAutomation } from "../types/task";
 import { getPriority } from "../utils/taskUtils";
 
 const ASSIGNMENT_FILTERS = [
@@ -73,10 +73,13 @@ export function Tasks() {
         const matchesFilter =
             filter === "all" ||
             task.assignees.some((a) => (a.login || a.name) === filter);
+        const normalizedSearch = search.toLowerCase();
         const matchesSearch =
             search === "" ||
-            task.title.toLowerCase().includes(search.toLowerCase()) ||
-            task.number.toString().includes(search);
+            task.title.toLowerCase().includes(normalizedSearch) ||
+            task.number.toString().includes(search) ||
+            task.automation?.cronJobId.toLowerCase().includes(normalizedSearch) ||
+            task.automation?.jobName?.toLowerCase().includes(normalizedSearch);
         return matchesFilter && matchesSearch;
     });
 
@@ -201,6 +204,10 @@ export function Tasks() {
         title?: string;
         body?: string;
         labels?: string[];
+        automation?: Pick<
+            TaskAutomation,
+            "cronJobId" | "scheduleSummary" | "sessionTarget"
+        > | null;
     }) => {
         if (!selectedTask) {
             throw new Error("No selected task");
@@ -335,7 +342,13 @@ export function Tasks() {
                         <NewTaskModal
                             isOpen={isNewTaskOpen}
                             onClose={() => setIsNewTaskOpen(false)}
-                            onSubmit={async (title, body, priority, assignee) => {
+                            onSubmit={async (
+                                title,
+                                body,
+                                priority,
+                                assignee,
+                                automation
+                            ) => {
                                 const labels = [];
                                 if (priority) labels.push(`priority-${priority}`);
                                 await createTask.mutateAsync({
@@ -343,6 +356,7 @@ export function Tasks() {
                                     body: body || "",
                                     labels,
                                     assignee: assignee || TASK_ASSIGNEES.mira.id,
+                                    automation,
                                 });
                                 setIsNewTaskOpen(false);
                             }}

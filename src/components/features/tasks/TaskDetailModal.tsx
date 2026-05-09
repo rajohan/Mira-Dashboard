@@ -4,13 +4,40 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
-import type { ColumnId, Task, TaskUpdate } from "../../../types/task";
+import type { ColumnId, Task, TaskAutomation, TaskUpdate } from "../../../types/task";
+import {
+    formatCronLastStatus,
+    formatCronTimestamp,
+    getCronStatusVariant,
+} from "../../../utils/cronUtils";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
+
+function formatElapsedMs(value: number): string {
+    if (!Number.isFinite(value) || value < 0) {
+        return "—";
+    }
+
+    const seconds = Math.round(value / 1000);
+    if (seconds < 60) {
+        return `${seconds}s`;
+    }
+
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+        return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
 
 interface TaskDetailModalProps {
     task: Task | null;
@@ -22,6 +49,10 @@ interface TaskDetailModalProps {
         title?: string;
         body?: string;
         labels?: string[];
+        automation?: Pick<
+            TaskAutomation,
+            "cronJobId" | "scheduleSummary" | "sessionTarget"
+        > | null;
     }) => Promise<Task>;
     updates: TaskUpdate[];
     onAddUpdate: (messageMd: string) => Promise<void>;
@@ -50,6 +81,13 @@ export function TaskDetailModal({
     const [editPriority, setEditPriority] = useState<"low" | "medium" | "high">(
         getPriority(task?.labels || [])
     );
+    const [editCronJobId, setEditCronJobId] = useState(task?.automation?.cronJobId || "");
+    const [editScheduleSummary, setEditScheduleSummary] = useState(
+        task?.automation?.scheduleSummary || ""
+    );
+    const [editSessionTarget, setEditSessionTarget] = useState(
+        task?.automation?.sessionTarget || ""
+    );
 
     const [progressMessage, setProgressMessage] = useState("");
 
@@ -63,11 +101,29 @@ export function TaskDetailModal({
     const priority = getPriority(task.labels);
     const currentColumn = getColumnId(task) || "todo";
     const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
+    const automation = task.automation;
+    const automationStatus = automation?.runningAtMs
+        ? "RUNNING"
+        : automation?.enabled === false
+          ? "DISABLED"
+          : automation?.lastRunStatus
+            ? formatCronLastStatus(automation.lastRunStatus)
+            : automation
+              ? "SCHEDULED"
+              : "";
+    const automationStatusVariant = automation?.runningAtMs
+        ? "warning"
+        : automation?.enabled === false
+          ? "default"
+          : getCronStatusVariant(automation?.lastRunStatus || "");
 
     useEffect(() => {
         setEditTitle(task.title);
         setEditBody(task.body || "");
         setEditPriority(getPriority(task.labels || []));
+        setEditCronJobId(task.automation?.cronJobId || "");
+        setEditScheduleSummary(task.automation?.scheduleSummary || "");
+        setEditSessionTarget(task.automation?.sessionTarget || "");
     }, [task, assigneeLogin]);
 
     const assigneeProfileUrl =
@@ -106,10 +162,21 @@ export function TaskDetailModal({
 
         nextLabels.push(`priority-${editPriority}`);
 
+        const cronJobId = editCronJobId.trim();
+        const scheduleSummary = editScheduleSummary.trim();
+        const sessionTarget = editSessionTarget.trim();
+
         await onUpdate({
             title: editTitle.trim(),
             body: editBody,
             labels: nextLabels,
+            automation: cronJobId
+                ? {
+                      cronJobId,
+                      scheduleSummary,
+                      sessionTarget,
+                  }
+                : null,
         });
 
         setIsEditingTask(false);
@@ -202,6 +269,43 @@ export function TaskDetailModal({
                                         ))}
                                     </div>
                                 </div>
+                                <div className="border-primary-700 bg-primary-900/30 space-y-3 rounded-lg border p-3">
+                                    <div>
+                                        <h3 className="text-primary-200 text-sm font-semibold">
+                                            Recurring automation
+                                        </h3>
+                                        <p className="text-primary-500 text-xs">
+                                            Link this task to an OpenClaw cron job for
+                                            live run state.
+                                        </p>
+                                    </div>
+                                    <Input
+                                        label="Cron job ID"
+                                        value={editCronJobId}
+                                        onChange={(event) =>
+                                            setEditCronJobId(event.target.value)
+                                        }
+                                        placeholder="1ae8a485-..."
+                                    />
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <Input
+                                            label="Schedule summary"
+                                            value={editScheduleSummary}
+                                            onChange={(event) =>
+                                                setEditScheduleSummary(event.target.value)
+                                            }
+                                            placeholder="Twice daily at 09:30 and 18:30"
+                                        />
+                                        <Input
+                                            label="Session target"
+                                            value={editSessionTarget}
+                                            onChange={(event) =>
+                                                setEditSessionTarget(event.target.value)
+                                            }
+                                            placeholder="session:dashboard-autopilot"
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         ) : (
                             <h2 className="text-primary-100 text-lg font-semibold break-words">
@@ -236,6 +340,102 @@ export function TaskDetailModal({
                         Updated {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                 </div>
+
+                {automation && !isEditingTask && (
+                    <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-4">
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <h3 className="text-primary-300 text-sm font-semibold">
+                                    Backed by OpenClaw cron
+                                </h3>
+                                <p className="text-primary-500 mt-1 text-xs">
+                                    This task tracks a recurring automation job.
+                                </p>
+                            </div>
+                            {automationStatus && (
+                                <Badge variant={automationStatusVariant}>
+                                    {automationStatus}
+                                </Badge>
+                            )}
+                        </div>
+                        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Cron job
+                                </dt>
+                                <dd className="text-primary-200 break-all">
+                                    <a href="/cron" className="hover:text-primary-100">
+                                        {automation.jobName || automation.cronJobId}
+                                    </a>
+                                </dd>
+                            </div>
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Schedule
+                                </dt>
+                                <dd className="text-primary-200">
+                                    {automation.scheduleSummary || "—"}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Next run
+                                </dt>
+                                <dd className="text-primary-200">
+                                    {formatCronTimestamp(automation.nextRunAtMs)}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Last run
+                                </dt>
+                                <dd className="text-primary-200">
+                                    {formatCronTimestamp(automation.lastRunAtMs)}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Session
+                                </dt>
+                                <dd className="text-primary-200 break-all">
+                                    {automation.sessionTarget || "—"}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Runtime
+                                </dt>
+                                <dd className="text-primary-200">
+                                    {[automation.model, automation.thinking]
+                                        .filter(Boolean)
+                                        .join(" · ") || "—"}
+                                </dd>
+                            </div>
+                            {automation.lastDurationMs !== undefined && (
+                                <div>
+                                    <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                        Last duration
+                                    </dt>
+                                    <dd className="text-primary-200">
+                                        {formatElapsedMs(automation.lastDurationMs)}
+                                    </dd>
+                                </div>
+                            )}
+                            <div>
+                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    Source
+                                </dt>
+                                <dd className="text-primary-200">
+                                    {automation.source === "cron"
+                                        ? "Live cron state"
+                                        : automation.source === "body"
+                                          ? "Detected from body"
+                                          : "Stored metadata"}
+                                </dd>
+                            </div>
+                        </dl>
+                    </div>
+                )}
 
                 {task.body && !isEditingTask && (
                     <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-4">

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL DEFAULT 'todo',
     priority TEXT NOT NULL DEFAULT 'medium',
     labels_json TEXT NOT NULL DEFAULT '[]',
+    automation_json TEXT NOT NULL DEFAULT '{}',
     assignee TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -110,3 +111,11 @@ CREATE TABLE IF NOT EXISTS app_config (
     updated_at TEXT NOT NULL
 );
 `);
+
+const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{
+    name: string;
+}>;
+
+if (!taskColumns.some((column) => column.name === "automation_json")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'");
+}

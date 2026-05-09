@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { TaskAssigneeId } from "../constants/taskActors";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
-import type { Task, TaskUpdate } from "../types/task";
+import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 export const taskKeys = {
@@ -19,14 +19,23 @@ async function createTask(
     title: string,
     body: string,
     labels: string[],
-    assignee: TaskAssigneeId
+    assignee: TaskAssigneeId,
+    automation?: Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
 ): Promise<Task> {
-    return apiPost<Task>("/tasks", { title, body, labels, assignee });
+    return apiPost<Task>("/tasks", { title, body, labels, assignee, automation });
 }
 
 async function updateTask(
     number: number,
-    updates: { title?: string; body?: string; labels?: string[] }
+    updates: {
+        title?: string;
+        body?: string;
+        labels?: string[];
+        automation?: Pick<
+            TaskAutomation,
+            "cronJobId" | "scheduleSummary" | "sessionTarget"
+        > | null;
+    }
 ): Promise<Task> {
     return apiFetch<Task>(`/tasks/${number}`, {
         method: "PATCH",
@@ -92,12 +101,17 @@ export function useCreateTask() {
             body,
             labels,
             assignee,
+            automation,
         }: {
             title: string;
             body: string;
             labels: string[];
             assignee: TaskAssigneeId;
-        }) => createTask(title, body, labels, assignee),
+            automation?: Pick<
+                TaskAutomation,
+                "cronJobId" | "scheduleSummary" | "sessionTarget"
+            >;
+        }) => createTask(title, body, labels, assignee, automation),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },
@@ -113,7 +127,15 @@ export function useUpdateTask() {
             updates,
         }: {
             number: number;
-            updates: { title?: string; body?: string; labels?: string[] };
+            updates: {
+                title?: string;
+                body?: string;
+                labels?: string[];
+                automation?: Pick<
+                    TaskAutomation,
+                    "cronJobId" | "scheduleSummary" | "sessionTarget"
+                > | null;
+            };
         }) => updateTask(number, updates),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });

@@ -1,5 +1,24 @@
 import type { TaskAssigneeId } from "../constants/taskActors";
 
+export interface TaskAutomation {
+    type: "cron";
+    recurring: boolean;
+    cronJobId: string;
+    jobName?: string;
+    enabled?: boolean;
+    schedule?: { kind?: string; [key: string]: unknown };
+    scheduleSummary?: string;
+    sessionTarget?: string;
+    model?: string;
+    thinking?: string;
+    nextRunAtMs?: number;
+    runningAtMs?: number;
+    lastRunAtMs?: number;
+    lastRunStatus?: string;
+    lastDurationMs?: number;
+    source?: "cron" | "stored" | "body";
+}
+
 export interface Task {
     number: number;
     title: string;
@@ -10,6 +29,7 @@ export interface Task {
     createdAt: string;
     updatedAt: string;
     url: string;
+    automation?: TaskAutomation;
 }
 
 export interface TaskUpdate {
