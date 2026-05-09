@@ -143,13 +143,7 @@ function normalizeAutomationInput(value: unknown): string {
 
 function extractCronJobIdFromBody(body: string): string | null {
     const labeledMatch = /cron job(?: id)?\s*:\s*`?([\w-]{8,})`?/i.exec(body);
-    if (labeledMatch?.[1]) {
-        return labeledMatch[1];
-    }
-
-    const uuidMatch =
-        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.exec(body);
-    return uuidMatch?.[0] ?? null;
+    return labeledMatch?.[1] ?? null;
 }
 
 function cleanBodyMetadataValue(value: string): string {
