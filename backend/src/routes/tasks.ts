@@ -141,31 +141,6 @@ function normalizeAutomationInput(value: unknown): string {
     return JSON.stringify(automation);
 }
 
-function extractCronJobIdFromBody(body: string): string | null {
-    const labeledMatch = /cron job(?: id)?\s*:\s*`?([\w-]{8,})`?/i.exec(body);
-    return labeledMatch?.[1] ?? null;
-}
-
-function cleanBodyMetadataValue(value: string): string {
-    return value.replaceAll("`", "").trim();
-}
-
-function extractBodyLineValue(body: string, label: string): string | undefined {
-    const pattern = new RegExp(String.raw`^\s*-?\s*${label}\s*:\s*(.+)$`, "im");
-    const match = pattern.exec(body);
-    return match?.[1] ? cleanBodyMetadataValue(match[1]) : undefined;
-}
-
-function extractModelThinkingFromBody(body: string) {
-    const value = extractBodyLineValue(body, "Model/thinking");
-    if (!value) {
-        return {};
-    }
-
-    const [model, thinking] = value.split("/").map((part) => part.trim());
-    return { model, thinking };
-}
-
 function getCronJobId(job: CronJob): string {
     return String(job.jobId || job.id || "");
 }
@@ -241,8 +216,7 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
 
 function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>) {
     const stored = parseRecordJson(task.automation_json);
-    const storedCronJobId = stringFromRecord(stored, "cronJobId");
-    const cronJobId = storedCronJobId || extractCronJobIdFromBody(task.body);
+    const cronJobId = stringFromRecord(stored, "cronJobId");
     if (!cronJobId) {
         return;
     }
@@ -252,7 +226,6 @@ function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>)
         job?.schedule || (stored.schedule as Record<string, unknown> | undefined);
     const payload = job?.payload;
     const state = job?.state;
-    const bodyRuntime = extractModelThinkingFromBody(task.body);
     const lastRunStatus =
         stringFromRecord(state, "lastRunStatus") || stringFromRecord(state, "lastStatus");
 
@@ -265,26 +238,17 @@ function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>)
         schedule,
         scheduleSummary:
             formatScheduleSummary(schedule) ||
-            stringFromRecord(stored, "scheduleSummary") ||
-            extractBodyLineValue(task.body, "Schedule"),
-        sessionTarget:
-            job?.sessionTarget ||
-            stringFromRecord(stored, "sessionTarget") ||
-            extractBodyLineValue(task.body, "Session"),
-        model:
-            stringFromRecord(payload, "model") ||
-            stringFromRecord(stored, "model") ||
-            bodyRuntime.model,
+            stringFromRecord(stored, "scheduleSummary"),
+        sessionTarget: job?.sessionTarget || stringFromRecord(stored, "sessionTarget"),
+        model: stringFromRecord(payload, "model") || stringFromRecord(stored, "model"),
         thinking:
-            stringFromRecord(payload, "thinking") ||
-            stringFromRecord(stored, "thinking") ||
-            bodyRuntime.thinking,
+            stringFromRecord(payload, "thinking") || stringFromRecord(stored, "thinking"),
         nextRunAtMs: numberFromRecord(state, "nextRunAtMs"),
         runningAtMs: numberFromRecord(state, "runningAtMs"),
         lastRunAtMs: numberFromRecord(state, "lastRunAtMs"),
         lastRunStatus,
         lastDurationMs: numberFromRecord(state, "lastDurationMs"),
-        source: job ? "cron" : storedCronJobId ? "stored" : "body",
+        source: job ? "cron" : "stored",
     };
 }
 
