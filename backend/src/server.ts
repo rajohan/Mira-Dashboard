@@ -26,6 +26,7 @@ import moltbookRoutes from "./routes/moltbook.js";
 import notificationsRoutes from "./routes/notifications.js";
 import openClawConfigRoutes from "./routes/openclawConfig.js";
 import opsRoutes from "./routes/ops.js";
+import pullRequestsRoutes from "./routes/pullRequests.js";
 import sessionsRoutes from "./routes/sessions.js";
 import settingsRoutes from "./routes/settings.js";
 import staticRoutes from "./routes/static.js";
@@ -119,6 +120,7 @@ tasksRoutes(app, express);
 ttsRoutes(app, express);
 notificationsRoutes(app);
 opsRoutes(app);
+pullRequestsRoutes(app);
 terminalRoutes(app);
 
 // Static files & SPA (must be last)

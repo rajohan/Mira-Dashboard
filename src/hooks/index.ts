@@ -64,6 +64,15 @@ export type {
     OpsActionId,
 } from "./useOpsActions";
 export { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
+export type { DeploymentJob, PullRequestSummary } from "./usePullRequests";
+export {
+    pullRequestKeys,
+    useApprovePullRequest,
+    useDeployDashboard,
+    usePullRequestDeployments,
+    usePullRequests,
+    useRejectPullRequest,
+} from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export {
     sessionKeys,
