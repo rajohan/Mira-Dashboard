@@ -1,0 +1,47 @@
+name: Dashboard checks
+
+on:
+    pull_request:
+        branches: [master]
+    push:
+        branches: [master]
+
+jobs:
+    build-lint-e2e:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 25
+                  cache: npm
+
+            - name: Install frontend dependencies
+              run: npm ci --legacy-peer-deps
+
+            - name: Install backend dependencies
+              run: npm ci --legacy-peer-deps
+              working-directory: backend
+
+            - name: Install Playwright browsers
+              run: npx playwright install --with-deps chromium
+
+            - name: Lint frontend
+              run: npm run lint
+
+            - name: Build frontend
+              run: npm run build
+
+            - name: Lint backend
+              run: npm run lint
+              working-directory: backend
+
+            - name: Build backend
+              run: npm run build
+              working-directory: backend
+
+            - name: Run Playwright smoke tests
+              run: npm run test:e2e
