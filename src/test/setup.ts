@@ -1,1 +1,26 @@
 import "@testing-library/jest-dom/vitest";
+
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => {
+    cleanup();
+});
+
+class ResizeObserverMock implements ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    value: ResizeObserverMock,
+});
+
+if (!Element.prototype.getAnimations) {
+    Object.defineProperty(Element.prototype, "getAnimations", {
+        configurable: true,
+        value: () => [],
+    });
+}
