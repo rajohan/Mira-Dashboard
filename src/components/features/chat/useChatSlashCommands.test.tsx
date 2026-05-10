@@ -7,6 +7,11 @@ import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { useChatSlashCommands } from "./useChatSlashCommands";
 
+type ChatRequest = <T = unknown>(
+    method: string,
+    params?: Record<string, unknown>
+) => Promise<T>;
+
 function makeSession(overrides: Partial<Session> = {}): Session {
     return {
         displayLabel: "Main chat",
@@ -71,7 +76,7 @@ function renderSlashCommands(
                 { id: "codex", label: "Codex" },
                 { id: "kimi", label: "Kimi" },
             ],
-            request,
+            request: request as unknown as ChatRequest,
             selectedSession: overrides.selectedSession ?? makeSession(),
             selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
             setDraft,

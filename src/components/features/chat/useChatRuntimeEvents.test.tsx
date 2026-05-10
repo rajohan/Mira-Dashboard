@@ -6,6 +6,11 @@ import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage } from "./chatTypes";
 import { useChatRuntimeEvents } from "./useChatRuntimeEvents";
 
+type ChatRequest = <T = unknown>(
+    method: string,
+    params?: Record<string, unknown>
+) => Promise<T>;
+
 function renderRuntimeEvents(
     overrides: {
         request?: ReturnType<typeof vi.fn>;
@@ -57,7 +62,7 @@ function renderRuntimeEvents(
         useChatRuntimeEvents({
             activeStreamsReference,
             liveHistoryRefreshTimerReference,
-            request,
+            request: request as unknown as ChatRequest,
             selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
             setHistoryLoadVersion,
             setIsAtBottom,

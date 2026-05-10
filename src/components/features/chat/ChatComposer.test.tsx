@@ -8,6 +8,7 @@ import type { ChatSendAttachment } from "./chatTypes";
 
 const textAttachment: ChatSendAttachment = {
     contentBase64: btoa("hello attachment"),
+    file: new File(["hello attachment"], "notes.txt", { type: "text/plain" }),
     fileName: "notes.txt",
     id: "att-1",
     kind: "text",
