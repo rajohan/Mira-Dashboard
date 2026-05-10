@@ -1,9 +1,17 @@
+import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authActions, authStore } from "./authStore";
+import {
+    authActions,
+    authStore,
+    useAuthStore,
+    useAuthUser,
+    useIsAuthenticated,
+} from "./authStore";
 
 describe("authStore", () => {
     afterEach(() => {
+        vi.unstubAllGlobals();
         authStore.setState(() => ({
             user: null,
             isAuthenticated: false,
@@ -50,6 +58,35 @@ describe("authStore", () => {
         authActions.clearSession();
         expect(authStore.state.isAuthenticated).toBe(false);
         expect(authStore.state.user).toBe(null);
+        expect(authStore.state.isInitialized).toBe(true);
+    });
+
+    it("initialize fetches session and deduplicates concurrent calls", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                authenticated: true,
+                bootstrapRequired: false,
+                user: { id: 2, username: "mira" },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const first = authActions.initialize();
+        const second = authActions.initialize();
+        await Promise.all([first, second]);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(authStore.state.isAuthenticated).toBe(true);
+        expect(authStore.state.user?.username).toBe("mira");
+    });
+
+    it("initialize marks initialized on session fetch failure", async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new Error("Network error"));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await authActions.initialize();
+        expect(authStore.state.isAuthenticated).toBe(false);
         expect(authStore.state.isInitialized).toBe(true);
     });
 
@@ -110,5 +147,31 @@ describe("authStore", () => {
 
         await authActions.logout();
         expect(authStore.state.isAuthenticated).toBe(false);
+    });
+
+    it("useAuthStore exposes state and actions", () => {
+        authActions.setSession({
+            authenticated: true,
+            bootstrapRequired: false,
+            user: { id: 1, username: "test" },
+        });
+
+        const { result } = renderHook(() => useAuthStore());
+        expect(result.current.isAuthenticated).toBe(true);
+        expect(result.current.user?.username).toBe("test");
+        expect(typeof result.current.logout).toBe("function");
+    });
+
+    it("useAuthUser and useIsAuthenticated select individual values", () => {
+        authActions.setSession({
+            authenticated: true,
+            bootstrapRequired: false,
+            user: { id: 1, username: "test" },
+        });
+
+        const userHook = renderHook(() => useAuthUser());
+        const authHook = renderHook(() => useIsAuthenticated());
+        expect(userHook.result.current?.username).toBe("test");
+        expect(authHook.result.current).toBe(true);
     });
 });

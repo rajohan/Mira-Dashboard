@@ -1,8 +1,10 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
 import {
+    moltbookKeys,
     useMoltbookData,
     useMoltbookFeed,
     useMoltbookHome,
@@ -11,6 +13,12 @@ import {
 } from "./useMoltbook";
 
 describe("moltbook hooks", () => {
+    it("exports stable query keys", () => {
+        expect(moltbookKeys.home()).toEqual(["moltbook", "home"]);
+        expect(moltbookKeys.feed("hot")).toEqual(["moltbook", "feed", "hot"]);
+        expect(moltbookKeys.profile()).toEqual(["moltbook", "profile"]);
+        expect(moltbookKeys.myContent()).toEqual(["moltbook", "myContent"]);
+    });
     it("composes moltbook data from cache entries", async () => {
         const homeData = {
             pendingRequestCount: 2,
@@ -191,6 +199,27 @@ describe("moltbook hooks", () => {
         });
 
         await waitFor(() => expect(result.current.error).toBeTruthy(), { timeout: 5000 });
+    });
+
+    it("refetches all moltbook cache entries", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ key: "x", data: {}, cachedAt: "2026-01-01" }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useMoltbookData(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+        act(() => {
+            result.current.refetch();
+        });
+        await waitFor(() =>
+            expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(8)
+        );
     });
 
     it("individual cache hooks call useCacheEntry with correct keys", async () => {
