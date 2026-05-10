@@ -71,6 +71,19 @@ interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
+interface GitWorktree {
+    path: string;
+    branch?: string;
+    head?: string;
+}
+
+interface WorktreeCleanupResult {
+    status: "removed" | "skipped" | "warning";
+    branch: string;
+    path?: string;
+    message: string;
+}
+
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return (req, res, next) => {
         Promise.resolve(handler(req, res, next)).catch((error) => {
@@ -224,6 +237,107 @@ function validatePrNumber(value: unknown): number {
         throw new Error("Invalid pull request number");
     }
     return number;
+}
+
+function parseGitWorktrees(output: string): GitWorktree[] {
+    return output
+        .trim()
+        .split(/\n\s*\n/)
+        .filter(Boolean)
+        .map((block) => {
+            const worktree: GitWorktree = { path: "" };
+            for (const line of block.split("\n")) {
+                if (line.startsWith("worktree ")) {
+                    worktree.path = line.slice("worktree ".length);
+                }
+                if (line.startsWith("HEAD ")) {
+                    worktree.head = line.slice("HEAD ".length);
+                }
+                if (line.startsWith("branch ")) {
+                    worktree.branch = line.slice("branch ".length);
+                }
+            }
+            return worktree;
+        })
+        .filter((worktree) => worktree.path);
+}
+
+function isPathInsideRoot(value: string, root: string): boolean {
+    const resolvedValue = path.resolve(value);
+    const resolvedRoot = path.resolve(root);
+    const relative = path.relative(resolvedRoot, resolvedValue);
+    return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null> {
+    const { stdout } = await runCommand("git", ["worktree", "list", "--porcelain"], {
+        timeoutMs: 30_000,
+    });
+    const expectedRef = `refs/heads/${branch}`;
+    return (
+        parseGitWorktrees(stdout).find(
+            (worktree) => worktree.branch === expectedRef || worktree.branch === branch
+        ) || null
+    );
+}
+
+async function cleanupPullRequestWorktree(
+    branch: string
+): Promise<WorktreeCleanupResult> {
+    try {
+        const worktree = await findWorktreeForBranch(branch);
+        if (!worktree) {
+            return {
+                status: "skipped",
+                branch,
+                message: `No local worktree found for ${branch}`,
+            };
+        }
+
+        const worktreePath = path.resolve(worktree.path);
+        if (!isPathInsideRoot(worktreePath, DASHBOARD_WORKTREE_ROOT)) {
+            return {
+                status: "warning",
+                branch,
+                path: worktreePath,
+                message: `Skipped cleanup for ${branch}; worktree path is outside ${DASHBOARD_WORKTREE_ROOT}`,
+            };
+        }
+
+        const { stdout: status } = await runCommand(
+            "git",
+            ["-C", worktreePath, "status", "--short"],
+            { timeoutMs: 30_000 }
+        );
+        if (status.trim()) {
+            return {
+                status: "warning",
+                branch,
+                path: worktreePath,
+                message: `Skipped cleanup for ${branch}; worktree has local changes`,
+            };
+        }
+
+        await runCommand("git", ["worktree", "remove", worktreePath], {
+            timeoutMs: 60_000,
+        });
+
+        return {
+            status: "removed",
+            branch,
+            path: worktreePath,
+            message: `Removed local worktree for ${branch}`,
+        };
+    } catch (error) {
+        return {
+            status: "warning",
+            branch,
+            message:
+                error instanceof Error
+                    ? `Worktree cleanup warning for ${branch}: ${error.message}`
+                    : `Worktree cleanup warning for ${branch}`,
+        };
+    }
 }
 
 function validateMiraPr(pr: PullRequestSummary): void {
@@ -436,12 +550,14 @@ async function approvePullRequest(number: number, deploy: boolean) {
         ],
         { timeoutMs: 120_000 }
     );
+    const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
     await syncMaster();
 
     return {
         ok: true,
         message: deploy ? `PR #${number} merged; deploy started` : `PR #${number} merged`,
         deployment: deploy ? await deployLatest() : undefined,
+        cleanup,
     };
 }
 
@@ -454,10 +570,12 @@ async function rejectPullRequest(number: number, comment: string) {
         ["pr", "close", String(number), "--repo", DASHBOARD_REPO, "--comment", comment],
         { timeoutMs: 60_000 }
     );
+    const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
 
     return {
         ok: true,
         message: `PR #${number} closed`,
+        cleanup,
     };
 }
 

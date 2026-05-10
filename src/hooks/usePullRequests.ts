@@ -53,6 +53,13 @@ export interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
+export interface WorktreeCleanupResult {
+    status: "removed" | "skipped" | "warning";
+    branch: string;
+    path?: string;
+    message: string;
+}
+
 interface PullRequestsResponse {
     pullRequests: PullRequestSummary[];
 }
@@ -69,6 +76,7 @@ interface PullRequestActionResponse {
     ok: boolean;
     message: string;
     deployment?: DeploymentJob;
+    cleanup?: WorktreeCleanupResult;
 }
 
 export const pullRequestKeys = {

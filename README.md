@@ -95,6 +95,8 @@ git -C /home/ubuntu/projects/mira-dashboard worktree add \
 
 Run lint/build verification inside the worktree, not the production checkout. This prevents unapproved PR branches from writing live `dist/` or `backend/dist` artifacts.
 
+The Dashboard PR approval/rejection endpoints attempt to remove the matching local worktree after a PR is merged or rejected. Cleanup is best-effort: it only removes paths under `/home/ubuntu/projects/mira-dashboard-worktrees` and skips worktrees with uncommitted changes.
+
 ## Safety notes for agents
 
 - Do not merge PRs, deploy, restart services, rotate secrets, or change gateway configuration from this repo without Raymond's explicit approval.
