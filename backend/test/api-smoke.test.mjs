@@ -5,12 +5,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import test from "node:test";
+import test, { after, before } from "node:test";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const serverEntry = path.join(repoRoot, "dist/server.js");
 const port = 3301;
 const baseUrl = `http://127.0.0.1:${port}`;
+
+let server;
 
 async function request(pathname, options = {}) {
     const response = await fetch(`${baseUrl}${pathname}`, {
@@ -89,113 +91,106 @@ async function startServer() {
     };
 }
 
-test("health and loopback session endpoints are available", async () => {
-    const server = await startServer();
-    try {
-        const health = await request("/api/health");
-        assert.equal(health.response.status, 200);
-        assert.equal(health.body.status, "ok");
-        assert.equal(typeof health.body.gatewayConnected, "boolean");
+before(async () => {
+    server = await startServer();
+});
 
-        const session = await request("/api/auth/session");
-        assert.equal(session.response.status, 200);
-        assert.equal(session.body.authenticated, true);
-        assert.equal(session.body.user.username, "mira-local");
-    } finally {
-        await server.stop();
-    }
+after(async () => {
+    await server?.stop();
+});
+
+test("health and loopback session endpoints are available", async () => {
+    const health = await request("/api/health");
+    assert.equal(health.response.status, 200);
+    assert.equal(health.body.status, "ok");
+    assert.equal(typeof health.body.gatewayConnected, "boolean");
+
+    const session = await request("/api/auth/session");
+    assert.equal(session.response.status, 200);
+    assert.equal(session.body.authenticated, true);
+    assert.equal(session.body.user.username, "mira-local");
 });
 
 test("task lifecycle API supports create, update, move, progress, and delete", async () => {
-    const server = await startServer();
-    try {
-        const created = await request("/api/tasks", {
-            method: "POST",
-            body: JSON.stringify({
-                title: "Smoke test task",
-                body: "Created by backend API smoke test",
-                labels: ["priority-high"],
-                assignee: "rajohan",
-            }),
-        });
-        assert.equal(created.response.status, 201);
-        assert.equal(created.body.title, "Smoke test task");
-        assert.deepEqual(
-            created.body.labels.map((label) => label.name).toSorted(),
-            ["priority-high", "todo"].toSorted()
-        );
+    const created = await request("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+            title: "Smoke test task",
+            body: "Created by backend API smoke test",
+            labels: ["priority-high"],
+            assignee: "rajohan",
+        }),
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.title, "Smoke test task");
+    assert.deepEqual(
+        created.body.labels.map((label) => label.name).toSorted(),
+        ["priority-high", "todo"].toSorted()
+    );
 
-        const taskId = created.body.number;
-        assert.equal(typeof taskId, "number");
+    const taskId = created.body.number;
+    assert.equal(typeof taskId, "number");
 
-        const listed = await request("/api/tasks");
-        assert.equal(listed.response.status, 200);
-        assert.ok(listed.body.some((task) => task.number === taskId));
+    const listed = await request("/api/tasks");
+    assert.equal(listed.response.status, 200);
+    assert.ok(listed.body.some((task) => task.number === taskId));
 
-        const moved = await request(`/api/tasks/${taskId}/move`, {
-            method: "POST",
-            body: JSON.stringify({ columnLabel: "in-progress" }),
-        });
-        assert.equal(moved.response.status, 200);
-        assert.ok(moved.body.labels.some((label) => label.name === "in-progress"));
+    const moved = await request(`/api/tasks/${taskId}/move`, {
+        method: "POST",
+        body: JSON.stringify({ columnLabel: "in-progress" }),
+    });
+    assert.equal(moved.response.status, 200);
+    assert.ok(moved.body.labels.some((label) => label.name === "in-progress"));
 
-        const update = await request(`/api/tasks/${taskId}/updates`, {
-            method: "POST",
-            body: JSON.stringify({
-                author: "mira-2026",
-                messageMd: "Progress update from smoke test",
-            }),
-        });
-        assert.equal(update.response.status, 201);
-        assert.equal(update.body.messageMd, "Progress update from smoke test");
+    const update = await request(`/api/tasks/${taskId}/updates`, {
+        method: "POST",
+        body: JSON.stringify({
+            author: "mira-2026",
+            messageMd: "Progress update from smoke test",
+        }),
+    });
+    assert.equal(update.response.status, 201);
+    assert.equal(update.body.messageMd, "Progress update from smoke test");
 
-        const updates = await request(`/api/tasks/${taskId}/updates`);
-        assert.equal(updates.response.status, 200);
-        assert.equal(updates.body.length, 1);
+    const updates = await request(`/api/tasks/${taskId}/updates`);
+    assert.equal(updates.response.status, 200);
+    assert.equal(updates.body.length, 1);
 
-        const patched = await request(`/api/tasks/${taskId}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-                title: "Updated smoke test task",
-                labels: ["done", "priority-low"],
-            }),
-        });
-        assert.equal(patched.response.status, 200);
-        assert.equal(patched.body.title, "Updated smoke test task");
-        assert.equal(patched.body.state, "CLOSED");
+    const patched = await request(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+            title: "Updated smoke test task",
+            labels: ["done", "priority-low"],
+        }),
+    });
+    assert.equal(patched.response.status, 200);
+    assert.equal(patched.body.title, "Updated smoke test task");
+    assert.equal(patched.body.state, "CLOSED");
 
-        const deleted = await request(`/api/tasks/${taskId}`, { method: "DELETE" });
-        assert.equal(deleted.response.status, 200);
-        assert.deepEqual(deleted.body, { ok: true });
-    } finally {
-        await server.stop();
-    }
+    const deleted = await request(`/api/tasks/${taskId}`, { method: "DELETE" });
+    assert.equal(deleted.response.status, 200);
+    assert.deepEqual(deleted.body, { ok: true });
 });
 
 test("task API returns validation errors for invalid input", async () => {
-    const server = await startServer();
-    try {
-        const missingTitle = await request("/api/tasks", {
-            method: "POST",
-            body: JSON.stringify({ assignee: "rajohan" }),
-        });
-        assert.equal(missingTitle.response.status, 400);
-        assert.equal(missingTitle.body.error, "Title is required");
+    const missingTitle = await request("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({ assignee: "rajohan" }),
+    });
+    assert.equal(missingTitle.response.status, 400);
+    assert.equal(missingTitle.body.error, "Title is required");
 
-        const invalidAssignee = await request("/api/tasks", {
-            method: "POST",
-            body: JSON.stringify({ title: "Invalid", assignee: "nobody" }),
-        });
-        assert.equal(invalidAssignee.response.status, 400);
-        assert.equal(invalidAssignee.body.error, "Assignee must be Mira or Raymond");
+    const invalidAssignee = await request("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({ title: "Invalid", assignee: "nobody" }),
+    });
+    assert.equal(invalidAssignee.response.status, 400);
+    assert.equal(invalidAssignee.body.error, "Assignee must be Mira or Raymond");
 
-        const missingTask = await request("/api/tasks/999999/move", {
-            method: "POST",
-            body: JSON.stringify({ columnLabel: "done" }),
-        });
-        assert.equal(missingTask.response.status, 404);
-        assert.equal(missingTask.body.error, "Task not found");
-    } finally {
-        await server.stop();
-    }
+    const missingTask = await request("/api/tasks/999999/move", {
+        method: "POST",
+        body: JSON.stringify({ columnLabel: "done" }),
+    });
+    assert.equal(missingTask.response.status, 404);
+    assert.equal(missingTask.body.error, "Task not found");
 });
