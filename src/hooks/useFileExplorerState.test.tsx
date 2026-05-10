@@ -142,4 +142,248 @@ describe("useFileExplorerState", () => {
         });
         expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("expands directory and loads children", async () => {
+        const dirFiles = [
+            { path: "/root", type: "directory", loaded: false },
+            { path: "/root/other.txt", type: "file", loaded: false },
+        ];
+        const childFiles = [
+            { path: "/root/child1.txt", type: "file" },
+            { path: "/root/sub", type: "directory" },
+        ];
+
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: dirFiles }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: childFiles }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBeGreaterThan(0));
+
+        // Expand the directory
+        await act(async () => {
+            await result.current.handleToggle("/root");
+        });
+
+        expect(result.current.expandedPaths.has("/root")).toBe(true);
+    });
+
+    it("collapses an expanded directory", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                files: [{ path: "/dir", type: "directory", loaded: true }],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBeGreaterThan(0));
+
+        // Expand then collapse
+        await act(async () => {
+            await result.current.handleToggle("/dir");
+        });
+        expect(result.current.expandedPaths.has("/dir")).toBe(true);
+
+        await act(async () => {
+            await result.current.handleToggle("/dir");
+        });
+        expect(result.current.expandedPaths.has("/dir")).toBe(false);
+    });
+
+    it("handles large file warning", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    path: "/big.txt",
+                    content: "x".repeat(200_000),
+                    size: 200_000,
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/big.txt");
+        });
+        await waitFor(() => expect(result.current.largeFileWarning).toBe(true));
+    });
+
+    it("handles save error", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    path: "/a/b.txt",
+                    content: "original",
+                    size: 8,
+                }),
+            })
+            .mockRejectedValueOnce(new Error("Network error"));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/a/b.txt");
+        });
+        await waitFor(() => expect(result.current.editedContent).toBe("original"));
+
+        act(() => {
+            result.current.handleContentChange("changed");
+        });
+
+        await act(async () => {
+            await result.current.handleSave();
+        });
+        expect(result.current.error).toBeTruthy();
+    });
+
+    it("handles save without selection", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ files: [] }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+
+        // No file selected, save should return early
+        await act(async () => {
+            await result.current.handleSave();
+        });
+        expect(result.current.error).toBeNull();
+    });
+
+    it("validates json5 editing mode", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    path: "/a/b.json5",
+                    content: "{a: 1}",
+                    size: 6,
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/a/b.json5");
+        });
+        await waitFor(() => expect(result.current.editedContent).toBe("{a: 1}"));
+
+        // Switch to json editing mode
+        act(() => {
+            result.current.setJsonPreview(false);
+        });
+
+        expect(result.current.isJsonEditing).toBe(true);
+    });
+
+    it("handles code edit mode and markdown preview toggle", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ files: [] }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+
+        act(() => {
+            result.current.setCodeEditMode(true);
+        });
+        expect(result.current.codeEditMode).toBe(true);
+
+        act(() => {
+            result.current.setMarkdownPreview(false);
+        });
+        expect(result.current.markdownPreview).toBe(false);
+    });
+
+    it("handles directory toggle failure gracefully", async () => {
+        const dirFiles = [{ path: "/fail", type: "directory", loaded: false }];
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: dirFiles }),
+            })
+            .mockRejectedValueOnce(new Error("Failed to load directory"));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBeGreaterThan(0));
+
+        // Should not throw, just console.error
+        await act(async () => {
+            await result.current.handleToggle("/fail");
+        });
+        expect(result.current.expandedPaths.has("/fail")).toBe(true);
+    });
 });

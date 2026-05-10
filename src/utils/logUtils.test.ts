@@ -75,10 +75,7 @@ describe("log utils", () => {
     });
 
     it("parses JSON with positional number args", () => {
-        const entry = parseLogLine(
-            JSON.stringify({ "0": 42 }),
-            13
-        );
+        const entry = parseLogLine(JSON.stringify({ "0": 42 }), 13);
 
         expect(entry?.msg).toBe("42");
     });
