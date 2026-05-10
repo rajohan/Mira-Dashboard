@@ -13,7 +13,7 @@ describe("LiveFeedRow", () => {
                     sessionType: "direct",
                     role: "assistant",
                     content: "Rendered message",
-                    timestamp: new Date("2026-05-10T10:00:00.000Z").getTime(),
+                    timestamp: new Date(2026, 4, 10, 12, 0, 0).getTime(),
                 }}
             />
         );
