@@ -32,17 +32,17 @@ describe("useOpenClawSocket", () => {
             let error: Error | undefined;
             try {
                 renderHook(() => useOpenClawSocket());
-            } catch (e) {
-                error = e as Error;
+            } catch (error_) {
+                error = error_ as Error;
             }
             // React 19 testing-library may catch the error as result.error instead of throwing
-            if (!error) {
-                // The hook throw was caught by renderHook's error boundary
-                expect(true).toBe(true); // error boundary caught it, which proves the throw works
-            } else {
+            if (error) {
                 expect(error.message).toBe(
                     "useOpenClawSocket must be used within OpenClawSocketProvider"
                 );
+            } else {
+                // The hook throw was caught by renderHook's error boundary
+                expect(true).toBe(true); // error boundary caught it, which proves the throw works
             }
         } finally {
             consoleSpy.mockRestore();

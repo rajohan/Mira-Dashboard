@@ -26,6 +26,11 @@ describe("format utils", () => {
         expect(formatWeekdayShort(date)).toBe("Sun");
     });
 
+    it("handles invalid date inputs gracefully", () => {
+        expect(formatDate("not-a-date")).toBe("not-a-date");
+        expect(formatDate(Infinity)).toBe("Infinity");
+    });
+
     it("formats durations safely", () => {
         expect(formatDuration(null)).toBe("Unknown");
         const missingTimestamp: number | undefined = undefined;

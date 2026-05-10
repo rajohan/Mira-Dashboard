@@ -95,6 +95,104 @@ describe("moltbook hooks", () => {
         expect(result.current.isLoading).toBe(false);
     });
 
+    it("transforms posts with various field shapes", async () => {
+        const feedData = {
+            posts: [
+                {
+                    id: "p2",
+                    title: "Alt fields",
+                    content_preview: "preview text",
+                    author: {
+                        name: "bot",
+                        display_name: "Bot",
+                        avatar_url: "http://img",
+                    },
+                    upvotes: 0,
+                    downvotes: 1,
+                    comment_count: 0,
+                    created_at: "2026-01-01",
+                    submolt_name: "test",
+                    you_follow_author: true,
+                },
+            ],
+        };
+
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.home",
+                    data: {},
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.feed.hot",
+                    data: feedData,
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.profile",
+                    data: {},
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.my-content",
+                    data: { posts: [], comments: [] },
+                    cachedAt: "2026-01-01",
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useMoltbookData(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.posts.length).toBe(1));
+        const post = result.current.posts[0];
+        expect(post?.id).toBe("p2");
+        expect(post?.author.name).toBe("bot");
+        expect(post?.author.display_name).toBe("Bot");
+        expect(post?.author.avatar_url).toBe("http://img");
+        expect(post?.you_follow_author).toBe(true);
+        expect(post?.content).toBe("preview text");
+    });
+
+    it("handles error state from cache entries", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                json: async () => ({ error: "fail" }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => ({ key: "x", data: {}, cachedAt: "2026-01-01" }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useMoltbookData(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.error).toBeTruthy(), { timeout: 5000 });
+    });
+
     it("individual cache hooks call useCacheEntry with correct keys", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
