@@ -78,6 +78,23 @@ Use the smallest meaningful gate for the change you are making. For docs-only ch
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced for API routes after `/api/auth/*`; route modules should assume authenticated access unless explicitly mounted before the auth middleware.
 
+## Production checkout and PR worktrees
+
+`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `master`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
+
+Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard-worktrees`, for example:
+
+```bash
+mkdir -p /home/ubuntu/projects/mira-dashboard-worktrees
+git -C /home/ubuntu/projects/mira-dashboard fetch --prune origin
+git -C /home/ubuntu/projects/mira-dashboard worktree add \
+  -b mira/<short-slug> \
+  /home/ubuntu/projects/mira-dashboard-worktrees/<short-slug> \
+  master
+```
+
+Run lint/build verification inside the worktree, not the production checkout. This prevents unapproved PR branches from writing live `dist/` or `backend/dist` artifacts.
+
 ## Safety notes for agents
 
 - Do not merge PRs, deploy, restart services, rotate secrets, or change gateway configuration from this repo without Raymond's explicit approval.

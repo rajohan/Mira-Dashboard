@@ -64,11 +64,16 @@ export type {
     OpsActionId,
 } from "./useOpsActions";
 export { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
-export type { DeploymentJob, PullRequestSummary } from "./usePullRequests";
+export type {
+    DeploymentJob,
+    ProductionCheckoutStatus,
+    PullRequestSummary,
+} from "./usePullRequests";
 export {
     pullRequestKeys,
     useApprovePullRequest,
     useDeployDashboard,
+    useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,

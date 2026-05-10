@@ -8,10 +8,15 @@ import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
-import type { DeploymentJob, PullRequestSummary } from "../hooks";
+import type {
+    DeploymentJob,
+    ProductionCheckoutStatus,
+    PullRequestSummary,
+} from "../hooks";
 import {
     useApprovePullRequest,
     useDeployDashboard,
+    useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
@@ -50,7 +55,7 @@ function statusVariant(value: string | undefined) {
 
 function summarizeChecks(checks: unknown[] | undefined) {
     if (!checks?.length) {
-        return { label: "No checks", variant: "default" as const };
+        return { label: "No CI checks", variant: "default" as const };
     }
 
     const records = checks.filter(
@@ -79,6 +84,39 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     return "info" as const;
 }
 
+function checkoutVariant(checkout: ProductionCheckoutStatus | undefined) {
+    if (!checkout) return "default" as const;
+    if (!checkout.isProductionRoot || !checkout.isClean) return "error" as const;
+    if (!checkout.isSafeForDeploy) return "warning" as const;
+    return "success" as const;
+}
+
+function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
+    if (!checkout) return "Checking production checkout";
+    if (!checkout.isProductionRoot) return "Wrong root";
+    if (!checkout.isClean) return "Dirty checkout";
+    if (checkout.branch !== checkout.expectedBranch) return "Will switch to master";
+    return "Ready to deploy";
+}
+
+function checkoutMessage(
+    checkout: ProductionCheckoutStatus | undefined,
+    error: Error | null
+) {
+    if (error) return error.message;
+    if (!checkout) return "Loading checkout status…";
+    if (!checkout.isProductionRoot) {
+        return `Deploy is blocked because the backend is not operating on ${checkout.expectedRoot}.`;
+    }
+    if (!checkout.isClean) {
+        return "Deploy and merge are blocked until local changes in the production checkout are resolved.";
+    }
+    if (checkout.branch !== checkout.expectedBranch) {
+        return `The next deploy/merge will switch the production checkout from ${checkout.branch} to ${checkout.expectedBranch} before building.`;
+    }
+    return "Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees.";
+}
+
 function actionLabel(action: PendingAction) {
     if (!action) return "Confirm";
     switch (action.type) {
@@ -99,17 +137,19 @@ function actionMessage(action: PendingAction) {
         case "merge":
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
         case "merge-deploy":
-            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, build frontend/backend, schedule a service restart, and run a health check.`;
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to master, build frontend/backend from there, schedule a service restart, and run a health check.`;
         case "reject":
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
         case "deploy":
-            return "Deploy latest master?\n\nThis will build frontend/backend, schedule a mira-dashboard.service restart, and run a health check.";
+            return "Deploy latest master?\n\nThis will sync the production checkout to master, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.";
     }
 }
 
 export function PullRequests() {
     const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
     const { data: deployments = [] } = usePullRequestDeployments();
+    const { data: productionCheckout, error: productionCheckoutError } =
+        useProductionCheckout();
     const approvePullRequest = useApprovePullRequest();
     const rejectPullRequest = useRejectPullRequest();
     const deployDashboard = useDeployDashboard();
@@ -121,6 +161,10 @@ export function PullRequests() {
         approvePullRequest.isPending ||
         rejectPullRequest.isPending ||
         deployDashboard.isPending;
+    const isProductionActionBlocked = Boolean(
+        productionCheckout &&
+        (!productionCheckout.isProductionRoot || !productionCheckout.isClean)
+    );
 
     async function confirmAction() {
         if (!pendingAction) return;
@@ -195,7 +239,7 @@ export function PullRequests() {
                         <Button
                             variant="primary"
                             onClick={() => setPendingAction({ type: "deploy" })}
-                            disabled={isActionPending}
+                            disabled={isActionPending || isProductionActionBlocked}
                         >
                             <Rocket className="h-4 w-4" />
                             Deploy latest master
@@ -217,6 +261,60 @@ export function PullRequests() {
                         <p className="text-sm text-red-300">{actionError}</p>
                     </Card>
                 ) : null}
+
+                <Card variant="bordered" className="space-y-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <CardTitle className="text-base">
+                                Production checkout
+                            </CardTitle>
+                            <p className="text-primary-400 mt-1 text-sm">
+                                {checkoutMessage(
+                                    productionCheckout,
+                                    productionCheckoutError
+                                )}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Badge variant={checkoutVariant(productionCheckout)}>
+                                {checkoutLabel(productionCheckout)}
+                            </Badge>
+                            {productionCheckout ? (
+                                <Badge
+                                    variant={
+                                        productionCheckout.branch ===
+                                        productionCheckout.expectedBranch
+                                            ? "success"
+                                            : "warning"
+                                    }
+                                >
+                                    {productionCheckout.branch}
+                                </Badge>
+                            ) : null}
+                            {productionCheckout ? (
+                                <Badge
+                                    variant={
+                                        productionCheckout.isClean ? "success" : "error"
+                                    }
+                                >
+                                    {productionCheckout.isClean ? "clean" : "dirty"}
+                                </Badge>
+                            ) : null}
+                        </div>
+                    </div>
+                    {productionCheckout ? (
+                        <div className="text-primary-500 grid gap-1 text-xs lg:grid-cols-2">
+                            <div className="truncate">
+                                Production: {productionCheckout.root}
+                            </div>
+                            <div className="truncate">
+                                Worktrees: {productionCheckout.worktreeRoot}
+                            </div>
+                            <div>HEAD: {productionCheckout.head}</div>
+                            <div>Upstream: {productionCheckout.upstream || "none"}</div>
+                        </div>
+                    ) : null}
+                </Card>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
                     <div className="space-y-3">
@@ -295,7 +393,10 @@ export function PullRequests() {
                                                         pr,
                                                     })
                                                 }
-                                                disabled={isActionPending}
+                                                disabled={
+                                                    isActionPending ||
+                                                    isProductionActionBlocked
+                                                }
                                             >
                                                 <Rocket className="h-4 w-4" />
                                                 Merge + deploy
@@ -308,7 +409,10 @@ export function PullRequests() {
                                                         pr,
                                                     })
                                                 }
-                                                disabled={isActionPending}
+                                                disabled={
+                                                    isActionPending ||
+                                                    isProductionActionBlocked
+                                                }
                                             >
                                                 <GitMerge className="h-4 w-4" />
                                                 Merge only

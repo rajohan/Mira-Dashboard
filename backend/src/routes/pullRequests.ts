@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
 const DASHBOARD_ROOT = "/home/ubuntu/projects/mira-dashboard";
+const DASHBOARD_WORKTREE_ROOT = "/home/ubuntu/projects/mira-dashboard-worktrees";
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_BASE = "master";
@@ -54,6 +55,20 @@ interface DeploymentJob {
     note?: string;
     stdout?: string;
     stderr?: string;
+}
+
+interface ProductionCheckoutStatus {
+    root: string;
+    expectedRoot: string;
+    worktreeRoot: string;
+    branch: string;
+    expectedBranch: string;
+    head: string;
+    upstream?: string;
+    isClean: boolean;
+    isProductionRoot: boolean;
+    isSafeForDeploy: boolean;
+    statusShort?: string;
 }
 
 function asyncRoute(handler: RequestHandler): RequestHandler {
@@ -227,21 +242,87 @@ function validateMiraPr(pr: PullRequestSummary): void {
     }
 }
 
-async function ensureCleanWorktree(): Promise<void> {
-    const { stdout } = await runCommand("git", ["status", "--short"], {
-        timeoutMs: 30_000,
-    });
-    if (stdout.trim()) {
-        throw new Error("Dashboard worktree has local changes; refusing deploy/merge");
+async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> {
+    const [{ stdout: root }, { stdout: branch }, { stdout: head }, { stdout: status }] =
+        await Promise.all([
+            runCommand("git", ["rev-parse", "--show-toplevel"], {
+                timeoutMs: 30_000,
+            }),
+            runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+                timeoutMs: 30_000,
+            }),
+            runCommand("git", ["rev-parse", "--short", "HEAD"], {
+                timeoutMs: 30_000,
+            }),
+            runCommand("git", ["status", "--short"], { timeoutMs: 30_000 }),
+        ]);
+
+    let upstream: string | undefined;
+    try {
+        const { stdout } = await runCommand(
+            "git",
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            { timeoutMs: 30_000 }
+        );
+        upstream = stdout.trim() || undefined;
+    } catch {
+        upstream = undefined;
+    }
+
+    const productionRoot = root.trim();
+    const currentBranch = branch.trim();
+    const statusShort = status.trim();
+    const isClean = statusShort.length === 0;
+    const isProductionRoot =
+        path.resolve(productionRoot) === path.resolve(DASHBOARD_ROOT);
+
+    return {
+        root: productionRoot,
+        expectedRoot: DASHBOARD_ROOT,
+        worktreeRoot: DASHBOARD_WORKTREE_ROOT,
+        branch: currentBranch,
+        expectedBranch: DEFAULT_BASE,
+        head: head.trim(),
+        upstream,
+        isClean,
+        isProductionRoot,
+        isSafeForDeploy: isClean && isProductionRoot && currentBranch === DEFAULT_BASE,
+        statusShort: statusShort || undefined,
+    };
+}
+
+async function ensureProductionCheckout(): Promise<void> {
+    const status = await getProductionCheckoutStatus();
+
+    if (!status.isProductionRoot) {
+        throw new Error(
+            `Expected production checkout at ${DASHBOARD_ROOT}, got ${status.root}`
+        );
+    }
+
+    if (!status.isClean) {
+        throw new Error("Production checkout has local changes; refusing deploy/merge");
+    }
+}
+
+async function ensureProductionReadyForDeploy(): Promise<void> {
+    const status = await getProductionCheckoutStatus();
+
+    if (!status.isSafeForDeploy) {
+        throw new Error(
+            `Production checkout must be clean ${DEFAULT_BASE} before deploy; current branch=${status.branch}, clean=${status.isClean}`
+        );
     }
 }
 
 async function syncMaster(): Promise<void> {
+    await ensureProductionCheckout();
     await runCommand("git", ["fetch", "--prune", "origin"], { timeoutMs: 120_000 });
     await runCommand("git", ["checkout", DEFAULT_BASE], { timeoutMs: 60_000 });
     await runCommand("git", ["pull", "--ff-only", "origin", DEFAULT_BASE], {
         timeoutMs: 120_000,
     });
+    await ensureProductionReadyForDeploy();
 }
 
 function shellQuote(value: string): string {
@@ -301,7 +382,6 @@ async function deployLatest(): Promise<DeploymentJob> {
     writeDeploymentJob(job);
 
     try {
-        await ensureCleanWorktree();
         await syncMaster();
 
         await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
@@ -339,7 +419,7 @@ async function deployLatest(): Promise<DeploymentJob> {
 }
 
 async function approvePullRequest(number: number, deploy: boolean) {
-    await ensureCleanWorktree();
+    await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateMiraPr(pr);
 
@@ -393,6 +473,13 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/deployments",
         asyncRoute(async (_req, res) => {
             res.json({ deployments: readDeploymentJobs() });
+        })
+    );
+
+    app.get(
+        "/api/pull-requests/production-checkout",
+        asyncRoute(async (_req, res) => {
+            res.json({ checkout: await getProductionCheckoutStatus() });
         })
     );
 

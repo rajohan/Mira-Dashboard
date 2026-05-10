@@ -39,12 +39,30 @@ export interface DeploymentJob {
     stderr?: string;
 }
 
+export interface ProductionCheckoutStatus {
+    root: string;
+    expectedRoot: string;
+    worktreeRoot: string;
+    branch: string;
+    expectedBranch: string;
+    head: string;
+    upstream?: string;
+    isClean: boolean;
+    isProductionRoot: boolean;
+    isSafeForDeploy: boolean;
+    statusShort?: string;
+}
+
 interface PullRequestsResponse {
     pullRequests: PullRequestSummary[];
 }
 
 interface DeploymentsResponse {
     deployments: DeploymentJob[];
+}
+
+interface ProductionCheckoutResponse {
+    checkout: ProductionCheckoutStatus;
 }
 
 interface PullRequestActionResponse {
@@ -57,6 +75,7 @@ export const pullRequestKeys = {
     all: ["pull-requests"] as const,
     list: () => [...pullRequestKeys.all, "list"] as const,
     deployments: () => [...pullRequestKeys.all, "deployments"] as const,
+    productionCheckout: () => [...pullRequestKeys.all, "production-checkout"] as const,
 };
 
 async function fetchPullRequests(): Promise<PullRequestSummary[]> {
@@ -67,6 +86,13 @@ async function fetchPullRequests(): Promise<PullRequestSummary[]> {
 async function fetchDeployments(): Promise<DeploymentJob[]> {
     const response = await apiFetch<DeploymentsResponse>("/pull-requests/deployments");
     return response.deployments;
+}
+
+async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
+    const response = await apiFetch<ProductionCheckoutResponse>(
+        "/pull-requests/production-checkout"
+    );
+    return response.checkout;
 }
 
 async function approvePullRequest(
@@ -109,6 +135,15 @@ export function usePullRequestDeployments() {
     });
 }
 
+export function useProductionCheckout() {
+    return useQuery({
+        queryKey: pullRequestKeys.productionCheckout(),
+        queryFn: fetchProductionCheckout,
+        staleTime: 5_000,
+        refetchInterval: AUTO_REFRESH_MS,
+    });
+}
+
 export function useApprovePullRequest() {
     const queryClient = useQueryClient();
 
@@ -119,6 +154,9 @@ export function useApprovePullRequest() {
             void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
             void queryClient.invalidateQueries({
                 queryKey: pullRequestKeys.deployments(),
+            });
+            void queryClient.invalidateQueries({
+                queryKey: pullRequestKeys.productionCheckout(),
             });
         },
     });
@@ -144,6 +182,9 @@ export function useDeployDashboard() {
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: pullRequestKeys.deployments(),
+            });
+            void queryClient.invalidateQueries({
+                queryKey: pullRequestKeys.productionCheckout(),
             });
         },
     });
