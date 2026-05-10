@@ -213,6 +213,110 @@ describe("useChatRuntimeEvents", () => {
         });
     });
 
+    it("formats OpenClaw runtime transcript progress events", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        const emitRuntimeEvent = (
+            stream: string,
+            data: Record<string, unknown>,
+            runId: string
+        ) => {
+            act(() => {
+                emit({
+                    event: `session.${stream}`,
+                    payload: {
+                        data,
+                        runId,
+                        sessionKey: "session-a",
+                        stream,
+                    },
+                    type: "event",
+                });
+            });
+        };
+
+        emitRuntimeEvent("lifecycle", { phase: "start" }, "run-lifecycle");
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe("Thinking");
+
+        emitRuntimeEvent(
+            "item",
+            { itemKind: "task_update", summary: "Checking status" },
+            "run-item"
+        );
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Task update: Checking status"
+        );
+
+        emitRuntimeEvent("plan", { explanation: "Updating next steps" }, "run-plan");
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Updating next steps"
+        );
+
+        emitRuntimeEvent("approval", { command: "npm run build" }, "run-approval");
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "npm run build"
+        );
+
+        emitRuntimeEvent("patch", { summary: "Applying test fixes" }, "run-patch");
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Applying test fixes"
+        );
+
+        emitRuntimeEvent(
+            "command_output",
+            { exitCode: 1, name: "functions.exec", phase: "end", title: "npm test" },
+            "run-command"
+        );
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Exec: exit 1: npm test"
+        );
+
+        emitRuntimeEvent("compaction", { phase: "start" }, "run-compaction");
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Compacting context"
+        );
+    });
+
+    it("skips non-terminal command output and history refresh when not at bottom", async () => {
+        const { emit, request, result } = renderRuntimeEvents({
+            shouldStickToBottom: false,
+        });
+
+        act(() => {
+            emit({
+                event: "session.command_output",
+                payload: {
+                    data: { phase: "stdout", title: "still running" },
+                    runId: "run-output",
+                    sessionKey: "session-a",
+                    stream: "command_output",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams).toEqual({});
+
+        act(() => {
+            emit({
+                event: "session.lifecycle",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "run-output",
+                    sessionKey: "session-a",
+                    stream: "lifecycle",
+                },
+                type: "event",
+            });
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(150);
+        });
+
+        expect(request).not.toHaveBeenCalled();
+    });
+
     it("appends aborted buffered text and surfaces chat errors", async () => {
         const { emit, result } = renderRuntimeEvents();
 
