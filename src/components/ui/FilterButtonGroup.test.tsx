@@ -5,6 +5,18 @@ import { describe, expect, it, vi } from "vitest";
 import { FilterButtonGroup } from "./FilterButtonGroup";
 
 describe("FilterButtonGroup", () => {
+    it("renders without optional className", () => {
+        const { container } = render(
+            <FilterButtonGroup
+                options={[{ value: "all", label: "All" }]}
+                value="all"
+                onChange={vi.fn()}
+            />
+        );
+
+        expect(container.firstElementChild).toHaveClass("flex", "gap-2");
+    });
+
     it("renders options and emits selected values", async () => {
         const onChange = vi.fn();
         render(

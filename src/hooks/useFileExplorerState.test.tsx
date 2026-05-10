@@ -209,6 +209,72 @@ describe("useFileExplorerState", () => {
         expect(result.current.expandedPaths.has("/dir")).toBe(false);
     });
 
+    it("loads a nested directory through recursive lookup", async () => {
+        const rootFiles = [
+            {
+                path: "/root",
+                type: "directory",
+                loaded: true,
+                children: [{ path: "/root/sub", type: "directory", loaded: false }],
+            },
+        ];
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: rootFiles }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    files: [{ path: "/root/sub/file.txt", type: "file" }],
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBe(1));
+        await act(async () => {
+            await result.current.handleToggle("/root/sub");
+        });
+        expect(result.current.expandedPaths.has("/root/sub")).toBe(true);
+    });
+
+    it("refreshes selected file content", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => ({ path: "/a/b.txt", content: "hello", size: 5 }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/a/b.txt");
+        });
+        await waitFor(() => expect(result.current.editedContent).toBe("hello"));
+        act(() => {
+            result.current.handleRefresh();
+        });
+        expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+
     it("handles large file warning", async () => {
         const fetchMock = vi
             .fn()

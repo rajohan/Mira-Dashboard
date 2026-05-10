@@ -24,6 +24,40 @@ describe("MetricCard", () => {
         expect(container.querySelector("[style='width: 100%;']")).toBeInTheDocument();
     });
 
+    it("uses explicit color when no percent is provided", () => {
+        const { container } = render(
+            <MetricCard title="Plan" value="ok" color="purple" icon={<Circle />} />
+        );
+
+        expect(container.querySelector(".bg-primary-700")).toBeInTheDocument();
+    });
+
+    it("selects blue and orange colors from percentage thresholds", () => {
+        const { rerender, container } = render(
+            <MetricCard
+                title="CPU"
+                value="60"
+                percent={60}
+                icon={<Circle data-testid="blue-icon" />}
+            />
+        );
+        expect(
+            container.querySelector(String.raw`.bg-accent-500\/20`)
+        ).toBeInTheDocument();
+
+        rerender(
+            <MetricCard
+                title="CPU"
+                value="80"
+                percent={80}
+                icon={<Circle data-testid="orange-icon" />}
+            />
+        );
+        expect(
+            container.querySelector(String.raw`.bg-amber-500\/20`)
+        ).toBeInTheDocument();
+    });
+
     it("supports subtitle-only and hidden percent label", () => {
         render(
             <MetricCard

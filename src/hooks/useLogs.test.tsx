@@ -36,6 +36,37 @@ describe("log hooks", () => {
         );
     });
 
+    it("handles missing log arrays and non-string content", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ logs: "nope" }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ content: null }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+        const wrapper = createQueryWrapper();
+
+        const { result: files } = renderHook(() => useLogFiles(), { wrapper });
+        await waitFor(() => expect(files.current.data).toEqual([]));
+
+        const { result: content } = renderHook(() => useLogContent("app log", 10), {
+            wrapper,
+        });
+        await waitFor(() => expect(content.current.data).toBe(""));
+
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            2,
+            "/api/logs/content?file=app%20log&lines=10",
+            expect.any(Object)
+        );
+    });
+
     it("does not fetch content when disabled or file is missing", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);

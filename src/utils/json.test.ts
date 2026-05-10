@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import JSON5 from "json5";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { validateJsonString } from "./json";
 
 describe("json utils", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it("validates strict JSON", () => {
         expect(validateJsonString('{"ok":true}')).toEqual({ valid: true, error: null });
 
@@ -23,8 +28,18 @@ describe("json utils", () => {
     });
 
     it("handles non-Error throws in JSON.parse", () => {
-        // Pass a string that causes JSON.parse to throw a non-Error
-        const result = validateJsonString("undefined");
-        expect(result.valid).toBe(false);
+        vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+            throw "bad json";
+        });
+        const result = validateJsonString("{}");
+        expect(result).toEqual({ valid: false, error: "Invalid JSON" });
+    });
+
+    it("handles non-Error throws in JSON5.parse", () => {
+        vi.spyOn(JSON5, "parse").mockImplementationOnce(() => {
+            throw "bad json5";
+        });
+        const result = validateJsonString("{}", "json5");
+        expect(result).toEqual({ valid: false, error: "Invalid JSON5" });
     });
 });

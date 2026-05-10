@@ -24,6 +24,32 @@ describe("AppErrorFallback", () => {
         expect(resetErrorBoundary).toHaveBeenCalledTimes(1);
     });
 
+    it("triggers a full page reload", async () => {
+        const reload = vi.fn();
+        const originalLocation = window.location;
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: { reload },
+        });
+
+        try {
+            render(
+                <AppErrorFallback
+                    error={new Error("Boom")}
+                    resetErrorBoundary={vi.fn()}
+                />
+            );
+
+            await userEvent.click(screen.getByRole("button", { name: "Full reload" }));
+            expect(reload).toHaveBeenCalledTimes(1);
+        } finally {
+            Object.defineProperty(window, "location", {
+                configurable: true,
+                value: originalLocation,
+            });
+        }
+    });
+
     it("falls back for non-Error values", () => {
         render(<AppErrorFallback error="bad" resetErrorBoundary={vi.fn()} />);
 

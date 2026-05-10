@@ -121,6 +121,43 @@ describe("docker hooks", () => {
         expect(disabledExec.current.fetchStatus).toBe("idle");
     });
 
+    it("falls back when docker list/content responses omit arrays", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ content: null }),
+            })
+            .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+            .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+            .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+        vi.stubGlobal("fetch", fetchMock);
+        const wrapper = createQueryWrapper();
+
+        const { result: containers } = renderHook(() => useDockerContainers(), {
+            wrapper,
+        });
+        await waitFor(() => expect(containers.current.data).toEqual([]));
+
+        const { result: logs } = renderHook(() => useDockerContainerLogs("c1", 10), {
+            wrapper,
+        });
+        await waitFor(() => expect(logs.current.data).toBe(""));
+
+        const { result: images } = renderHook(() => useDockerImages(), { wrapper });
+        await waitFor(() => expect(images.current.data).toEqual([]));
+
+        const { result: volumes } = renderHook(() => useDockerVolumes(), { wrapper });
+        await waitFor(() => expect(volumes.current.data).toEqual([]));
+
+        const { result: updaterEvents } = renderHook(() => useDockerUpdaterEvents(2), {
+            wrapper,
+        });
+        await waitFor(() => expect(updaterEvents.current.data).toEqual([]));
+    });
+
     it("runs docker mutations and invalidates relevant queries", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
@@ -154,6 +191,7 @@ describe("docker hooks", () => {
             await deleteImage.current.mutateAsync("sha:abc");
             await deleteVolume.current.mutateAsync("vol/name");
             await prune.current.mutateAsync("images");
+            await prune.current.mutateAsync("volumes");
         });
 
         expect(fetchMock).toHaveBeenNthCalledWith(
@@ -187,7 +225,13 @@ describe("docker hooks", () => {
             expect.objectContaining({ body: JSON.stringify({ target: "images" }) })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: dockerKeys.containers });
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            7,
+            "/api/docker/prune",
+            expect.objectContaining({ body: JSON.stringify({ target: "volumes" }) })
+        );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: dockerKeys.images });
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: dockerKeys.volumes });
     });
 
     it("starts and stops docker exec jobs", async () => {

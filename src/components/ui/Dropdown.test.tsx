@@ -28,6 +28,23 @@ describe("Dropdown", () => {
         expect(onDelete).toHaveBeenCalledTimes(1);
     });
 
+    it("supports icon-only left-aligned primary trigger", async () => {
+        render(
+            <Dropdown
+                align="left"
+                variant="primary"
+                size="md"
+                icon={<span data-testid="more-icon" />}
+                items={[{ label: "Open" }]}
+            />
+        );
+
+        const button = screen.getByTestId("more-icon").closest("button");
+        expect(button).toHaveClass("bg-accent-500", "px-4");
+        await userEvent.click(button!);
+        expect(await screen.findByRole("menuitem", { name: "Open" })).toBeInTheDocument();
+    });
+
     it("renders custom menu content", async () => {
         render(<Dropdown label="More" content={<div>Custom content</div>} />);
 

@@ -22,6 +22,12 @@ describe("Checkbox", () => {
         expect(onChange).toHaveBeenCalledWith(true);
     });
 
+    it("renders without label or description", () => {
+        render(<Checkbox checked={false} onChange={vi.fn()} />);
+
+        expect(screen.getByRole("checkbox")).toBeInTheDocument();
+    });
+
     it("shows checked state and respects disabled", () => {
         render(<Checkbox checked onChange={vi.fn()} label="Done" disabled />);
 

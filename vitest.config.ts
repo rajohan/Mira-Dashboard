@@ -18,7 +18,7 @@ export default defineConfig({
                 "src/collections/**/*.{ts,tsx}",
                 "src/lib/**/*.{ts,tsx}",
             ],
-            exclude: ["src/**/*.test.{ts,tsx}"],
+            exclude: ["src/**/*.test.{ts,tsx}", "src/**/index.ts"],
         },
     },
 });

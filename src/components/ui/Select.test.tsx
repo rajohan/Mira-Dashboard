@@ -21,6 +21,29 @@ describe("Select", () => {
         expect(onChange).toHaveBeenCalledWith("done");
     });
 
+    it("supports icon, full-width layout, and custom menu width", async () => {
+        const { container } = render(
+            <Select
+                value="todo"
+                onChange={vi.fn()}
+                options={options}
+                icon={<span data-testid="select-icon" />}
+                width="w-full"
+                menuWidth="w-64"
+                className="custom-trigger"
+            />
+        );
+
+        expect(screen.getByTestId("select-icon")).toBeInTheDocument();
+        expect(container.firstElementChild).toHaveClass("block", "w-full");
+        expect(screen.getByRole("button", { name: /Todo/u })).toHaveClass(
+            "custom-trigger"
+        );
+
+        await userEvent.click(screen.getByRole("button", { name: /Todo/u }));
+        expect(await screen.findByRole("menu")).toHaveClass("w-64");
+    });
+
     it("renders placeholder when no selected option exists", () => {
         render(
             <Select

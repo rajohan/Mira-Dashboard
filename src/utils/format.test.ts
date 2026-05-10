@@ -27,8 +27,13 @@ describe("format utils", () => {
     });
 
     it("handles invalid date inputs gracefully", () => {
+        const invalidDate = new Date(Number.NaN);
         expect(formatDate("not-a-date")).toBe("not-a-date");
         expect(formatDate(Infinity)).toBe("Infinity");
+        expect(formatDateStamp(invalidDate)).toBe("unknown-date");
+        expect(formatOsloDate(invalidDate)).toBe("Unknown date");
+        expect(formatWeekdayShort(invalidDate)).toBe("---");
+        expect(formatDuration(Number.NaN)).toBe("Unknown");
     });
 
     it("formats durations safely", () => {

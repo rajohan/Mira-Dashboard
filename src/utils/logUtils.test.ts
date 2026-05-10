@@ -74,16 +74,38 @@ describe("log utils", () => {
         expect(entry).toMatchObject({ subsystem: "memory", msg: "cached" });
     });
 
+    it("parses nested object messages and positional fallback", () => {
+        const objectMessage = parseLogLine(
+            JSON.stringify({ "0": '{"module":"mod","msg":{"a":1}}' }),
+            31
+        );
+        expect(objectMessage).toMatchObject({ subsystem: "mod", msg: '{"a":1}' });
+
+        const fallback = parseLogLine(JSON.stringify({ "0": "{}" }), 32);
+        expect(fallback?.msg).toBe("{}");
+    });
+
     it("parses JSON with positional number args", () => {
         const entry = parseLogLine(JSON.stringify({ "0": 42 }), 13);
 
         expect(entry?.msg).toBe("42");
     });
 
+    it("parses JSON with positional-one fallback", () => {
+        expect(
+            parseLogLine(JSON.stringify({ "0": "", "1": "second arg" }), 14)
+        ).toMatchObject({
+            msg: "second arg",
+        });
+        expect(
+            parseLogLine(JSON.stringify({ "0": "", "1": { nested: true } }), 15)?.msg
+        ).toContain("nested");
+    });
+
     it("parses JSON with positional-two fallback", () => {
         const entry = parseLogLine(
             JSON.stringify({ "0": null, "1": null, "2": "third arg message" }),
-            14
+            16
         );
 
         expect(entry?.msg).toContain("third arg");
@@ -147,6 +169,8 @@ describe("log utils", () => {
         expect(formatLogTime("2026-05-10T06:07:08.000Z")).toMatch(/08:07:08|06:07:08/u);
         // Invalid date string falls back to --:--:-- via formatOsloTime catch
         expect(formatLogTime("not-a-date")).toBe("--:--:--");
+        const badTimestamp = Symbol("bad") as unknown as string;
+        expect(formatLogTime(badTimestamp)).toBe(badTimestamp);
     });
 
     it("returns correct level colors for all levels", () => {

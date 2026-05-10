@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OpenClawSocketProvider, useOpenClawSocket } from "./useOpenClawSocket";
 
@@ -41,6 +41,10 @@ describe("useOpenClawSocket", () => {
         mockClient.disconnect.mockReset();
         mockClient.isOpen.mockReturnValue(false);
         mockClient.request.mockResolvedValue();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it("throws when used outside provider", () => {
@@ -201,7 +205,137 @@ describe("useOpenClawSocket", () => {
 
         expect(result.current.isConnected).toBe(true);
 
-        // Reset
         (handleSocketMessage as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    });
+
+    it("updates state from socket lifecycle callbacks", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+
+        let options: Record<string, unknown> = {};
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                options = opts;
+                return mockClient;
+            }
+        );
+
+        const onConnect = vi.fn();
+        const onDisconnect = vi.fn();
+        const { result } = renderHook(
+            () => useOpenClawSocket({ onConnect, onDisconnect }),
+            { wrapper: createWrapper }
+        );
+
+        act(() => {
+            (options.onOpen as () => void)();
+        });
+
+        await waitFor(() => expect(result.current.isConnected).toBe(true));
+        expect(result.current.error).toBeNull();
+        expect(result.current.connectionId).toBe(1);
+        expect(onConnect).toHaveBeenCalled();
+        expect(mockClient.request).toHaveBeenCalledWith("sessions.list");
+
+        act(() => {
+            (options.onClose as () => void)();
+        });
+        await waitFor(() => expect(result.current.isConnected).toBe(false));
+        expect(onDisconnect).toHaveBeenCalled();
+
+        act(() => {
+            (options.onError as () => void)();
+        });
+        expect(result.current.error).toBe("WebSocket connection failed");
+    });
+
+    it("delegates requests when client exists", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.request.mockResolvedValueOnce();
+
+        const { result } = renderHook(() => useOpenClawSocket(), {
+            wrapper: createWrapper,
+        });
+
+        await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+        await expect(
+            result.current.request("test.method", { a: 1 })
+        ).resolves.toBeUndefined();
+        expect(mockClient.request).toHaveBeenCalledWith("test.method", { a: 1 });
+    });
+
+    it("logs message processing errors", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        const { handleSocketMessage } = await import("../lib/socket/socketMessageRouter");
+        (handleSocketMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+            throw new Error("router failed");
+        });
+
+        let onMessageCallback: ((data: unknown) => void) | undefined;
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                onMessageCallback = opts.onMessage as (data: unknown) => void;
+                return mockClient;
+            }
+        );
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        act(() => {
+            onMessageCallback?.({ type: "bad" });
+        });
+
+        expect(consoleSpy).toHaveBeenCalled();
+        consoleSpy.mockRestore();
+    });
+
+    it("reconnects on heartbeat request failure", async () => {
+        vi.useFakeTimers();
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(true);
+
+        let options: Record<string, unknown> = {};
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                options = opts;
+                return mockClient;
+            }
+        );
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        act(() => {
+            (options.onOpen as () => void)();
+        });
+        mockClient.request.mockRejectedValueOnce(new Error("heartbeat failed"));
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(10_000);
+        });
+
+        expect(mockClient.disconnect).toHaveBeenCalled();
+        expect(mockClient.connect).toHaveBeenCalledTimes(2);
+    });
+
+    it("resyncs socket on visibility/focus/online events", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(true);
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "visible",
+        });
+        window.dispatchEvent(new Event("focus"));
+        window.dispatchEvent(new Event("online"));
+        document.dispatchEvent(new Event("visibilitychange"));
+
+        await waitFor(() =>
+            expect(mockClient.request).toHaveBeenCalledWith("sessions.list")
+        );
     });
 });

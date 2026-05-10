@@ -54,7 +54,7 @@ function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: stri
 function normalizeStructuredMessage(parsed: Record<string, unknown>): {
     msg: string;
     subsystem: string;
-} | null {
+} {
     const positionalZero = parsed[0] ?? parsed["0"];
     const positionalOne = parsed[1] ?? parsed["1"];
     const positionalTwo = parsed[2] ?? parsed["2"];
@@ -172,9 +172,6 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
                 : String(parsed.time || parsed.timestamp || "");
 
         const normalized = normalizeStructuredMessage(parsed);
-        if (!normalized) {
-            return null;
-        }
 
         const dedupeKey = buildDedupeKey({
             ts,

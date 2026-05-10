@@ -53,6 +53,28 @@ describe("apiFetch", () => {
         await expect(apiFetch("/broken")).rejects.toThrow("Broken");
     });
 
+    it("falls back to HTTP status when error response has no message", async () => {
+        mockFetch({
+            ok: false,
+            status: 418,
+            json: async () => ({}),
+        });
+
+        await expect(apiFetch("/teapot")).rejects.toThrow("HTTP 418");
+    });
+
+    it("falls back to unknown error when error JSON parsing fails", async () => {
+        mockFetch({
+            ok: false,
+            status: 500,
+            json: async () => {
+                throw new Error("bad json");
+            },
+        });
+
+        await expect(apiFetch("/broken-json")).rejects.toThrow("Unknown error");
+    });
+
     it("clears auth and dispatches event on unauthorized", async () => {
         authStore.setState(() => ({
             user: { id: 1, username: "mira" },

@@ -49,6 +49,27 @@ describe("cache hooks", () => {
         );
     });
 
+    it("refreshes non-moltbook entries without broad moltbook invalidation", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+        const { result } = renderHook(() => useRefreshCacheEntry(), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        await act(async () => {
+            await result.current.mutateAsync("system.host");
+        });
+
+        expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ["moltbook"] });
+    });
+
     it("refreshes comma-separated entries and invalidates related queries", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,

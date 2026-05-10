@@ -21,6 +21,17 @@ describe("PageState", () => {
         expect(screen.queryByText("Content")).not.toBeInTheDocument();
     });
 
+    it("renders null fallbacks when state slots are omitted", () => {
+        const { container, rerender } = render(<PageState isLoading>Content</PageState>);
+        expect(container).toBeEmptyDOMElement();
+
+        rerender(<PageState error="Boom">Content</PageState>);
+        expect(container).toBeEmptyDOMElement();
+
+        rerender(<PageState isEmpty>Content</PageState>);
+        expect(container).toBeEmptyDOMElement();
+    });
+
     it("renders error, empty, or children by priority", () => {
         const { rerender } = render(
             <PageState error="Boom" errorView={<p>Error</p>}>

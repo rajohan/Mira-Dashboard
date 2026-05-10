@@ -47,6 +47,21 @@ describe("backup hooks", () => {
         );
     });
 
+    it("uses short polling while kopia backup is running", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ job: { id: "kopia", status: "running" } }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useKopiaBackup(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.data?.job?.status).toBe("running"));
+    });
+
     it("runs backups and invalidates status caches", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,

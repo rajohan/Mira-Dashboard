@@ -18,6 +18,11 @@ describe("useLiveFeed", () => {
                             content: "older",
                             timestamp: "2026-01-01T00:00:00Z",
                         },
+                        {
+                            role: "tool-result",
+                            content: "fallback timestamp",
+                            timestamp: "not-a-date",
+                        },
                         { role: "assistant", content: "   " },
                     ],
                 }),
@@ -53,12 +58,45 @@ describe("useLiveFeed", () => {
             expect(result.current.data?.map((item) => item.content)).toEqual([
                 "newer",
                 "older",
+                "fallback timestamp",
             ])
         );
         expect(result.current.data?.[1]?.role).toBe("tool_result");
+        expect(result.current.data?.[2]).toMatchObject({
+            sessionLabel: "One",
+            sessionType: "DIRECT",
+            role: "tool_result",
+            timestamp: 1,
+        });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/sessions/s1/history?limit=20&offset=0",
             expect.any(Object)
+        );
+    });
+
+    it("falls back to session key, unknown type, unknown role, and string content", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                messages: [{ role: null, content: 123, timestamp: undefined }],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(
+            () => useLiveFeed([{ key: "s3", updatedAt: 7 }] as never, false),
+            { wrapper: createQueryWrapper() }
+        );
+
+        await waitFor(() =>
+            expect(result.current.data?.[0]).toMatchObject({
+                sessionLabel: "s3",
+                sessionType: "UNKNOWN",
+                role: "unknown",
+                content: "123",
+                timestamp: 7,
+            })
         );
     });
 

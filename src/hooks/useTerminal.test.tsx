@@ -86,6 +86,11 @@ describe("terminal hooks", () => {
         expect(result.current.history[0].status).toBe("done");
 
         act(() => {
+            result.current.updateCommand("missing", { status: "error" });
+        });
+        expect(result.current.history[0].status).toBe("done");
+
+        act(() => {
             result.current.clearHistory();
         });
         expect(result.current.history.length).toBe(0);

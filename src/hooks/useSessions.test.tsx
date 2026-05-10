@@ -3,7 +3,12 @@ import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
-import { useDeleteSession, useSessionAction, useSessionHistory } from "./useSessions";
+import {
+    sessionKeys,
+    useDeleteSession,
+    useSessionAction,
+    useSessionHistory,
+} from "./useSessions";
 
 vi.mock("../collections/sessions", () => ({
     deleteSessionFromCollection: vi.fn(),
@@ -12,6 +17,9 @@ vi.mock("../collections/sessions", () => ({
 const { deleteSessionFromCollection } = await import("../collections/sessions");
 
 describe("session hooks", () => {
+    it("builds session history query keys", () => {
+        expect(sessionKeys.history("abc")).toEqual(["sessions", "history", "abc"]);
+    });
     it("fetches paginated session history and normalizes invalid messages", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
@@ -32,6 +40,31 @@ describe("session hooks", () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/sessions/agent%3Amain/history?offset=0&limit=25",
+            expect.any(Object)
+        );
+    });
+
+    it("keeps valid history messages", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                messages: [{ role: "user", content: "hi" }],
+                hasMore: false,
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useSessionHistory("agent:main"), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await act(async () => {
+            await result.current.fetchNextPage();
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/sessions/agent%3Amain/history?offset=0&limit=50",
             expect.any(Object)
         );
     });

@@ -22,6 +22,15 @@ describe("Switch", () => {
         expect(onChange).toHaveBeenCalledWith(true);
     });
 
+    it("renders without label or description", () => {
+        const { container } = render(
+            <Switch checked={false} onChange={vi.fn()} className="extra" />
+        );
+
+        expect(screen.getByRole("switch")).toBeInTheDocument();
+        expect(container.firstElementChild).toHaveClass("extra");
+    });
+
     it("shows checked and disabled state", () => {
         render(<Switch checked onChange={vi.fn()} label="Enabled" disabled />);
 

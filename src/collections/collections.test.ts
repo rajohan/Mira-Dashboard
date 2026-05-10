@@ -121,6 +121,13 @@ describe("collections", () => {
         expect(mockUtils.writeDelete).not.toHaveBeenCalled();
     });
 
+    it("deleteSessionFromCollection ignores non-matching sessions", () => {
+        mockIsReady.mockReturnValue(true);
+        mockEntries.push(["other-key", {}]);
+        deleteSessionFromCollection("key-1");
+        expect(mockUtils.writeDelete).not.toHaveBeenCalled();
+    });
+
     it("deleteSessionFromCollection deletes matching session", () => {
         mockIsReady.mockReturnValue(true);
         mockEntries.push(["key-1", {}]);
