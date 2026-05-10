@@ -43,5 +43,9 @@ jobs:
               run: npm run build
               working-directory: backend
 
+            - name: Test backend API
+              run: npm test
+              working-directory: backend
+
             - name: Run Playwright smoke tests
               run: npm run test:e2e
