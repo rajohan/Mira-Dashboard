@@ -138,10 +138,9 @@ describe("useOpenClawSocket", () => {
         mockUseIsAuthenticated.mockReturnValue(true);
 
         const onConnect = vi.fn();
-        renderHook(
-            () => useOpenClawSocket({ onConnect, onDisconnect: vi.fn() }),
-            { wrapper: createWrapper }
-        );
+        renderHook(() => useOpenClawSocket({ onConnect, onDisconnect: vi.fn() }), {
+            wrapper: createWrapper,
+        });
 
         // The provider auto-connects when authenticated
         await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());

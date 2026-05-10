@@ -75,7 +75,9 @@ describe("authStore", () => {
         });
         vi.stubGlobal("fetch", fetchMock);
 
-        await expect(authActions.refreshSession()).rejects.toThrow("Failed to fetch auth session");
+        await expect(authActions.refreshSession()).rejects.toThrow(
+            "Failed to fetch auth session"
+        );
     });
 
     it("logout calls API and clears session", async () => {
@@ -90,7 +92,10 @@ describe("authStore", () => {
 
         await authActions.logout();
         expect(authStore.state.isAuthenticated).toBe(false);
-        expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/auth/logout",
+            expect.objectContaining({ method: "POST" })
+        );
     });
 
     it("logout handles fetch failure gracefully", async () => {
