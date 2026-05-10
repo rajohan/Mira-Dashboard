@@ -38,7 +38,6 @@ describe("collections", () => {
         mockUtils.writeUpsert.mockClear();
         mockUtils.writeDelete.mockClear();
         mockIsReady.mockReturnValue(false);
-        mockIterator.mockReturnValue([]);
     });
 
     it("writeAgentsFromWebSocket skips when not ready", () => {
