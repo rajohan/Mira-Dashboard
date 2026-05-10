@@ -68,6 +68,7 @@ export type {
     DeploymentJob,
     ProductionCheckoutStatus,
     PullRequestSummary,
+    WorktreeCleanupResult,
 } from "./usePullRequests";
 export {
     pullRequestKeys,

@@ -12,6 +12,7 @@ import type {
     DeploymentJob,
     ProductionCheckoutStatus,
     PullRequestSummary,
+    WorktreeCleanupResult,
 } from "../hooks";
 import {
     useApprovePullRequest,
@@ -145,6 +146,11 @@ function actionMessage(action: PendingAction) {
     }
 }
 
+function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
+    if (!cleanup) return message;
+    return `${message}\n${cleanup.message}`;
+}
+
 export function PullRequests() {
     const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
     const { data: deployments = [] } = usePullRequestDeployments();
@@ -176,7 +182,7 @@ export function PullRequests() {
                     number: pendingAction.pr.number,
                     deploy: false,
                 });
-                setLastResult(result.message);
+                setLastResult(actionResultMessage(result.message, result.cleanup));
             }
 
             if (pendingAction.type === "merge-deploy") {
@@ -184,14 +190,19 @@ export function PullRequests() {
                     number: pendingAction.pr.number,
                     deploy: true,
                 });
-                setLastResult(result.deployment?.note || result.message);
+                setLastResult(
+                    actionResultMessage(
+                        result.deployment?.note || result.message,
+                        result.cleanup
+                    )
+                );
             }
 
             if (pendingAction.type === "reject") {
                 const result = await rejectPullRequest.mutateAsync({
                     number: pendingAction.pr.number,
                 });
-                setLastResult(result.message);
+                setLastResult(actionResultMessage(result.message, result.cleanup));
             }
 
             if (pendingAction.type === "deploy") {
@@ -252,7 +263,9 @@ export function PullRequests() {
                         variant="bordered"
                         className="border-green-500/30 bg-green-500/10"
                     >
-                        <p className="text-sm text-green-300">{lastResult}</p>
+                        <p className="text-sm whitespace-pre-line text-green-300">
+                            {lastResult}
+                        </p>
                     </Card>
                 ) : null}
 
