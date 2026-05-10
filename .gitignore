@@ -12,6 +12,7 @@ lerna-debug.log*
 node_modules
 dist
 backend/data/
+data/
 .test-openclaw/
 dist-ssr
 *.local
@@ -27,3 +28,4 @@ dist-ssr
 *.sln
 *.sw?
 coverage/
+test-results/

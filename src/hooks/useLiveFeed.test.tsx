@@ -111,4 +111,52 @@ describe("useLiveFeed", () => {
         expect(result.current.fetchStatus).toBe("idle");
         expect(fetchMock).not.toHaveBeenCalled();
     });
+
+    it("ignores non-array sessions and malformed history message lists", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ messages: null }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result: disabled } = renderHook(() => useLiveFeed(null as never, false), {
+            wrapper: createQueryWrapper(),
+        });
+        expect(disabled.current.fetchStatus).toBe("idle");
+
+        const { result } = renderHook(
+            () => useLiveFeed([{ key: "valid", updatedAt: 1 }] as never, false),
+            { wrapper: createQueryWrapper() }
+        );
+
+        await waitFor(() => expect(result.current.data).toEqual([]));
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/sessions/valid/history?limit=20&offset=0",
+            expect.any(Object)
+        );
+    });
+
+    it("uses fallbacks for sessions and messages with missing optional fields", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                messages: [{ role: "assistant", content: "visible" }, { role: "user" }],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(
+            () => useLiveFeed([{ key: "valid" }] as never, false),
+            { wrapper: createQueryWrapper() }
+        );
+
+        await waitFor(() => expect(result.current.data?.[0]?.content).toBe("visible"));
+        expect(result.current.data?.[0]).toMatchObject({
+            sessionType: "UNKNOWN",
+            sessionLabel: "valid",
+            role: "assistant",
+        });
+    });
 });

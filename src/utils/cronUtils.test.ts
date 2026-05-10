@@ -29,6 +29,12 @@ describe("cron utils", () => {
 
         expect(sortCronJobs(jobs).map(getCronJobName)).toEqual(["Alpha", "Beta", "Zoo"]);
         expect(jobs.map(getCronJobName)).toEqual(["Zoo", "Beta", "Alpha"]);
+        expect(
+            sortCronJobs([
+                { name: "Enabled", enabled: true },
+                { name: "Disabled", enabled: false },
+            ] as CronJob[]).map(getCronJobName)
+        ).toEqual(["Enabled", "Disabled"]);
     });
 
     it("reads state values safely", () => {

@@ -32,6 +32,25 @@ describe("useFiles hooks", () => {
         expect(disabled.current.fetchStatus).toBe("idle");
     });
 
+    it("fetches path-specific listings and falls back to an empty file list", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFiles("/nested path"), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.data).toEqual([]));
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/files?path=%2Fnested%20path",
+            expect.any(Object)
+        );
+    });
+
     it("saves file content and invalidates", async () => {
         const fetchMock = vi
             .fn()

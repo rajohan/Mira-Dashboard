@@ -1,0 +1,94 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import type { QuotasResponse } from "../../../hooks/useQuotas";
+import { QuotaOverviewCard } from "./QuotaOverviewCard";
+
+const quotas: QuotasResponse = {
+    cacheAgeMs: 1000,
+    checkedAt: new Date("2026-05-10T10:00:00.000Z").getTime(),
+    elevenlabs: {
+        percentUsed: 75,
+        remaining: 25,
+        resetAt: "2026-05-11T10:00:00.000Z",
+        tier: "creator",
+        total: 100,
+        used: 75,
+    },
+    openai: {
+        account: "codex",
+        fiveHourLeftPercent: 15,
+        fiveHourReset: "13:45 on 10 May",
+        model: "gpt-5.5",
+        percentUsed: 85,
+        resetAt: null,
+        weeklyLeftPercent: 60,
+        weeklyReset: "2026-05-17T10:00:00.000Z",
+    },
+    openrouter: {
+        percentUsed: 96,
+        remaining: 1.5,
+        totalCredits: 10,
+        usage: 8.5,
+        usageMonthly: 8.5,
+    },
+    synthetic: {
+        rollingFiveHourLimit: {
+            limited: false,
+            max: 100,
+            nextTickAt: "unknown",
+            percentUsed: 10,
+            remaining: 90,
+        },
+        searchHourly: {
+            limit: 100,
+            percentUsed: 0,
+            remaining: 100,
+            renewsAt: null,
+            requests: 0,
+        },
+        subscription: {
+            limit: 100,
+            percentUsed: 0,
+            remaining: 100,
+            renewsAt: null,
+            requests: 0,
+        },
+        weeklyTokenLimit: {
+            nextRegenAt: "2026-05-17T10:00:00.000Z",
+            percentRemaining: 98,
+        },
+    },
+    zai: {
+        fiveHour: { resetAt: "unknown", usedPercentage: 30 },
+        level: "pro",
+        weekly: { resetAt: "2026-05-17T10:00:00.000Z", usedPercentage: 40 },
+    },
+};
+
+describe("QuotaOverviewCard", () => {
+    it("renders loading state without quota data", () => {
+        render(<QuotaOverviewCard quotas={undefined} />);
+
+        expect(screen.getByText("Loading usage limits…")).toBeInTheDocument();
+    });
+
+    it("renders usage summaries and status fallbacks", () => {
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    elevenlabs: { note: "missing key", status: "not_configured" },
+                }}
+            />
+        );
+
+        expect(screen.getByText("Usage Limits")).toBeInTheDocument();
+        expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+        expect(screen.getByText("96%")).toBeInTheDocument();
+        expect(screen.getByText("not configured")).toBeInTheDocument();
+        expect(screen.getByText("missing key")).toBeInTheDocument();
+        expect(screen.getByText(/5h 70% left · weekly 60% left/u)).toBeInTheDocument();
+        expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
+    });
+});

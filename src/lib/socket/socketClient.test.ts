@@ -154,6 +154,23 @@ describe("socketClient", () => {
         await expect(promise).rejects.toBe("boom");
     });
 
+    it("ignores responses without a matching pending request", () => {
+        const onMessage = vi.fn();
+        const client = createSocketClient({ url: "ws://localhost", onMessage });
+        client.connect();
+        mockSocketInstances[0]?.emitOpen();
+
+        mockSocketInstances[0]?.emitMessage({
+            type: "res",
+            id: "missing",
+            ok: true,
+            payload: { ignored: true },
+        });
+        mockSocketInstances[0]?.emitMessage({ type: "res", ok: true });
+
+        expect(onMessage).toHaveBeenCalledTimes(2);
+    });
+
     it("forwards parsed messages to onMessage", () => {
         const onMessage = vi.fn();
         const client = createSocketClient({ url: "ws://localhost", onMessage });
@@ -210,6 +227,25 @@ describe("socketClient", () => {
         await expectation;
     });
 
+    it("does not timeout requests that already resolved", async () => {
+        vi.useFakeTimers();
+        const client = createSocketClient({ url: "ws://localhost" });
+        client.connect();
+        mockSocketInstances[0]?.emitOpen();
+
+        const promise = client.request("fast.method");
+        mockSocketInstances[0]?.emitMessage({
+            type: "res",
+            id: "1",
+            ok: true,
+            payload: "done",
+        });
+
+        await expect(promise).resolves.toBe("done");
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(mockSocketInstances[0]?.sent).toHaveLength(1);
+    });
+
     it("reconnects after close while reconnect is enabled", async () => {
         vi.useFakeTimers();
         const client = createSocketClient({ url: "ws://localhost" });
@@ -219,5 +255,31 @@ describe("socketClient", () => {
         mockSocketInstances[0]?.emitClose();
         await vi.advanceTimersByTimeAsync(2_000);
         expect(mockSocketInstances).toHaveLength(2);
+    });
+
+    it("skips reconnect when disconnected before the retry fires", async () => {
+        vi.useFakeTimers();
+        const client = createSocketClient({ url: "ws://localhost" });
+        client.connect();
+        expect(mockSocketInstances).toHaveLength(1);
+
+        mockSocketInstances[0]?.emitClose();
+        client.disconnect();
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(mockSocketInstances).toHaveLength(1);
+    });
+
+    it("does not schedule reconnect for intentional disconnect close events", async () => {
+        vi.useFakeTimers();
+        const client = createSocketClient({ url: "ws://localhost" });
+        client.connect();
+        const socket = mockSocketInstances[0];
+
+        client.disconnect();
+        socket?.emitClose();
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(mockSocketInstances).toHaveLength(1);
     });
 });

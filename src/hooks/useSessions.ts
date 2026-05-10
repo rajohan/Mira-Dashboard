@@ -54,7 +54,7 @@ export function useSessionHistory(key: string, limit = 50) {
         initialPageParam: 0,
         initialData: { pages: [], pageParams: [] },
         getNextPageParam: (lastPage) =>
-            lastPage?.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
+            lastPage?.hasMore ? lastPage.nextOffset : undefined,
         enabled: key.trim().length > 0,
         staleTime: 30_000,
     });

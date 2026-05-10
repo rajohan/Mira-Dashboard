@@ -7,6 +7,10 @@ import { useFileExplorerState } from "./useFileExplorerState";
 
 vi.mock("../utils/json", () => ({
     validateJsonString: (s: string) => {
+        if (s === "missing error") {
+            return { valid: false, error: null };
+        }
+
         try {
             JSON.parse(s);
             return { valid: true, error: null };
@@ -275,6 +279,33 @@ describe("useFileExplorerState", () => {
         expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
 
+    it("uses empty content fallback for sparse file responses", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ path: "/empty.txt", size: 0 }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/empty.txt");
+        });
+        await waitFor(() => expect(result.current.fileContent?.path).toBe("/empty.txt"));
+        expect(result.current.editedContent).toBe("");
+    });
+
     it("handles large file warning", async () => {
         const fetchMock = vi
             .fn()
@@ -426,6 +457,137 @@ describe("useFileExplorerState", () => {
             result.current.setMarkdownPreview(false);
         });
         expect(result.current.markdownPreview).toBe(false);
+    });
+
+    it("handles unloaded directories with missing children payloads", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    files: [{ path: "/empty-dir", type: "directory", loaded: false }],
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({}),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBe(1));
+        await act(async () => {
+            await result.current.handleToggle("/empty-dir");
+        });
+
+        expect(result.current.files[0]?.children).toEqual([]);
+    });
+
+    it("handles toggles for missing nested targets without loading children", async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                files: [
+                    {
+                        path: "/root",
+                        type: "directory",
+                        loaded: true,
+                        children: [{ path: "/root/file.txt", type: "file" }],
+                    },
+                ],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.files.length).toBe(1));
+        await act(async () => {
+            await result.current.handleToggle("/root/missing");
+        });
+
+        expect(result.current.expandedPaths.has("/root/missing")).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses parse-error fallback for invalid JSON without an error message", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ path: "/a/b.json", content: "{}", size: 2 }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/a/b.json");
+        });
+        await waitFor(() => expect(result.current.editedContent).toBe("{}"));
+        act(() => {
+            result.current.setJsonPreview(false);
+            result.current.handleContentChange("missing error");
+        });
+
+        await act(async () => {
+            await result.current.handleSave();
+        });
+
+        expect(result.current.error).toBe("Invalid JSON: parse error");
+    });
+
+    it("uses generic save error fallback for non-error failures", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ files: [] }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ path: "/a/b.txt", content: "original", size: 8 }),
+            })
+            .mockRejectedValueOnce("boom");
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useFileExplorerState(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.rootLoading).toBe(false));
+        act(() => {
+            result.current.handleSelect("/a/b.txt");
+        });
+        await waitFor(() => expect(result.current.editedContent).toBe("original"));
+        act(() => {
+            result.current.handleContentChange("changed");
+        });
+
+        await act(async () => {
+            await result.current.handleSave();
+        });
+
+        expect(result.current.error).toBe("Failed to save");
     });
 
     it("handles directory toggle failure gracefully", async () => {

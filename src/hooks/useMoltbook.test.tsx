@@ -179,6 +179,61 @@ describe("moltbook hooks", () => {
         expect(post?.content).toBe("preview text");
     });
 
+    it("uses safe defaults for sparse feed posts", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.home",
+                    data: {},
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.feed.hot",
+                    data: { posts: [{ id: "p3", title: "Sparse" }] },
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.profile",
+                    data: {},
+                    cachedAt: "2026-01-01",
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    key: "moltbook.my-content",
+                    data: {},
+                    cachedAt: "2026-01-01",
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useMoltbookData(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.posts[0]?.author.name).toBe("unknown"));
+        expect(result.current.posts[0]).toMatchObject({
+            content: "",
+            upvotes: 0,
+            downvotes: 0,
+            comment_count: 0,
+        });
+        expect(result.current.myContent).toEqual({ posts: [], comments: [] });
+    });
+
     it("handles error state from cache entries", async () => {
         const fetchMock = vi
             .fn()

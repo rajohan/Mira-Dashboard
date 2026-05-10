@@ -40,7 +40,7 @@ describe("useOpenClawSocket", () => {
         mockClient.connect.mockReset();
         mockClient.disconnect.mockReset();
         mockClient.isOpen.mockReturnValue(false);
-        mockClient.request.mockResolvedValue();
+        mockClient.request.mockImplementation(async () => {});
     });
 
     afterEach(() => {
@@ -120,6 +120,25 @@ describe("useOpenClawSocket", () => {
         });
 
         await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+    });
+
+    it("reuses the existing client on repeated connect calls", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        const createSocketClientMock = createSocketClient as ReturnType<typeof vi.fn>;
+        createSocketClientMock.mockClear();
+
+        const { result } = renderHook(() => useOpenClawSocket(), {
+            wrapper: createWrapper,
+        });
+
+        await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+        act(() => {
+            result.current.connect();
+        });
+
+        expect(createSocketClientMock).toHaveBeenCalledTimes(1);
+        expect(mockClient.connect).toHaveBeenCalledTimes(2);
     });
 
     it("disconnects when unauthenticated", async () => {
@@ -249,6 +268,31 @@ describe("useOpenClawSocket", () => {
         expect(result.current.error).toBe("WebSocket connection failed");
     });
 
+    it("swallows initial session sync failures after opening", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.request.mockRejectedValueOnce(new Error("initial sync failed"));
+
+        let options: Record<string, unknown> = {};
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                options = opts;
+                return mockClient;
+            }
+        );
+
+        const { result } = renderHook(() => useOpenClawSocket(), {
+            wrapper: createWrapper,
+        });
+
+        await act(async () => {
+            (options.onOpen as () => void)();
+            await Promise.resolve();
+        });
+
+        expect(result.current.isConnected).toBe(true);
+    });
+
     it("delegates requests when client exists", async () => {
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.request.mockResolvedValueOnce();
@@ -319,6 +363,75 @@ describe("useOpenClawSocket", () => {
         expect(mockClient.connect).toHaveBeenCalledTimes(2);
     });
 
+    it("skips heartbeat work while the socket is closed", async () => {
+        vi.useFakeTimers();
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(false);
+
+        let options: Record<string, unknown> = {};
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                options = opts;
+                return mockClient;
+            }
+        );
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        act(() => {
+            (options.onOpen as () => void)();
+        });
+        mockClient.request.mockClear();
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(10_000);
+        });
+
+        expect(mockClient.request).not.toHaveBeenCalled();
+    });
+
+    it("ignores stale heartbeat failures after the client changes", async () => {
+        vi.useFakeTimers();
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(true);
+        let rejectHeartbeat: (error: Error) => void = () => {};
+
+        let options: Record<string, unknown> = {};
+        const { createSocketClient } = await import("../lib/socket/socketClient");
+        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+            (opts: Record<string, unknown>) => {
+                options = opts;
+                return mockClient;
+            }
+        );
+
+        const { result } = renderHook(() => useOpenClawSocket(), {
+            wrapper: createWrapper,
+        });
+        act(() => {
+            (options.onOpen as () => void)();
+        });
+        mockClient.connect.mockClear();
+        mockClient.request.mockReturnValueOnce(
+            new Promise((_, reject) => {
+                rejectHeartbeat = reject;
+            })
+        );
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(10_000);
+        });
+        act(() => {
+            result.current.disconnect();
+        });
+        await act(async () => {
+            rejectHeartbeat(new Error("late heartbeat failure"));
+            await Promise.resolve();
+        });
+
+        expect(mockClient.connect).not.toHaveBeenCalled();
+    });
+
     it("resyncs socket on visibility/focus/online events", async () => {
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.isOpen.mockReturnValue(true);
@@ -337,5 +450,51 @@ describe("useOpenClawSocket", () => {
         await waitFor(() =>
             expect(mockClient.request).toHaveBeenCalledWith("sessions.list")
         );
+    });
+
+    it("swallows visible resync request failures", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(true);
+        mockClient.request.mockRejectedValueOnce(new Error("resync failed"));
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "visible",
+        });
+
+        await act(async () => {
+            window.dispatchEvent(new Event("focus"));
+            await Promise.resolve();
+        });
+
+        expect(mockClient.request).toHaveBeenCalledWith("sessions.list");
+    });
+
+    it("skips visible resync while hidden and reconnects when visible but closed", async () => {
+        mockUseIsAuthenticated.mockReturnValue(true);
+        mockClient.isOpen.mockReturnValue(false);
+
+        renderHook(() => useOpenClawSocket(), { wrapper: createWrapper });
+        await waitFor(() => expect(mockClient.connect).toHaveBeenCalled());
+        mockClient.connect.mockClear();
+        mockClient.request.mockClear();
+
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "hidden",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(mockClient.connect).not.toHaveBeenCalled();
+        expect(mockClient.request).not.toHaveBeenCalled();
+
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "visible",
+        });
+        window.dispatchEvent(new Event("focus"));
+        expect(mockClient.connect).toHaveBeenCalledTimes(1);
+        expect(mockClient.request).not.toHaveBeenCalled();
     });
 });

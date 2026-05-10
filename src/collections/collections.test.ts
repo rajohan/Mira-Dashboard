@@ -174,6 +174,17 @@ describe("collections", () => {
         expect(mockUtils.writeUpsert).toHaveBeenCalledTimes(1);
     });
 
+    it("replaceSessionsFromWebSocket keeps sessions that are still present", () => {
+        mockIsReady.mockReturnValue(true);
+        mockEntries.push(["same-session", {}]);
+        replaceSessionsFromWebSocket([{ key: "same-session", id: "same-session" }]);
+
+        expect(mockUtils.writeDelete).not.toHaveBeenCalled();
+        expect(mockUtils.writeUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({ key: "same-session" })
+        );
+    });
+
     it("replaceSessionsFromWebSocket handles non-array input", () => {
         mockIsReady.mockReturnValue(true);
         replaceSessionsFromWebSocket({ sessions: [] });

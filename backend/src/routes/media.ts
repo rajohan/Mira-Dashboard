@@ -60,6 +60,6 @@ export default function mediaRoutes(app: express.Application): void {
 
         response.setHeader("Content-Type", mimeTypeFromPath(realPath));
         response.setHeader("Cache-Control", "private, max-age=3600");
-        response.sendFile(realPath);
+        response.sendFile(realPath, { dotfiles: "allow" });
     }) as RequestHandler);
 }

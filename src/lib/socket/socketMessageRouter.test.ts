@@ -149,4 +149,9 @@ describe("socketMessageRouter", () => {
         handleSocketMessage({ type: "res", id: "1", ok: true, payload: { ok: true } });
         expect(vi.mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
     });
+
+    it("ignores primitive res payloads", () => {
+        handleSocketMessage({ type: "res", id: "1", ok: true, payload: "ok" });
+        expect(vi.mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
+    });
 });

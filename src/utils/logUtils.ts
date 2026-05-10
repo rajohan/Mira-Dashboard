@@ -16,12 +16,9 @@ function safeJsonParse(value: string): unknown {
 }
 
 function stringifyCompact(value: unknown): string {
-    if (typeof value === "string") {
-        return value;
-    }
-
     try {
-        return JSON.stringify(value);
+        const serialized = JSON.stringify(value);
+        return typeof serialized === "string" ? serialized : String(value);
     } catch {
         return String(value);
     }
@@ -35,7 +32,7 @@ function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: stri
     const bracketMatch = msg.match(/^\[([^\]]+)\]\s*/);
     if (bracketMatch) {
         return {
-            subsystem: normalizeSubsystemCandidate(bracketMatch[1] || ""),
+            subsystem: normalizeSubsystemCandidate(bracketMatch[1]!),
             msg: msg.slice(bracketMatch[0].length),
         };
     }
@@ -43,7 +40,7 @@ function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: stri
     const colonMatch = msg.match(/^([a-zA-Z][\w/-]*):\s*/);
     if (colonMatch) {
         return {
-            subsystem: normalizeSubsystemCandidate(colonMatch[1] || ""),
+            subsystem: normalizeSubsystemCandidate(colonMatch[1]!),
             msg: msg.slice(colonMatch[0].length),
         };
     }
@@ -179,7 +176,7 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
             subsystem: normalized.subsystem,
             msg: normalized.msg,
         });
-        const uniqueId = `${dedupeKey || ts || Date.now()}-${index ?? logIdCounter++}`;
+        const uniqueId = `${dedupeKey}-${index ?? logIdCounter++}`;
 
         return {
             id: uniqueId,
@@ -198,7 +195,7 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
             subsystem: extracted.subsystem,
             msg,
         });
-        const errorId = `${dedupeKey || Date.now()}-${index ?? logIdCounter++}`;
+        const errorId = `${dedupeKey}-${index ?? logIdCounter++}`;
         return {
             id: errorId,
             dedupeKey,

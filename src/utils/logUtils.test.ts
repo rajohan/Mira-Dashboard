@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
     formatLogTime,
@@ -83,6 +83,13 @@ describe("log utils", () => {
 
         const fallback = parseLogLine(JSON.stringify({ "0": "{}" }), 32);
         expect(fallback?.msg).toBe("{}");
+
+        const subsystemOnly = parseLogLine(
+            JSON.stringify({ "0": '{"subsystem":"api"}' }),
+            34
+        );
+        expect(subsystemOnly).toMatchObject({ subsystem: "api" });
+        expect(subsystemOnly?.msg).toContain("subsystem");
     });
 
     it("parses JSON with positional number args", () => {
@@ -123,6 +130,32 @@ describe("log utils", () => {
         expect(entry?.msg).toContain("key");
     });
 
+    it("falls back when compact stringification is unavailable", () => {
+        const line = JSON.stringify({ msg: { key: "val" } });
+        const stringifySpy = vi.spyOn(JSON, "stringify").mockImplementationOnce(() => {
+            throw new Error("stringify failed");
+        });
+
+        expect(parseLogLine(line, 33)).toMatchObject({
+            subsystem: "object Object",
+            msg: "",
+        });
+        stringifySpy.mockRestore();
+    });
+
+    it("falls back when compact stringification returns undefined", () => {
+        const line = JSON.stringify({ msg: { key: "val" } });
+        const stringifySpy = vi
+            .spyOn(JSON, "stringify")
+            .mockImplementationOnce(() => undefined as never);
+
+        expect(parseLogLine(line, 35)).toMatchObject({
+            subsystem: "object Object",
+            msg: "",
+        });
+        stringifySpy.mockRestore();
+    });
+
     it("parses JSON where entire parsed object is stringified when no msg found", () => {
         const entry = parseLogLine(JSON.stringify({ "0": "" }), 17);
 
@@ -146,6 +179,15 @@ describe("log utils", () => {
         const entry = parseLogLine("just a plain log line", 22);
 
         expect(entry).toMatchObject({ subsystem: "", msg: "just a plain log line" });
+        expect(parseLogLine("plain log without explicit index")?.id).toContain(
+            "plain log without explicit index"
+        );
+    });
+
+    it("uses the original line when a plain-text prefix has no message", () => {
+        const entry = parseLogLine("[agent/sub] ");
+
+        expect(entry).toMatchObject({ subsystem: "sub", msg: "[agent/sub] " });
     });
 
     it("handles JSON preceded by non-brace text", () => {
@@ -164,6 +206,15 @@ describe("log utils", () => {
         expect(entry?.raw).toBe("{broken json text");
     });
 
+    it("uses metadata fallbacks when metadata fields are blank", () => {
+        const entry = parseLogLine(
+            JSON.stringify({ _meta: { logLevelName: "", date: "" }, "0": "hello" }),
+            36
+        );
+
+        expect(entry).toMatchObject({ level: "info", ts: "", msg: "hello" });
+    });
+
     it("formats log time and colors", () => {
         expect(formatLogTime()).toBe("");
         expect(formatLogTime("2026-05-10T06:07:08.000Z")).toMatch(/08:07:08|06:07:08/u);
@@ -174,6 +225,8 @@ describe("log utils", () => {
     });
 
     it("returns correct level colors for all levels", () => {
+        expect(getLevelColor()).toContain("blue");
+        expect(getLevelColor("")).toContain("blue");
         expect(getLevelColor("fatal")).toContain("red");
         expect(getLevelColor("error")).toContain("red");
         expect(getLevelColor("warn")).toContain("yellow");

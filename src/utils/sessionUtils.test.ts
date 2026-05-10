@@ -56,4 +56,22 @@ describe("session utils", () => {
             "agent:main:main",
         ]);
     });
+
+    it("treats missing activity timestamps as oldest", () => {
+        const sessions = [
+            session({ key: "missing", type: "MAIN", updatedAt: undefined }),
+            session({ key: "recent", type: "MAIN", updatedAt: 10 }),
+        ];
+
+        expect(sortSessionsByTypeAndActivity(sessions).map((item) => item.key)).toEqual([
+            "recent",
+            "missing",
+        ]);
+        expect(
+            sortSessionsByTypeAndActivity([
+                session({ key: "first-missing", type: "MAIN", updatedAt: undefined }),
+                session({ key: "second-missing", type: "MAIN", updatedAt: undefined }),
+            ]).map((item) => item.key)
+        ).toEqual(["first-missing", "second-missing"]);
+    });
 });
