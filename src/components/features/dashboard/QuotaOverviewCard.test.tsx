@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { QuotasResponse } from "../../../hooks/useQuotas";
+import type { QuotasResponse, SyntheticQuota } from "../../../hooks/useQuotas";
 import { QuotaOverviewCard } from "./QuotaOverviewCard";
 
 const quotas: QuotasResponse = {
@@ -85,10 +85,72 @@ describe("QuotaOverviewCard", () => {
 
         expect(screen.getByText("Usage Limits")).toBeInTheDocument();
         expect(screen.getByText("OpenRouter")).toBeInTheDocument();
-        expect(screen.getByText("96%")).toBeInTheDocument();
+        expect(screen.getByText("96%")).toHaveClass("bg-red-500/20");
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
         expect(screen.getByText(/5h 70% left · weekly 60% left/u)).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
+    });
+
+    it("renders warning and success quota severities with reset fallbacks", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    elevenlabs: {
+                        ...quotas.elevenlabs,
+                        percentUsed: 0,
+                        resetAt: "unknown",
+                    },
+                    openai: {
+                        ...quotas.openai,
+                        fiveHourReset: "14:30",
+                        percentUsed: 80,
+                        weeklyReset: "not a date",
+                    },
+                    openrouter: {
+                        ...quotas.openrouter,
+                        percentUsed: 50,
+                    },
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            percentUsed: 84.4,
+                        },
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            percentRemaining: 70,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText("50%")).toHaveClass("bg-green-500/20");
+        expect(screen.getByText("80%")).toHaveClass("bg-yellow-500/20");
+        expect(screen.getByText("84%")).toHaveClass("bg-yellow-500/20");
+        expect(screen.getByText("100% left")).toBeInTheDocument();
+        expect(screen.getByText(/weekly not a date/u)).toBeInTheDocument();
+    });
+
+    it("renders provider status lines without optional notes or badges", () => {
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    openai: { status: "error" },
+                    openrouter: { status: "not_configured" },
+                    synthetic: { status: "error" },
+                    zai: { status: "not_configured" },
+                }}
+            />
+        );
+
+        expect(screen.getAllByText("error")).toHaveLength(2);
+        expect(screen.getAllByText("not configured")).toHaveLength(2);
+        expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });
 });
