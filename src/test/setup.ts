@@ -4,8 +4,13 @@ import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 (
-    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    globalThis as typeof globalThis & {
+        IS_REACT_ACT_ENVIRONMENT?: boolean;
+        __APP_COMMIT__?: string;
+    }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & { __APP_COMMIT__?: string }).__APP_COMMIT__ =
+    "test-commit";
 
 afterEach(() => {
     cleanup();
