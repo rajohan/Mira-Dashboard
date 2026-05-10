@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,12 +12,14 @@ import {
 describe("authStore", () => {
     afterEach(() => {
         vi.unstubAllGlobals();
-        authStore.setState(() => ({
-            user: null,
-            isAuthenticated: false,
-            isInitialized: false,
-            bootstrapRequired: false,
-        }));
+        act(() => {
+            authStore.setState(() => ({
+                user: null,
+                isAuthenticated: false,
+                isInitialized: false,
+                bootstrapRequired: false,
+            }));
+        });
     });
 
     it("starts with default state", () => {

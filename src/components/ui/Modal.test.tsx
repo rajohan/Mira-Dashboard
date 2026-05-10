@@ -22,14 +22,14 @@ describe("Modal", () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it("can render without a title", () => {
+    it("can render without a title", async () => {
         render(
             <Modal isOpen onClose={vi.fn()}>
                 <p>Untitled body</p>
             </Modal>
         );
 
-        expect(screen.getByText("Untitled body")).toBeInTheDocument();
+        expect(await screen.findByText("Untitled body")).toBeInTheDocument();
         expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     });
 });

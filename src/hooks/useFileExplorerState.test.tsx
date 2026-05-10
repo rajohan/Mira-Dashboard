@@ -591,6 +591,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles directory toggle failure gracefully", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
         const dirFiles = [{ path: "/fail", type: "directory", loaded: false }];
         const fetchMock = vi
             .fn()
@@ -608,10 +609,14 @@ describe("useFileExplorerState", () => {
 
         await waitFor(() => expect(result.current.files.length).toBeGreaterThan(0));
 
-        // Should not throw, just console.error
         await act(async () => {
             await result.current.handleToggle("/fail");
         });
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Failed to load directory:",
+            expect.any(Error)
+        );
         expect(result.current.expandedPaths.has("/fail")).toBe(true);
+        consoleErrorSpy.mockRestore();
     });
 });

@@ -12,8 +12,7 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
-        "test": "npm run build && node --test test/*.test.mjs",
-        "test:coverage": "npm run build && node --experimental-test-coverage --test test/*.test.mjs"
+        "test": "node --import tsx --test \"src/**/*.test.ts\""
     },
     "dependencies": {
         "dotenv": "^17.4.2",

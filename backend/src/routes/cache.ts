@@ -138,12 +138,12 @@ const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     ],
 };
 
-function parseJsonFieldOrValue(value: string) {
+export function parseJsonFieldOrValue(value: string) {
     const parsed = parseJsonField<unknown>(value);
     return parsed ?? value;
 }
 
-function mapCacheRow(row: CacheEntryRow) {
+export function mapCacheRowForResponse(row: CacheEntryRow) {
     return {
         key: row.key,
         source: row.source,
@@ -187,13 +187,13 @@ export async function refreshCacheKey(key: string) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
 
-    return mapCacheRow(row);
+    return mapCacheRowForResponse(row);
 }
 
 export default function cacheRoutes(app: express.Application): void {
     app.get("/api/cache/heartbeat", (async (_req, res) => {
         const cacheEntries = await getAllCacheEntries();
-        const mapped = cacheEntries.map(mapCacheRow);
+        const mapped = cacheEntries.map(mapCacheRowForResponse);
         res.json({
             generatedAt: new Date().toISOString(),
             count: mapped.length,
@@ -231,6 +231,6 @@ export default function cacheRoutes(app: express.Application): void {
             return;
         }
 
-        res.json(mapCacheRow(row));
+        res.json(mapCacheRowForResponse(row));
     }) as RequestHandler);
 }

@@ -30,7 +30,7 @@ describe("ConfirmModal", () => {
         expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
-    it("shows loading label and disables actions", () => {
+    it("shows loading label and disables actions", async () => {
         render(
             <ConfirmModal
                 isOpen
@@ -43,7 +43,7 @@ describe("ConfirmModal", () => {
             />
         );
 
-        expect(screen.getByRole("button", { name: "Deploy..." })).toBeDisabled();
+        expect(await screen.findByRole("button", { name: "Deploy..." })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     });
 });
