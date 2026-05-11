@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
+import { setCacheStoreDockerBinForTests } from "./cacheStore.js";
+
 const originalPath = process.env.PATH;
 const originalMode = process.env.FAKE_MOLTBOOK_CACHE_MODE;
 
@@ -43,6 +45,7 @@ process.stdout.write([
     );
     await chmod(dockerPath, 0o755);
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+    setCacheStoreDockerBinForTests(dockerPath);
 }
 
 describe("Moltbook cache helpers", () => {
@@ -66,6 +69,7 @@ describe("Moltbook cache helpers", () => {
         } else {
             process.env.FAKE_MOLTBOOK_CACHE_MODE = originalMode;
         }
+        setCacheStoreDockerBinForTests(undefined);
         await rm(tempDir, { recursive: true, force: true });
     });
 
