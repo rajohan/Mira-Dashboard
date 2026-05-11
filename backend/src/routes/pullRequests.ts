@@ -15,7 +15,9 @@ const DASHBOARD_WORKTREE_ROOT =
     "/home/ubuntu/projects/mira-dashboard-worktrees";
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
+const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "master";
+const DASHBOARD_PR_AUTHORS = [MIRA_AUTHOR, DEPENDABOT_AUTHOR];
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 
@@ -165,43 +167,63 @@ async function runCommand(
 }
 
 async function runGhJson<T>(args: string[]): Promise<T> {
-    const { stdout } = await runCommand("gh", args, { timeoutMs: 60_000 });
-    return JSON.parse(stdout || "null") as T;
+    const { stdout } = await execFileAsync("gh", args, {
+        cwd: DASHBOARD_ROOT,
+        env: buildCommandEnv(),
+        maxBuffer: MAX_BUFFER,
+        timeout: 60_000,
+    });
+
+    return JSON.parse(String(stdout || "null")) as T;
 }
 
-async function listMiraPullRequests(): Promise<PullRequestSummary[]> {
-    return runGhJson<PullRequestSummary[]>([
-        "pr",
-        "list",
-        "--repo",
-        DASHBOARD_REPO,
-        "--state",
-        "open",
-        "--author",
-        MIRA_AUTHOR,
-        "--limit",
-        "50",
-        "--json",
-        [
-            "number",
-            "title",
-            "body",
-            "url",
-            "headRefName",
-            "baseRefName",
-            "author",
-            "createdAt",
-            "updatedAt",
-            "isDraft",
-            "mergeable",
-            "mergeStateStatus",
-            "reviewDecision",
-            "statusCheckRollup",
-            "additions",
-            "deletions",
-            "changedFiles",
-        ].join(","),
-    ]);
+async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    const pullRequestsByNumber = new Map<number, PullRequestSummary>();
+
+    for (const author of DASHBOARD_PR_AUTHORS) {
+        const pullRequests = await runGhJson<PullRequestSummary[]>([
+            "pr",
+            "list",
+            "--repo",
+            DASHBOARD_REPO,
+            "--state",
+            "open",
+            "--author",
+            author,
+            "--limit",
+            "50",
+            "--json",
+            [
+                "number",
+                "title",
+                "body",
+                "url",
+                "headRefName",
+                "baseRefName",
+                "author",
+                "createdAt",
+                "updatedAt",
+                "isDraft",
+                "mergeable",
+                "mergeStateStatus",
+                "reviewDecision",
+                "statusCheckRollup",
+                "additions",
+                "deletions",
+                "changedFiles",
+            ].join(","),
+        ]);
+
+        for (const pullRequest of pullRequests) {
+            if (pullRequest.baseRefName === DEFAULT_BASE) {
+                pullRequestsByNumber.set(pullRequest.number, pullRequest);
+            }
+        }
+    }
+
+    return [...pullRequestsByNumber.values()].sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt)
+    );
 }
 
 async function getPullRequest(number: number): Promise<PullRequestSummary> {
@@ -586,7 +608,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
     app.get(
         "/api/pull-requests",
         asyncRoute(async (_req, res) => {
-            res.json({ pullRequests: await listMiraPullRequests() });
+            res.json({ pullRequests: await listDashboardPullRequests() });
         })
     );
 

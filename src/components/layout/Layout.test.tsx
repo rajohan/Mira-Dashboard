@@ -20,6 +20,7 @@ const hooks = vi.hoisted(() => ({
     useNavigate: vi.fn(),
     useNotifications: vi.fn(),
     useOpenClawSocket: vi.fn(),
+    usePullRequests: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -48,6 +49,7 @@ vi.mock("../../hooks", () => ({
     useHealth: hooks.useHealth,
     useCacheEntry: hooks.useCacheEntry,
     useNotifications: hooks.useNotifications,
+    usePullRequests: hooks.usePullRequests,
     useMarkNotificationRead: hooks.useMarkNotificationRead,
     useMarkAllNotificationsRead: hooks.useMarkAllNotificationsRead,
     useClearReadNotifications: hooks.useClearReadNotifications,
@@ -81,6 +83,7 @@ beforeEach(() => {
         data: { items: [], unreadCount: 0 },
     });
     hooks.useOpenClawSocket.mockReturnValue({ isConnected: true });
+    hooks.usePullRequests.mockReturnValue({ data: [] });
 });
 
 describe("Layout", () => {

@@ -22,6 +22,7 @@ const hooks = vi.hoisted(() => ({
     pullRequests: [
         {
             additions: 10,
+            author: { login: "mira-2026" },
             baseRefName: "master",
             body: "Adds tests",
             changedFiles: 2,
@@ -157,7 +158,7 @@ describe("PullRequests page", () => {
     it("renders pull request, checkout, and deployment summaries", () => {
         render(<PullRequests />);
 
-        expect(screen.getByText("PR approvals")).toBeInTheDocument();
+        expect(screen.getByText("Pull requests")).toBeInTheDocument();
         expect(screen.getByText("Add dashboard tests")).toBeInTheDocument();
         expect(screen.getByText("Checks passed")).toBeInTheDocument();
         expect(screen.getByText("Ready to deploy")).toBeInTheDocument();
@@ -201,7 +202,7 @@ describe("PullRequests page", () => {
             },
         });
         rerender(<PullRequests />);
-        expect(screen.getByText("No Mira-authored PRs waiting")).toBeInTheDocument();
+        expect(screen.getByText("No open PRs waiting")).toBeInTheDocument();
     });
 
     it("confirms merge, merge deploy, reject, and master deploy actions", async () => {
