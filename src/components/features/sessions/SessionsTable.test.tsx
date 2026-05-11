@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -95,5 +95,42 @@ describe("SessionsTable", () => {
         expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
         expect(handlers.onSelectSession).not.toHaveBeenCalled();
+    });
+
+    it("handles keyboard selection and fallback labels", () => {
+        const fallbackSession: Session = {
+            ...sessions[0],
+            displayLabel: "",
+            displayName: "",
+            id: "fallback-id",
+            key: "fallback-key",
+            label: "",
+            maxTokens: 0,
+            model: "",
+            tokenCount: 0,
+            updatedAt: null,
+        };
+        const handlers = renderTable({ sessions: [fallbackSession] });
+
+        expect(screen.getAllByText("fallback-id").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("0.0k / 200k").length).toBeGreaterThan(0);
+
+        const mobileCard = screen
+            .getAllByRole("button")
+            .find((button) => button.textContent?.includes("fallback-id"));
+
+        expect(mobileCard).toBeDefined();
+        fireEvent.keyDown(mobileCard!, { key: "Enter" });
+        fireEvent.keyDown(mobileCard!, { key: " " });
+
+        expect(handlers.onSelectSession).toHaveBeenCalledTimes(2);
+        expect(handlers.onSelectSession).toHaveBeenCalledWith(fallbackSession);
+    });
+
+    it("treats non-array session data as empty", () => {
+        renderTable({ sessions: null as unknown as Session[] });
+
+        expect(screen.getByText("No sessions found")).toBeInTheDocument();
     });
 });
