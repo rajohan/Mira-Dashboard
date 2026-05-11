@@ -1,5 +1,9 @@
 import { GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
 
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -30,6 +34,18 @@ type PendingAction =
     | { type: "reject"; pr: PullRequestSummary }
     | { type: "deploy" }
     | null;
+
+const MIRA_AUTHOR = "mira-2026";
+const DEPENDABOT_AUTHOR = "app/dependabot";
+
+function isMiraPullRequest(pr: PullRequestSummary): boolean {
+    return pr.author?.login === MIRA_AUTHOR;
+}
+
+function authorLabel(pr: PullRequestSummary): string {
+    if (pr.author?.login === DEPENDABOT_AUTHOR) return "Dependabot";
+    return pr.author?.login || "Unknown author";
+}
 
 function statusVariant(value: string | undefined) {
     const normalized = (value || "").toLowerCase();
@@ -151,6 +167,93 @@ function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
     return `${message}\n${cleanup.message}`;
 }
 
+function normalizePullRequestBody(body: string): string {
+    if (!body.includes("\n") && body.includes(String.raw`\n`)) {
+        return body.replaceAll(String.raw`\n`, "\n");
+    }
+
+    return body;
+}
+
+function PullRequestDescription({ body }: { body: string }) {
+    const normalizedBody = normalizePullRequestBody(body);
+
+    return (
+        <div className="border-primary-700 bg-primary-900/50 max-h-80 overflow-auto rounded border p-3 sm:p-4">
+            <div className="prose prose-invert prose-p:my-2 prose-headings:my-3 prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5 prose-table:my-3 prose-th:border-primary-700 prose-td:border-primary-700 prose-th:p-2 prose-td:p-2 prose-code:before:content-none prose-code:after:content-none max-w-none text-sm break-words">
+                <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                    components={{
+                        a(props) {
+                            return <a {...props} target="_blank" rel="noreferrer" />;
+                        },
+                    }}
+                >
+                    {normalizedBody}
+                </ReactMarkdown>
+            </div>
+        </div>
+    );
+}
+
+function PullRequestCard({
+    pr,
+    actions,
+}: {
+    pr: PullRequestSummary;
+    actions?: ReactNode;
+}) {
+    const checks = summarizeChecks(pr.statusCheckRollup);
+
+    return (
+        <Card variant="bordered" className="space-y-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                    <div className="text-primary-400 text-xs">
+                        #{pr.number} · {pr.headRefName} → {pr.baseRefName}
+                    </div>
+                    <CardTitle className="mt-1 text-base">
+                        <a
+                            href={pr.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-primary-200"
+                        >
+                            {pr.title}
+                        </a>
+                    </CardTitle>
+                    <div className="text-primary-500 mt-1 text-xs">
+                        {authorLabel(pr)} · Updated {formatDate(pr.updatedAt)} · +
+                        {pr.additions ?? 0} -{pr.deletions ?? 0} across{" "}
+                        {pr.changedFiles ?? 0} files
+                    </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <Badge variant={isMiraPullRequest(pr) ? "info" : "default"}>
+                        {authorLabel(pr)}
+                    </Badge>
+                    <Badge variant={statusVariant(pr.mergeable)}>
+                        {pr.mergeable || "mergeable unknown"}
+                    </Badge>
+                    <Badge variant={statusVariant(pr.mergeStateStatus)}>
+                        {pr.mergeStateStatus || "state unknown"}
+                    </Badge>
+                    <Badge variant={checks.variant}>{checks.label}</Badge>
+                </div>
+            </div>
+
+            {pr.body ? <PullRequestDescription body={pr.body} /> : null}
+
+            {actions ? (
+                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+                    {actions}
+                </div>
+            ) : null}
+        </Card>
+    );
+}
+
 export function PullRequests() {
     const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
     const { data: deployments = [] } = usePullRequestDeployments();
@@ -171,6 +274,8 @@ export function PullRequests() {
         productionCheckout &&
         (!productionCheckout.isProductionRoot || !productionCheckout.isClean)
     );
+    const miraPullRequests = pullRequests.filter(isMiraPullRequest);
+    const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
     async function confirmAction() {
         if (!pendingAction) return;
@@ -233,11 +338,11 @@ export function PullRequests() {
                     <div>
                         <h2 className="text-primary-100 flex items-center gap-2 text-xl font-semibold">
                             <GitPullRequest className="h-5 w-5" />
-                            PR approvals
+                            Pull requests
                         </h2>
                         <p className="text-primary-400 mt-1 max-w-2xl text-sm">
-                            Review Mira-authored pull requests for rajohan/Mira-Dashboard.
-                            Actions are explicit: reject, merge, or merge and deploy.
+                            Review open rajohan/Mira-Dashboard pull requests. Dashboard
+                            actions are only enabled for Mira-authored PRs.
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:flex">
@@ -330,124 +435,105 @@ export function PullRequests() {
                 </Card>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         {pullRequests.length === 0 ? (
                             <Card variant="bordered">
-                                <CardTitle>No Mira-authored PRs waiting</CardTitle>
+                                <CardTitle>No open PRs waiting</CardTitle>
                                 <p className="text-primary-400 mt-2 text-sm">
-                                    New dashboard autopilot PRs will appear here for
+                                    New dashboard and dependency PRs will appear here for
                                     review.
                                 </p>
                             </Card>
-                        ) : (
-                            pullRequests.map((pr) => {
-                                const checks = summarizeChecks(pr.statusCheckRollup);
-                                return (
-                                    <Card
+                        ) : null}
+
+                        {miraPullRequests.length > 0 ? (
+                            <section className="space-y-3" aria-label="Mira-authored PRs">
+                                <div>
+                                    <CardTitle className="text-base">
+                                        Mira-authored PRs
+                                    </CardTitle>
+                                    <p className="text-primary-400 mt-1 text-sm">
+                                        These can be merged, rejected, or merged and
+                                        deployed from the dashboard.
+                                    </p>
+                                </div>
+                                {miraPullRequests.map((pr) => (
+                                    <PullRequestCard
                                         key={pr.number}
-                                        variant="bordered"
-                                        className="space-y-3"
-                                    >
-                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                            <div className="min-w-0">
-                                                <div className="text-primary-400 text-xs">
-                                                    #{pr.number} · {pr.headRefName} →{" "}
-                                                    {pr.baseRefName}
-                                                </div>
-                                                <CardTitle className="mt-1 text-base">
-                                                    <a
-                                                        href={pr.url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="hover:text-primary-200"
-                                                    >
-                                                        {pr.title}
-                                                    </a>
-                                                </CardTitle>
-                                                <div className="text-primary-500 mt-1 text-xs">
-                                                    Updated {formatDate(pr.updatedAt)} · +
-                                                    {pr.additions ?? 0} -
-                                                    {pr.deletions ?? 0} across{" "}
-                                                    {pr.changedFiles ?? 0} files
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                <Badge
-                                                    variant={statusVariant(pr.mergeable)}
+                                        pr={pr}
+                                        actions={
+                                            <>
+                                                <Button
+                                                    variant="primary"
+                                                    onClick={() =>
+                                                        setPendingAction({
+                                                            type: "merge-deploy",
+                                                            pr,
+                                                        })
+                                                    }
+                                                    disabled={
+                                                        isActionPending ||
+                                                        isProductionActionBlocked
+                                                    }
                                                 >
-                                                    {pr.mergeable || "mergeable unknown"}
-                                                </Badge>
-                                                <Badge
-                                                    variant={statusVariant(
-                                                        pr.mergeStateStatus
-                                                    )}
+                                                    <Rocket className="h-4 w-4" />
+                                                    Merge + deploy
+                                                </Button>
+                                                <Button
+                                                    variant="secondary"
+                                                    onClick={() =>
+                                                        setPendingAction({
+                                                            type: "merge",
+                                                            pr,
+                                                        })
+                                                    }
+                                                    disabled={
+                                                        isActionPending ||
+                                                        isProductionActionBlocked
+                                                    }
                                                 >
-                                                    {pr.mergeStateStatus ||
-                                                        "state unknown"}
-                                                </Badge>
-                                                <Badge variant={checks.variant}>
-                                                    {checks.label}
-                                                </Badge>
-                                            </div>
-                                        </div>
+                                                    <GitMerge className="h-4 w-4" />
+                                                    Merge only
+                                                </Button>
+                                                <Button
+                                                    variant="danger"
+                                                    onClick={() =>
+                                                        setPendingAction({
+                                                            type: "reject",
+                                                            pr,
+                                                        })
+                                                    }
+                                                    disabled={isActionPending}
+                                                >
+                                                    <XCircle className="h-4 w-4" />
+                                                    Reject
+                                                </Button>
+                                            </>
+                                        }
+                                    />
+                                ))}
+                            </section>
+                        ) : null}
 
-                                        {pr.body ? (
-                                            <pre className="border-primary-700 bg-primary-900/50 text-primary-300 max-h-48 overflow-auto rounded border p-3 text-xs whitespace-pre-wrap">
-                                                {pr.body}
-                                            </pre>
-                                        ) : null}
-
-                                        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-                                            <Button
-                                                variant="primary"
-                                                onClick={() =>
-                                                    setPendingAction({
-                                                        type: "merge-deploy",
-                                                        pr,
-                                                    })
-                                                }
-                                                disabled={
-                                                    isActionPending ||
-                                                    isProductionActionBlocked
-                                                }
-                                            >
-                                                <Rocket className="h-4 w-4" />
-                                                Merge + deploy
-                                            </Button>
-                                            <Button
-                                                variant="secondary"
-                                                onClick={() =>
-                                                    setPendingAction({
-                                                        type: "merge",
-                                                        pr,
-                                                    })
-                                                }
-                                                disabled={
-                                                    isActionPending ||
-                                                    isProductionActionBlocked
-                                                }
-                                            >
-                                                <GitMerge className="h-4 w-4" />
-                                                Merge only
-                                            </Button>
-                                            <Button
-                                                variant="danger"
-                                                onClick={() =>
-                                                    setPendingAction({
-                                                        type: "reject",
-                                                        pr,
-                                                    })
-                                                }
-                                                disabled={isActionPending}
-                                            >
-                                                <XCircle className="h-4 w-4" />
-                                                Reject
-                                            </Button>
-                                        </div>
-                                    </Card>
-                                );
-                            })
-                        )}
+                        {externalPullRequests.length > 0 ? (
+                            <section
+                                className="space-y-3"
+                                aria-label="Dependency and external PRs"
+                            >
+                                <div>
+                                    <CardTitle className="text-base">
+                                        Dependency / external PRs
+                                    </CardTitle>
+                                    <p className="text-primary-400 mt-1 text-sm">
+                                        Visible for review status. Manage these on GitHub
+                                        until we add a dedicated safe policy.
+                                    </p>
+                                </div>
+                                {externalPullRequests.map((pr) => (
+                                    <PullRequestCard key={pr.number} pr={pr} />
+                                ))}
+                            </section>
+                        ) : null}
                     </div>
 
                     <Card variant="bordered" className="h-fit space-y-3">

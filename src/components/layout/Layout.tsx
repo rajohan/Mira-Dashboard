@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
-import { useCacheEntry } from "../../hooks";
+import { useCacheEntry, usePullRequests } from "../../hooks";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";
 
@@ -52,7 +52,9 @@ export function Layout({ children }: LayoutProps) {
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
+    const { data: pullRequests = [] } = usePullRequests();
     const openClawVersion = systemHost?.data.version?.current;
+    const openPullRequestCount = pullRequests.length;
 
     useEffect(() => {
         setIsSidebarOpen(false);
@@ -97,6 +99,19 @@ export function Layout({ children }: LayoutProps) {
                         >
                             <item.icon size={20} aria-hidden="true" />
                             <span>{item.label}</span>
+                            {item.to === "/pull-requests" && openPullRequestCount > 0 ? (
+                                <span
+                                    className={cn(
+                                        "ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-xs font-semibold",
+                                        isActive
+                                            ? "bg-white/20 text-white"
+                                            : "bg-accent-500/20 text-accent-200"
+                                    )}
+                                    aria-label={`${openPullRequestCount} open pull requests`}
+                                >
+                                    {openPullRequestCount}
+                                </span>
+                            ) : null}
                         </Link>
                     );
                 })}
