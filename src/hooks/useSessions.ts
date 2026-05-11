@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { deleteSessionFromCollection } from "../collections/sessions";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
@@ -11,20 +11,20 @@ interface SessionHistoryResponse {
     nextOffset?: number;
 }
 
-const EMPTY_SESSION_HISTORY_PAGE: SessionHistoryResponse = {
-    messages: [],
-    total: 0,
-    hasMore: false,
-};
+function isValidInfiniteHistoryData(data: unknown): boolean {
+    if (data == null) return true;
+    if (typeof data !== "object") return false;
+
+    const value = data as { pages?: unknown; pageParams?: unknown };
+    return Array.isArray(value.pages) && Array.isArray(value.pageParams);
+}
 
 // Query keys
 export const sessionKeys = {
     all: ["sessions"] as const,
-    history: (key: string): ["sessions", "history", "infinite", "v2", string] => [
+    history: (key: string): ["sessions", "history", string] => [
         "sessions",
         "history",
-        "infinite",
-        "v2",
         key,
     ],
 };
@@ -56,17 +56,21 @@ async function deleteSessionRequest(key: string): Promise<void> {
 }
 
 export function useSessionHistory(key: string | null | undefined, limit = 50) {
+    const queryClient = useQueryClient();
     const sessionKey = typeof key === "string" ? key.trim() : "";
+    const queryKey = sessionKeys.history(sessionKey);
+
+    // Older modal builds could leave a non-infinite value under this key. TanStack's
+    // infinite observer assumes cached data has pages/pageParams and crashes before
+    // render if it finds a plain page response instead.
+    if (!isValidInfiniteHistoryData(queryClient.getQueryData(queryKey))) {
+        queryClient.removeQueries({ queryKey, exact: true });
+    }
 
     return useInfiniteQuery({
-        queryKey: sessionKeys.history(sessionKey),
+        queryKey,
         queryFn: ({ pageParam = 0 }) => fetchSessionHistory(sessionKey, pageParam, limit),
         initialPageParam: 0,
-        initialData: {
-            pages: [EMPTY_SESSION_HISTORY_PAGE],
-            pageParams: [0],
-        },
-        initialDataUpdatedAt: 0,
         getNextPageParam: (lastPage) =>
             lastPage?.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
         enabled: sessionKey.length > 0,
