@@ -121,7 +121,7 @@ function mockLogs(overrides = {}) {
         },
     ];
     mocks.useLogFiles.mockReturnValue({
-        data: [{ name: "openclaw-2026-05-11.log" }, { name: "openclaw-2026-05-10.log" }],
+        data: [{ name: "openclaw-2099-01-02.log" }, { name: "openclaw-2099-01-01.log" }],
     });
     mocks.useLogContent.mockReturnValue({
         isFetching: false,
@@ -174,7 +174,7 @@ describe("Logs page", () => {
         expect(screen.getByText("INFO first info")).toBeInTheDocument();
         expect(screen.getByText("ERROR boom")).toBeInTheDocument();
         expect(screen.getAllByLabelText("select")[0]).toHaveValue(
-            "openclaw-2026-05-11.log"
+            "openclaw-2099-01-02.log"
         );
     });
 
