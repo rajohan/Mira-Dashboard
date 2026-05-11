@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Tasks } from "./Tasks";
@@ -70,10 +71,35 @@ const taskModule = vi.hoisted(() => {
     };
 });
 
+const dndMocks = vi.hoisted(() => ({
+    handlers: null as null | {
+        onDragEnd: (event: {
+            active: { id: string };
+            over: { id: string } | null;
+        }) => Promise<void> | void;
+        onDragOver: (event: { over: { id: string } | null }) => void;
+        onDragStart: (event: { active: { id: string } }) => void;
+    },
+}));
+
 vi.mock("@dnd-kit/core", () => ({
-    DndContext: ({ children }: { children: React.ReactNode }) => (
-        <div data-testid="dnd-context">{children}</div>
-    ),
+    DndContext: ({
+        children,
+        onDragEnd,
+        onDragOver,
+        onDragStart,
+    }: {
+        children: React.ReactNode;
+        onDragEnd: (event: {
+            active: { id: string };
+            over: { id: string } | null;
+        }) => Promise<void> | void;
+        onDragOver: (event: { over: { id: string } | null }) => void;
+        onDragStart: (event: { active: { id: string } }) => void;
+    }) => {
+        dndMocks.handlers = { onDragEnd, onDragOver, onDragStart };
+        return <div data-testid="dnd-context">{children}</div>;
+    },
     DragOverlay: ({ children }: { children: React.ReactNode }) => (
         <div data-testid="drag-overlay">{children}</div>
     ),
@@ -112,7 +138,7 @@ vi.mock("../components/features/tasks", () => ({
             body: string,
             priority: string,
             assignee: string,
-            automation: { cronJobId: string }
+            automation: { cronJobId: string } | null
         ) => Promise<void>;
     }) => (
         <section data-testid="new-task-modal">
@@ -128,6 +154,12 @@ vi.mock("../components/features/tasks", () => ({
                 }
             >
                 Submit new task
+            </button>
+            <button
+                type="button"
+                onClick={() => void onSubmit("Default task", "", "", "", null)}
+            >
+                Submit default task
             </button>
         </section>
     ),
@@ -272,6 +304,7 @@ function mockTaskHooks(overrides = {}) {
 
 describe("Tasks page", () => {
     beforeEach(() => {
+        dndMocks.handlers = null;
         hooks.assignTask.mockResolvedValue(task({ number: 1, title: "Assigned" }));
         hooks.createTask.mockResolvedValue(task({ number: 3, title: "New task" }));
         hooks.createTaskUpdate.mockResolvedValue(Promise.resolve());
@@ -357,6 +390,44 @@ describe("Tasks page", () => {
             labels: ["priority-high"],
             title: "New task",
         });
+
+        await user.click(screen.getByRole("button", { name: "New Task" }));
+        await user.click(screen.getByRole("button", { name: "Submit default task" }));
+
+        expect(hooks.createTask).toHaveBeenLastCalledWith({
+            assignee: "mira-2026",
+            automation: null,
+            body: "",
+            labels: [],
+            title: "Default task",
+        });
+    });
+
+    it("moves tasks through drag and drop events", async () => {
+        render(<Tasks />);
+
+        expect(dndMocks.handlers).not.toBeNull();
+        const handlers = dndMocks.handlers!;
+
+        act(() => {
+            handlers.onDragStart({ active: { id: "1" } });
+        });
+        expect(screen.getByTestId("task-overlay")).toHaveTextContent("Build tests");
+
+        act(() => {
+            handlers.onDragOver({ over: { id: "done" } });
+        });
+        expect(screen.getByTestId("column-done")).toHaveTextContent("over");
+
+        await act(async () => {
+            await handlers.onDragEnd({ active: { id: "1" }, over: { id: "done" } });
+        });
+
+        expect(hooks.moveTask).toHaveBeenCalledWith({
+            number: 1,
+            columnLabel: "done",
+        });
+        expect(screen.queryByTestId("task-overlay")).not.toBeInTheDocument();
     });
 
     it("opens task details and performs task/update actions", async () => {
