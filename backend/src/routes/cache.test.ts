@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { mapCacheRowForResponse, parseJsonFieldOrValue } from "./cache.js";
+import {
+    mapCacheRowForResponse,
+    parseJsonFieldOrValue,
+    refreshCacheKey,
+} from "./cache.js";
 
 const baseRow = {
     key: "quotas.summary",
@@ -60,5 +64,11 @@ describe("cache route mapping helpers", () => {
         assert.equal(mapped.consecutiveFailures, 0);
         assert.equal(mapped.data, "raw output");
         assert.deepEqual(mapped.meta, {});
+    });
+
+    it("rejects refresh requests for unconfigured cache keys before shelling out", async () => {
+        await assert.rejects(() => refreshCacheKey("not.configured"), {
+            message: "No refresh command configured for cache key: not.configured",
+        });
     });
 });

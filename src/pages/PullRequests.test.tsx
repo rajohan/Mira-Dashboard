@@ -281,4 +281,111 @@ describe("PullRequests page", () => {
         );
         expect(await screen.findByText("Merge failed")).toBeInTheDocument();
     });
+
+    it("summarizes checkout edge states, missing deploys, and check outcomes", () => {
+        mockPullRequests({
+            checkout: {
+                data: {
+                    ...hooks.productionCheckout,
+                    branch: "feature-branch",
+                    isSafeForDeploy: true,
+                },
+                error: null,
+            },
+            deployments: { data: [] },
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        body: "",
+                        mergeStateStatus: "BLOCKED",
+                        mergeable: "CONFLICTING",
+                        number: 11,
+                        statusCheckRollup: [{ conclusion: "FAILURE", name: "ci" }],
+                        title: "Needs work",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "UNKNOWN",
+                        mergeable: "UNKNOWN",
+                        number: 12,
+                        statusCheckRollup: [{ status: "IN_PROGRESS", name: "ci" }],
+                        title: "Still running",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        number: 13,
+                        statusCheckRollup: [],
+                        title: "No checks yet",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Will switch to master")).toBeInTheDocument();
+        expect(
+            screen.getByText(/will switch the production checkout from feature-branch/)
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText("No dashboard deploy jobs recorded yet.")
+        ).toBeInTheDocument();
+        expect(screen.getByText("Checks failed")).toBeInTheDocument();
+        expect(screen.getByText("Checks running")).toBeInTheDocument();
+        expect(screen.getByText("No CI checks")).toBeInTheDocument();
+        expect(screen.getByText("CONFLICTING")).toBeInTheDocument();
+        expect(screen.getByText("BLOCKED")).toBeInTheDocument();
+    });
+
+    it("shows production checkout loading and wrong-root errors", () => {
+        const { rerender } = render(<PullRequests />);
+
+        mockPullRequests({
+            checkout: { data: undefined, error: null },
+        });
+        rerender(<PullRequests />);
+        expect(screen.getByText("Checking production checkout")).toBeInTheDocument();
+        expect(screen.getByText("Loading checkout status…")).toBeInTheDocument();
+
+        mockPullRequests({
+            checkout: {
+                data: {
+                    ...hooks.productionCheckout,
+                    isProductionRoot: false,
+                    isSafeForDeploy: false,
+                    root: "/tmp/wrong",
+                },
+                error: null,
+            },
+        });
+        rerender(<PullRequests />);
+        expect(screen.getByText("Wrong root")).toBeInTheDocument();
+        expect(screen.getByText(/not operating on/)).toBeInTheDocument();
+
+        mockPullRequests({
+            checkout: { data: undefined, error: new Error("Checkout unavailable") },
+        });
+        rerender(<PullRequests />);
+        expect(screen.getByText("Checkout unavailable")).toBeInTheDocument();
+    });
+
+    it("keeps the confirmation modal open while mutations are pending", async () => {
+        const user = userEvent.setup();
+        const { rerender } = render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Reject" }));
+        expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Reject PR #10");
+
+        mockPullRequests({
+            approve: { isPending: true, mutateAsync: hooks.approve },
+        });
+        rerender(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Cancel action" }));
+        expect(screen.getByTestId("confirm-modal")).toBeInTheDocument();
+    });
 });
