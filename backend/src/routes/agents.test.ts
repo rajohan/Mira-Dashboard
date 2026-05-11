@@ -1,0 +1,243 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { after, before, describe, it } from "node:test";
+
+import express from "express";
+
+import { db } from "../db.js";
+import gateway from "../gateway.js";
+
+interface TestServer {
+    baseUrl: string;
+    close: () => Promise<void>;
+}
+
+const originalHome = process.env.HOME;
+const originalGateway = {
+    getSessions: gateway.getSessions,
+    request: gateway.request,
+};
+const agentId = `test-agent-${Date.now()}`;
+
+async function startServer(homeDir: string): Promise<TestServer> {
+    process.env.HOME = homeDir;
+    const { default: agentsRoutes } = await import("./agents.js");
+
+    const app = express();
+    agentsRoutes(app);
+    const server = http.createServer(app);
+
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+
+    return {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () => new Promise((resolve) => server.close(() => resolve())),
+    };
+}
+
+async function requestJson<T>(
+    server: TestServer,
+    pathName: string,
+    options: { method?: string; body?: unknown } = {}
+): Promise<{ status: number; body: T }> {
+    const response = await fetch(`${server.baseUrl}${pathName}`, {
+        method: options.method || "GET",
+        headers:
+            options.body === undefined
+                ? undefined
+                : { "Content-Type": "application/json" },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+
+    return {
+        status: response.status,
+        body: (await response.json()) as T,
+    };
+}
+
+describe("agents routes", () => {
+    let server: TestServer;
+    let homeDir: string;
+    let metadataPath: string;
+
+    before(async () => {
+        homeDir = await mkdtemp(path.join(os.tmpdir(), "mira-agents-route-"));
+        const openclawRoot = path.join(homeDir, ".openclaw");
+        await mkdir(openclawRoot, { recursive: true });
+        await writeFile(
+            path.join(openclawRoot, "openclaw.json"),
+            JSON.stringify(
+                {
+                    agents: {
+                        defaults: {
+                            model: { primary: "codex" },
+                            models: {
+                                "openai-codex/gpt-5.5": { alias: "codex" },
+                            },
+                        },
+                        list: [
+                            { id: agentId, default: true },
+                            {
+                                id: "researcher",
+                                model: { primary: "synthetic/hf:moonshotai/Kimi-K2.5" },
+                            },
+                        ],
+                    },
+                },
+                null,
+                2
+            )
+        );
+        metadataPath = path.join(
+            openclawRoot,
+            "agents",
+            agentId,
+            "sessions",
+            "metadata.json"
+        );
+
+        gateway.getSessions = () => [];
+        gateway.request = async (method: string) => {
+            if (method === "sessions.list") {
+                return {
+                    sessions: [
+                        {
+                            key: `agent:${agentId}:main`,
+                            model: "openai-codex/gpt-5.5",
+                            updatedAt: Date.now(),
+                        },
+                    ],
+                };
+            }
+
+            throw new Error(`Unexpected gateway method: ${method}`);
+        };
+        server = await startServer(homeDir);
+    });
+
+    after(async () => {
+        await server.close();
+        db.prepare("DELETE FROM agent_task_history WHERE agent_id = ?").run(agentId);
+        gateway.getSessions = originalGateway.getSessions;
+        gateway.request = originalGateway.request;
+        if (originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = originalHome;
+        }
+        await rm(homeDir, { recursive: true, force: true });
+    });
+
+    it("returns parsed agent config and status with resolved models", async () => {
+        const config = await requestJson<{
+            defaults: { model: { primary: string } };
+            list: Array<{ id: string }>;
+        }>(server, "/api/agents/config");
+
+        assert.equal(config.status, 200);
+        assert.equal(config.body.defaults.model.primary, "codex");
+        assert.deepEqual(
+            config.body.list.map((agent) => agent.id),
+            [agentId, "researcher"]
+        );
+
+        const status = await requestJson<{
+            agents: Array<{
+                id: string;
+                status: string;
+                model: string;
+                currentTask: string | null;
+            }>;
+            timestamp: number;
+        }>(server, "/api/agents/status");
+
+        assert.equal(status.status, 200);
+        const testAgent = status.body.agents.find((agent) => agent.id === agentId);
+        const researcher = status.body.agents.find((agent) => agent.id === "researcher");
+        assert.equal(testAgent?.status, "idle");
+        assert.equal(testAgent?.model, "openai-codex/gpt-5.5");
+        assert.equal(testAgent?.currentTask, null);
+        assert.equal(researcher?.model, "hf:moonshotai/Kimi-K2.5");
+        assert.equal(typeof status.body.timestamp, "number");
+    });
+
+    it("validates, stores, and rotates current task metadata into history", async () => {
+        const invalid = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "   " } }
+        );
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.body.error, "Provide currentTask");
+
+        const firstTask = await requestJson<{ currentTask: string; updatedAt: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: " Write backend tests " } }
+        );
+        assert.equal(firstTask.status, 200);
+        assert.equal(firstTask.body.currentTask, "Write backend tests");
+        assert.match(firstTask.body.updatedAt, /^\d{4}-\d{2}-\d{2}T/u);
+
+        const saved = JSON.parse(await readFile(metadataPath, "utf8")) as {
+            currentTask: string;
+        };
+        assert.equal(saved.currentTask, "Write backend tests");
+
+        const secondTask = await requestJson<{ currentTask: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "Verify local batch" } }
+        );
+        assert.equal(secondTask.status, 200);
+        assert.equal(secondTask.body.currentTask, "Verify local batch");
+
+        const active = db
+            .prepare(
+                "SELECT task FROM agent_task_history WHERE agent_id = ? AND status = 'active'"
+            )
+            .all(agentId) as Array<{ task: string }>;
+        const completed = db
+            .prepare(
+                "SELECT task FROM agent_task_history WHERE agent_id = ? AND status = 'completed'"
+            )
+            .all(agentId) as Array<{ task: string }>;
+
+        assert.deepEqual(
+            active.map((row) => row.task),
+            ["Verify local batch"]
+        );
+        assert.deepEqual(
+            completed.map((row) => row.task),
+            ["Write backend tests"]
+        );
+
+        const history = await requestJson<{
+            tasks: Array<{ agentId: string; task: string; status: string }>;
+        }>(server, "/api/agents/tasks/history?limit=5");
+        assert.equal(history.status, 200);
+        assert.equal(
+            history.body.tasks.some(
+                (task) =>
+                    task.agentId === agentId &&
+                    task.task === "Write backend tests" &&
+                    task.status === "completed"
+            ),
+            true
+        );
+    });
+
+    it("returns 404s when config or agent entries are missing", async () => {
+        const missingAgent = await requestJson<{ error: string }>(
+            server,
+            "/api/agents/missing/status"
+        );
+        assert.equal(missingAgent.status, 404);
+        assert.equal(missingAgent.body.error, "Agent 'missing' not found");
+    });
+});
