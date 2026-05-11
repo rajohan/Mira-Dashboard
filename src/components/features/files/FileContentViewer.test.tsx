@@ -5,6 +5,26 @@ import { describe, expect, it, vi } from "vitest";
 import type { FileContent } from "../../../types/file";
 import { FileContentViewer } from "./FileContentViewer";
 
+vi.mock("./viewers/MarkdownPreview", () => ({
+    MarkdownPreview: ({ content }: { content: string }) => (
+        <div data-testid="markdown-preview">{content}</div>
+    ),
+}));
+
+vi.mock("./viewers/JsonPreview", () => ({
+    JsonPreview: ({ content }: { content: string }) => (
+        <div data-testid="json-preview">{content}</div>
+    ),
+}));
+
+vi.mock("./viewers/CodePreview", () => ({
+    CodePreview: ({ content, language }: { content: string; language: string }) => (
+        <div data-testid="code-preview" data-language={language}>
+            {content}
+        </div>
+    ),
+}));
+
 const baseFile: FileContent = {
     content: "hello",
     isBinary: false,
@@ -119,5 +139,61 @@ describe("FileContentViewer", () => {
         });
 
         expect(screen.getByDisplayValue("const ok = true;")).toBeInTheDocument();
+    });
+
+    it("loads markdown, JSON, and code previews", async () => {
+        const { rerender } = render(
+            <FileContentViewer
+                codeEditMode={false}
+                editedContent="# Notes"
+                fileContent={{ ...baseFile, path: "/workspace/notes.md" }}
+                isEditable={true}
+                jsonPreview={false}
+                largeFileWarning={false}
+                markdownPreview={true}
+                onContentChange={vi.fn()}
+                syntaxClass="text-primary-300"
+            />
+        );
+
+        expect(await screen.findByTestId("markdown-preview")).toHaveTextContent(
+            "# Notes"
+        );
+
+        rerender(
+            <FileContentViewer
+                codeEditMode={false}
+                editedContent='{ "ok": true }'
+                fileContent={{ ...baseFile, path: "/workspace/config.json" }}
+                isEditable={true}
+                jsonPreview={true}
+                largeFileWarning={false}
+                markdownPreview={false}
+                onContentChange={vi.fn()}
+                syntaxClass="text-primary-300"
+            />
+        );
+
+        expect(await screen.findByTestId("json-preview")).toHaveTextContent(
+            '{ "ok": true }'
+        );
+
+        rerender(
+            <FileContentViewer
+                codeEditMode={false}
+                editedContent="console.log('hi');"
+                fileContent={{ ...baseFile, path: "/workspace/app.ts" }}
+                isEditable={true}
+                jsonPreview={false}
+                largeFileWarning={false}
+                markdownPreview={false}
+                onContentChange={vi.fn()}
+                syntaxClass="text-primary-300"
+            />
+        );
+
+        const codePreview = await screen.findByTestId("code-preview");
+        expect(codePreview).toHaveTextContent("console.log('hi');");
+        expect(codePreview).toHaveAttribute("data-language", "typescript");
     });
 });
