@@ -1,0 +1,70 @@
+name: Bug report
+description: Report broken or incorrect dashboard behavior
+title: "bug: "
+labels:
+    - "type: bugfix"
+    - "status: needs-review"
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for keeping this concrete. Do not include secrets, tokens, raw `.env` files, database dumps, or private runtime logs.
+    - type: textarea
+      id: summary
+      attributes:
+          label: Summary
+          description: What is broken?
+          placeholder: The sessions page crashes when...
+      validations:
+          required: true
+    - type: textarea
+      id: steps
+      attributes:
+          label: Steps to reproduce
+          description: Exact steps, commands, or UI path.
+          placeholder: |
+              1. Go to ...
+              2. Click ...
+              3. See ...
+      validations:
+          required: true
+    - type: textarea
+      id: expected
+      attributes:
+          label: Expected behavior
+          description: What should happen instead?
+      validations:
+          required: true
+    - type: textarea
+      id: actual
+      attributes:
+          label: Actual behavior
+          description: Error message, screenshot, or sanitized log excerpt.
+      validations:
+          required: true
+    - type: dropdown
+      id: area
+      attributes:
+          label: Area
+          options:
+              - "area: frontend"
+              - "area: backend"
+              - "area: auth"
+              - "area: chat"
+              - "area: sessions"
+              - "area: tasks"
+              - "area: docker"
+              - "area: database"
+              - "area: files"
+              - "area: settings"
+              - "area: notifications"
+              - "area: openclaw"
+              - "area: ops"
+              - "area: ci"
+      validations:
+          required: false
+    - type: textarea
+      id: verification
+      attributes:
+          label: Verification notes
+          description: Any checks already run, if applicable.

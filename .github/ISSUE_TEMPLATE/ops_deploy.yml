@@ -1,0 +1,55 @@
+name: Ops or deploy task
+description: Track deployment, service restart, config, backup, or production operations
+title: "ops: "
+labels:
+    - "area: ops"
+    - "status: needs-review"
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Keep operational details sanitized. Never paste secrets, tokens, private keys, full `.env` files, or sensitive personal data.
+    - type: textarea
+      id: summary
+      attributes:
+          label: Summary
+          description: What operation is needed?
+          placeholder: Deploy latest dashboard master and restart mira-dashboard.service...
+      validations:
+          required: true
+    - type: dropdown
+      id: risk
+      attributes:
+          label: Risk level
+          options:
+              - Low - reversible / no user impact expected
+              - Medium - restart or brief interruption possible
+              - High - production data, auth, secrets, or destructive action involved
+      validations:
+          required: true
+    - type: textarea
+      id: plan
+      attributes:
+          label: Plan
+          description: Commands, dashboard actions, rollout order, or rollback notes.
+          placeholder: |
+              1. Pull latest master
+              2. Build frontend/backend
+              3. Restart service
+              4. Verify /api/health
+      validations:
+          required: true
+    - type: checkboxes
+      id: checklist
+      attributes:
+          label: Safety checklist
+          options:
+              - label: Production checkout/root verified
+              - label: Secrets/config changes identified without pasting secret values
+              - label: Rollback or recovery path is clear
+              - label: Health check or smoke test is defined
+    - type: textarea
+      id: verification
+      attributes:
+          label: Completion evidence
+          description: Fill this in when done with commit IDs, health checks, service status, or screenshots.

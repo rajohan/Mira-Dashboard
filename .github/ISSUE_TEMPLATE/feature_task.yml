@@ -1,0 +1,70 @@
+name: Feature or task
+description: Request a feature, refactor, test task, or maintenance item
+title: "task: "
+labels:
+    - "type: feature"
+    - "status: needs-review"
+body:
+    - type: textarea
+      id: goal
+      attributes:
+          label: Goal
+          description: What outcome do we want?
+          placeholder: Add coverage for...
+      validations:
+          required: true
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Why this matters, links to prior work, constraints, or screenshots.
+      validations:
+          required: false
+    - type: checkboxes
+      id: type
+      attributes:
+          label: Work type
+          options:
+              - label: Feature/user-visible change
+              - label: Bugfix
+              - label: Refactor
+              - label: Tests/coverage
+              - label: Security/auth/trust boundary
+              - label: Maintenance/cleanup
+              - label: Performance/resource usage
+    - type: dropdown
+      id: area
+      attributes:
+          label: Primary area
+          options:
+              - "area: frontend"
+              - "area: backend"
+              - "area: auth"
+              - "area: chat"
+              - "area: sessions"
+              - "area: tasks"
+              - "area: docker"
+              - "area: database"
+              - "area: files"
+              - "area: settings"
+              - "area: notifications"
+              - "area: openclaw"
+              - "area: ops"
+              - "area: ci"
+      validations:
+          required: false
+    - type: textarea
+      id: acceptance
+      attributes:
+          label: Acceptance criteria
+          description: What must be true before this is done?
+          placeholder: |
+              - [ ] ...
+              - [ ] ...
+      validations:
+          required: true
+    - type: textarea
+      id: verification
+      attributes:
+          label: Suggested verification
+          description: Tests, builds, screenshots, service health checks, or manual smoke checks.
