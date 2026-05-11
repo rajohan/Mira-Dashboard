@@ -128,4 +128,31 @@ describe("CronJobDetails", () => {
         expect(screen.getByText("Invalid JSON: Unexpected token")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Save edits" })).toBeDisabled();
     });
+
+    it("renders pending and disabled states", async () => {
+        const user = userEvent.setup();
+        const onEditModeChange = vi.fn();
+
+        renderDetails({
+            job: { ...job, enabled: false },
+            isEditMode: true,
+            runPending: true,
+            togglePending: true,
+            updatePending: true,
+            hasInvalidJson: true,
+            payloadValidation: { valid: false, error: null },
+            deliveryValidation: { valid: false, error: "missing mode" },
+            onEditModeChange,
+        });
+
+        expect(screen.getByText("Disabled")).toBeInTheDocument();
+        expect(screen.getByRole("switch", { name: "Enabled" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Triggering/ })).toBeDisabled();
+        expect(screen.getByText("Running job...")).toBeInTheDocument();
+        expect(screen.getByText("Invalid JSON: parse error")).toBeInTheDocument();
+        expect(screen.getByText("Invalid JSON: missing mode")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(onEditModeChange).toHaveBeenCalledWith(false);
+    });
 });
