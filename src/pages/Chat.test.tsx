@@ -185,17 +185,25 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
 
 vi.mock("../components/features/chat/ChatComposer", () => ({
     ChatComposer: ({
+        attachments,
         canSend,
         draft,
         isConnected,
+        onAttachFiles,
         onChangeDraft,
+        onRemoveAttachment,
         onSend,
+        onToggleRecording,
     }: {
+        attachments: Array<{ id: string; fileName: string }>;
         canSend: boolean;
         draft: string;
         isConnected: boolean;
+        onAttachFiles: (files: FileList | null) => void;
         onChangeDraft: (draft: string) => void;
+        onRemoveAttachment: (id: string) => void;
         onSend: () => void;
+        onToggleRecording: () => void;
     }) => (
         <form
             onSubmit={(event) => {
@@ -213,6 +221,27 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
                     onChange={(event) => onChangeDraft(event.target.value)}
                 />
             </label>
+            <label>
+                Attach file
+                <input
+                    aria-label="Attach file"
+                    type="file"
+                    multiple
+                    onChange={(event) => onAttachFiles(event.target.files)}
+                />
+            </label>
+            {attachments.map((attachment) => (
+                <button
+                    key={attachment.id}
+                    type="button"
+                    onClick={() => onRemoveAttachment(attachment.id)}
+                >
+                    remove {attachment.fileName}
+                </button>
+            ))}
+            <button type="button" onClick={onToggleRecording}>
+                toggle recording
+            </button>
             <button type="submit" disabled={!canSend}>
                 send
             </button>
@@ -375,6 +404,89 @@ describe("Chat", () => {
         expect(
             screen.queryByRole("dialog", { name: "attachment preview" })
         ).not.toBeInTheDocument();
+    });
+
+    it("attaches, removes, and sends files without draft text", async () => {
+        const user = userEvent.setup();
+        const file = new File(["hello"], "notes.txt", {
+            type: "text/plain",
+            lastModified: 123,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.upload(screen.getByLabelText("Attach file"), file);
+        expect(
+            await screen.findByRole("button", { name: "remove notes.txt" })
+        ).toBeInTheDocument();
+        expect(screen.getByTestId("composer-state")).toHaveTextContent("true:true");
+
+        await user.click(screen.getByRole("button", { name: "remove notes.txt" }));
+        expect(
+            screen.queryByRole("button", { name: "remove notes.txt" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId("composer-state")).toHaveTextContent("true:false");
+
+        const secondFile = new File(["hello"], "notes.txt", {
+            type: "text/plain",
+            lastModified: 456,
+        });
+        await user.upload(screen.getByLabelText("Attach file"), secondFile);
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    attachments: [
+                        expect.objectContaining({
+                            content: "aGVsbG8=",
+                            fileName: "notes.txt",
+                            mimeType: "text/plain",
+                        }),
+                    ],
+                    message: "",
+                    sessionKey: "session-a",
+                })
+            )
+        );
+        expect(
+            screen.queryByRole("button", { name: "remove notes.txt" })
+        ).not.toBeInTheDocument();
+    });
+
+    it("reports attachment limits, voice fallback, and slash command handling", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(true);
+        const oversizedFile = new File(["x"], "huge.txt", {
+            type: "text/plain",
+        });
+        Object.defineProperty(oversizedFile, "size", { value: 21 * 1024 * 1024 });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.upload(screen.getByLabelText("Attach file"), oversizedFile);
+        expect(await screen.findByText(/huge\.txt is too large/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+        expect(
+            await screen.findByText(
+                /Direct voice recording .* Choose or record an audio file instead\./
+            )
+        ).toBeInTheDocument();
+
+        await user.type(screen.getByLabelText("Draft"), "/model codex");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.slashCommand).toHaveBeenCalledWith("/model codex")
+        );
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "/model codex" })
+        );
     });
 
     it("surfaces socket and send failures", async () => {
