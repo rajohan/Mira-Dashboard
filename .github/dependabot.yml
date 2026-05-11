@@ -10,8 +10,8 @@ updates:
       timezone: "Europe/Oslo"
     open-pull-requests-limit: 3
     labels:
-      - "dependencies"
-      - "frontend"
+      - "type: dependencies"
+      - "area: frontend"
     commit-message:
       prefix: "deps"
     ignore:
@@ -39,8 +39,8 @@ updates:
       timezone: "Europe/Oslo"
     open-pull-requests-limit: 3
     labels:
-      - "dependencies"
-      - "backend"
+      - "type: dependencies"
+      - "area: backend"
     commit-message:
       prefix: "deps"
     groups:
@@ -60,8 +60,8 @@ updates:
       timezone: "Europe/Oslo"
     open-pull-requests-limit: 2
     labels:
-      - "dependencies"
-      - "github-actions"
+      - "type: dependencies"
+      - "area: ci"
     commit-message:
       prefix: "ci"
     groups:
