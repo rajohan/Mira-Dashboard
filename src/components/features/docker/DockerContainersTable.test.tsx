@@ -158,6 +158,51 @@ describe("DockerContainersTable", () => {
         expect(screen.queryByText("service: undefined")).not.toBeInTheDocument();
     });
 
+    it("renders less common health/state variants and memory units", () => {
+        renderTable([
+            makeContainer({
+                health: "unknown",
+                id: "created",
+                name: "created-container",
+                ports: [],
+                state: "created",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "",
+                    memory: "1024KB / 2GB",
+                    memoryPercent: "0%",
+                    netIO: "0B / 0B",
+                    pids: "0",
+                },
+                status: "Created",
+            }),
+            makeContainer({
+                health: "none",
+                id: "dead",
+                name: "dead-container",
+                state: "dead",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "-7.5%",
+                    memory: "1TB / 2TB",
+                    memoryPercent: "50%",
+                    netIO: "0B / 0B",
+                    pids: "0",
+                },
+                status: "Dead",
+            }),
+        ]);
+
+        expect(screen.getAllByText("created")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("dead")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("unknown")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("none")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("1 MB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("1073.74 GB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("-")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("-7.5%")[0]).toBeInTheDocument();
+    });
+
     it("supports keyboard row activation and sortable columns", async () => {
         const user = userEvent.setup();
         const onDetails = vi.fn();
