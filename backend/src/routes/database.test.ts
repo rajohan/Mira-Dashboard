@@ -36,7 +36,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     const dockerPath = path.join(binDir, "docker");
     await writeFile(
         dockerPath,
-        String.raw`#!/usr/bin/env node
+        String.raw`#!${process.execPath}
 const command = process.argv.at(-1) || "";
 function out(value) { process.stdout.write(value); }
 if (command.includes('/comet') && command.includes('FROM torrents')) {

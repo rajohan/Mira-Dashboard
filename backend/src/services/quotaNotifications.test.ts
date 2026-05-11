@@ -15,7 +15,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     const dockerPath = path.join(binDir, "docker");
     await writeFile(
         dockerPath,
-        String.raw`#!/usr/bin/env node
+        String.raw`#!${process.execPath}
 const percent = Number(process.env.FAKE_OPENROUTER_PERCENT || "91");
 const checkedAt = 1_800_000_000_000;
 const data = {

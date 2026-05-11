@@ -15,7 +15,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     const dockerPath = path.join(binDir, "docker");
     await writeFile(
         dockerPath,
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 const mode = process.env.FAKE_QUOTAS_CACHE_MODE || "fresh";
 if (mode === "missing") {
   process.exit(0);

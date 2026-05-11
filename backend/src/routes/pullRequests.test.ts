@@ -26,7 +26,7 @@ async function installFakeCommands(tempDir: string): Promise<void> {
 
     await writeExecutable(
         path.join(binDir, "gh"),
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 if (args[0] === "pr" && args[1] === "list") {
   process.stdout.write(JSON.stringify([
@@ -59,7 +59,7 @@ process.exit(1);
 
     await writeExecutable(
         path.join(binDir, "git"),
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 if (args.join(" ") === "rev-parse --show-toplevel") {
   process.stdout.write("/home/ubuntu/projects/mira-dashboard\n");

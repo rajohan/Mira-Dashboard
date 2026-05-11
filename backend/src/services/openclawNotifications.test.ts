@@ -16,7 +16,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     const dockerPath = path.join(binDir, "docker");
     await writeFile(
         dockerPath,
-        String.raw`#!/usr/bin/env node
+        String.raw`#!${process.execPath}
 const updateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE !== "false";
 const latest = process.env.FAKE_OPENCLAW_LATEST || "v2026.5.99";
 const data = {

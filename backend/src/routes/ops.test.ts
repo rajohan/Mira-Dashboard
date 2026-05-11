@@ -25,20 +25,20 @@ async function installFakeCommands(tempDir: string): Promise<void> {
 
     await writeExecutable(
         path.join(binDir, "docker"),
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 process.stdout.write('{"completedAt":"2026-05-11T01:00:00.000Z","ok":true}\n');
 `
     );
     await writeExecutable(
         path.join(binDir, "node"),
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 process.stderr.write('dry-run stderr\n');
 process.stdout.write(JSON.stringify({ ok: true, mode: 'dry-run', args: process.argv.slice(2) }));
 `
     );
     await writeExecutable(
         path.join(binDir, "sudo"),
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 process.stderr.write('run stderr\n');
 process.stdout.write(JSON.stringify({ ok: true, mode: 'run', args: process.argv.slice(2) }));
 `

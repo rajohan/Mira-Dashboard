@@ -18,7 +18,7 @@ async function installFakeDoppler(tempDir: string): Promise<string> {
     const dopplerPath = path.join(tempDir, "doppler");
     await writeFile(
         dopplerPath,
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 const command = args.at(-1) || "";
 process.stdout.write("started backup\n" + command + "\n");

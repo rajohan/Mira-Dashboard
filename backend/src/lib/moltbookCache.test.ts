@@ -15,7 +15,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     const dockerPath = path.join(binDir, "docker");
     await writeFile(
         dockerPath,
-        String.raw`#!/usr/bin/node
+        String.raw`#!${process.execPath}
 const mode = process.env.FAKE_MOLTBOOK_CACHE_MODE || "fresh";
 const command = process.argv.join(" ");
 let key = "moltbook.home";
