@@ -159,9 +159,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         return () => {
-            if (import.meta.env.PROD) {
-                disconnect();
-            }
+            clientRef.current?.disconnect();
+            clientRef.current = null;
         };
     }, []);
 

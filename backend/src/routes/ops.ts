@@ -5,7 +5,7 @@ import express, { type RequestHandler } from "express";
 
 const execFileAsync = promisify(execFile);
 
-const N8N_ROOT = "/home/ubuntu/projects/n8n";
+const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
 const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
 const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;

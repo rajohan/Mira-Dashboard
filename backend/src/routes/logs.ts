@@ -4,6 +4,7 @@ import path from "path";
 import type WebSocket from "ws";
 
 const LOGS_DIR = "/tmp/openclaw";
+const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
 let logWatcher: NodeJS.Timeout | null = null;
 let lastLogSize = 0;
 let lastLogFile = "";
@@ -114,6 +115,21 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
     logSubscribers.delete(ws);
 }
 
+export const __testing = {
+    resetLogWatcherForTest(): void {
+        if (logWatcher) {
+            clearInterval(logWatcher);
+        }
+        logWatcher = null;
+        lastLogSize = 0;
+        lastLogFile = "";
+        logSubscribers.clear();
+    },
+    subscriberCount(): number {
+        return logSubscribers.size;
+    },
+};
+
 export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {
@@ -152,9 +168,9 @@ export default function logsRoutes(app: express.Application): void {
         }
 
         try {
-            const filePath = path.join(LOGS_DIR, logFile);
+            const filePath = path.resolve(LOGS_DIR, logFile);
 
-            if (!filePath.startsWith(LOGS_DIR)) {
+            if (!filePath.startsWith(`${REAL_LOGS_DIR}${path.sep}`)) {
                 res.status(403).json({ error: "Access denied" });
                 return;
             }

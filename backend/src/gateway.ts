@@ -817,6 +817,28 @@ async function getSessionHistory(
     };
 }
 
+export const __testing = {
+    transformSession,
+    enrichRuntimeEventPayload,
+    hydrateOmittedChatHistoryImages,
+    readRawTranscriptImageMessages,
+    getTranscriptPath,
+    normalizeMessageText,
+    normalizeTimestamp,
+    imageBlockHasOmittedData,
+    sessionHasRunIdentifier,
+    setSessionListForTest(sessions: Session[]): void {
+        sessionList = sessions;
+    },
+    resetGatewayStateForTest(): void {
+        subscribers.clear();
+        sessionList = [];
+        isGatewayConnected = false;
+        pendingRequests.clear();
+        requestId = 1000;
+    },
+};
+
 export default {
     init,
     handleClient,

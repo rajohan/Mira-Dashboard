@@ -3,6 +3,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+let testDockerBin: string | undefined;
+
+export function setCacheStoreDockerBinForTests(dockerBin: string | undefined) {
+    testDockerBin = dockerBin;
+}
+
 export interface CacheEntryRow {
     key: string;
     data: string;
@@ -43,8 +49,9 @@ async function runDockerExec(container: string, command: string) {
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
     };
+    const dockerBin = testDockerBin || "docker";
     const { stdout } = await execFileAsync(
-        "docker",
+        dockerBin,
         ["exec", container, "bash", "-lc", command],
         options
     );

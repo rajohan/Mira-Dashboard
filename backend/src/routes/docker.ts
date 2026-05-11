@@ -8,8 +8,10 @@ import { parseTable } from "../lib/cacheStore.js";
 
 const execFileAsync = promisify(execFile);
 
-const DOCKER_COMPOSE_WRAPPER = "/opt/docker/bin/docker-compose-doppler";
-const DOCKER_ROOT = "/opt/docker";
+const DOCKER_ROOT = process.env.MIRA_DOCKER_ROOT || "/opt/docker";
+const DOCKER_COMPOSE_WRAPPER =
+    process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
+    `${DOCKER_ROOT}/bin/docker-compose-doppler`;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const N8N_DATABASE = "n8n";

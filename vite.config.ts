@@ -17,6 +17,8 @@ const appCommit = (() => {
     }
 })();
 
+const apiTarget = process.env.DASHBOARD_API_TARGET || "http://localhost:3100";
+
 export default defineConfig({
     plugins: [devtools(), react(), babel({ presets: [reactCompilerPreset()] })],
     define: {
@@ -26,7 +28,7 @@ export default defineConfig({
         host: true, // Listen on all addresses (needed for Tailscale)
         proxy: {
             "/api": {
-                target: "http://localhost:3100",
+                target: apiTarget,
                 changeOrigin: true,
             },
         },

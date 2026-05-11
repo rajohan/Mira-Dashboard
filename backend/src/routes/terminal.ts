@@ -1,4 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import express from "express";
@@ -30,7 +31,7 @@ interface CompletionResponse {
     commonPrefix: string;
 }
 
-const HOME_DIR = "/home/ubuntu";
+const HOME_DIR = os.homedir();
 
 function expandPath(inputPath: string, cwd: string): string {
     if (inputPath.startsWith("/")) return inputPath;

@@ -11,7 +11,9 @@
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
-        "format:check": "prettier --check '**/*.{ts,js}'"
+        "format:check": "prettier --check '**/*.{ts,js}'",
+        "test": "node --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\"",
+        "test:coverage": "node --experimental-test-coverage --test-coverage-lines=79 --test-coverage-branches=64 --test-coverage-functions=72 --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\""
     },
     "dependencies": {
         "dotenv": "^17.4.2",

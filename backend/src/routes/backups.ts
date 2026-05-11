@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
-const N8N_ROOT = "/home/ubuntu/projects/n8n";
+const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
+const DOPPLER_BIN = process.env.DOPPLER_BIN || "/usr/local/bin/doppler";
 const MAX_OUTPUT_CHARS = 100_000;
 
 interface BackupJob {
@@ -119,7 +120,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     }
 
     const child = spawn(
-        "/usr/local/bin/doppler",
+        DOPPLER_BIN,
         ["run", "--project", "rajohan", "--config", "prd", "--", "bash", "-lc", command],
         {
             cwd: N8N_ROOT,
@@ -141,12 +142,6 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
-        if (type === "kopia" && activeKopiaJobId === job.id) {
-            activeKopiaJobId = null;
-        }
-        if (type === "walg" && activeWalgJobId === job.id) {
-            activeWalgJobId = null;
-        }
     });
 
     child.on("error", (error) => {
@@ -154,12 +149,6 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
-        if (type === "kopia" && activeKopiaJobId === job.id) {
-            activeKopiaJobId = null;
-        }
-        if (type === "walg" && activeWalgJobId === job.id) {
-            activeWalgJobId = null;
-        }
     });
 
     return job;
