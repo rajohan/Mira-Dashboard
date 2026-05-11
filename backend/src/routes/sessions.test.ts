@@ -19,6 +19,7 @@ const originalGateway = {
     getSessions: gateway.getSessions,
     sendSessionMessage: gateway.sendSessionMessage,
 };
+const originalConsoleLog = console.log;
 
 const sessions: Session[] = [
     {
@@ -100,6 +101,7 @@ describe("sessions routes", () => {
     const deleted: string[] = [];
 
     before(async () => {
+        console.log = () => {};
         gateway.getSessions = () => [...sessions];
         gateway.getSessionHistory = (async () => ({
             total: 3,
@@ -130,6 +132,7 @@ describe("sessions routes", () => {
 
     after(async () => {
         await server.close();
+        console.log = originalConsoleLog;
         gateway.abortSessionRun = originalGateway.abortSessionRun;
         gateway.deleteSession = originalGateway.deleteSession;
         gateway.getSessionHistory = originalGateway.getSessionHistory;
