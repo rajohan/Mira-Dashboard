@@ -35,8 +35,8 @@ jobs:
             - name: Build frontend
               run: npm run build
 
-            - name: Test frontend utilities
-              run: npm test
+            - name: Test frontend coverage
+              run: npm run test:coverage
 
             - name: Lint backend
               run: npm run lint
@@ -46,8 +46,8 @@ jobs:
               run: npm run build
               working-directory: backend
 
-            - name: Test backend API
-              run: npm test
+            - name: Test backend coverage
+              run: npm run test:coverage
               working-directory: backend
 
             - name: Run Playwright smoke tests
