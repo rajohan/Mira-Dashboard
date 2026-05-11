@@ -215,7 +215,7 @@ describe("terminal routes", () => {
             { path: "~", cwd: tempDir }
         );
         assert.equal(home.status, 200);
-        assert.equal(home.body.newCwd, "/home/ubuntu");
+        assert.equal(home.body.newCwd, os.homedir());
 
         const absolute = await requestJson<{ success: boolean; newCwd: string }>(
             server,
