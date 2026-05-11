@@ -14,9 +14,10 @@ interface SessionHistoryResponse {
 // Query keys
 export const sessionKeys = {
     all: ["sessions"] as const,
-    history: (key: string): ["sessions", "history", string] => [
+    history: (key: string): ["sessions", "history", "infinite", string] => [
         "sessions",
         "history",
+        "infinite",
         key,
     ],
 };
@@ -51,7 +52,7 @@ export function useSessionHistory(key: string | null | undefined, limit = 50) {
     const sessionKey = typeof key === "string" ? key.trim() : "";
 
     return useInfiniteQuery({
-        queryKey: ["sessions", "history", sessionKey],
+        queryKey: sessionKeys.history(sessionKey),
         queryFn: ({ pageParam = 0 }) => fetchSessionHistory(sessionKey, pageParam, limit),
         initialPageParam: 0,
         getNextPageParam: (lastPage) =>

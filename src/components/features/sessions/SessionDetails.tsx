@@ -33,7 +33,9 @@ function OpenSessionDetails({
 }: SessionDetailsProps & { session: Session }) {
     const {
         data,
+        isFetching,
         isLoading,
+        isPending,
         error,
         refetch,
         fetchNextPage,
@@ -46,6 +48,9 @@ function OpenSessionDetails({
     const allMessages = historyPages.flatMap((page) =>
         Array.isArray(page?.messages) ? page.messages : []
     );
+
+    const showLoadingHistory =
+        (isLoading || isPending || isFetching) && allMessages.length === 0;
 
     const displayName =
         session.displayLabel || session.label || session.displayName || session.id;
@@ -100,7 +105,7 @@ function OpenSessionDetails({
                         </Button>
                     </div>
                     <div className="flex-1 overflow-auto py-3 sm:py-4">
-                        {isLoading ? (
+                        {showLoadingHistory ? (
                             <div className="flex items-center justify-center py-8">
                                 <RefreshCw className="text-primary-400 h-5 w-5 animate-spin" />
                                 <span className="text-primary-400 ml-2">
