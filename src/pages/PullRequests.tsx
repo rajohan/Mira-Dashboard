@@ -1,6 +1,8 @@
 import { GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Badge } from "../components/ui/Badge";
@@ -165,11 +167,31 @@ function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
     return `${message}\n${cleanup.message}`;
 }
 
+function normalizePullRequestBody(body: string): string {
+    if (!body.includes("\n") && body.includes(String.raw`\n`)) {
+        return body.replaceAll(String.raw`\n`, "\n");
+    }
+
+    return body;
+}
+
 function PullRequestDescription({ body }: { body: string }) {
+    const normalizedBody = normalizePullRequestBody(body);
+
     return (
         <div className="border-primary-700 bg-primary-900/50 max-h-80 overflow-auto rounded border p-3 sm:p-4">
             <div className="prose prose-invert prose-p:my-2 prose-headings:my-3 prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5 prose-table:my-3 prose-th:border-primary-700 prose-td:border-primary-700 prose-th:p-2 prose-td:p-2 prose-code:before:content-none prose-code:after:content-none max-w-none text-sm break-words">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+                <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                    components={{
+                        a(props) {
+                            return <a {...props} target="_blank" rel="noreferrer" />;
+                        },
+                    }}
+                >
+                    {normalizedBody}
+                </ReactMarkdown>
             </div>
         </div>
     );
