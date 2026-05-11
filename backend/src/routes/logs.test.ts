@@ -6,7 +6,7 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
-import logsRoutes from "./logs.js";
+import logsRoutes, { __testing, subscribeToLogs, unsubscribeFromLogs } from "./logs.js";
 
 interface TestServer {
     baseUrl: string;
@@ -16,6 +16,14 @@ interface TestServer {
 const logsDir = "/tmp/openclaw";
 const outsideDir = "/tmp/openclaw-logs-route-outside";
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
+
+class FakeWebSocket {
+    readonly sent: string[] = [];
+
+    send(data: string): void {
+        this.sent.push(data);
+    }
+}
 
 async function startServer(): Promise<TestServer> {
     const app = express();
@@ -54,6 +62,7 @@ describe("logs routes", () => {
     });
 
     after(async () => {
+        __testing.resetLogWatcherForTest();
         await server.close();
         for (const file of [...testFiles, "not-openclaw.txt"]) {
             await rm(path.join(logsDir, file), { force: true });
@@ -126,5 +135,61 @@ describe("logs routes", () => {
         );
         assert.equal(missing.status, 404);
         assert.deepEqual(await missing.json(), { error: "Log file not found" });
+    });
+
+    it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        await writeFile(
+            path.join(logsDir, todayFile),
+            "ignored blank\n\nlatest one\nlatest two\n",
+            "utf8"
+        );
+
+        const ws = new FakeWebSocket();
+        subscribeToLogs(ws as never);
+
+        assert.equal(__testing.subscriberCount(), 1);
+        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+            type: "log_file",
+            file: todayFile,
+        });
+        assert.deepEqual(
+            ws.sent.slice(1, -1).map((message) => JSON.parse(message)),
+            [
+                { type: "log", line: "ignored blank" },
+                { type: "log", line: "latest one" },
+                { type: "log", line: "latest two" },
+            ]
+        );
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "log_history_complete",
+            count: 3,
+        });
+
+        unsubscribeFromLogs(ws as never);
+        assert.equal(__testing.subscriberCount(), 0);
+        __testing.resetLogWatcherForTest();
+        await rm(path.join(logsDir, todayFile), { force: true });
+    });
+
+    it("sends empty log history when today's log is missing", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        await rm(path.join(logsDir, todayFile), { force: true });
+
+        const ws = new FakeWebSocket();
+        subscribeToLogs(ws as never);
+
+        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+            type: "log_file",
+            file: todayFile,
+        });
+        assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
+            type: "log_history_complete",
+            count: 0,
+        });
+
+        __testing.resetLogWatcherForTest();
     });
 });

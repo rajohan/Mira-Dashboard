@@ -115,6 +115,21 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
     logSubscribers.delete(ws);
 }
 
+export const __testing = {
+    resetLogWatcherForTest(): void {
+        if (logWatcher) {
+            clearInterval(logWatcher);
+        }
+        logWatcher = null;
+        lastLogSize = 0;
+        lastLogFile = "";
+        logSubscribers.clear();
+    },
+    subscriberCount(): number {
+        return logSubscribers.size;
+    },
+};
+
 export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {

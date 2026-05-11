@@ -329,6 +329,14 @@ describe("Chat", () => {
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
         setupRequest();
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: undefined,
+        });
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: undefined,
+        });
     });
 
     it("loads sessions, models, history, and toggles diagnostic visibility", async () => {
@@ -510,5 +518,96 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
 
         expect(await screen.findByText("send failed")).toBeInTheDocument();
+    });
+
+    it("switches sessions, reloads history, and clears queued attachments", async () => {
+        const user = userEvent.setup();
+        const file = new File(["hello"], "queued.txt", {
+            type: "text/plain",
+            lastModified: 789,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.upload(screen.getByLabelText("Attach file"), file);
+        expect(
+            await screen.findByRole("button", { name: "remove queued.txt" })
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "select side chat" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-b")
+        );
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                limit: 1000,
+                sessionKey: "session-b",
+            })
+        );
+        expect(
+            screen.queryByRole("button", { name: "remove queued.txt" })
+        ).not.toBeInTheDocument();
+    });
+
+    it("handles history/model loading fallbacks and disconnected send state", async () => {
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "models.list") {
+                throw new Error("models unavailable");
+            }
+            if (method === "chat.history") {
+                throw new Error("history unavailable");
+            }
+            return {};
+        });
+
+        const { rerender } = render(<Chat />);
+        expect(await screen.findByText("history unavailable")).toBeInTheDocument();
+        expect(screen.getByTestId("loading-history")).toHaveTextContent("false");
+
+        mocks.isConnected = false;
+        mocks.socketError = "socket down";
+        rerender(<Chat />);
+        expect(screen.getByTestId("composer-state")).toHaveTextContent("false:false");
+    });
+
+    it("limits attachment batches and surfaces recorder startup failures", async () => {
+        const user = userEvent.setup();
+        const files = Array.from(
+            { length: 11 },
+            (_, index) =>
+                new File(["x"], `file-${index}.txt`, {
+                    type: "text/plain",
+                    lastModified: index,
+                })
+        );
+
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn().mockRejectedValue(new Error("microphone denied")),
+            },
+        });
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: vi.fn(),
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.upload(screen.getByLabelText("Attach file"), files);
+        expect(
+            await screen.findByText("Only 10 attachments can be sent at once.")
+        ).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "remove file-0.txt" })
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "remove file-10.txt" })
+        ).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+        expect(await screen.findByText("microphone denied")).toBeInTheDocument();
     });
 });
