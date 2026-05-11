@@ -66,4 +66,48 @@ describe("ChatMarkdown", () => {
         expect(block).toHaveAttribute("data-language", "typescript");
         expect(block).toHaveTextContent("const ok = true;");
     });
+
+    it("falls back to syntax highlighting when JSON fences are invalid", () => {
+        render(<ChatMarkdown text={"```json\n{not valid}\n```"} />);
+
+        const block = screen.getByTestId("syntax-block");
+        expect(block).toHaveAttribute("data-language", "json");
+        expect(block).toHaveTextContent("{not valid}");
+    });
+
+    it("detects JSON-like blocks without an explicit language", () => {
+        render(<ChatMarkdown text={'```\n["alpha", "beta"]\n```'} />);
+
+        expect(screen.getByText("json")).toBeInTheDocument();
+        expect(screen.getByTestId("json-block")).toHaveTextContent(
+            JSON.stringify(["alpha", "beta"])
+        );
+    });
+
+    it("wraps primitive JSON values and normalizes shell aliases", () => {
+        const { rerender } = render(<ChatMarkdown text={"```json5\n42\n```"} />);
+
+        expect(screen.getByTestId("json-block")).toHaveTextContent(
+            JSON.stringify({ value: 42 })
+        );
+
+        rerender(<ChatMarkdown text={"```sh\necho hi\n```"} />);
+
+        const block = screen.getByTestId("syntax-block");
+        expect(block).toHaveAttribute("data-language", "bash");
+        expect(block).toHaveTextContent("echo hi");
+    });
+
+    it("renders blockquotes and image links without alt text", () => {
+        render(
+            <ChatMarkdown
+                text={["> quoted", "", "![](https://example.com/raw.png)"].join("\n")}
+            />
+        );
+
+        expect(screen.getByText("quoted").closest("blockquote")).toBeInTheDocument();
+        expect(
+            screen.getByRole("link", { name: "https://example.com/raw.png" })
+        ).toHaveAttribute("href", "https://example.com/raw.png");
+    });
 });
