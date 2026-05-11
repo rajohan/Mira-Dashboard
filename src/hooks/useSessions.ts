@@ -47,14 +47,16 @@ async function deleteSessionRequest(key: string): Promise<void> {
     await apiDelete(`/sessions/${encodeURIComponent(key)}`);
 }
 
-export function useSessionHistory(key: string, limit = 50) {
+export function useSessionHistory(key: string | null | undefined, limit = 50) {
+    const sessionKey = typeof key === "string" ? key.trim() : "";
+
     return useInfiniteQuery({
-        queryKey: ["sessions", "history", key],
-        queryFn: ({ pageParam = 0 }) => fetchSessionHistory(key, pageParam, limit),
+        queryKey: ["sessions", "history", sessionKey],
+        queryFn: ({ pageParam = 0 }) => fetchSessionHistory(sessionKey, pageParam, limit),
         initialPageParam: 0,
         getNextPageParam: (lastPage) =>
             lastPage?.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
-        enabled: key.trim().length > 0,
+        enabled: sessionKey.length > 0,
         staleTime: 30_000,
     });
 }

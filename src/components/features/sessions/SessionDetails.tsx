@@ -42,10 +42,10 @@ function OpenSessionDetails({
     } = useSessionHistory(session.key);
 
     // Flatten all pages into single array, tolerating partial history responses.
-    const allMessages =
-        data?.pages.flatMap((page) =>
-            Array.isArray(page.messages) ? page.messages : []
-        ) ?? [];
+    const historyPages = Array.isArray(data?.pages) ? data.pages : [];
+    const allMessages = historyPages.flatMap((page) =>
+        Array.isArray(page?.messages) ? page.messages : []
+    );
 
     const displayName =
         session.displayLabel || session.label || session.displayName || session.id;
