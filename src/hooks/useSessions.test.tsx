@@ -2,7 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { createQueryWrapper } from "../test/queryClient";
+import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import {
     sessionKeys,
     useDeleteSession,
@@ -69,16 +69,51 @@ describe("session hooks", () => {
         );
     });
 
-    it("stays disabled for blank history keys", () => {
+    it("stays disabled for blank and missing history keys", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
 
-        const { result } = renderHook(() => useSessionHistory("   "), {
+        const blank = renderHook(() => useSessionHistory("   "), {
+            wrapper: createQueryWrapper(),
+        });
+        const missingKey: string | undefined = undefined;
+        const missing = renderHook(() => useSessionHistory(missingKey), {
             wrapper: createQueryWrapper(),
         });
 
-        expect(result.current.fetchStatus).toBe("idle");
+        expect(blank.result.current.fetchStatus).toBe("idle");
+        expect(missing.result.current.fetchStatus).toBe("idle");
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("clears stale non-infinite cached history before mounting", () => {
+        const queryClient = createTestQueryClient();
+        const queryKey = sessionKeys.history("agent:main");
+        queryClient.setQueryData(queryKey, { messages: [], hasMore: false });
+        vi.stubGlobal("fetch", vi.fn());
+
+        const { result } = renderHook(() => useSessionHistory("agent:main"), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        expect(result.current.error).toBeNull();
+        expect(queryClient.getQueryData(queryKey)).toBeUndefined();
+    });
+
+    it("keeps valid infinite cached history while mounting", () => {
+        const queryClient = createTestQueryClient();
+        const queryKey = sessionKeys.history("agent:main");
+        queryClient.setQueryData(queryKey, {
+            pages: [{ messages: [{ role: "assistant", content: "cached" }] }],
+            pageParams: [0],
+        });
+        vi.stubGlobal("fetch", vi.fn());
+
+        const { result } = renderHook(() => useSessionHistory("agent:main"), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        expect(result.current.data?.pages[0]?.messages[0]?.content).toBe("cached");
     });
 
     it("posts session actions", async () => {

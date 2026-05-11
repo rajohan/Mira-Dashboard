@@ -101,11 +101,17 @@ describe("DockerContainersTable", () => {
             screen.getByRole("button", { name: "Open console for comet" })
         );
         await userEvent.click(screen.getByRole("button", { name: "Restart comet" }));
+        await userEvent.click(screen.getByRole("button", { name: "Logs" }));
+        await userEvent.click(screen.getByRole("button", { name: "Console" }));
+        await userEvent.click(screen.getByRole("button", { name: "Restart" }));
 
         expect(onRestartStack).toHaveBeenCalledTimes(1);
         expect(onDetails).toHaveBeenCalledWith("container-1");
+        expect(onLogs).toHaveBeenCalledTimes(2);
         expect(onLogs).toHaveBeenCalledWith("container-1");
+        expect(onConsole).toHaveBeenCalledTimes(2);
         expect(onConsole).toHaveBeenCalledWith("container-1");
+        expect(onRestart).toHaveBeenCalledTimes(2);
         expect(onRestart).toHaveBeenCalledWith("container-1");
     });
 
