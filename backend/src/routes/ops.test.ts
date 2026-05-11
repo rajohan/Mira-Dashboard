@@ -13,6 +13,7 @@ interface TestServer {
 }
 
 const originalPath = process.env.PATH;
+const originalN8nRoot = process.env.MIRA_N8N_ROOT;
 
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
@@ -91,12 +92,18 @@ describe("ops routes", () => {
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-ops-route-"));
         await installFakeCommands(tempDir);
+        process.env.MIRA_N8N_ROOT = tempDir;
         server = await startServer();
     });
 
     after(async () => {
         await server.close();
         process.env.PATH = originalPath;
+        if (originalN8nRoot === undefined) {
+            delete process.env.MIRA_N8N_ROOT;
+        } else {
+            process.env.MIRA_N8N_ROOT = originalN8nRoot;
+        }
         await rm(tempDir, { recursive: true, force: true });
     });
 

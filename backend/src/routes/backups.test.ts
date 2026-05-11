@@ -13,6 +13,7 @@ interface TestServer {
 }
 
 const originalDopplerBin = process.env.DOPPLER_BIN;
+const originalN8nRoot = process.env.MIRA_N8N_ROOT;
 
 async function installFakeDoppler(tempDir: string): Promise<string> {
     const dopplerPath = path.join(tempDir, "doppler");
@@ -33,6 +34,7 @@ setTimeout(() => process.exit(0), 10);
 
 async function startServer(tempDir: string): Promise<TestServer> {
     process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
+    process.env.MIRA_N8N_ROOT = tempDir;
     const { default: backupRoutes } = await import(`./backups.js?test=${Date.now()}`);
     const app = express();
     app.use(express.json());
@@ -95,6 +97,11 @@ describe("backup routes", () => {
             delete process.env.DOPPLER_BIN;
         } else {
             process.env.DOPPLER_BIN = originalDopplerBin;
+        }
+        if (originalN8nRoot === undefined) {
+            delete process.env.MIRA_N8N_ROOT;
+        } else {
+            process.env.MIRA_N8N_ROOT = originalN8nRoot;
         }
         await rm(tempDir, { recursive: true, force: true });
     });

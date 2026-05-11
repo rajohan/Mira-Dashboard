@@ -14,6 +14,8 @@ interface TestServer {
 
 const originalCwd = process.cwd();
 const originalPath = process.env.PATH;
+const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
+const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
 
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
@@ -62,7 +64,7 @@ process.exit(1);
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 if (args.join(" ") === "rev-parse --show-toplevel") {
-  process.stdout.write("/home/ubuntu/projects/mira-dashboard\n");
+  process.stdout.write((process.env.MIRA_DASHBOARD_ROOT || "/home/ubuntu/projects/mira-dashboard") + "\n");
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --abbrev-ref HEAD") {
@@ -90,6 +92,8 @@ process.exit(1);
 
 async function startServer(tempDir: string): Promise<TestServer> {
     process.chdir(tempDir);
+    process.env.MIRA_DASHBOARD_ROOT = tempDir;
+    process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
     const { default: pullRequestsRoutes } = await import(
         `./pullRequests.js?test=${Date.now()}`
     );
@@ -151,6 +155,16 @@ describe("pull request routes", () => {
         await server.close();
         process.chdir(originalCwd);
         process.env.PATH = originalPath;
+        if (originalDashboardRoot === undefined) {
+            delete process.env.MIRA_DASHBOARD_ROOT;
+        } else {
+            process.env.MIRA_DASHBOARD_ROOT = originalDashboardRoot;
+        }
+        if (originalWorktreeRoot === undefined) {
+            delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+        } else {
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
+        }
         await rm(tempDir, { recursive: true, force: true });
     });
 
@@ -219,9 +233,9 @@ describe("pull request routes", () => {
 
         assert.equal(response.status, 200);
         assert.deepEqual(response.body.checkout, {
-            root: "/home/ubuntu/projects/mira-dashboard",
-            expectedRoot: "/home/ubuntu/projects/mira-dashboard",
-            worktreeRoot: "/home/ubuntu/projects/mira-dashboard-worktrees",
+            root: tempDir,
+            expectedRoot: tempDir,
+            worktreeRoot: path.join(tempDir, "worktrees"),
             branch: "master",
             expectedBranch: "master",
             head: "abc1234",

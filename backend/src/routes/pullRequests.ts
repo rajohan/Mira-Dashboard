@@ -8,8 +8,11 @@ import express, { type RequestHandler } from "express";
 const execFileAsync = promisify(execFile);
 
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
-const DASHBOARD_ROOT = "/home/ubuntu/projects/mira-dashboard";
-const DASHBOARD_WORKTREE_ROOT = "/home/ubuntu/projects/mira-dashboard-worktrees";
+const DASHBOARD_ROOT =
+    process.env.MIRA_DASHBOARD_ROOT || "/home/ubuntu/projects/mira-dashboard";
+const DASHBOARD_WORKTREE_ROOT =
+    process.env.MIRA_DASHBOARD_WORKTREE_ROOT ||
+    "/home/ubuntu/projects/mira-dashboard-worktrees";
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_BASE = "master";

@@ -13,6 +13,7 @@ interface TestServer {
 }
 
 const originalPath = process.env.PATH;
+const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 
 async function installFakeDocker(tempDir: string): Promise<void> {
     const binDir = path.join(tempDir, "bin");
@@ -151,12 +152,18 @@ describe("docker routes", () => {
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-routes-"));
         await installFakeDocker(tempDir);
+        process.env.MIRA_DOCKER_ROOT = tempDir;
         server = await startServer();
     });
 
     after(async () => {
         await server.close();
         process.env.PATH = originalPath;
+        if (originalDockerRoot === undefined) {
+            delete process.env.MIRA_DOCKER_ROOT;
+        } else {
+            process.env.MIRA_DOCKER_ROOT = originalDockerRoot;
+        }
         await rm(tempDir, { recursive: true, force: true });
     });
 
