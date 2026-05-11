@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -192,6 +192,39 @@ describe("Logs page", () => {
         expect(screen.getByText("No logs match your filter.")).toBeInTheDocument();
     });
 
+    it("changes selected file and requested line count", async () => {
+        const user = userEvent.setup();
+
+        render(<Logs />);
+
+        await waitFor(() => {
+            expect(mocks.useLogContent).toHaveBeenCalledWith(
+                "openclaw-2099-01-02.log",
+                100,
+                false
+            );
+        });
+
+        const selects = screen.getAllByLabelText("select");
+        await user.selectOptions(selects[0]!, "openclaw-2099-01-01.log");
+        await waitFor(() => {
+            expect(mocks.useLogContent).toHaveBeenLastCalledWith(
+                "openclaw-2099-01-01.log",
+                100,
+                false
+            );
+        });
+
+        await user.selectOptions(selects[1]!, "500");
+        await waitFor(() => {
+            expect(mocks.useLogContent).toHaveBeenLastCalledWith(
+                "openclaw-2099-01-01.log",
+                500,
+                false
+            );
+        });
+    });
+
     it("reloads log content into the collection and clears logs", async () => {
         const user = userEvent.setup();
 
@@ -219,6 +252,30 @@ describe("Logs page", () => {
         await user.click(screen.getByRole("button", { name: "Export" }));
         expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
         expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:logs");
+    });
+
+    it("shows follow control when scrolled away from the bottom", async () => {
+        const user = userEvent.setup();
+
+        render(<Logs />);
+
+        const container = screen
+            .getByText("INFO first info")
+            .closest(".overflow-y-auto") as HTMLDivElement;
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 200 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        container.scrollTop = 100;
+
+        fireEvent.scroll(container);
+        const followButton = await screen.findByRole("button", { name: "↓ Follow" });
+        await user.click(followButton);
+
+        expect(container.scrollTop).toBe(1000);
+        expect(
+            screen.queryByRole("button", { name: "↓ Follow" })
+        ).not.toBeInTheDocument();
     });
 
     it("renders waiting state and disabled actions with no logs", () => {
