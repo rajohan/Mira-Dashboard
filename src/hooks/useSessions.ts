@@ -11,13 +11,20 @@ interface SessionHistoryResponse {
     nextOffset?: number;
 }
 
+const EMPTY_SESSION_HISTORY_PAGE: SessionHistoryResponse = {
+    messages: [],
+    total: 0,
+    hasMore: false,
+};
+
 // Query keys
 export const sessionKeys = {
     all: ["sessions"] as const,
-    history: (key: string): ["sessions", "history", "infinite", string] => [
+    history: (key: string): ["sessions", "history", "infinite", "v2", string] => [
         "sessions",
         "history",
         "infinite",
+        "v2",
         key,
     ],
 };
@@ -55,6 +62,11 @@ export function useSessionHistory(key: string | null | undefined, limit = 50) {
         queryKey: sessionKeys.history(sessionKey),
         queryFn: ({ pageParam = 0 }) => fetchSessionHistory(sessionKey, pageParam, limit),
         initialPageParam: 0,
+        initialData: {
+            pages: [EMPTY_SESSION_HISTORY_PAGE],
+            pageParams: [0],
+        },
+        initialDataUpdatedAt: 0,
         getNextPageParam: (lastPage) =>
             lastPage?.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
         enabled: sessionKey.length > 0,
