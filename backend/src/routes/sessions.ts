@@ -124,8 +124,6 @@ export default function sessionsRoutes(app: express.Application): void {
             .toLowerCase();
 
         try {
-            console.log("[Sessions] action request", { sessionKey, action });
-
             if (!sessionKey) {
                 res.status(400).json({ error: "Session id required" });
                 return;
