@@ -1,5 +1,7 @@
 import { GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -163,6 +165,16 @@ function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
     return `${message}\n${cleanup.message}`;
 }
 
+function PullRequestDescription({ body }: { body: string }) {
+    return (
+        <div className="border-primary-700 bg-primary-900/50 max-h-80 overflow-auto rounded border p-3 sm:p-4">
+            <div className="prose prose-invert prose-p:my-2 prose-headings:my-3 prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5 prose-table:my-3 prose-th:border-primary-700 prose-td:border-primary-700 prose-th:p-2 prose-td:p-2 prose-code:before:content-none prose-code:after:content-none max-w-none text-sm break-words">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+            </div>
+        </div>
+    );
+}
+
 function PullRequestCard({
     pr,
     actions,
@@ -209,11 +221,7 @@ function PullRequestCard({
                 </div>
             </div>
 
-            {pr.body ? (
-                <pre className="border-primary-700 bg-primary-900/50 text-primary-300 max-h-48 overflow-auto rounded border p-3 text-xs whitespace-pre-wrap">
-                    {pr.body}
-                </pre>
-            ) : null}
+            {pr.body ? <PullRequestDescription body={pr.body} /> : null}
 
             {actions ? (
                 <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
