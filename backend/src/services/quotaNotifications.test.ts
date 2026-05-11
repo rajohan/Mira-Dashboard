@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
 
 const originalPath = process.env.PATH;
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
+const originalQuotasJson = process.env.FAKE_QUOTAS_JSON;
 
 async function installFakeDocker(tempDir: string): Promise<void> {
     const binDir = path.join(tempDir, "bin");
@@ -18,15 +19,17 @@ async function installFakeDocker(tempDir: string): Promise<void> {
         String.raw`#!${process.execPath}
 const percent = Number(process.env.FAKE_OPENROUTER_PERCENT || "91");
 const checkedAt = 1_800_000_000_000;
-const data = {
-  openrouter: { usage: 9, totalCredits: 10, remaining: 1.23, usageMonthly: 9, percentUsed: percent },
-  elevenlabs: { status: "not_configured" },
-  zai: { status: "not_configured" },
-  synthetic: { status: "not_configured" },
-  openai: { status: "not_configured" },
-  checkedAt,
-  cacheAgeMs: 0,
-};
+const data = process.env.FAKE_QUOTAS_JSON
+  ? JSON.parse(process.env.FAKE_QUOTAS_JSON)
+  : {
+      openrouter: { usage: 9, totalCredits: 10, remaining: 1.23, usageMonthly: 9, percentUsed: percent },
+      elevenlabs: { status: "not_configured" },
+      zai: { status: "not_configured" },
+      synthetic: { status: "not_configured" },
+      openai: { status: "not_configured" },
+      checkedAt,
+      cacheAgeMs: 0,
+    };
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
   "quotas.summary\t" + JSON.stringify(data) + "\tquotas\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
@@ -64,19 +67,24 @@ describe("quota notifications", () => {
     beforeEach(() => {
         db.exec("BEGIN TRANSACTION");
         process.env.FAKE_OPENROUTER_PERCENT = "91";
+        delete process.env.FAKE_QUOTAS_JSON;
+    });
+
+    afterEach(() => {
+        db.exec("ROLLBACK");
     });
 
     after(async () => {
-        try {
-            db.exec("ROLLBACK");
-        } catch {
-            // Ignore when the current test already rolled back.
-        }
         process.env.PATH = originalPath;
         if (originalPercent === undefined) {
             delete process.env.FAKE_OPENROUTER_PERCENT;
         } else {
             process.env.FAKE_OPENROUTER_PERCENT = originalPercent;
+        }
+        if (originalQuotasJson === undefined) {
+            delete process.env.FAKE_QUOTAS_JSON;
+        } else {
+            process.env.FAKE_QUOTAS_JSON = originalQuotasJson;
         }
         await rm(tempDir, { recursive: true, force: true });
     });
@@ -125,5 +133,67 @@ describe("quota notifications", () => {
             { bucket: 95, is_armed: 1 },
         ]);
         assert.equal(quotaNotifications().length, 2);
+    });
+
+    it("creates provider-specific quota notifications and ignores status-only providers", async () => {
+        process.env.FAKE_QUOTAS_JSON = JSON.stringify({
+            openrouter: { status: "error", message: "missing cache" },
+            elevenlabs: {
+                usage: 8_700,
+                limit: 10_000,
+                remaining: 1_300,
+                percentUsed: 87,
+            },
+            zai: {
+                fiveHour: { used: 96, limit: 100, remaining: 4, usedPercentage: 96 },
+                weekly: { used: 10, limit: 100, remaining: 90, usedPercentage: 10 },
+            },
+            synthetic: {
+                rollingFiveHourLimit: {
+                    usedTokens: 0,
+                    limit: 100,
+                    remainingTokens: 8,
+                    percentUsed: 92,
+                },
+                weeklyTokenLimit: {
+                    usedTokens: 40,
+                    limit: 100,
+                    remainingTokens: 60,
+                    percentRemaining: 60,
+                },
+            },
+            openai: {
+                fiveHourUsedPercent: 99,
+                fiveHourLeftPercent: 1,
+                weeklyUsedPercent: 20,
+                weeklyLeftPercent: 80,
+                percentUsed: 99,
+            },
+            checkedAt: 1_800_000_000_000,
+            cacheAgeMs: 0,
+        });
+
+        await runQuotaNotificationCheck();
+
+        assert.deepEqual(
+            quotaNotifications().map((notification) => notification.dedupe_key),
+            [
+                "quota:elevenlabs:80",
+                "quota:openai:80",
+                "quota:openai:90",
+                "quota:openai:95",
+                "quota:synthetic:80",
+                "quota:synthetic:90",
+                "quota:zai:80",
+                "quota:zai:90",
+                "quota:zai:95",
+            ]
+        );
+
+        const titles = quotaNotifications().map((notification) => notification.title);
+        assert.ok(titles.includes("ElevenLabs usage high (80%)"));
+        assert.ok(titles.includes("Synthetic.new usage high (90%)"));
+        assert.ok(titles.includes("OpenAI / Codex usage high (95%)"));
+        assert.ok(!titles.some((title) => title.includes("OpenRouter")));
     });
 });
