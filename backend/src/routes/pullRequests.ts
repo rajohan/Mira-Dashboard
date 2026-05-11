@@ -166,7 +166,7 @@ async function runGhJson<T>(args: string[]): Promise<T> {
     return JSON.parse(stdout || "null") as T;
 }
 
-async function listMiraPullRequests(): Promise<PullRequestSummary[]> {
+async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     return runGhJson<PullRequestSummary[]>([
         "pr",
         "list",
@@ -174,8 +174,8 @@ async function listMiraPullRequests(): Promise<PullRequestSummary[]> {
         DASHBOARD_REPO,
         "--state",
         "open",
-        "--author",
-        MIRA_AUTHOR,
+        "--base",
+        DEFAULT_BASE,
         "--limit",
         "50",
         "--json",
@@ -583,7 +583,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
     app.get(
         "/api/pull-requests",
         asyncRoute(async (_req, res) => {
-            res.json({ pullRequests: await listMiraPullRequests() });
+            res.json({ pullRequests: await listDashboardPullRequests() });
         })
     );
 
