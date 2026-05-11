@@ -232,6 +232,72 @@ describe("agents routes", () => {
         );
     });
 
+    it("infers active task, tool activity, session key, and channel from files", async () => {
+        const researcherSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "researcher",
+            "sessions"
+        );
+        await mkdir(researcherSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(researcherSessionsDir, "sessions.json"),
+            JSON.stringify([
+                { key: "channel:discord:team", updatedAt: Date.now() - 10 },
+                { key: "channel:telegram:old", updatedAt: Date.now() - 1000 },
+            ]),
+            "utf8"
+        );
+        await writeFile(
+            path.join(researcherSessionsDir, "active.jsonl"),
+            [
+                "not json",
+                JSON.stringify({
+                    message: {
+                        role: "user",
+                        content:
+                            'Sender: noisy metadata\n```json\n{"ignore":true}\n```\nResearch coverage gaps [media attached: screenshot]',
+                    },
+                }),
+                JSON.stringify({
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "functions.edit",
+                                arguments: { path: "src/routes/agents.ts" },
+                            },
+                        ],
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const response = await requestJson<{
+            id: string;
+            status: string;
+            model: string;
+            currentTask: string;
+            currentActivity: string;
+            sessionKey: string;
+            channel: string;
+            lastActivity: string;
+        }>(server, "/api/agents/researcher/status");
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.id, "researcher");
+        assert.equal(response.body.status, "active");
+        assert.equal(response.body.model, "hf:moonshotai/Kimi-K2.5");
+        assert.equal(response.body.currentTask, "Research coverage gaps");
+        assert.equal(response.body.currentActivity, "edit src/routes/agents.ts");
+        assert.equal(response.body.sessionKey, "channel:discord:team");
+        assert.equal(response.body.channel, "discord");
+        assert.match(response.body.lastActivity, /^\d{4}-\d{2}-\d{2}T/u);
+    });
+
     it("returns 404s when config or agent entries are missing", async () => {
         const missingAgent = await requestJson<{ error: string }>(
             server,

@@ -102,12 +102,73 @@ if (args[0] === "logs") {
   process.stderr.write("stderr log\n");
   process.exit(0);
 }
+if (["start", "stop", "restart"].includes(args[0])) {
+  process.stdout.write(args[0] + " ok\n");
+  process.exit(0);
+}
+if (command === "image rm sha256:image123") {
+  process.stdout.write("deleted image\n");
+  process.exit(0);
+}
+if (command === "volume rm app_data") {
+  process.stdout.write("deleted volume\n");
+  process.exit(0);
+}
+if (command === "image prune -a -f") {
+  process.stdout.write("deleted unused images\n");
+  process.exit(0);
+}
+if (command === "volume prune -f") {
+  process.stdout.write("deleted unused volumes\n");
+  process.exit(0);
+}
+if (args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+  process.stdout.write("exec stdout\n");
+  process.stderr.write("exec stderr\n");
+  process.exit(0);
+}
+if (args[0] === "exec" && args[1] === "postgres" && args[2] === "psql") {
+  const sql = args.join(" ");
+  if (sql.includes("docker_managed_services")) {
+    const header = "id\tapp_slug\tservice_name\tcompose_image_ref\timage_repo\tcurrent_tag\tcurrent_digest\tlatest_tag\tlatest_digest\tpolicy\tpin_mode\tenabled\tlast_checked_at\tlast_updated_at\tlast_status\tmetadata\n";
+    const rows = [
+      "1\tmedia\tapp\trepo/app:1.0.0\trepo/app\t1.0.0\tsha256:old\t1.0.1\tsha256:new\tauto\tdigest\ttrue\t2026-05-11\t\t\t{\"owner\":\"mira\"}",
+      "2\tmedia\tdisabled\trepo/disabled:1\trepo/disabled\t1\t\t2\t\tnotify\ttag\tfalse\t\t\t\t{}",
+      "3\tmedia\tcurrent\trepo/current:1\trepo/current\t1\t\t1\t\tnotify\ttag\ttrue\t\t\t\tnot-json"
+    ];
+    const whereMatch = sql.match(/WHERE id = (\d+)/);
+    if (whereMatch) {
+      const row = rows.find((entry) => entry.startsWith(whereMatch[1] + "\t"));
+      process.stdout.write(header + (row ? row + "\n" : ""));
+    } else {
+      process.stdout.write(header + rows.join("\n") + "\n");
+    }
+    process.exit(0);
+  }
+  process.exit(0);
+}
+if (args[0] === "exec" && args[1] === "postgres" && args[2] === "cat") {
+  process.stdout.write("7\t1\tmedia\tapp\tupdated\t1.0.0\t1.0.1\tsha256:old\tsha256:new\t2026-05-11 12:00:00\n");
+  process.exit(0);
+}
+if (args[0] === "exec" && args[1] === "postgres" && args[2] === "rm") {
+  process.exit(0);
+}
 process.stderr.write("unexpected docker args: " + command);
 process.exit(1);
 `,
         "utf8"
     );
     await chmod(dockerPath, 0o755);
+    const composePath = path.join(binDir, "docker-compose-doppler");
+    await writeFile(
+        composePath,
+        String.raw`#!${process.execPath}
+process.stdout.write("compose " + process.argv.slice(2).join(" ") + "\n");
+`,
+        "utf8"
+    );
+    await chmod(composePath, 0o755);
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
 }
 
@@ -310,5 +371,175 @@ describe("docker routes", () => {
 
         assert.equal(response.status, 400);
         assert.equal(response.body.error, "Invalid prune target");
+    });
+
+    it("runs container, stack, image, volume, and prune actions", async () => {
+        const action = await requestJson<{ output: string }>(
+            server,
+            "/api/docker/containers/abc123/action",
+            { method: "POST", body: { action: "restart" } }
+        );
+        assert.equal(action.status, 200);
+        assert.equal(action.body.output, "restart sent to app");
+
+        const stack = await requestJson<{ output: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", body: { action: "restart", service: "app" } }
+        );
+        assert.equal(stack.status, 200);
+        assert.equal(stack.body.output, "compose restart app");
+
+        const deleteImage = await requestJson<{ success: boolean }>(
+            server,
+            "/api/docker/images/sha256:image123",
+            { method: "DELETE" }
+        );
+        assert.equal(deleteImage.status, 200);
+        assert.equal(deleteImage.body.success, true);
+
+        const deleteVolume = await requestJson<{ success: boolean }>(
+            server,
+            "/api/docker/volumes/app_data",
+            { method: "DELETE" }
+        );
+        assert.equal(deleteVolume.status, 200);
+        assert.equal(deleteVolume.body.success, true);
+
+        const pruneImages = await requestJson<{ success: boolean; output: string }>(
+            server,
+            "/api/docker/prune",
+            { method: "POST", body: { target: "images" } }
+        );
+        assert.equal(pruneImages.status, 200);
+        assert.equal(pruneImages.body.output, "deleted unused images\n");
+
+        const pruneVolumes = await requestJson<{ success: boolean; output: string }>(
+            server,
+            "/api/docker/prune",
+            { method: "POST", body: { target: "volumes" } }
+        );
+        assert.equal(pruneVolumes.status, 200);
+        assert.equal(pruneVolumes.body.output, "deleted unused volumes\n");
+    });
+
+    it("returns updater services, events, and validates manual update state", async () => {
+        const services = await requestJson<{
+            services: Array<{
+                id: number;
+                serviceName: string;
+                enabled: boolean;
+                updateAvailable: boolean;
+                metadata: Record<string, unknown>;
+            }>;
+            summary: { total: number; enabled: number; updateAvailable: number };
+        }>(server, "/api/docker/updater/services");
+        assert.equal(services.status, 200);
+        assert.equal(services.body.summary.total, 3);
+        assert.equal(services.body.summary.enabled, 2);
+        assert.equal(services.body.summary.updateAvailable, 2);
+        assert.deepEqual(services.body.services[0]?.metadata, { owner: "mira" });
+        assert.deepEqual(services.body.services[2]?.metadata, {});
+
+        const events = await requestJson<{
+            events: Array<{ id: number; serviceName: string; toDigest: string }>;
+        }>(server, "/api/docker/updater/events?limit=500");
+        assert.equal(events.status, 200);
+        assert.deepEqual(events.body.events, [
+            {
+                id: 7,
+                managedServiceId: 1,
+                appSlug: "media",
+                serviceName: "app",
+                eventType: "updated",
+                fromTag: "1.0.0",
+                toTag: "1.0.1",
+                fromDigest: "sha256:old",
+                toDigest: "sha256:new",
+                message: null,
+                createdAt: "2026-05-11 12:00:00",
+            },
+        ]);
+
+        const invalid = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/updater/services/nope/update",
+            { method: "POST", body: {} }
+        );
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.body.error, "Invalid service id");
+
+        const missing = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/updater/services/999/update",
+            { method: "POST", body: {} }
+        );
+        assert.equal(missing.status, 404);
+        assert.equal(missing.body.error, "Updater service not found");
+
+        const disabled = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/updater/services/2/update",
+            { method: "POST", body: {} }
+        );
+        assert.equal(disabled.status, 400);
+        assert.equal(disabled.body.error, "Updater service is disabled");
+
+        const noUpdate = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/updater/services/3/update",
+            { method: "POST", body: {} }
+        );
+        assert.equal(noUpdate.status, 400);
+        assert.equal(noUpdate.body.error, "No update available for this service");
+    });
+
+    it("starts and reads docker exec jobs", async () => {
+        const invalid = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: "app" } }
+        );
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.body.error, "Missing containerId or command");
+
+        const start = await requestJson<{ jobId: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: "app", command: "echo hi" } }
+        );
+        assert.equal(start.status, 200);
+        assert.match(start.body.jobId, /^[0-9a-f-]+$/u);
+
+        let job = await requestJson<{
+            status: string;
+            code: number | null;
+            stdout: string;
+            stderr: string;
+        }>(server, `/api/docker/exec/${start.body.jobId}`);
+        for (let attempt = 0; attempt < 20 && job.body.status !== "done"; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            job = await requestJson(server, `/api/docker/exec/${start.body.jobId}`);
+        }
+        assert.equal(job.status, 200);
+        assert.equal(job.body.status, "done");
+        assert.equal(job.body.code, 0);
+        assert.equal(job.body.stdout, "exec stdout\n");
+        assert.equal(job.body.stderr, "exec stderr\n");
+
+        const stopDone = await requestJson<{ error: string }>(
+            server,
+            `/api/docker/exec/${start.body.jobId}/stop`,
+            { method: "POST", body: {} }
+        );
+        assert.equal(stopDone.status, 400);
+        assert.equal(stopDone.body.error, "Job is not running");
+
+        const missing = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/missing"
+        );
+        assert.equal(missing.status, 404);
+        assert.equal(missing.body.error, "Docker exec job not found");
     });
 });

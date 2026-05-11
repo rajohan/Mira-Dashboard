@@ -30,28 +30,35 @@ async function installFakeCommands(tempDir: string): Promise<void> {
         path.join(binDir, "gh"),
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
+const pr = {
+  number: 10,
+  title: "Add Playwright smoke tests",
+  body: "Coverage batch",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/10",
+  headRefName: "add-playwright-smoke-tests",
+  baseRefName: "master",
+  author: { login: "mira-2026" },
+  createdAt: "2026-05-10T00:00:00Z",
+  updatedAt: "2026-05-11T00:00:00Z",
+  isDraft: false,
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "CLEAN",
+  reviewDecision: "",
+  statusCheckRollup: [],
+  additions: 12,
+  deletions: 3,
+  changedFiles: 4
+};
 if (args[0] === "pr" && args[1] === "list") {
-  process.stdout.write(JSON.stringify([
-    {
-      number: 10,
-      title: "Add Playwright smoke tests",
-      body: "Coverage batch",
-      url: "https://github.com/rajohan/Mira-Dashboard/pull/10",
-      headRefName: "add-playwright-smoke-tests",
-      baseRefName: "master",
-      author: { login: "mira-2026" },
-      createdAt: "2026-05-10T00:00:00Z",
-      updatedAt: "2026-05-11T00:00:00Z",
-      isDraft: false,
-      mergeable: "MERGEABLE",
-      mergeStateStatus: "CLEAN",
-      reviewDecision: "",
-      statusCheckRollup: [],
-      additions: 12,
-      deletions: 3,
-      changedFiles: 4
-    }
-  ]));
+  process.stdout.write(JSON.stringify([pr]));
+  process.exit(0);
+}
+if (args[0] === "pr" && args[1] === "view") {
+  process.stdout.write(JSON.stringify(pr));
+  process.exit(0);
+}
+if (args[0] === "pr" && ["merge", "close"].includes(args[1])) {
+  process.stdout.write(args.slice(0, 3).join(" ") + "\n");
   process.exit(0);
 }
 process.stderr.write("unexpected gh args: " + args.join(" "));
@@ -82,8 +89,37 @@ if (args.join(" ") === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
   process.stdout.write("origin/master\n");
   process.exit(0);
 }
+if (args.join(" ") === "worktree list --porcelain") {
+  process.stdout.write("worktree " + process.env.MIRA_DASHBOARD_WORKTREE_ROOT + "/add-playwright-smoke-tests\nHEAD deadbeef\nbranch refs/heads/add-playwright-smoke-tests\n\n");
+  process.exit(0);
+}
+if (args[0] === "-C" && args[2] === "status" && args[3] === "--short") {
+  process.exit(0);
+}
+if (args[0] === "worktree" && args[1] === "remove") {
+  process.stdout.write("removed " + args[2] + "\n");
+  process.exit(0);
+}
+if (["fetch", "checkout", "pull"].includes(args[0])) {
+  process.stdout.write(args.join(" ") + "\n");
+  process.exit(0);
+}
 process.stderr.write("unexpected git args: " + args.join(" "));
 process.exit(1);
+`
+    );
+
+    await writeExecutable(
+        path.join(binDir, "npm"),
+        String.raw`#!${process.execPath}
+process.stdout.write("npm " + process.argv.slice(2).join(" ") + "\n");
+`
+    );
+
+    await writeExecutable(
+        path.join(binDir, "sudo"),
+        String.raw`#!${process.execPath}
+process.stdout.write("sudo " + process.argv.slice(2).join(" ") + "\n");
 `
     );
 
@@ -137,6 +173,9 @@ describe("pull request routes", () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-pull-requests-"));
         await installFakeCommands(tempDir);
         await mkdir(path.join(tempDir, "data", "deployments"), { recursive: true });
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
         await writeFile(
             path.join(tempDir, "data", "deployments", "job-1.json"),
             JSON.stringify({
@@ -263,5 +302,50 @@ describe("pull request routes", () => {
         } finally {
             console.error = originalConsoleError;
         }
+    });
+
+    it("approves, rejects, and deploys Mira pull requests", async () => {
+        const approve = await requestJson<{
+            ok: boolean;
+            message: string;
+            cleanup: { status: string; branch: string };
+        }>(server, "/api/pull-requests/10/approve", {
+            method: "POST",
+            body: { deploy: false },
+        });
+        assert.equal(approve.status, 200);
+        assert.equal(approve.body.ok, true);
+        assert.equal(approve.body.message, "PR #10 merged");
+        assert.deepEqual(approve.body.cleanup, {
+            status: "removed",
+            branch: "add-playwright-smoke-tests",
+            path: path.join(tempDir, "worktrees", "add-playwright-smoke-tests"),
+            message: "Removed local worktree for add-playwright-smoke-tests",
+        });
+
+        const reject = await requestJson<{
+            ok: boolean;
+            message: string;
+            cleanup: { status: string };
+        }>(server, "/api/pull-requests/10/reject", {
+            method: "POST",
+            body: { comment: " Not this one " },
+        });
+        assert.equal(reject.status, 200);
+        assert.equal(reject.body.ok, true);
+        assert.equal(reject.body.message, "PR #10 closed");
+
+        const deploy = await requestJson<{
+            ok: boolean;
+            deployment: { status: string; commit: string; note: string };
+        }>(server, "/api/pull-requests/deploy", { method: "POST", body: {} });
+        assert.equal(deploy.status, 200);
+        assert.equal(deploy.body.ok, true);
+        assert.equal(deploy.body.deployment.status, "restart-scheduled");
+        assert.equal(deploy.body.deployment.commit, "abc1234");
+        assert.equal(
+            deploy.body.deployment.note,
+            "Build passed; restart + health check scheduled"
+        );
     });
 });

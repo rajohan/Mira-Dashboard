@@ -101,6 +101,15 @@ describe("logs routes", () => {
 
         assert.equal(tailed.status, 200);
         assert.equal(tailedBody.content, "second\nthird");
+
+        const invalidTail = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
+                testFiles[1]
+            )}&lines=not-a-number`
+        );
+        const invalidTailBody = (await invalidTail.json()) as { content: string };
+        assert.equal(invalidTail.status, 200);
+        assert.equal(invalidTailBody.content, "first\n\nsecond\nthird\n");
     });
 
     it("rejects traversal and reports missing logs", async () => {

@@ -198,4 +198,99 @@ describe("Terminal page", () => {
         await user.click(screen.getByRole("button", { name: /Clear/ }));
         expect(terminal.clearHistory).toHaveBeenCalledTimes(1);
     });
+
+    it("records cd and remote start failures", async () => {
+        const user = userEvent.setup();
+        terminal.changeDirectory.mockRejectedValueOnce(new Error("boom"));
+        terminal.startCommand.mockRejectedValueOnce(new Error("spawn failed"));
+
+        render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "cd broken");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.addCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+                command: "cd broken",
+                code: 1,
+                status: "error",
+                stderr: "Failed to change directory",
+            })
+        );
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "npm test");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.addCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+                command: "npm test",
+                code: 1,
+                status: "error",
+                stderr: "Failed to start command",
+            })
+        );
+        expect(terminal.updateCommand).toHaveBeenCalledWith(expect.any(String), {
+            status: "error",
+        });
+    });
+
+    it("updates running job output and stops jobs", async () => {
+        const user = userEvent.setup();
+        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: null,
+                      endedAt: null,
+                      stderr: "watch stderr",
+                      stdout: "watch stdout",
+                      status: "running",
+                  }
+                : null,
+        }));
+
+        render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "npm run dev");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+
+        await waitFor(() => {
+            expect(terminal.updateCommand).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.objectContaining({
+                    stderr: "watch stderr",
+                    stdout: "watch stdout",
+                    status: "running",
+                })
+            );
+        });
+
+        await user.click(await screen.findByRole("button", { name: /Stop/ }));
+        expect(terminal.stopTerminalJob).toHaveBeenCalledWith("job-1");
+    });
+
+    it("handles single, empty, and failed tab completions", async () => {
+        const user = userEvent.setup();
+        terminal.getCompletions
+            .mockResolvedValueOnce({
+                commonPrefix: "",
+                completions: [{ completion: "src/pages/Terminal.tsx" }],
+            })
+            .mockResolvedValueOnce({ commonPrefix: "", completions: [] })
+            .mockRejectedValueOnce(new Error("completion failed"));
+
+        render(<Terminal />);
+        const input = screen.getByPlaceholderText("Enter command...");
+
+        await user.type(input, "src/p");
+        await user.keyboard("{Tab}");
+        await waitFor(() => expect(input).toHaveValue("src/pages/Terminal.tsx"));
+
+        await user.clear(input);
+        await user.type(input, "no-match");
+        await user.keyboard("{Tab}");
+        expect(input).toHaveValue("no-match");
+
+        await user.clear(input);
+        await user.type(input, "throws");
+        await user.keyboard("{Tab}");
+        expect(input).toHaveValue("throws");
+    });
 });
