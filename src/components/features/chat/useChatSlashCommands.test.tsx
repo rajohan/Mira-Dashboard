@@ -152,6 +152,10 @@ describe("useChatSlashCommands", () => {
             await result.current.runCommand("/model kimi");
             await result.current.runCommand("/fast on");
             await result.current.runCommand("/reasoning summary");
+            await result.current.runCommand("/think high");
+            await result.current.runCommand("/verbose detailed");
+            await result.current.runCommand("/elevated ask");
+            await result.current.runCommand("/usage full");
             await result.current.runCommand("/exec host allowlist always node-a");
         });
 
@@ -168,6 +172,22 @@ describe("useChatSlashCommands", () => {
             reasoningLevel: "summary",
         });
         expect(request).toHaveBeenCalledWith("sessions.patch", {
+            key: "session-a",
+            thinkingLevel: "high",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.patch", {
+            key: "session-a",
+            verboseLevel: "detailed",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.patch", {
+            elevatedLevel: "ask",
+            key: "session-a",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.patch", {
+            key: "session-a",
+            responseUsage: "full",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.patch", {
             execAsk: "always",
             execHost: "host",
             execNode: "node-a",
@@ -176,6 +196,34 @@ describe("useChatSlashCommands", () => {
         });
         expect(result.current.isSending).toBe(false);
         expect(result.current.messages.at(-1)?.text).toBe("Exec defaults updated.");
+    });
+
+    it("reports current runtime settings without patching", async () => {
+        const { request, result } = renderSlashCommands({
+            selectedSession: makeSession({ fastMode: true }),
+        });
+
+        await act(async () => {
+            await result.current.runCommand("/model");
+            await result.current.runCommand("/think");
+            await result.current.runCommand("/verbose");
+            await result.current.runCommand("/fast status");
+            await result.current.runCommand("/reasoning");
+            await result.current.runCommand("/elevated");
+            await result.current.runCommand("/usage");
+        });
+
+        expect(request).not.toHaveBeenCalled();
+        const systemText = result.current.messages
+            .map((message) => message.text)
+            .join("\n");
+        expect(systemText).toContain("Current model: codex");
+        expect(systemText).toContain("Current thinking level: medium");
+        expect(systemText).toContain("Current verbose mode: off");
+        expect(systemText).toContain("Current fast mode: on");
+        expect(systemText).toContain("Current reasoning visibility: off");
+        expect(systemText).toContain("Current elevated mode: off");
+        expect(systemText).toContain("Session usage:");
     });
 
     it("clears local chat view and stops active runs", async () => {
