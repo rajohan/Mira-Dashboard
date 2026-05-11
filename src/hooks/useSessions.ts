@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { deleteSessionFromCollection } from "../collections/sessions";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
@@ -47,18 +47,23 @@ async function deleteSessionRequest(key: string): Promise<void> {
     await apiDelete(`/sessions/${encodeURIComponent(key)}`);
 }
 
-export function useSessionHistory(key: string | null | undefined, limit = 50) {
+export function useSessionHistory(key: string | null | undefined, limit = 200) {
     const sessionKey = typeof key === "string" ? key.trim() : "";
 
-    return useInfiniteQuery({
-        queryKey: ["sessions", "history", sessionKey],
-        queryFn: ({ pageParam = 0 }) => fetchSessionHistory(sessionKey, pageParam, limit),
-        initialPageParam: 0,
-        getNextPageParam: (lastPage) =>
-            lastPage?.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
+    const query = useQuery({
+        queryKey: ["sessions", "history", "single", sessionKey, limit],
+        queryFn: () => fetchSessionHistory(sessionKey, 0, limit),
         enabled: sessionKey.length > 0,
         staleTime: 30_000,
     });
+
+    return {
+        ...query,
+        data: query.data ? { pages: [query.data], pageParams: [0] } : undefined,
+        fetchNextPage: query.refetch,
+        hasNextPage: false,
+        isFetchingNextPage: false,
+    };
 }
 
 export function useSessionAction() {
