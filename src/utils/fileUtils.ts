@@ -1,24 +1,24 @@
 export { formatSize } from "./format";
 
-/** Handles get file extension. */
+/** Returns file extension. */
 export function getFileExtension(filename: string): string {
     const parts = filename.split(".");
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
 }
 
-/** Handles is markdown file. */
+/** Returns whether markdown file. */
 export function isMarkdownFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ext === "md" || ext === "markdown";
 }
 
-/** Handles is json file. */
+/** Returns whether JSON file. */
 export function isJsonFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ext === "json" || ext === "json5";
 }
 
-/** Handles is code file. */
+/** Returns whether code file. */
 export function isCodeFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const codeExts = [
@@ -52,7 +52,7 @@ export function isCodeFile(filename: string): boolean {
     return codeExts.includes(ext);
 }
 
-/** Handles get language. */
+/** Returns language. */
 export function getLanguage(filename: string): string {
     const ext = getFileExtension(filename);
     const langMap: Record<string, string> = {
@@ -95,13 +95,13 @@ export function getLanguage(filename: string): string {
     return langMap[ext] || "text";
 }
 
-/** Handles is image file. */
+/** Returns whether image file. */
 export function isImageFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"].includes(ext);
 }
 
-/** Handles is binary file. */
+/** Returns whether binary file. */
 export function isBinaryFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const binaryExts = [
@@ -131,7 +131,7 @@ export function isBinaryFile(filename: string): boolean {
     return binaryExts.includes(ext);
 }
 
-/** Handles get syntax class. */
+/** Returns syntax class. */
 export function getSyntaxClass(filename: string): string {
     const ext = getFileExtension(filename);
     const syntaxMap: Record<string, string> = {

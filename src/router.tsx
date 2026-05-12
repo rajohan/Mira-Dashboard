@@ -160,11 +160,11 @@ const routeTree = rootRoute.addChildren([
     ]),
 ]);
 
-/** Stores router. */
+/** Defines router. */
 export const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
-    /** Describes register. */
+    /** Represents register. */
     interface Register {
         router: typeof router;
     }

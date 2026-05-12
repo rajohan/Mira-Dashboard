@@ -4,13 +4,13 @@ import type { FileContent, FileNode } from "../types/file";
 import { apiFetch, apiPut } from "./useApi";
 
 // Types
-/** Describes files response. */
+/** Represents the files API response. */
 interface FilesResponse {
     files: FileNode[];
 }
 
 // Query keys
-/** Stores file keys. */
+/** Defines file keys. */
 export const fileKeys = {
     all: ["files"] as const,
     list: (path?: string): ["files", "list", string | undefined] => [
@@ -22,14 +22,14 @@ export const fileKeys = {
 };
 
 // Fetchers
-/** Handles fetch files. */
+/** Fetches files. */
 async function fetchFiles(path?: string): Promise<FileNode[]> {
     const endpoint = path ? `/files?path=${encodeURIComponent(path)}` : "/files";
     const data = await apiFetch<FilesResponse>(endpoint);
     return data.files || [];
 }
 
-/** Handles fetch file content. */
+/** Fetches file content. */
 async function fetchFileContent(path: string): Promise<FileContent> {
     const isConfig = path.startsWith("config:");
     const endpoint = isConfig
@@ -38,7 +38,7 @@ async function fetchFileContent(path: string): Promise<FileContent> {
     return apiFetch<FileContent>(endpoint);
 }
 
-/** Handles save file content. */
+/** Performs save file content. */
 async function saveFileContent(path: string, content: string): Promise<void> {
     const isConfig = path.startsWith("config:");
     const endpoint = isConfig
@@ -48,7 +48,7 @@ async function saveFileContent(path: string, content: string): Promise<void> {
 }
 
 // Hooks
-/** Handles use files. */
+/** Provides files. */
 export function useFiles(path?: string) {
     return useQuery({
         queryKey: fileKeys.list(path),
@@ -57,7 +57,7 @@ export function useFiles(path?: string) {
     });
 }
 
-/** Handles use file content. */
+/** Provides file content. */
 export function useFileContent(path: string | null) {
     return useQuery({
         queryKey: fileKeys.content(path || ""),
@@ -67,7 +67,7 @@ export function useFileContent(path: string | null) {
     });
 }
 
-/** Handles use save file. */
+/** Provides save file. */
 export function useSaveFile() {
     const queryClient = useQueryClient();
 

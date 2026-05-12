@@ -3,13 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { apiFetch, apiPost } from "./useApi";
 
-/** Describes pull request author. */
+/** Represents pull request author. */
 export interface PullRequestAuthor {
     login?: string;
     name?: string;
 }
 
-/** Describes pull request summary. */
+/** Represents pull request summary. */
 export interface PullRequestSummary {
     number: number;
     title: string;
@@ -30,7 +30,7 @@ export interface PullRequestSummary {
     changedFiles?: number;
 }
 
-/** Describes deployment job. */
+/** Represents deployment job. */
 export interface DeploymentJob {
     id: string;
     status: "building" | "restart-scheduled" | "ok" | "failed";
@@ -42,7 +42,7 @@ export interface DeploymentJob {
     stderr?: string;
 }
 
-/** Describes production checkout status. */
+/** Represents production checkout status. */
 export interface ProductionCheckoutStatus {
     root: string;
     expectedRoot: string;
@@ -57,7 +57,7 @@ export interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
-/** Describes worktree cleanup result. */
+/** Represents worktree cleanup result. */
 export interface WorktreeCleanupResult {
     status: "removed" | "skipped" | "warning";
     branch: string;
@@ -65,22 +65,22 @@ export interface WorktreeCleanupResult {
     message: string;
 }
 
-/** Describes pull requests response. */
+/** Represents the pull requests API response. */
 interface PullRequestsResponse {
     pullRequests: PullRequestSummary[];
 }
 
-/** Describes deployments response. */
+/** Represents the deployments API response. */
 interface DeploymentsResponse {
     deployments: DeploymentJob[];
 }
 
-/** Describes production checkout response. */
+/** Represents the production checkout API response. */
 interface ProductionCheckoutResponse {
     checkout: ProductionCheckoutStatus;
 }
 
-/** Describes pull request action response. */
+/** Represents the pull request action API response. */
 interface PullRequestActionResponse {
     ok: boolean;
     message: string;
@@ -88,7 +88,7 @@ interface PullRequestActionResponse {
     cleanup?: WorktreeCleanupResult;
 }
 
-/** Stores pull request keys. */
+/** Defines pull request keys. */
 export const pullRequestKeys = {
     all: ["pull-requests"] as const,
     list: () => [...pullRequestKeys.all, "list"] as const,
@@ -96,19 +96,19 @@ export const pullRequestKeys = {
     productionCheckout: () => [...pullRequestKeys.all, "production-checkout"] as const,
 };
 
-/** Handles fetch pull requests. */
+/** Fetches pull requests. */
 async function fetchPullRequests(): Promise<PullRequestSummary[]> {
     const response = await apiFetch<PullRequestsResponse>("/pull-requests");
     return response.pullRequests;
 }
 
-/** Handles fetch deployments. */
+/** Fetches deployments. */
 async function fetchDeployments(): Promise<DeploymentJob[]> {
     const response = await apiFetch<DeploymentsResponse>("/pull-requests/deployments");
     return response.deployments;
 }
 
-/** Handles fetch production checkout. */
+/** Fetches production checkout. */
 async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
     const response = await apiFetch<ProductionCheckoutResponse>(
         "/pull-requests/production-checkout"
@@ -116,7 +116,7 @@ async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
     return response.checkout;
 }
 
-/** Handles approve pull request. */
+/** Performs approve pull request. */
 async function approvePullRequest(
     number: number,
     deploy: boolean
@@ -126,7 +126,7 @@ async function approvePullRequest(
     });
 }
 
-/** Handles reject pull request. */
+/** Performs reject pull request. */
 async function rejectPullRequest(
     number: number,
     comment?: string
@@ -136,12 +136,12 @@ async function rejectPullRequest(
     });
 }
 
-/** Handles deploy dashboard. */
+/** Performs deploy dashboard. */
 async function deployDashboard(): Promise<{ ok: boolean; deployment: DeploymentJob }> {
     return apiPost<{ ok: boolean; deployment: DeploymentJob }>("/pull-requests/deploy");
 }
 
-/** Handles use pull requests. */
+/** Provides pull requests. */
 export function usePullRequests() {
     return useQuery({
         queryKey: pullRequestKeys.list(),
@@ -151,7 +151,7 @@ export function usePullRequests() {
     });
 }
 
-/** Handles use pull request deployments. */
+/** Provides pull request deployments. */
 export function usePullRequestDeployments() {
     return useQuery({
         queryKey: pullRequestKeys.deployments(),
@@ -161,7 +161,7 @@ export function usePullRequestDeployments() {
     });
 }
 
-/** Handles use production checkout. */
+/** Provides production checkout. */
 export function useProductionCheckout() {
     return useQuery({
         queryKey: pullRequestKeys.productionCheckout(),
@@ -171,7 +171,7 @@ export function useProductionCheckout() {
     });
 }
 
-/** Handles use approve pull request. */
+/** Provides approve pull request. */
 export function useApprovePullRequest() {
     const queryClient = useQueryClient();
 
@@ -190,7 +190,7 @@ export function useApprovePullRequest() {
     });
 }
 
-/** Handles use reject pull request. */
+/** Provides reject pull request. */
 export function useRejectPullRequest() {
     const queryClient = useQueryClient();
 
@@ -203,7 +203,7 @@ export function useRejectPullRequest() {
     });
 }
 
-/** Handles use deploy dashboard. */
+/** Provides deploy dashboard. */
 export function useDeployDashboard() {
     const queryClient = useQueryClient();
 

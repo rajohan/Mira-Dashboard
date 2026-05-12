@@ -11,7 +11,7 @@ export type OpsActionId =
     | "openclaw_update"
     | "openclaw_cleanup";
 
-/** Describes ops action definition. */
+/** Represents ops action definition. */
 export interface OpsActionDefinition {
     id: OpsActionId;
     label: string;
@@ -23,14 +23,14 @@ export interface OpsActionDefinition {
     danger?: boolean;
 }
 
-/** Describes exec response. */
+/** Represents the exec API response. */
 export interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
-/** Describes exec job response. */
+/** Represents the exec job API response. */
 export interface ExecJobResponse extends ExecResponse {
     jobId: string;
     status: "running" | "done";
@@ -38,7 +38,7 @@ export interface ExecJobResponse extends ExecResponse {
     endedAt: number | null;
 }
 
-/** Stores ops actions. */
+/** Defines ops actions. */
 export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "system_restart",
@@ -103,7 +103,7 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     },
 ];
 
-/** Handles use start ops action. */
+/** Provides start ops action. */
 export function useStartOpsAction() {
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
@@ -111,7 +111,7 @@ export function useStartOpsAction() {
     });
 }
 
-/** Handles use exec job. */
+/** Provides exec job. */
 export function useExecJob(jobId: string | null) {
     return useQuery({
         queryKey: ["exec-job", jobId],

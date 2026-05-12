@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "./useApi";
 
-/** Describes database overview response. */
+/** Represents the database overview API response. */
 export interface DatabaseOverviewResponse {
     overview: {
         totalDatabaseSizeBytes: number;
@@ -76,7 +76,7 @@ export interface DatabaseOverviewResponse {
     }>;
 }
 
-/** Handles use database overview. */
+/** Provides database overview. */
 export function useDatabaseOverview() {
     return useQuery({
         queryKey: ["database", "overview"],

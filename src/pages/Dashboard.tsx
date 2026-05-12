@@ -41,7 +41,7 @@ import {
     formatWeekdayShort,
 } from "../utils/format";
 
-/** Handles get weather icon. */
+/** Returns weather icon. */
 function getWeatherIcon(description?: string) {
     const text = (description || "").toLowerCase();
 
@@ -60,7 +60,7 @@ function getWeatherIcon(description?: string) {
     return Cloud;
 }
 
-/** Handles format temp. */
+/** Formats temp for display. */
 function formatTemp(value: number | null | undefined): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return "--";
@@ -69,7 +69,7 @@ function formatTemp(value: number | null | undefined): string {
     return Math.round(value).toString();
 }
 
-/** Describes weather time card props. */
+/** Provides props for weather time card. */
 interface WeatherTimeCardProps {
     className?: string;
 }

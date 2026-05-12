@@ -5,19 +5,19 @@ import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
-/** Stores task keys. */
+/** Defines task keys. */
 export const taskKeys = {
     all: ["tasks"] as const,
     list: () => [...taskKeys.all, "list"] as const,
     updates: (taskId: number) => [...taskKeys.all, "updates", taskId] as const,
 };
 
-/** Handles fetch tasks. */
+/** Fetches tasks. */
 async function fetchTasks(): Promise<Task[]> {
     return apiFetch<Task[]>("/tasks");
 }
 
-/** Handles create task. */
+/** Creates task. */
 async function createTask(
     title: string,
     body: string,
@@ -28,7 +28,7 @@ async function createTask(
     return apiPost<Task>("/tasks", { title, body, labels, assignee, automation });
 }
 
-/** Handles update task. */
+/** Performs update task. */
 async function updateTask(
     number: number,
     updates: {
@@ -47,27 +47,27 @@ async function updateTask(
     });
 }
 
-/** Handles move task. */
+/** Performs move task. */
 async function moveTask(number: number, columnLabel: string): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/move`, { columnLabel });
 }
 
-/** Handles assign task. */
+/** Performs assign task. */
 async function assignTask(number: number, assignee: TaskAssigneeId): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/assign`, { assignee });
 }
 
-/** Handles delete task. */
+/** Performs delete task. */
 async function deleteTask(number: number): Promise<void> {
     await apiDelete(`/tasks/${number}`);
 }
 
-/** Handles fetch task updates. */
+/** Fetches task updates. */
 async function fetchTaskUpdates(taskId: number): Promise<TaskUpdate[]> {
     return apiFetch<TaskUpdate[]>(`/tasks/${taskId}/updates`);
 }
 
-/** Handles create task update. */
+/** Creates task update. */
 async function createTaskUpdate(
     taskId: number,
     author: TaskAssigneeId,
@@ -76,7 +76,7 @@ async function createTaskUpdate(
     return apiPost<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
 }
 
-/** Handles update task update. */
+/** Performs update task update. */
 async function updateTaskUpdate(
     taskId: number,
     updateId: number,
@@ -89,12 +89,12 @@ async function updateTaskUpdate(
     });
 }
 
-/** Handles delete task update. */
+/** Performs delete task update. */
 async function deleteTaskUpdate(taskId: number, updateId: number): Promise<void> {
     await apiDelete(`/tasks/${taskId}/updates/${updateId}`);
 }
 
-/** Handles use tasks. */
+/** Provides tasks. */
 export function useTasks() {
     return useQuery({
         queryKey: taskKeys.list(),
@@ -104,7 +104,7 @@ export function useTasks() {
     });
 }
 
-/** Handles use create task. */
+/** Provides create task. */
 export function useCreateTask() {
     const queryClient = useQueryClient();
 
@@ -131,7 +131,7 @@ export function useCreateTask() {
     });
 }
 
-/** Handles use update task. */
+/** Provides update task. */
 export function useUpdateTask() {
     const queryClient = useQueryClient();
 
@@ -157,7 +157,7 @@ export function useUpdateTask() {
     });
 }
 
-/** Handles use move task. */
+/** Provides move task. */
 export function useMoveTask() {
     const queryClient = useQueryClient();
 
@@ -170,7 +170,7 @@ export function useMoveTask() {
     });
 }
 
-/** Handles use assign task. */
+/** Provides assign task. */
 export function useAssignTask() {
     const queryClient = useQueryClient();
 
@@ -188,7 +188,7 @@ export function useAssignTask() {
     });
 }
 
-/** Handles use delete task. */
+/** Provides delete task. */
 export function useDeleteTask() {
     const queryClient = useQueryClient();
 
@@ -200,7 +200,7 @@ export function useDeleteTask() {
     });
 }
 
-/** Handles use task updates. */
+/** Provides task updates. */
 export function useTaskUpdates(taskId: number | null) {
     return useQuery({
         queryKey: taskId ? taskKeys.updates(taskId) : taskKeys.all,
@@ -211,7 +211,7 @@ export function useTaskUpdates(taskId: number | null) {
     });
 }
 
-/** Handles use create task update. */
+/** Provides create task update. */
 export function useCreateTaskUpdate() {
     const queryClient = useQueryClient();
 
@@ -234,7 +234,7 @@ export function useCreateTaskUpdate() {
     });
 }
 
-/** Handles use update task update. */
+/** Provides update task update. */
 export function useUpdateTaskUpdate() {
     const queryClient = useQueryClient();
 
@@ -259,7 +259,7 @@ export function useUpdateTaskUpdate() {
     });
 }
 
-/** Handles use delete task update. */
+/** Provides delete task update. */
 export function useDeleteTaskUpdate() {
     const queryClient = useQueryClient();
 

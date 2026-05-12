@@ -17,7 +17,7 @@ import { cn } from "../utils/cn";
 
 const HOME_DIR = "/home/ubuntu";
 
-/** Handles shorten path. */
+/** Performs shorten path. */
 function shortenPath(path: string): string {
     if (path === HOME_DIR) return "~";
     if (path.startsWith(HOME_DIR + "/")) return "~" + path.slice(HOME_DIR.length);
@@ -46,7 +46,7 @@ export function Terminal() {
     }, []);
 
     // Check if user is near bottom (within 30px)
-    /** Handles check is at bottom. */
+    /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
         if (!outputRef.current) return true;
         const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
@@ -61,14 +61,14 @@ export function Terminal() {
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
     // Track scroll position
-    /** Handles handle scroll. */
+    /** Handles scroll interactions. */
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
         setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
     };
 
     // Scroll to bottom manually
-    /** Handles scroll to bottom. */
+    /** Performs scroll to bottom. */
     const scrollToBottom = () => {
         if (outputRef.current) {
             outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -106,7 +106,7 @@ export function Terminal() {
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
-    /** Handles handle tab completion. */
+    /** Handles tab completion interactions. */
     async function handleTabCompletion() {
         if (!command.trim()) return;
 
@@ -126,7 +126,7 @@ export function Terminal() {
         }
     }
 
-    /** Handles handle submit. */
+    /** Handles submit interactions. */
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!command.trim() || startCommand.isPending) return;
@@ -253,7 +253,7 @@ export function Terminal() {
         }
     };
 
-    /** Handles handle key down. */
+    /** Handles key down interactions. */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         // Handle Tab for completion
         if (event.key === "Tab") {

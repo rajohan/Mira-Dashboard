@@ -18,7 +18,7 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 let lastVisibleLogFiles: LogFile[] = [];
 
-/** Handles is named log file. */
+/** Returns whether named log file. */
 function isNamedLogFile(file: unknown): file is LogFile {
     return (
         Boolean(file) &&
@@ -28,7 +28,7 @@ function isNamedLogFile(file: unknown): file is LogFile {
     );
 }
 
-/** Handles compare log file names descending. */
+/** Performs compare log file names descending. */
 function compareLogFileNamesDescending(a: { name?: unknown }, b: { name?: unknown }) {
     return String(b.name || "").localeCompare(String(a.name || ""));
 }
@@ -113,7 +113,7 @@ export function Logs() {
         });
     }, [isConnected, connectionId, request]);
 
-    /** Handles load log content. */
+    /** Performs load log content. */
     const loadLogContent = async () => {
         if (!selectedFile) return;
 
@@ -163,7 +163,7 @@ export function Logs() {
         return true;
     });
 
-    /** Handles toggle level. */
+    /** Performs toggle level. */
     const toggleLevel = (level: string) => {
         const next = new Set(levelFilter);
         if (next.has(level)) {
@@ -197,7 +197,7 @@ export function Logs() {
         measureElement: (element) => Math.ceil(element.getBoundingClientRect().height),
     });
 
-    /** Handles check is at bottom. */
+    /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
         const el = logContainerRef.current;
         if (!el) return true;
@@ -218,7 +218,7 @@ export function Logs() {
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
-    /** Handles scroll to bottom. */
+    /** Performs scroll to bottom. */
     const scrollToBottom = () => {
         const el = logContainerRef.current;
         if (!el) return;
@@ -232,7 +232,7 @@ export function Logs() {
         if (filteredLogs.length === 0) return;
 
         if (!shouldStickToBottomRef.current) {
-            /** Handles restore scroll top. */
+            /** Performs restore scroll top. */
             const restoreScrollTop = () => {
                 const el = logContainerRef.current;
                 if (!el || shouldStickToBottomRef.current) {
@@ -259,7 +259,7 @@ export function Logs() {
 
     const sortedLogFiles = [...availableLogFiles].sort(compareLogFileNamesDescending);
 
-    /** Handles clear logs. */
+    /** Performs clear logs. */
     const clearLogs = () => {
         const existingKeys = Array.from(logsCollection, ([key]) => String(key));
         for (const key of existingKeys) {

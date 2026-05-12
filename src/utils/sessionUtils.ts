@@ -1,13 +1,13 @@
 import type { Session } from "../types/session";
 
-/** Handles format session type. */
+/** Formats session type for display. */
 export function formatSessionType(session: Session): string {
     const type = (session.type || "unknown").toUpperCase();
     if (type === "SUBAGENT" && session.agentType) return session.agentType.toUpperCase();
     return type;
 }
 
-/** Handles get type sort order. */
+/** Returns type sort order. */
 export function getTypeSortOrder(type: string | null | undefined): number {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
@@ -29,7 +29,7 @@ export function getTypeSortOrder(type: string | null | undefined): number {
     }
 }
 
-/** Handles get default chat sort order. */
+/** Returns default chat sort order. */
 function getDefaultChatSortOrder(session: Session): number {
     if (session.key === "agent:main:main") {
         return 0;
@@ -38,7 +38,7 @@ function getDefaultChatSortOrder(session: Session): number {
     return 1;
 }
 
-/** Handles sort sessions by type and activity. */
+/** Sorts sessions by type and activity. */
 export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
     return [...sessions].sort((a, b) => {
         const defaultChatOrder = getDefaultChatSortOrder(a) - getDefaultChatSortOrder(b);
@@ -55,5 +55,5 @@ export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
     });
 }
 
-/** Stores session types. */
+/** Defines session types. */
 export const SESSION_TYPES = ["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"] as const;

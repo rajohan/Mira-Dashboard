@@ -8,7 +8,7 @@ import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { authActions } from "../stores/authStore";
 
-/** Describes bootstrap response. */
+/** Represents the bootstrap API response. */
 interface BootstrapResponse {
     bootstrapRequired: boolean;
     hasGatewayToken: boolean;

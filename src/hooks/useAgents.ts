@@ -3,19 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentTaskHistoryItem } from "../types/session";
 import { apiFetch } from "./useApi";
 
-/** Describes agents status response. */
+/** Represents the agents status API response. */
 interface AgentsStatusResponse {
     agents: Agent[];
     timestamp: number;
 }
 
-/** Describes agent task history response. */
+/** Represents the agent task history API response. */
 interface AgentTaskHistoryResponse {
     tasks: AgentTaskHistoryItem[];
     timestamp: number;
 }
 
-/** Describes agents config response. */
+/** Represents the agents config API response. */
 interface AgentsConfigResponse {
     defaults: {
         model?: {
@@ -36,7 +36,7 @@ interface AgentsConfigResponse {
     }>;
 }
 
-/** Handles use agents status. */
+/** Provides agents status. */
 export function useAgentsStatus() {
     return useQuery<AgentsStatusResponse>({
         queryKey: ["agents", "status"],
@@ -46,7 +46,7 @@ export function useAgentsStatus() {
     });
 }
 
-/** Handles use agents config. */
+/** Provides agents config. */
 export function useAgentsConfig() {
     return useQuery<AgentsConfigResponse>({
         queryKey: ["agents", "config"],
@@ -55,7 +55,7 @@ export function useAgentsConfig() {
     });
 }
 
-/** Handles use agent task history. */
+/** Provides agent task history. */
 export function useAgentTaskHistory(limit = 8) {
     return useQuery<AgentTaskHistoryResponse>({
         queryKey: ["agents", "tasks", "history", limit],
@@ -66,7 +66,7 @@ export function useAgentTaskHistory(limit = 8) {
     });
 }
 
-/** Handles use agent status. */
+/** Provides agent status. */
 export function useAgentStatus(agentId: string) {
     return useQuery<Agent>({
         queryKey: ["agents", "status", agentId],

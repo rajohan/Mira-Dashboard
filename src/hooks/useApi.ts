@@ -10,13 +10,13 @@ export class UnauthorizedError extends Error {
     }
 }
 
-/** Handles handle unauthorized. */
+/** Handles unauthorized interactions. */
 function handleUnauthorized() {
     authActions.clearSession();
     window.dispatchEvent(new CustomEvent("openclaw:unauthorized"));
 }
 
-/** Handles api fetch. */
+/** Performs API fetch. */
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const headers: HeadersInit = {
         "Content-Type": "application/json",
@@ -42,7 +42,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     return response.json() as Promise<T>;
 }
 
-/** Handles api post. */
+/** Performs API post. */
 export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
     return apiFetch<T>(endpoint, {
         method: "POST",
@@ -50,7 +50,7 @@ export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
     });
 }
 
-/** Handles api put. */
+/** Performs API put. */
 export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
     return apiFetch<T>(endpoint, {
         method: "PUT",
@@ -58,7 +58,7 @@ export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
     });
 }
 
-/** Handles api delete. */
+/** Performs API delete. */
 export function apiDelete<T>(endpoint: string): Promise<T> {
     return apiFetch<T>(endpoint, { method: "DELETE" });
 }

@@ -1,4 +1,4 @@
-/** Describes mira profile. */
+/** Represents mira profile. */
 export interface MiraProfile {
     name: string;
     display_name: string;
@@ -11,7 +11,7 @@ export interface MiraProfile {
     avatar_url: string | null;
 }
 
-/** Describes mira post. */
+/** Represents mira post. */
 export interface MiraPost {
     id: string;
     title: string;
@@ -23,7 +23,7 @@ export interface MiraPost {
     submolt: { name: string };
 }
 
-/** Describes mira comment. */
+/** Represents mira comment. */
 export interface MiraComment {
     id: string;
     content: string;
@@ -33,7 +33,7 @@ export interface MiraComment {
     post: { id: string; title: string; submolt: { name: string } };
 }
 
-/** Describes mira content. */
+/** Represents mira content. */
 export interface MiraContent {
     posts: MiraPost[];
     comments: MiraComment[];

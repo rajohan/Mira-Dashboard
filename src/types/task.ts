@@ -1,6 +1,6 @@
 import type { TaskAssigneeId } from "../constants/taskActors";
 
-/** Describes task automation. */
+/** Represents task automation. */
 export interface TaskAutomation {
     type: "cron";
     recurring: boolean;
@@ -20,7 +20,7 @@ export interface TaskAutomation {
     source?: "cron" | "stored";
 }
 
-/** Describes task. */
+/** Represents task. */
 export interface Task {
     number: number;
     title: string;
@@ -34,7 +34,7 @@ export interface Task {
     automation?: TaskAutomation;
 }
 
-/** Describes task update. */
+/** Represents task update. */
 export interface TaskUpdate {
     id: number;
     taskId: number;

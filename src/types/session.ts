@@ -1,4 +1,4 @@
-/** Describes agent status. */
+/** Represents agent status. */
 export interface AgentStatus {
     version: string;
     uptime: number;
@@ -10,7 +10,7 @@ export interface AgentStatus {
     };
 }
 
-/** Describes session. */
+/** Represents session. */
 export interface Session {
     id: string;
     key: string;
@@ -42,7 +42,7 @@ export interface Session {
     elevatedLevel?: string;
 }
 
-/** Describes agent info. */
+/** Represents agent info. */
 export interface AgentInfo {
     id: string;
     name: string;
@@ -51,7 +51,7 @@ export interface AgentInfo {
 }
 
 // Agent with real-time status
-/** Describes agent. */
+/** Represents agent. */
 export interface Agent {
     id: string;
     status: "active" | "thinking" | "idle" | "offline";
@@ -63,7 +63,7 @@ export interface Agent {
     channel: string | null;
 }
 
-/** Describes agent task history item. */
+/** Represents agent task history item. */
 export interface AgentTaskHistoryItem {
     id: number;
     agentId: string;

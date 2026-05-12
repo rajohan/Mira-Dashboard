@@ -1,4 +1,4 @@
-/** Describes log entry. */
+/** Represents log entry. */
 export interface LogEntry {
     id: string;
     dedupeKey?: string;
@@ -9,7 +9,7 @@ export interface LogEntry {
     raw: string;
 }
 
-/** Describes log file. */
+/** Represents log file. */
 export interface LogFile {
     name: string;
     size: number;

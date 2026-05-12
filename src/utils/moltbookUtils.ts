@@ -3,18 +3,18 @@ import { enUS } from "date-fns/locale";
 
 const MOLTBOOK_URL = "https://www.moltbook.com";
 
-/** Handles format time. */
+/** Formats time for display. */
 export function formatTime(dateStr: string): string {
     return formatDistanceToNow(new Date(dateStr), { addSuffix: true, locale: enUS });
 }
 
-/** Handles truncate. */
+/** Performs truncate. */
 export function truncate(text: string, maxLen: number): string {
     if (text.length <= maxLen) return text;
     return text.slice(0, maxLen) + "...";
 }
 
-/** Handles get moltbook url. */
+/** Returns moltbook URL. */
 export function getMoltbookUrl(path: string): string {
     return MOLTBOOK_URL + path;
 }

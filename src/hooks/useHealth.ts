@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "./useApi";
 
-/** Describes health response. */
+/** Represents the health API response. */
 export interface HealthResponse {
     status: string;
     gatewayConnected: boolean;
@@ -10,12 +10,12 @@ export interface HealthResponse {
     backendCommit?: string;
 }
 
-/** Handles fetch health. */
+/** Fetches health. */
 function fetchHealth() {
     return apiFetch<HealthResponse>("/health");
 }
 
-/** Handles use health. */
+/** Provides health. */
 export function useHealth() {
     return useQuery({
         queryKey: ["health"],

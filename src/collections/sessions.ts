@@ -4,13 +4,13 @@ import { createCollection } from "@tanstack/react-db";
 import { queryClient } from "../lib/queryClient";
 import type { Session } from "../types/session";
 
-/** Handles get session collection key. */
+/** Returns session collection key. */
 function getSessionCollectionKey(item: Partial<Session>): string | null {
     const key = item.key || item.id;
     return typeof key === "string" && key.trim().length > 0 ? key : null;
 }
 
-/** Handles is writable session. */
+/** Returns whether writable session. */
 function isWritableSession(item: unknown): item is Session {
     return (
         !!item &&
@@ -19,7 +19,7 @@ function isWritableSession(item: unknown): item is Session {
     );
 }
 
-/** Stores sessions collection. */
+/** Defines sessions collection. */
 export const sessionsCollection = createCollection(
     queryCollectionOptions({
         queryKey: ["sessions"],
@@ -32,7 +32,7 @@ export const sessionsCollection = createCollection(
 
 void sessionsCollection.preload();
 
-/** Handles delete session from collection. */
+/** Performs delete session from collection. */
 export function deleteSessionFromCollection(key: string) {
     if (!sessionsCollection.isReady()) {
         return;
@@ -54,7 +54,7 @@ export function deleteSessionFromCollection(key: string) {
     }
 }
 
-/** Handles replace sessions from web socket. */
+/** Performs replace sessions from WebSocket. */
 export function replaceSessionsFromWebSocket(sessions: unknown) {
     if (!sessionsCollection.isReady()) {
         return;

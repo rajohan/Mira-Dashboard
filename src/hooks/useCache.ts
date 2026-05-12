@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
 
-/** Describes cache envelope. */
+/** Represents cache envelope. */
 export interface CacheEnvelope<T> {
     key: string;
     source: string;
@@ -17,21 +17,21 @@ export interface CacheEnvelope<T> {
     meta: unknown;
 }
 
-/** Describes cache heartbeat response. */
+/** Represents the cache heartbeat API response. */
 export interface CacheHeartbeatResponse {
     generatedAt: string;
     count: number;
     entries: CacheEnvelope<unknown>[];
 }
 
-/** Stores cache keys. */
+/** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
     heartbeat: () => [...cacheKeys.all, "heartbeat"] as const,
     entry: (key: string) => [...cacheKeys.all, key] as const,
 };
 
-/** Handles use cache heartbeat. */
+/** Provides cache heartbeat. */
 export function useCacheHeartbeat(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: cacheKeys.heartbeat(),
@@ -41,7 +41,7 @@ export function useCacheHeartbeat(refreshInterval: number | false = false) {
     });
 }
 
-/** Handles use cache entry. */
+/** Provides cache entry. */
 export function useCacheEntry<T>(key: string, refreshInterval: number | false = false) {
     return useQuery({
         queryKey: cacheKeys.entry(key),
@@ -51,7 +51,7 @@ export function useCacheEntry<T>(key: string, refreshInterval: number | false = 
     });
 }
 
-/** Handles use refresh cache entry. */
+/** Provides refresh cache entry. */
 export function useRefreshCacheEntry() {
     const queryClient = useQueryClient();
 

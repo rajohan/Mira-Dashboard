@@ -15,7 +15,7 @@ import { router } from "./router";
 /** Renders the app UI. */
 function App() {
     useEffect(() => {
-        /** Handles on unauthorized. */
+        /** Performs on unauthorized. */
         const onUnauthorized = () => {
             void router.navigate({ to: "/login" });
         };

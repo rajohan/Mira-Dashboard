@@ -7,7 +7,7 @@ import {
 
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
-/** Describes docker container. */
+/** Represents docker container. */
 export interface DockerContainer {
     id: string;
     name: string;
@@ -44,7 +44,7 @@ export interface DockerContainer {
     } | null;
 }
 
-/** Describes docker container details. */
+/** Represents docker container details. */
 export interface DockerContainerDetails extends DockerContainer {
     env: string[];
     labels: Record<string, string>;
@@ -56,7 +56,7 @@ export interface DockerContainerDetails extends DockerContainer {
     }>;
 }
 
-/** Describes docker image. */
+/** Represents docker image. */
 export interface DockerImage {
     id: string;
     repository: string;
@@ -69,7 +69,7 @@ export interface DockerImage {
     inUseBy: string[];
 }
 
-/** Describes docker volume. */
+/** Represents docker volume. */
 export interface DockerVolume {
     name: string;
     driver: string;
@@ -80,7 +80,7 @@ export interface DockerVolume {
     usedBy: string[];
 }
 
-/** Describes docker exec job. */
+/** Represents docker exec job. */
 export interface DockerExecJob {
     jobId: string;
     containerId: string;
@@ -92,7 +92,7 @@ export interface DockerExecJob {
     endedAt: number | null;
 }
 
-/** Describes docker updater service. */
+/** Represents docker updater service. */
 export interface DockerUpdaterService {
     id: number;
     appSlug: string;
@@ -113,7 +113,7 @@ export interface DockerUpdaterService {
     metadata: Record<string, unknown>;
 }
 
-/** Describes docker updater event. */
+/** Represents docker updater event. */
 export interface DockerUpdaterEvent {
     id: number;
     managedServiceId: number;
@@ -129,7 +129,7 @@ export interface DockerUpdaterEvent {
     createdAt: string;
 }
 
-/** Describes docker updater summary. */
+/** Represents docker updater summary. */
 export interface DockerUpdaterSummary {
     total: number;
     enabled: number;
@@ -139,7 +139,7 @@ export interface DockerUpdaterSummary {
     failed: number;
 }
 
-/** Describes docker manual update result. */
+/** Represents docker manual update result. */
 export interface DockerManualUpdateResult {
     success: boolean;
     service: DockerUpdaterService;
@@ -168,7 +168,7 @@ export interface DockerManualUpdateResult {
     stderr: string;
 }
 
-/** Describes docker updater run step. */
+/** Represents docker updater run step. */
 export interface DockerUpdaterRunStep {
     step: string;
     ok: boolean;
@@ -176,13 +176,13 @@ export interface DockerUpdaterRunStep {
     stderr: string;
 }
 
-/** Describes docker updater run result. */
+/** Represents docker updater run result. */
 export interface DockerUpdaterRunResult {
     success: boolean;
     steps: DockerUpdaterRunStep[];
 }
 
-/** Stores docker keys. */
+/** Defines docker keys. */
 export const dockerKeys = {
     containers: ["docker", "containers"] as const,
     container: (containerId: string) => ["docker", "container", containerId] as const,
@@ -195,20 +195,20 @@ export const dockerKeys = {
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
 };
 
-/** Handles fetch containers. */
+/** Fetches containers. */
 async function fetchContainers(): Promise<DockerContainer[]> {
     const data = await apiFetch<{ containers: DockerContainer[] }>("/docker/containers");
     return data.containers || [];
 }
 
-/** Handles fetch container. */
+/** Fetches container. */
 async function fetchContainer(containerId: string): Promise<DockerContainerDetails> {
     return apiFetch<DockerContainerDetails>(
         `/docker/containers/${encodeURIComponent(containerId)}`
     );
 }
 
-/** Handles fetch container logs. */
+/** Fetches container logs. */
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
     const data = await apiFetch<{ content: string }>(
         `/docker/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`
@@ -216,24 +216,24 @@ async function fetchContainerLogs(containerId: string, tail: number): Promise<st
     return data.content || "";
 }
 
-/** Handles fetch images. */
+/** Fetches images. */
 async function fetchImages(): Promise<DockerImage[]> {
     const data = await apiFetch<{ images: DockerImage[] }>("/docker/images");
     return data.images || [];
 }
 
-/** Handles fetch volumes. */
+/** Fetches volumes. */
 async function fetchVolumes(): Promise<DockerVolume[]> {
     const data = await apiFetch<{ volumes: DockerVolume[] }>("/docker/volumes");
     return data.volumes || [];
 }
 
-/** Handles fetch docker exec job. */
+/** Fetches docker exec job. */
 async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
     return apiFetch<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
-/** Handles fetch docker updater services. */
+/** Fetches docker updater services. */
 async function fetchDockerUpdaterServices(): Promise<{
     services: DockerUpdaterService[];
     summary: DockerUpdaterSummary;
@@ -243,7 +243,7 @@ async function fetchDockerUpdaterServices(): Promise<{
     );
 }
 
-/** Handles fetch docker updater events. */
+/** Fetches docker updater events. */
 async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
     const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(
         `/docker/updater/events?limit=${limit}`
@@ -251,7 +251,7 @@ async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEve
     return data.events || [];
 }
 
-/** Handles use docker containers. */
+/** Provides docker containers. */
 export function useDockerContainers() {
     return useQuery({
         queryKey: dockerKeys.containers,
@@ -263,7 +263,7 @@ export function useDockerContainers() {
     });
 }
 
-/** Handles use docker container. */
+/** Provides docker container. */
 export function useDockerContainer(containerId: string | null) {
     return useQuery({
         queryKey: dockerKeys.container(containerId || ""),
@@ -273,7 +273,7 @@ export function useDockerContainer(containerId: string | null) {
     });
 }
 
-/** Handles use docker container logs. */
+/** Provides docker container logs. */
 export function useDockerContainerLogs(
     containerId: string | null,
     tail: number,
@@ -287,7 +287,7 @@ export function useDockerContainerLogs(
     });
 }
 
-/** Handles use docker images. */
+/** Provides docker images. */
 export function useDockerImages() {
     return useQuery({
         queryKey: dockerKeys.images,
@@ -299,7 +299,7 @@ export function useDockerImages() {
     });
 }
 
-/** Handles use docker volumes. */
+/** Provides docker volumes. */
 export function useDockerVolumes() {
     return useQuery({
         queryKey: dockerKeys.volumes,
@@ -311,7 +311,7 @@ export function useDockerVolumes() {
     });
 }
 
-/** Handles use docker exec job. */
+/** Provides docker exec job. */
 export function useDockerExecJob(jobId: string | null) {
     return useQuery({
         queryKey: dockerKeys.execJob(jobId),
@@ -324,7 +324,7 @@ export function useDockerExecJob(jobId: string | null) {
     });
 }
 
-/** Handles use docker updater services. */
+/** Provides docker updater services. */
 export function useDockerUpdaterServices() {
     return useQuery({
         queryKey: dockerKeys.updaterServices,
@@ -335,7 +335,7 @@ export function useDockerUpdaterServices() {
     });
 }
 
-/** Handles use docker updater events. */
+/** Provides docker updater events. */
 export function useDockerUpdaterEvents(limit = 50) {
     return useQuery({
         queryKey: dockerKeys.updaterEvents(limit),
@@ -346,7 +346,7 @@ export function useDockerUpdaterEvents(limit = 50) {
     });
 }
 
-/** Handles use docker action. */
+/** Provides docker action. */
 export function useDockerAction() {
     const queryClient = useQueryClient();
 
@@ -368,7 +368,7 @@ export function useDockerAction() {
     });
 }
 
-/** Handles use docker manual update. */
+/** Provides docker manual update. */
 export function useDockerManualUpdate() {
     const queryClient = useQueryClient();
 
@@ -391,7 +391,7 @@ export function useDockerManualUpdate() {
     });
 }
 
-/** Handles use run docker updater. */
+/** Provides run docker updater. */
 export function useRunDockerUpdater() {
     const queryClient = useQueryClient();
 
@@ -411,7 +411,7 @@ export function useRunDockerUpdater() {
     });
 }
 
-/** Handles use delete docker image. */
+/** Provides delete docker image. */
 export function useDeleteDockerImage() {
     const queryClient = useQueryClient();
 
@@ -426,7 +426,7 @@ export function useDeleteDockerImage() {
     });
 }
 
-/** Handles use delete docker volume. */
+/** Provides delete docker volume. */
 export function useDeleteDockerVolume() {
     const queryClient = useQueryClient();
 
@@ -441,7 +441,7 @@ export function useDeleteDockerVolume() {
     });
 }
 
-/** Handles use docker prune. */
+/** Provides docker prune. */
 export function useDockerPrune() {
     const queryClient = useQueryClient();
 
@@ -460,12 +460,12 @@ export function useDockerPrune() {
     });
 }
 
-/** Handles start docker exec. */
+/** Performs start docker exec. */
 export function startDockerExec(containerId: string, command: string) {
     return apiPost<{ jobId: string }>("/docker/exec/start", { containerId, command });
 }
 
-/** Handles stop docker exec. */
+/** Performs stop docker exec. */
 export function stopDockerExec(jobId: string) {
     return apiPost<{ success: boolean }>(
         `/docker/exec/${encodeURIComponent(jobId)}/stop`

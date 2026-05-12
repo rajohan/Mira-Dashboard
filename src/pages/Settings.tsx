@@ -28,13 +28,13 @@ import {
 } from "../hooks";
 import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
 
-/** Handles patch success. */
+/** Performs patch success. */
 function patchSuccess(setSuccess: (value: string | null) => void, message: string) {
     setSuccess(message);
     setTimeout(() => setSuccess(null), 3000);
 }
 
-/** Handles configured channels. */
+/** Performs configured channels. */
 function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[] {
     const channels = (config?.channels || {}) as Record<string, Record<string, unknown>>;
     return Object.entries(channels)
@@ -57,7 +57,7 @@ function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Handles number from duration. */
+/** Performs number from duration. */
 function numberFromDuration(value: unknown, fallback: number): number {
     if (typeof value === "number") return value;
     if (typeof value !== "string") return fallback;
@@ -69,7 +69,7 @@ function numberFromDuration(value: unknown, fallback: number): number {
     return amount * (factors[unit] || 1);
 }
 
-/** Describes system host cache. */
+/** Represents system host cache. */
 interface SystemHostCache {
     version?: {
         current?: string;
@@ -97,7 +97,7 @@ export function Settings() {
 
     const loading = configLoading || skillsLoading;
 
-    /** Handles handle restart. */
+    /** Handles restart interactions. */
     async function handleRestart() {
         try {
             await restartGateway.mutateAsync();
@@ -108,7 +108,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle backup. */
+    /** Handles backup interactions. */
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
@@ -126,7 +126,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle skill toggle. */
+    /** Handles skill toggle interactions. */
     async function handleSkillToggle(skillName: string, enabled: boolean) {
         try {
             await toggleSkill.mutateAsync({ name: skillName, enabled });
@@ -135,7 +135,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle session save. */
+    /** Handles session save interactions. */
     async function handleSessionSave(idleMinutes: number) {
         setError(null);
         try {
@@ -148,7 +148,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle heartbeat save. */
+    /** Handles heartbeat save interactions. */
     async function handleHeartbeatSave(every: number, target: string) {
         setError(null);
         try {
@@ -184,7 +184,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle agent access save. */
+    /** Handles agent access save interactions. */
     async function handleAgentAccessSave(agents: AgentConfig[]) {
         setError(null);
         try {
@@ -199,7 +199,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle model save. */
+    /** Handles model save interactions. */
     async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
         setError(null);
         try {
@@ -212,7 +212,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle tool save. */
+    /** Handles tool save interactions. */
     async function handleToolSave(values: ToolSettings) {
         setError(null);
         try {
@@ -241,7 +241,7 @@ export function Settings() {
         }
     }
 
-    /** Handles handle channels save. */
+    /** Handles channels save interactions. */
     async function handleChannelsSave(channels: ChannelSummary[]) {
         setError(null);
         try {
