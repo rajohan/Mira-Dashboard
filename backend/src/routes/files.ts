@@ -295,12 +295,14 @@ export default function filesRoutes(
                     throw error;
                 }
 
-                // codeql[js/path-injection]: fullPath is returned by safePathWithinRoot and confined to WORKSPACE_ROOT.
+                // fullPath is returned by safePathWithinRoot and confined to WORKSPACE_ROOT.
+                // codeql[js/path-injection]
                 fs.mkdirSync(path.dirname(fullPath), { recursive: true });
             }
 
             writeTextGuarded(guardedPath(fullPath), content);
-            // codeql[js/path-injection]: fullPath is returned by safePathWithinRoot and confined to WORKSPACE_ROOT.
+            // fullPath is returned by safePathWithinRoot and confined to WORKSPACE_ROOT.
+            // codeql[js/path-injection]
             const stat = statGuarded(guardedPath(fullPath));
 
             res.json({
