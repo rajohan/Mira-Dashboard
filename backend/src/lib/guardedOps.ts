@@ -43,7 +43,7 @@ export function copyGuarded(source: GuardedPath, destination: GuardedPath): void
 export function writeTextGuarded(path: GuardedPath, content: string): void {
     const fd = fsOps.openSync(guardedPathBuffer(path), "w");
     try {
-        Fs.writeSync(fd, content, undefined, "utf8");
+        Fs.writeSync(fd, Buffer.from(content, "utf8"));
     } finally {
         Fs.closeSync(fd);
     }
