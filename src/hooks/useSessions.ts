@@ -1,9 +1,10 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { deleteSessionFromCollection } from "../collections/sessions";
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetchRequired, apiPost } from "./useApi";
 
 // Types
+/** Represents a paged session-history response returned by the dashboard API. */
 interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
     total?: number;
@@ -11,6 +12,7 @@ interface SessionHistoryResponse {
     nextOffset?: number;
 }
 
+/** Checks whether cached history data has TanStack infinite-query page metadata. */
 function isValidInfiniteHistoryData(data: unknown): boolean {
     if (data == null) return true;
     if (typeof data !== "object") return false;
@@ -20,6 +22,7 @@ function isValidInfiniteHistoryData(data: unknown): boolean {
 }
 
 // Query keys
+/** Defines React Query keys for session lists and per-session history. */
 export const sessionKeys = {
     all: ["sessions"] as const,
     history: (key: string): ["sessions", "history", string] => [
@@ -29,12 +32,13 @@ export const sessionKeys = {
     ],
 };
 
+/** Fetches one page of normalized session history messages. */
 async function fetchSessionHistory(
     key: string,
     offset = 0,
     limit = 50
 ): Promise<SessionHistoryResponse> {
-    const data = await apiFetch<SessionHistoryResponse>(
+    const data = await apiFetchRequired<SessionHistoryResponse>(
         `/sessions/${encodeURIComponent(key)}/history?offset=${offset}&limit=${limit}`
     );
 
@@ -44,6 +48,7 @@ async function fetchSessionHistory(
     };
 }
 
+/** Sends a lifecycle action request for a session. */
 async function sessionAction(
     key: string,
     action: "stop" | "compact" | "reset"
@@ -51,10 +56,12 @@ async function sessionAction(
     await apiPost(`/sessions/${encodeURIComponent(key)}/action`, { action });
 }
 
+/** Deletes a session through the dashboard API. */
 async function deleteSessionRequest(key: string): Promise<void> {
     await apiDelete(`/sessions/${encodeURIComponent(key)}`);
 }
 
+/** Provides paginated session history while repairing stale non-infinite cache entries. */
 export function useSessionHistory(key: string | null | undefined, limit = 50) {
     const queryClient = useQueryClient();
     const sessionKey = typeof key === "string" ? key.trim() : "";
@@ -78,6 +85,7 @@ export function useSessionHistory(key: string | null | undefined, limit = 50) {
     });
 }
 
+/** Returns a mutation for stop, compact, and reset session actions. */
 export function useSessionAction() {
     return useMutation({
         mutationFn: ({
@@ -90,11 +98,20 @@ export function useSessionAction() {
     });
 }
 
+/** Deletes a session and clears related local collection/query cache state. */
 export function useDeleteSession() {
+    const queryClient = useQueryClient();
+
     return useMutation({
         mutationFn: deleteSessionRequest,
         onSuccess: (_, key) => {
-            deleteSessionFromCollection(key);
+            const sessionKey = key.trim();
+            deleteSessionFromCollection(sessionKey);
+            queryClient.removeQueries({
+                queryKey: sessionKeys.history(sessionKey),
+                exact: true,
+            });
+            queryClient.invalidateQueries({ queryKey: sessionKeys.all });
         },
     });
 }

@@ -10,17 +10,20 @@ let lastLogSize = 0;
 let lastLogFile = "";
 const logSubscribers = new Set<WebSocket>();
 
+/** Represents log file. */
 interface LogFile {
     name: string;
     size: number;
     modified: Date;
 }
 
+/** Returns today log file. */
 function getTodayLogFile(): string {
     const today = new Date().toISOString().split("T")[0];
     return path.join(LOGS_DIR, "openclaw-" + today + ".log");
 }
 
+/** Performs start log watcher. */
 function startLogWatcher(): void {
     if (logWatcher) return;
 
@@ -67,6 +70,7 @@ function startLogWatcher(): void {
     }, 1000);
 }
 
+/** Performs send log history. */
 function sendLogHistory(ws: WebSocket): void {
     try {
         const logFile = getTodayLogFile();
@@ -101,6 +105,7 @@ function sendLogHistory(ws: WebSocket): void {
     }
 }
 
+/** Performs subscribe to logs. */
 export function subscribeToLogs(ws: WebSocket): void {
     logSubscribers.add(ws);
 
@@ -111,10 +116,12 @@ export function subscribeToLogs(ws: WebSocket): void {
     startLogWatcher();
 }
 
+/** Performs unsubscribe from logs. */
 export function unsubscribeFromLogs(ws: WebSocket): void {
     logSubscribers.delete(ws);
 }
 
+/** Defines testing. */
 export const __testing = {
     resetLogWatcherForTest(): void {
         if (logWatcher) {
@@ -130,6 +137,7 @@ export const __testing = {
     },
 };
 
+/** Registers logs API routes. */
 export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {

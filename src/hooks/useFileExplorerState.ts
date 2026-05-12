@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import type { FileNode } from "../types/file";
 import { getFileExtension, isJsonFile } from "../utils/fileUtils";
 import { validateJsonString } from "../utils/json";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
+/** Defines max preview size. */
 export const MAX_PREVIEW_SIZE = 100_000;
 
+/** Provides file explorer state. */
 export function useFileExplorerState() {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -52,6 +54,7 @@ export function useFileExplorerState() {
         }
     }, [fileContent]);
 
+    /** Responds to toggle events. */
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
@@ -65,6 +68,7 @@ export function useFileExplorerState() {
 
         setExpandedPaths((prev) => new Set(prev).add(path));
 
+        /** Performs find node. */
         const findNode = (nodes: FileNode[]): FileNode | undefined => {
             for (const node of nodes) {
                 if (node.path === path) return node;
@@ -82,12 +86,13 @@ export function useFileExplorerState() {
                 const data = await queryClient.fetchQuery({
                     queryKey: fileKeys.list(path),
                     queryFn: () =>
-                        apiFetch<{ files: FileNode[] }>(
+                        apiFetchRequired<{ files: FileNode[] }>(
                             `/files?path=${encodeURIComponent(path)}`
                         ),
                     staleTime: 30_000,
                 });
                 const children = data.files || [];
+                /** Performs update node. */
                 const updateNode = (nodes: FileNode[]): FileNode[] => {
                     return nodes.map((n) => {
                         if (n.path === path) return { ...n, children, loaded: true };
@@ -102,12 +107,14 @@ export function useFileExplorerState() {
         }
     };
 
+    /** Responds to select events. */
     const handleSelect = (path: string) => {
         setSelectedPath(path);
         setHasChanges(false);
         setError(null);
     };
 
+    /** Responds to content change events. */
     const handleContentChange = (value: string) => {
         setEditedContent(value);
         setHasChanges(value !== fileContent?.content);
@@ -120,6 +127,7 @@ export function useFileExplorerState() {
         ? validateJsonString(editedContent, jsonValidationMode)
         : { valid: true, error: null };
 
+    /** Responds to save events. */
     const handleSave = async () => {
         if (!selectedPath || !fileContent) return;
 
@@ -140,6 +148,7 @@ export function useFileExplorerState() {
         }
     };
 
+    /** Responds to refresh events. */
     const handleRefresh = () => {
         void refetchRoot();
         if (selectedPath) {

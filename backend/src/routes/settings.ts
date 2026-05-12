@@ -2,6 +2,7 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+/** Represents settings. */
 interface Settings {
     theme: "light" | "dark" | "system";
     sidebarCollapsed: boolean;
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
     refreshInterval: 5000,
 };
 
+/** Performs load settings. */
 function loadSettings(): Settings {
     try {
         if (fs.existsSync(SETTINGS_FILE)) {
@@ -34,6 +36,7 @@ function loadSettings(): Settings {
     return DEFAULT_SETTINGS;
 }
 
+/** Performs save settings. */
 function saveSettings(settings: Settings): void {
     try {
         const dir = path.dirname(SETTINGS_FILE);
@@ -46,6 +49,7 @@ function saveSettings(settings: Settings): void {
     }
 }
 
+/** Registers settings API routes. */
 export default function settingsRoutes(
     app: express.Application,
     _express: typeof express,

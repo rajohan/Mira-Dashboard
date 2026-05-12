@@ -54,10 +54,12 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 
+/** Performs deleted messages storage key. */
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
 }
 
+/** Performs read deleted message keys. */
 function readDeletedMessageKeys(sessionKey: string): Set<string> {
     if (!sessionKey || typeof window === "undefined") {
         return new Set();
@@ -76,6 +78,7 @@ function readDeletedMessageKeys(sessionKey: string): Set<string> {
     }
 }
 
+/** Performs write deleted message keys. */
 function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): void {
     if (!sessionKey) {
         return;
@@ -91,11 +94,13 @@ function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): void {
     }
 }
 
+/** Represents stored chat diagnostic visibility. */
 interface StoredChatDiagnosticVisibility {
     thinking: boolean;
     tools: boolean;
 }
 
+/** Performs session timestamp milliseconds. */
 function sessionTimestampMs(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
@@ -109,6 +114,7 @@ function sessionTimestampMs(value: unknown): number | null {
     return null;
 }
 
+/** Performs history has newer assistant message. */
 function historyHasNewerAssistantMessage(
     messages: ChatHistoryMessage[],
     updatedAt: string | undefined
@@ -129,6 +135,7 @@ function historyHasNewerAssistantMessage(
     });
 }
 
+/** Performs read stored chat diagnostic visibility. */
 function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
         return { thinking: false, tools: false };
@@ -150,6 +157,7 @@ function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     }
 }
 
+/** Performs write stored chat diagnostic visibility. */
 function writeStoredChatDiagnosticVisibility(
     visibility: StoredChatDiagnosticVisibility
 ): void {
@@ -163,6 +171,7 @@ function writeStoredChatDiagnosticVisibility(
     }
 }
 
+/** Performs supported audio recording mime type. */
 function supportedAudioRecordingMimeType(): string | undefined {
     if (window.MediaRecorder === undefined) {
         return undefined;
@@ -179,6 +188,7 @@ function supportedAudioRecordingMimeType(): string | undefined {
     return candidates.find((mimeType) => window.MediaRecorder.isTypeSupported(mimeType));
 }
 
+/** Renders the chat UI. */
 export function Chat() {
     const { isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
@@ -231,6 +241,7 @@ export function Chat() {
     const { data: agentsStatus } = useAgentsStatus();
     const agents = agentsStatus?.agents || [];
 
+    /** Performs update active streamilliseconds. */
     const updateActiveStreams = (
         updater: (previous: ActiveChatStreams) => ActiveChatStreams
     ) => {
@@ -335,6 +346,7 @@ export function Chat() {
 
         let cancelled = false;
 
+        /** Performs load models. */
         const loadModels = async () => {
             try {
                 const result = (await request("models.list", {
@@ -385,6 +397,7 @@ export function Chat() {
 
         let cancelled = false;
 
+        /** Performs load history. */
         const loadHistory = async () => {
             setIsLoadingHistory(true);
             setSendError(null);
@@ -444,6 +457,7 @@ export function Chat() {
             return;
         }
 
+        /** Performs refresh history. */
         const refreshHistory = async () => {
             if (!shouldStickToBottomReference.current) {
                 return;
@@ -529,6 +543,7 @@ export function Chat() {
         let cancelled = false;
         let refreshInFlight = false;
 
+        /** Performs refresh visible history. */
         const refreshVisibleHistory = async () => {
             if (
                 refreshInFlight ||
@@ -609,6 +624,7 @@ export function Chat() {
         setHistoryLoadVersion,
     });
 
+    /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
 
@@ -622,6 +638,7 @@ export function Chat() {
         );
     };
 
+    /** Responds to messages scroll events. */
     const handleMessagesScroll = () => {
         const container = messagesContainerReference.current;
         if (container) {
@@ -633,6 +650,7 @@ export function Chat() {
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
+    /** Performs scroll messages to bottom. */
     const scrollMessagesToBottom = () => {
         const container = messagesContainerReference.current;
         if (!container || chatRows.length === 0) {
@@ -646,6 +664,7 @@ export function Chat() {
         setIsAtBottom(true);
     };
 
+    /** Performs schedule bottom follow. */
     const scheduleBottomFollow = () => {
         if (bottomFollowFrameReference.current !== null) {
             return;
@@ -671,6 +690,7 @@ export function Chat() {
         },
     });
 
+    /** Responds to dynamic row content load events. */
     const handleDynamicRowContentLoad = () => {
         if (shouldStickToBottomReference.current) {
             scheduleBottomFollow();
@@ -729,14 +749,17 @@ export function Chat() {
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
 
+    /** Performs apply slash suggestion. */
     const applySlashSuggestion = (value: string) => {
         setDraft(value);
     };
 
+    /** Responds to delete message events. */
     const handleDeleteMessage = (messageKey: string) => {
         setPendingDeleteMessageKey(messageKey);
     };
 
+    /** Performs confirm delete message. */
     const confirmDeleteMessage = () => {
         if (!selectedSessionKey || !pendingDeleteMessageKey) {
             return;
@@ -751,6 +774,7 @@ export function Chat() {
         setPendingDeleteMessageKey(null);
     };
 
+    /** Responds to files selected events. */
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) {
             return;
@@ -801,12 +825,14 @@ export function Chat() {
         }
     };
 
+    /** Performs remove attachment. */
     const removeAttachment = (attachmentId: string) => {
         setAttachments((previous) =>
             previous.filter((attachment) => attachment.id !== attachmentId)
         );
     };
 
+    /** Performs transcribe recording. */
     const transcribeRecording = async (audioBlob: Blob) => {
         if (audioBlob.size === 0) {
             setSendError("No audio was recorded.");
@@ -853,6 +879,7 @@ export function Chat() {
         }
     };
 
+    /** Responds to voice file selected events. */
     const handleVoiceFileSelected = async (files: FileList | null) => {
         const file = files?.[0];
         if (!file) {
@@ -876,6 +903,7 @@ export function Chat() {
         }
     };
 
+    /** Responds to toggle recording events. */
     const handleToggleRecording = async () => {
         if (isRecording) {
             mediaRecorderReference.current?.stop();
@@ -960,6 +988,7 @@ export function Chat() {
         shouldStickToBottomReference,
     });
 
+    /** Responds to send events. */
     const handleSend = async () => {
         if (!selectedSessionKey || isSending || sendInFlightReference.current) {
             return;

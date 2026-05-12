@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { LogFile } from "../types/log";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
 // Types
+/** Represents the log files API response. */
 interface LogFilesResponse {
     logs: LogFile[];
 }
 
+/** Represents the log content API response. */
 interface LogContentResponse {
     content: string;
 }
@@ -15,6 +17,7 @@ interface LogContentResponse {
 let lastKnownLogFiles: LogFile[] = [];
 
 // Query keys
+/** Defines log keys. */
 export const logKeys = {
     files: (): ["logs", "files"] => ["logs", "files"],
     content: (file: string, lines: number): ["logs", "content", string, number] => [
@@ -26,6 +29,7 @@ export const logKeys = {
 };
 
 // Fetchers
+/** Returns whether log file. */
 function isLogFile(file: unknown): file is LogFile {
     return (
         !!file &&
@@ -35,8 +39,9 @@ function isLogFile(file: unknown): file is LogFile {
     );
 }
 
+/** Fetches log files. */
 async function fetchLogFiles(): Promise<LogFile[]> {
-    const data = await apiFetch<LogFilesResponse>("/logs/info");
+    const data = await apiFetchRequired<LogFilesResponse>("/logs/info");
     const files = Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
 
     if (files.length > 0) {
@@ -46,14 +51,16 @@ async function fetchLogFiles(): Promise<LogFile[]> {
     return files;
 }
 
+/** Fetches log content. */
 async function fetchLogContent(file: string, lines: number): Promise<string> {
-    const data = await apiFetch<LogContentResponse>(
+    const data = await apiFetchRequired<LogContentResponse>(
         `/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
     );
     return typeof data.content === "string" ? data.content : "";
 }
 
 // Hooks
+/** Provides log files. */
 export function useLogFiles() {
     return useQuery({
         queryKey: logKeys.files(),
@@ -63,6 +70,7 @@ export function useLogFiles() {
     });
 }
 
+/** Provides log content. */
 export function useLogContent(file: string | null, lines: number, enabled = true) {
     return useQuery({
         queryKey: logKeys.content(file || "", lines),

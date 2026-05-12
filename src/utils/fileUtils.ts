@@ -1,20 +1,24 @@
 export { formatSize } from "./format";
 
+/** Returns file extension. */
 export function getFileExtension(filename: string): string {
     const parts = filename.split(".");
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
 }
 
+/** Returns whether markdown file. */
 export function isMarkdownFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ext === "md" || ext === "markdown";
 }
 
+/** Returns whether JSON file. */
 export function isJsonFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ext === "json" || ext === "json5";
 }
 
+/** Returns whether code file. */
 export function isCodeFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const codeExts = [
@@ -48,6 +52,7 @@ export function isCodeFile(filename: string): boolean {
     return codeExts.includes(ext);
 }
 
+/** Returns language. */
 export function getLanguage(filename: string): string {
     const ext = getFileExtension(filename);
     const langMap: Record<string, string> = {
@@ -90,11 +95,13 @@ export function getLanguage(filename: string): string {
     return langMap[ext] || "text";
 }
 
+/** Returns whether image file. */
 export function isImageFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     return ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"].includes(ext);
 }
 
+/** Returns whether binary file. */
 export function isBinaryFile(filename: string): boolean {
     const ext = getFileExtension(filename);
     const binaryExts = [
@@ -124,6 +131,7 @@ export function isBinaryFile(filename: string): boolean {
     return binaryExts.includes(ext);
 }
 
+/** Returns syntax class. */
 export function getSyntaxClass(filename: string): string {
     const ext = getFileExtension(filename);
     const syntaxMap: Record<string, string> = {
