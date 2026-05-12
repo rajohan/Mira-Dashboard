@@ -18,6 +18,7 @@ const OPS_SHELL_COMMANDS = new Set([
     "$HOME/.local/bin/openclaw update --yes",
 ]);
 
+/** Represents exec request. */
 interface ExecRequest {
     command: string;
     args?: string[];
@@ -93,12 +94,14 @@ function validateExecRequest(payload: unknown): ExecRequest {
     return { command, args, cwd, shell };
 }
 
+/** Represents the exec API response. */
 interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
+/** Represents exec job. */
 interface ExecJob {
     id: string;
     status: "running" | "done";
@@ -110,10 +113,12 @@ interface ExecJob {
     process?: ChildProcess;
 }
 
+/** Represents the exec start API response. */
 interface ExecStartResponse {
     jobId: string;
 }
 
+/** Represents the exec job API response. */
 interface ExecJobResponse {
     jobId: string;
     status: "running" | "done";
@@ -128,6 +133,7 @@ const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const jobs = new Map<string, ExecJob>();
 
+/** Performs trim output. */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -225,6 +231,7 @@ function spawnApprovedShell(
     return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
 }
 
+/** Runs a validated exec request and streams output into the tracked job. */
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
@@ -299,6 +306,7 @@ function runExecCommand(
     });
 }
 
+/** Performs cleanup jobs. */
 function cleanupJobs(): void {
     if (jobs.size <= MAX_JOBS) {
         return;
@@ -316,6 +324,7 @@ function cleanupJobs(): void {
     }
 }
 
+/** Registers exec API routes. */
 export default function execRoutes(
     app: express.Application,
     _express: typeof express

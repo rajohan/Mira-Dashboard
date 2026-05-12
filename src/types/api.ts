@@ -1,3 +1,4 @@
+/** Represents the high-level OpenClaw runtime status returned by the API. */
 export interface OpenClawStatus {
     version: string;
     uptime: number;
@@ -9,6 +10,7 @@ export interface OpenClawStatus {
     };
 }
 
+/** Represents a session summary returned by generic API responses. */
 export interface Session {
     id: string;
     agentId: string;
@@ -20,7 +22,8 @@ export interface Session {
     updatedAt: string;
 }
 
-export interface Metrics {
+/** Represents the compact legacy metrics payload with scalar resource usage values. */
+export interface ApiMetrics {
     cpu: number;
     memory: number;
     disk: number;

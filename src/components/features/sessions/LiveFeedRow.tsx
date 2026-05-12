@@ -1,6 +1,7 @@
 import { formatOsloTime } from "../../../utils/format";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 
+/** Provides the message payload rendered by a live feed row. */
 interface LiveFeedRowProps {
     item: {
         id: string;
@@ -12,6 +13,7 @@ interface LiveFeedRowProps {
     };
 }
 
+/** Maps a message role to the corresponding badge variant. */
 function getRoleVariant(role: string) {
     switch (role.toLowerCase()) {
         case "user":
@@ -29,6 +31,7 @@ function getRoleVariant(role: string) {
     }
 }
 
+/** Renders the live feed row UI. */
 export function LiveFeedRow({ item }: LiveFeedRowProps) {
     return (
         <div className="border-primary-700 bg-primary-800 text-primary-100 w-full rounded-2xl border px-3 py-2 text-sm shadow-sm">

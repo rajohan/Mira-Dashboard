@@ -9,6 +9,7 @@
         return;
     }
 
+    /** Performs generate uUId. */
     const generateUUID: Crypto["randomUUID"] = () => {
         return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replaceAll(/[xy]/g, (character) => {
             const randomValue = Math.trunc(Math.random() * 16);

@@ -1,10 +1,17 @@
 import JSON5 from "json5";
 
+/** Represents the result of JSON or JSON5 validation. */
 export interface JsonValidation {
     valid: boolean;
     error: string | null;
 }
 
+/**
+ * Validates a JSON or JSON5 string.
+ * @param value - The string to validate.
+ * @param mode - The parser mode to use.
+ * @returns Validation status and the parse error when invalid.
+ */
 export function validateJsonString(
     value: string,
     mode: "json" | "json5" = "json"

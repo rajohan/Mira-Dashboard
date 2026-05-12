@@ -1,7 +1,9 @@
+/** Formats number for display. */
 export function formatNumber(n: number): string {
     return n.toLocaleString("en-US");
 }
 
+/** Formats bytes for display. */
 export function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";
@@ -17,6 +19,7 @@ export function formatBytes(bytes: number): string {
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+/** Performs truncate query. */
 export function truncateQuery(query: string, max = 180) {
     if (query.length <= max) {
         return query;

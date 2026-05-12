@@ -16,6 +16,7 @@ const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const N8N_DATABASE = "n8n";
 
+/** Represents one docker updater service row. */
 interface DockerUpdaterServiceRow {
     id: string;
     app_slug: string;
@@ -35,10 +36,12 @@ interface DockerUpdaterServiceRow {
     metadata: string;
 }
 
+/** Represents docker manual update request. */
 interface DockerManualUpdateRequest {
     serviceId?: number;
 }
 
+/** Represents docker updater run result. */
 interface DockerUpdaterRunResult {
     step: string;
     ok: boolean;
@@ -46,6 +49,7 @@ interface DockerUpdaterRunResult {
     stderr: string;
 }
 
+/** Represents one docker ps row. */
 interface DockerPsRow {
     Command: string;
     CreatedAt: string;
@@ -63,6 +67,7 @@ interface DockerPsRow {
     Status: string;
 }
 
+/** Represents one docker stats row. */
 interface DockerStatsRow {
     BlockIO: string;
     CPUPerc: string;
@@ -75,6 +80,7 @@ interface DockerStatsRow {
     PIDs: string;
 }
 
+/** Represents one docker image row. */
 interface DockerImageRow {
     ID: string;
     ContainerName?: string;
@@ -92,6 +98,7 @@ interface DockerImageRow {
     UniqueSize?: string;
 }
 
+/** Represents one docker volume row. */
 interface DockerVolumeRow {
     Driver: string;
     Labels: string;
@@ -102,6 +109,7 @@ interface DockerVolumeRow {
     Size: string;
 }
 
+/** Represents docker inspect mount. */
 interface DockerInspectMount {
     Type?: string;
     Source?: string;
@@ -111,6 +119,7 @@ interface DockerInspectMount {
     Name?: string;
 }
 
+/** Represents one docker inspect row. */
 interface DockerInspectRow {
     Id?: string;
     Image?: string;
@@ -134,6 +143,7 @@ interface DockerInspectRow {
     Mounts?: DockerInspectMount[];
 }
 
+/** Represents docker container summary. */
 interface DockerContainerSummary {
     id: string;
     name: string;
@@ -170,6 +180,7 @@ interface DockerContainerSummary {
     } | null;
 }
 
+/** Represents docker container details. */
 interface DockerContainerDetails extends DockerContainerSummary {
     env: string[];
     labels: Record<string, string>;
@@ -181,6 +192,7 @@ interface DockerContainerDetails extends DockerContainerSummary {
     }>;
 }
 
+/** Represents docker image summary. */
 interface DockerImageSummary {
     id: string;
     repository: string;
@@ -193,6 +205,7 @@ interface DockerImageSummary {
     inUseBy: string[];
 }
 
+/** Represents docker volume summary. */
 interface DockerVolumeSummary {
     name: string;
     driver: string;
@@ -203,24 +216,29 @@ interface DockerVolumeSummary {
     usedBy: string[];
 }
 
+/** Represents docker action request. */
 interface DockerActionRequest {
     action: "start" | "stop" | "restart";
 }
 
+/** Represents docker stack action request. */
 interface DockerStackActionRequest {
     action: "restart";
     service?: string;
 }
 
+/** Represents docker prune request. */
 interface DockerPruneRequest {
     target: "images" | "volumes";
 }
 
+/** Represents docker exec start request. */
 interface DockerExecStartRequest {
     containerId: string;
     command: string;
 }
 
+/** Represents docker exec job. */
 interface DockerExecJob {
     id: string;
     containerId: string;
@@ -235,6 +253,7 @@ interface DockerExecJob {
 
 const dockerExecJobs = new Map<string, DockerExecJob>();
 
+/** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return (req, res, next) => {
         Promise.resolve(handler(req, res, next)).catch((error) => {
@@ -250,6 +269,7 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     };
 }
 
+/** Performs trim output. */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -258,6 +278,7 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+/** Parses JSON lines. */
 function parseJsonLines<T>(input: string): T[] {
     return input
         .split("\n")
@@ -266,6 +287,7 @@ function parseJsonLines<T>(input: string): T[] {
         .map((line) => JSON.parse(line) as T);
 }
 
+/** Parses JSON field. */
 function parseJsonField<T>(value: string | undefined): T | null {
     if (!value) {
         return null;
@@ -278,6 +300,7 @@ function parseJsonField<T>(value: string | undefined): T | null {
     }
 }
 
+/** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -286,6 +309,7 @@ function buildPostgresUri(database = N8N_DATABASE) {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
+/** Performs query n8n. */
 async function queryN8n(sql: string): Promise<string> {
     const { stdout } = await execFileAsync(
         "docker",
@@ -312,6 +336,7 @@ async function queryN8n(sql: string): Promise<string> {
     return String(stdout);
 }
 
+/** Performs query n8n tsv rows. */
 async function queryN8nTsvRows<T extends object>(
     sql: string,
     columns: string[]
@@ -361,6 +386,7 @@ async function queryN8nTsvRows<T extends object>(
     }
 }
 
+/** Returns whether updater candIDate is present. */
 function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     if (service.pin_mode === "digest") {
         return Boolean(
@@ -377,6 +403,7 @@ function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     );
 }
 
+/** Extracts trailing JSON. */
 function extractTrailingJson(input: string) {
     const trimmed = input.trim();
     const start = trimmed.lastIndexOf("\n{");
@@ -384,6 +411,7 @@ function extractTrailingJson(input: string) {
     return JSON.parse(candidate);
 }
 
+/** Parses labels. */
 function parseLabels(labelsRaw: string | undefined): Record<string, string> {
     if (!labelsRaw) {
         return {};
@@ -405,6 +433,7 @@ function parseLabels(labelsRaw: string | undefined): Record<string, string> {
     );
 }
 
+/** Parses ports. */
 function parsePorts(portsRaw: string | undefined): string[] {
     if (!portsRaw) {
         return [];
@@ -416,6 +445,7 @@ function parsePorts(portsRaw: string | undefined): string[] {
         .filter(Boolean);
 }
 
+/** Parses docker size to bytes. */
 function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     if (!sizeRaw) {
         return 0;
@@ -440,6 +470,7 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     return Math.round(value * (multipliers[unit] || 1));
 }
 
+/** Performs run docker. */
 async function runDocker(args: string[]): Promise<string> {
     const { stdout } = await execFileAsync("docker", args, {
         cwd: DOCKER_ROOT,
@@ -450,6 +481,7 @@ async function runDocker(args: string[]): Promise<string> {
     return String(stdout);
 }
 
+/** Performs run compose. */
 async function runCompose(args: string[]): Promise<{ stdout: string; stderr: string }> {
     const { stdout, stderr } = await execFileAsync(DOCKER_COMPOSE_WRAPPER, args, {
         cwd: DOCKER_ROOT,
@@ -463,6 +495,7 @@ async function runCompose(args: string[]): Promise<{ stdout: string; stderr: str
     };
 }
 
+/** Returns container inspect map. */
 async function getContainerInspectMap(containerIds: string[]) {
     if (containerIds.length === 0) {
         return new Map<string, DockerInspectRow>();
@@ -488,6 +521,7 @@ async function getContainerInspectMap(containerIds: string[]) {
     return map;
 }
 
+/** Returns containers. */
 async function getContainers(): Promise<DockerContainerSummary[]> {
     const psRows = parseJsonLines<DockerPsRow>(
         await runDocker(["ps", "-a", "--format", "{{json .}}"])
@@ -554,6 +588,7 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
     });
 }
 
+/** Returns container details. */
 async function getContainerDetails(
     containerId: string
 ): Promise<DockerContainerDetails | null> {
@@ -589,6 +624,7 @@ async function getContainerDetails(
     };
 }
 
+/** Returns images. */
 async function getImages(): Promise<DockerImageSummary[]> {
     const images = parseJsonLines<DockerImageRow>(
         await runDocker(["image", "ls", "--format", "{{json .}}", "--no-trunc"])
@@ -623,6 +659,7 @@ async function getImages(): Promise<DockerImageSummary[]> {
     });
 }
 
+/** Returns volumes. */
 async function getVolumes(): Promise<DockerVolumeSummary[]> {
     const volumeRows = parseJsonLines<DockerVolumeRow>(
         await runDocker(["volume", "ls", "--format", "{{json .}}"])
@@ -649,6 +686,7 @@ async function getVolumes(): Promise<DockerVolumeSummary[]> {
     }));
 }
 
+/** Returns docker updater services. */
 async function getDockerUpdaterServices() {
     const rows = parseTable<DockerUpdaterServiceRow>(
         await queryN8n(`
@@ -695,6 +733,7 @@ async function getDockerUpdaterServices() {
     }));
 }
 
+/** Returns docker updater service by ID. */
 async function getDockerUpdaterServiceById(serviceId: number) {
     const rows = parseTable<DockerUpdaterServiceRow>(
         await queryN8n(`
@@ -747,6 +786,7 @@ async function getDockerUpdaterServiceById(serviceId: number) {
     };
 }
 
+/** Performs run manual updater for service. */
 async function runManualUpdaterForService(serviceId: number) {
     const manual = await runUpdaterCommand("manual-update", [
         "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
@@ -789,6 +829,7 @@ async function runManualUpdaterForService(serviceId: number) {
     };
 }
 
+/** Performs run updater command. */
 async function runUpdaterCommand(
     step: string,
     args: string[]
@@ -826,6 +867,7 @@ async function runUpdaterCommand(
     }
 }
 
+/** Performs run docker updater now. */
 async function runDockerUpdaterNow() {
     const register = await runUpdaterCommand("register", [
         "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
@@ -854,6 +896,7 @@ async function runDockerUpdaterNow() {
     return [register, poll, autoUpdate, notify, discord];
 }
 
+/** Represents one docker updater event row. */
 interface DockerUpdaterEventRow {
     id: string;
     managed_service_id: string;
@@ -867,6 +910,7 @@ interface DockerUpdaterEventRow {
     created_at: string;
 }
 
+/** Returns docker updater events. */
 async function getDockerUpdaterEvents(limit: number) {
     const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
     const columns = [
@@ -917,6 +961,7 @@ async function getDockerUpdaterEvents(limit: number) {
     }));
 }
 
+/** Performs run container action. */
 async function runContainerAction(
     containerId: string,
     action: DockerActionRequest["action"]
@@ -931,6 +976,7 @@ async function runContainerAction(
     return { output: `${action} sent to ${details.name}` };
 }
 
+/** Performs run stack action. */
 async function runStackAction(request: DockerStackActionRequest) {
     const args = ["restart"];
     if (request.service) {
@@ -942,6 +988,7 @@ async function runStackAction(request: DockerStackActionRequest) {
     };
 }
 
+/** Performs run docker exec command. */
 async function runDockerExecCommand(
     containerId: string,
     command: string,
@@ -987,6 +1034,7 @@ async function runDockerExecCommand(
     });
 }
 
+/** Performs cleanup docker exec jobs. */
 function cleanupDockerExecJobs() {
     if (dockerExecJobs.size <= MAX_JOBS) {
         return;
@@ -1006,6 +1054,7 @@ function cleanupDockerExecJobs() {
     }
 }
 
+/** Registers docker API routes. */
 export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/updater/services",

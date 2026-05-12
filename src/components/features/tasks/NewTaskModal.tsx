@@ -9,6 +9,7 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
+/** Provides props for new task modal. */
 interface NewTaskModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -24,6 +25,7 @@ interface NewTaskModalProps {
     ) => Promise<void>;
 }
 
+/** Renders the new task modal UI. */
 export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
     const form = useForm({
         defaultValues: {

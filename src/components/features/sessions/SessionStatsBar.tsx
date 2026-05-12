@@ -3,6 +3,7 @@ import { Clock, Cpu, Hash } from "lucide-react";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { ProgressBar } from "../../ui/ProgressBar";
 
+/** Provides props for session stats bar. */
 interface SessionStatsBarProps {
     model: string;
     tokenCount: number;
@@ -10,6 +11,7 @@ interface SessionStatsBarProps {
     updatedAt: number | null;
 }
 
+/** Renders the session stats bar UI. */
 export function SessionStatsBar({
     model,
     tokenCount,

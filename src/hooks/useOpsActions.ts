@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
+/** Defines ops action id. */
 export type OpsActionId =
     | "gateway_restart"
     | "system_restart"
@@ -10,6 +11,7 @@ export type OpsActionId =
     | "openclaw_update"
     | "openclaw_cleanup";
 
+/** Represents ops action definition. */
 export interface OpsActionDefinition {
     id: OpsActionId;
     label: string;
@@ -21,12 +23,14 @@ export interface OpsActionDefinition {
     danger?: boolean;
 }
 
+/** Represents the exec API response. */
 export interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
+/** Represents the exec job API response. */
 export interface ExecJobResponse extends ExecResponse {
     jobId: string;
     status: "running" | "done";
@@ -34,6 +38,7 @@ export interface ExecJobResponse extends ExecResponse {
     endedAt: number | null;
 }
 
+/** Defines ops actions. */
 export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "system_restart",
@@ -98,20 +103,23 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     },
 ];
 
+/** Provides start ops action. */
 export function useStartOpsAction() {
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
-            apiPost<{ jobId: string }>("/exec/start", {
+            apiPostRequired<{ jobId: string }>("/exec/start", {
                 command: action.command,
                 shell: true,
             }),
     });
 }
 
+/** Provides exec job. */
 export function useExecJob(jobId: string | null) {
     return useQuery({
         queryKey: ["exec-job", jobId],
-        queryFn: () => apiFetch<ExecJobResponse>(`/exec/${jobId}`),
+        queryFn: () =>
+            apiFetchRequired<ExecJobResponse>(`/exec/${encodeURIComponent(jobId || "")}`),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as ExecJobResponse | undefined)?.status;

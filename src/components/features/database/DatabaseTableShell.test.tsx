@@ -87,6 +87,20 @@ describe("DatabaseTableShell", () => {
         expect(onRowClick).toHaveBeenNthCalledWith(2, { name: "Alpha", value: 1 });
     });
 
+    it("activates desktop rows by keyboard when a row click handler is provided", async () => {
+        const onRowClick = vi.fn();
+        renderShell({ onRowClick });
+
+        const desktopAlpha = screen.getByText("Alpha").closest("tr");
+        expect(desktopAlpha).toHaveAttribute("tabIndex", "0");
+        desktopAlpha?.focus();
+        await userEvent.keyboard("{Enter}");
+        await userEvent.keyboard(" ");
+
+        expect(onRowClick).toHaveBeenNthCalledWith(1, { name: "Alpha", value: 1 });
+        expect(onRowClick).toHaveBeenNthCalledWith(2, { name: "Alpha", value: 1 });
+    });
+
     it("sorts rows from sortable column headers", async () => {
         renderShell();
 

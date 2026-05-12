@@ -69,6 +69,7 @@ const backendCommit = (() => {
 // API Routes
 // =====================
 
+/** Performs health handler. */
 const healthHandler: express.RequestHandler = (_req, res) => {
     res.json({
         status: "ok",

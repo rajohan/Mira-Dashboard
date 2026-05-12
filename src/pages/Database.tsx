@@ -6,6 +6,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { useDatabaseOverview } from "../hooks/useDatabase";
 
+/** Renders the database UI. */
 export function Database() {
     const { data, isLoading, error } = useDatabaseOverview();
 

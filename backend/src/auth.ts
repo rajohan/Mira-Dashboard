@@ -8,6 +8,7 @@ import { db } from "./db.js";
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
+/** Represents one user row. */
 interface UserRow {
     id: number;
     username: string;
@@ -16,6 +17,7 @@ interface UserRow {
     updated_at: string;
 }
 
+/** Represents auth user. */
 export interface AuthUser {
     id: number;
     username: string;
@@ -26,6 +28,7 @@ const LOOPBACK_USER: AuthUser = {
     username: "mira-local",
 };
 
+/** Parses cookies. */
 function parseCookies(cookieHeader?: string): Record<string, string> {
     if (!cookieHeader) {
         return {};
@@ -46,20 +49,24 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
     );
 }
 
+/** Returns session ID from cookie header. */
 function getSessionIdFromCookieHeader(cookieHeader?: string): string | null {
     const cookies = parseCookies(cookieHeader);
     const sessionId = cookies[SESSION_COOKIE];
     return sessionId || null;
 }
 
+/** Performs now iso. */
 function nowIso(): string {
     return new Date().toISOString();
 }
 
+/** Normalizes username. */
 function normalizeUsername(username: string): string {
     return username.trim().toLowerCase();
 }
 
+/** Returns whether production. */
 function isProduction(request?: IncomingMessage): boolean {
     const forwardedProto = request?.headers["x-forwarded-proto"];
     if (typeof forwardedProto === "string") {
@@ -68,6 +75,7 @@ function isProduction(request?: IncomingMessage): boolean {
     return process.env.NODE_ENV === "production";
 }
 
+/** Returns whether loopback address. */
 function isLoopbackAddress(address?: string | null): boolean {
     if (!address) {
         return false;
@@ -76,17 +84,20 @@ function isLoopbackAddress(address?: string | null): boolean {
     return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
+/** Returns whether loopback request. */
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
     const remoteAddress = request.socket?.remoteAddress;
     return isLoopbackAddress(remoteAddress);
 }
 
+/** Performs hash password. */
 export function hashPassword(password: string): string {
     const salt = crypto.randomBytes(16).toString("hex");
     const derivedKey = crypto.scryptSync(password, salt, 64);
     return `scrypt:${salt}:${derivedKey.toString("hex")}`;
 }
 
+/** Performs verify password. */
 export function verifyPassword(password: string, storedHash: string): boolean {
     const [algorithm, salt, hash] = storedHash.split(":");
     if (algorithm !== "scrypt" || !salt || !hash) {
@@ -103,6 +114,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     return crypto.timingSafeEqual(storedBuffer, derivedKey);
 }
 
+/** Returns user count. */
 export function getUserCount(): number {
     const row = db.prepare("SELECT COUNT(*) AS count FROM users").get() as {
         count: number;
@@ -110,10 +122,12 @@ export function getUserCount(): number {
     return row.count;
 }
 
+/** Performs bootstrap reqUIred. */
 export function bootstrapRequired(): boolean {
     return getUserCount() === 0;
 }
 
+/** Performs find user by username. */
 export function findUserByUsername(username: string): UserRow | null {
     const row = db
         .prepare(
@@ -126,6 +140,7 @@ export function findUserByUsername(username: string): UserRow | null {
     return row || null;
 }
 
+/** Creates user. */
 export function createUser(username: string, password: string): AuthUser {
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
@@ -144,6 +159,7 @@ export function createUser(username: string, password: string): AuthUser {
     };
 }
 
+/** Performs persist gateway token. */
 export function persistGatewayToken(token: string): void {
     const timestamp = nowIso();
     db.prepare(
@@ -153,6 +169,7 @@ export function persistGatewayToken(token: string): void {
     ).run(token, timestamp);
 }
 
+/** Returns persisted gateway token. */
 export function getPersistedGatewayToken(): string | null {
     const row = db
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
@@ -160,6 +177,7 @@ export function getPersistedGatewayToken(): string | null {
     return row?.value || null;
 }
 
+/** Creates session. */
 export function createSession(userId: number): string {
     const sessionId = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
@@ -173,14 +191,17 @@ export function createSession(userId: number): string {
     return sessionId;
 }
 
+/** Performs delete session. */
 export function deleteSession(sessionId: string): void {
     db.prepare("DELETE FROM auth_sessions WHERE id = ?").run(sessionId);
 }
 
+/** Performs cleanup expired sessions. */
 export function cleanupExpiredSessions(): void {
     db.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(nowIso());
 }
 
+/** Returns auth user from session ID. */
 export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
     cleanupExpiredSessions();
 
@@ -196,6 +217,7 @@ export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
     return row || null;
 }
 
+/** Returns auth user from request. */
 export function getAuthUserFromRequest(
     request: express.Request | IncomingMessage
 ): AuthUser | null {
@@ -210,6 +232,7 @@ export function getAuthUserFromRequest(
     return getAuthUserFromSessionId(sessionId);
 }
 
+/** Performs set session cookie. */
 export function setSessionCookie(
     response: express.Response,
     sessionId: string,
@@ -232,6 +255,7 @@ export function setSessionCookie(
     response.setHeader("Set-Cookie", cookieParts.join("; "));
 }
 
+/** Performs clear session cookie. */
 export function clearSessionCookie(
     response: express.Response,
     request: express.Request
@@ -252,6 +276,7 @@ export function clearSessionCookie(
     response.setHeader("Set-Cookie", cookieParts.join("; "));
 }
 
+/** Performs reqUIre auth. */
 export function requireAuth(
     request: express.Request,
     response: express.Response,
@@ -268,6 +293,7 @@ export function requireAuth(
 }
 
 declare module "express-serve-static-core" {
+    /** Represents request. */
     interface Request {
         user?: AuthUser;
     }

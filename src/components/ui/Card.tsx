@@ -2,10 +2,12 @@ import { forwardRef, type HTMLAttributes } from "react";
 
 import { cn } from "../../utils/cn";
 
+/** Provides props for card. */
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
     variant?: "default" | "bordered";
 }
 
+/** Renders the card UI. */
 export const Card = forwardRef<HTMLDivElement, CardProps>(
     ({ className, variant = "default", children, ...props }, ref) => {
         return (
@@ -28,6 +30,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
 
 Card.displayName = "Card";
 
+/** Renders the card title UI. */
 export const CardTitle = forwardRef<
     HTMLHeadingElement,
     HTMLAttributes<HTMLHeadingElement>

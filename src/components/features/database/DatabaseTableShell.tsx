@@ -7,11 +7,12 @@ import {
     useReactTable,
 } from "@tanstack/react-table";
 import { ChevronDown } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useState } from "react";
 
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
+/** Represents props. */
 interface Props<T extends object> {
     data: T[];
     // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.
@@ -23,6 +24,15 @@ interface Props<T extends object> {
     renderMobileCard?: (row: T) => ReactNode;
 }
 
+/** Returns whether a focused row/card should activate from its own keyboard event. */
+function shouldActivateRow(event: KeyboardEvent<HTMLElement>) {
+    return (
+        event.currentTarget === event.target &&
+        (event.key === "Enter" || event.key === " ")
+    );
+}
+
+/** Renders the database table shell UI. */
 export function DatabaseTableShell<T extends object>({
     data,
     columns,
@@ -69,10 +79,7 @@ export function DatabaseTableShell<T extends object>({
                                     onKeyDown={
                                         onRowClick
                                             ? (event) => {
-                                                  if (
-                                                      event.key === "Enter" ||
-                                                      event.key === " "
-                                                  ) {
+                                                  if (shouldActivateRow(event)) {
                                                       event.preventDefault();
                                                       onRowClick(row.original);
                                                   }
@@ -141,6 +148,7 @@ export function DatabaseTableShell<T extends object>({
                                 {table.getRowModel().rows.map((row) => (
                                     <tr
                                         key={row.id}
+                                        tabIndex={onRowClick ? 0 : undefined}
                                         className={[
                                             "border-primary-700/50 hover:bg-primary-700/30 border-b",
                                             onRowClick ? "cursor-pointer" : "",
@@ -148,6 +156,16 @@ export function DatabaseTableShell<T extends object>({
                                         onClick={
                                             onRowClick
                                                 ? () => onRowClick(row.original)
+                                                : undefined
+                                        }
+                                        onKeyDown={
+                                            onRowClick
+                                                ? (event) => {
+                                                      if (shouldActivateRow(event)) {
+                                                          event.preventDefault();
+                                                          onRowClick(row.original);
+                                                      }
+                                                  }
                                                 : undefined
                                         }
                                     >
