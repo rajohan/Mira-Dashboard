@@ -44,8 +44,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const trustProxy = process.env.TRUST_PROXY ?? "loopback";
-app.set("trust proxy", trustProxy);
+
+/** Parses Express trust-proxy config from environment strings. */
+function parseTrustProxy(value: string | undefined): boolean | number | string {
+    if (value === undefined || value.trim() === "") {
+        return "loopback";
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+
+    const numeric = Number(normalized);
+    if (Number.isInteger(numeric) && numeric >= 0) {
+        return numeric;
+    }
+
+    return value;
+}
+
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });

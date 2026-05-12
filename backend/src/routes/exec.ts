@@ -59,6 +59,10 @@ function validateExecRequest(payload: unknown): ExecRequest {
         throw new ExecValidationError("command contains disallowed control characters");
     }
 
+    if (shell !== undefined && typeof shell !== "boolean") {
+        throw new ExecValidationError("shell must be a boolean");
+    }
+
     if (args !== undefined && shell) {
         throw new ExecValidationError("args cannot be combined with shell mode");
     }
@@ -83,6 +87,10 @@ function validateExecRequest(payload: unknown): ExecRequest {
         for (const arg of args) {
             if (typeof arg !== "string") {
                 throw new ExecValidationError("all args must be strings");
+            }
+
+            if (arg.includes("\0")) {
+                throw new ExecValidationError("args cannot contain null bytes");
             }
         }
     }
@@ -143,7 +151,15 @@ function trimOutput(text: string): string {
 }
 
 function parseCommand(command: string): { executable: string; args: string[] } {
-    const parsed = parseShellCommand(command);
+    let parsed: ReturnType<typeof parseShellCommand>;
+    try {
+        parsed = parseShellCommand(command, (key) => `$${key}`);
+    } catch (error) {
+        throw new ExecValidationError(
+            `command could not be parsed: ${(error as Error).message}`
+        );
+    }
+
     const parts: string[] = [];
 
     for (const part of parsed) {
@@ -229,6 +245,16 @@ function spawnApprovedShell(
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
 ): ChildProcess {
     return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
+}
+
+/** Returns the public error payload for exec route failures without leaking internals. */
+function execErrorResponse(error: unknown): { status: number; error: string } {
+    if (error instanceof ExecValidationError) {
+        return { status: 400, error: error.message };
+    }
+
+    console.error("[Exec] Route error:", (error as Error).message);
+    return { status: 500, error: "internal server error" };
 }
 
 /** Runs a validated exec request and streams output into the tracked job. */
@@ -340,9 +366,8 @@ export default function execRoutes(
                 stderr: result.stderr.slice(-10_000),
             } satisfies ExecResponse);
         } catch (error) {
-            res.status(error instanceof ExecValidationError ? 400 : 500).json({
-                error: (error as Error).message,
-            });
+            const response = execErrorResponse(error);
+            res.status(response.status).json({ error: response.error });
         }
     }) as RequestHandler);
 
@@ -351,9 +376,8 @@ export default function execRoutes(
         try {
             payload = validateExecRequest(req.body as ExecRequest);
         } catch (error) {
-            res.status(error instanceof ExecValidationError ? 400 : 500).json({
-                error: (error as Error).message,
-            });
+            const response = execErrorResponse(error);
+            res.status(response.status).json({ error: response.error });
             return;
         }
 
@@ -382,9 +406,8 @@ export default function execRoutes(
             });
         } catch (error) {
             jobs.delete(jobId);
-            res.status(error instanceof ExecValidationError ? 400 : 500).json({
-                error: (error as Error).message,
-            });
+            const response = execErrorResponse(error);
+            res.status(response.status).json({ error: response.error });
             return;
         }
 

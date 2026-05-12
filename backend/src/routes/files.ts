@@ -8,7 +8,7 @@ import {
     mkdirGuarded,
     openReadNoFollowGuarded,
     statGuarded,
-    writeTextGuarded,
+    writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
 
@@ -293,11 +293,6 @@ export default function filesRoutes(
             return;
         }
 
-        if (Buffer.byteLength(content, "utf8") > MAX_FILE_SIZE) {
-            res.status(413).json({ error: "Content exceeds maximum file size" });
-            return;
-        }
-
         try {
             const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
 
@@ -317,7 +312,7 @@ export default function filesRoutes(
                 mkdirGuarded(guardedPath(path.dirname(fullPath)), { recursive: true });
             }
 
-            await writeTextGuarded(guardedPath(fullPath), content);
+            await writeTextNoFollowGuarded(guardedPath(fullPath), content);
             const stat = statGuarded(guardedPath(fullPath));
 
             res.json({
