@@ -645,7 +645,7 @@ async function forwardRequest(
     }
 }
 
-/** Handles client interactions. */
+/** Processes Gateway WebSocket client events. */
 function handleClient(ws: WebSocket): void {
     subscribers.add(ws);
     ws.send(
