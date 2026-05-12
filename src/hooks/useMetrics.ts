@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "./useApi";
 
+/** Describes metrics. */
 export interface Metrics {
     cpu: {
         count: number;
@@ -47,10 +48,12 @@ export interface Metrics {
     timestamp: number;
 }
 
+/** Handles fetch metrics. */
 async function fetchMetrics(): Promise<Metrics> {
     return apiFetch<Metrics>("/metrics");
 }
 
+/** Handles use metrics. */
 export function useMetrics(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: ["metrics"],

@@ -1,10 +1,12 @@
 import JSON5 from "json5";
 
+/** Describes json validation. */
 export interface JsonValidation {
     valid: boolean;
     error: string | null;
 }
 
+/** Handles validate json string. */
 export function validateJsonString(
     value: string,
     mode: "json" | "json5" = "json"

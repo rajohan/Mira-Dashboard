@@ -41,6 +41,7 @@ import {
     formatWeekdayShort,
 } from "../utils/format";
 
+/** Handles get weather icon. */
 function getWeatherIcon(description?: string) {
     const text = (description || "").toLowerCase();
 
@@ -59,6 +60,7 @@ function getWeatherIcon(description?: string) {
     return Cloud;
 }
 
+/** Handles format temp. */
 function formatTemp(value: number | null | undefined): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return "--";
@@ -67,10 +69,12 @@ function formatTemp(value: number | null | undefined): string {
     return Math.round(value).toString();
 }
 
+/** Describes weather time card props. */
 interface WeatherTimeCardProps {
     className?: string;
 }
 
+/** Renders the weather time card UI. */
 function WeatherTimeCard({ className }: WeatherTimeCardProps) {
     const [now, setNow] = useState(() => new Date());
     const { data: weather, isLoading, isError } = useWeather(AUTO_REFRESH_MS);
@@ -169,6 +173,7 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
     );
 }
 
+/** Renders the dashboard UI. */
 export function Dashboard() {
     const { error } = useOpenClawSocket();
     const { data: metrics } = useMetrics(AUTO_REFRESH_MS);

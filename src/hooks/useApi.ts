@@ -2,6 +2,7 @@ import { authActions } from "../stores/authStore";
 
 const API_BASE = "/api";
 
+/** Implements unauthorized error. */
 export class UnauthorizedError extends Error {
     constructor() {
         super("Unauthorized");
@@ -9,11 +10,13 @@ export class UnauthorizedError extends Error {
     }
 }
 
+/** Handles handle unauthorized. */
 function handleUnauthorized() {
     authActions.clearSession();
     window.dispatchEvent(new CustomEvent("openclaw:unauthorized"));
 }
 
+/** Handles api fetch. */
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const headers: HeadersInit = {
         "Content-Type": "application/json",
@@ -39,6 +42,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     return response.json() as Promise<T>;
 }
 
+/** Handles api post. */
 export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
     return apiFetch<T>(endpoint, {
         method: "POST",
@@ -46,6 +50,7 @@ export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
     });
 }
 
+/** Handles api put. */
 export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
     return apiFetch<T>(endpoint, {
         method: "PUT",
@@ -53,6 +58,7 @@ export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
     });
 }
 
+/** Handles api delete. */
 export function apiDelete<T>(endpoint: string): Promise<T> {
     return apiFetch<T>(endpoint, { method: "DELETE" });
 }

@@ -1,11 +1,13 @@
 import type { ColumnId, Task } from "../types/task";
 
+/** Stores priority colors. */
 export const PRIORITY_COLORS: Record<string, string> = {
     high: "bg-red-500/20 text-red-400 border-red-500/30",
     medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
     low: "bg-primary-500/20 text-primary-400 border-primary-500/30",
 };
 
+/** Describes column config. */
 export interface ColumnConfig {
     id: ColumnId;
     title: string;
@@ -14,6 +16,7 @@ export interface ColumnConfig {
     filter: (t: Task) => boolean;
 }
 
+/** Stores column config. */
 export const COLUMN_CONFIG: ColumnConfig[] = [
     {
         id: "todo",
@@ -52,6 +55,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
     },
 ];
 
+/** Handles get priority. */
 export function getPriority(labels: Array<{ name: string }>): "high" | "medium" | "low" {
     if (
         labels.some(
@@ -68,6 +72,7 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
     return "low";
 }
 
+/** Handles get column id. */
 export function getColumnId(taskOrId: Task | string): ColumnId | null {
     if (typeof taskOrId === "string") {
         if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {

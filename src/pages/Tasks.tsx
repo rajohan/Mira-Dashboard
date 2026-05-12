@@ -45,6 +45,7 @@ const ASSIGNMENT_FILTERS = [
     { value: TASK_ASSIGNEES.raymond.id, label: TASK_ASSIGNEES.raymond.label },
 ] as const;
 
+/** Renders the tasks UI. */
 export function Tasks() {
     const { data: tasks = [], isLoading, error, refetch } = useTasks();
     const moveTask = useMoveTask();
@@ -112,10 +113,12 @@ export function Tasks() {
             });
     }
 
+    /** Handles handle drag start. */
     const handleDragStart = (event: DragStartEvent) => {
         setActiveId(event.active.id as string);
     };
 
+    /** Handles resolve column from over id. */
     const resolveColumnFromOverId = (overIdValue: string): ColumnId | null => {
         const directColumn = getColumnId(overIdValue);
         if (directColumn) {
@@ -130,6 +133,7 @@ export function Tasks() {
         return getColumnId(overTask);
     };
 
+    /** Handles handle drag over. */
     const handleDragOver = (event: DragOverEvent) => {
         const { over } = event;
         if (!over) {
@@ -142,6 +146,7 @@ export function Tasks() {
         }
     };
 
+    /** Handles handle drag end. */
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event;
         setActiveId(null);
@@ -170,10 +175,12 @@ export function Tasks() {
         }
     };
 
+    /** Handles handle task click. */
     const handleTaskClick = (task: Task) => {
         setSelectedTask(task);
     };
 
+    /** Handles handle move task. */
     const handleMoveTask = async (column: ColumnId) => {
         if (!selectedTask) return;
         const col = COLUMN_CONFIG.find((c) => c.id === column);
@@ -186,6 +193,7 @@ export function Tasks() {
         }
     };
 
+    /** Handles handle assign task. */
     const handleAssignTask = async (assignee: TaskAssigneeId) => {
         if (!selectedTask) return;
         const updated = await assignTask.mutateAsync({
@@ -195,11 +203,13 @@ export function Tasks() {
         setSelectedTask(updated);
     };
 
+    /** Handles handle delete task. */
     const handleDeleteTask = async () => {
         if (!selectedTask) return;
         setPendingDeleteTaskId(selectedTask.number);
     };
 
+    /** Handles confirm delete task. */
     const confirmDeleteTask = async () => {
         if (!pendingDeleteTaskId) return;
         await deleteTask.mutateAsync({ number: pendingDeleteTaskId });
@@ -207,6 +217,7 @@ export function Tasks() {
         setSelectedTask(null);
     };
 
+    /** Handles handle update task. */
     const handleUpdateTask = async (updates: {
         title?: string;
         body?: string;
@@ -228,6 +239,7 @@ export function Tasks() {
         return updated;
     };
 
+    /** Handles handle add task update. */
     const handleAddTaskUpdate = async (messageMd: string) => {
         if (!selectedTask) return;
 
@@ -238,6 +250,7 @@ export function Tasks() {
         });
     };
 
+    /** Handles handle edit task update. */
     const handleEditTaskUpdate = async (updateId: number, messageMd: string) => {
         if (!selectedTask) return;
 
@@ -249,10 +262,12 @@ export function Tasks() {
         });
     };
 
+    /** Handles handle delete task update. */
     const handleDeleteTaskUpdate = async (updateId: number) => {
         setPendingDeleteUpdateId(updateId);
     };
 
+    /** Handles confirm delete task update. */
     const confirmDeleteTaskUpdate = async () => {
         if (!selectedTask || !pendingDeleteUpdateId) return;
 

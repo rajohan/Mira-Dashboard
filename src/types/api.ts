@@ -1,3 +1,4 @@
+/** Describes open claw status. */
 export interface OpenClawStatus {
     version: string;
     uptime: number;
@@ -9,6 +10,7 @@ export interface OpenClawStatus {
     };
 }
 
+/** Describes session. */
 export interface Session {
     id: string;
     agentId: string;
@@ -20,6 +22,7 @@ export interface Session {
     updatedAt: string;
 }
 
+/** Describes metrics. */
 export interface Metrics {
     cpu: number;
     memory: number;

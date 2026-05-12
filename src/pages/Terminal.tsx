@@ -17,12 +17,14 @@ import { cn } from "../utils/cn";
 
 const HOME_DIR = "/home/ubuntu";
 
+/** Handles shorten path. */
 function shortenPath(path: string): string {
     if (path === HOME_DIR) return "~";
     if (path.startsWith(HOME_DIR + "/")) return "~" + path.slice(HOME_DIR.length);
     return path;
 }
 
+/** Renders the terminal UI. */
 export function Terminal() {
     const [command, setCommand] = useState("");
     const [historyIndex, setHistoryIndex] = useState(-1);
@@ -44,6 +46,7 @@ export function Terminal() {
     }, []);
 
     // Check if user is near bottom (within 30px)
+    /** Handles check is at bottom. */
     const checkIsAtBottom = () => {
         if (!outputRef.current) return true;
         const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
@@ -58,12 +61,14 @@ export function Terminal() {
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
     // Track scroll position
+    /** Handles handle scroll. */
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
         setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
     };
 
     // Scroll to bottom manually
+    /** Handles scroll to bottom. */
     const scrollToBottom = () => {
         if (outputRef.current) {
             outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -101,6 +106,7 @@ export function Terminal() {
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
+    /** Handles handle tab completion. */
     async function handleTabCompletion() {
         if (!command.trim()) return;
 
@@ -120,6 +126,7 @@ export function Terminal() {
         }
     }
 
+    /** Handles handle submit. */
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!command.trim() || startCommand.isPending) return;
@@ -246,6 +253,7 @@ export function Terminal() {
         }
     };
 
+    /** Handles handle key down. */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         // Handle Tab for completion
         if (event.key === "Tab") {
@@ -416,6 +424,7 @@ export function Terminal() {
     );
 }
 
+/** Renders the terminal output UI. */
 function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
     const isSuccess = entry.status === "done" && entry.code === 0;
 
