@@ -12,7 +12,7 @@ const ALLOWED_CONFIG_FILES = [
     "hooks/transforms/agentmail.ts",
 ];
 
-/** Describes config file. */
+/** Represents config file. */
 interface ConfigFile {
     name: string;
     path: string;
@@ -22,7 +22,7 @@ interface ConfigFile {
     modified: string;
 }
 
-/** Describes config file response. */
+/** Represents the config file API response. */
 interface ConfigFileResponse {
     path: string;
     relPath: string;
@@ -33,7 +33,7 @@ interface ConfigFileResponse {
     truncated?: boolean;
 }
 
-/** Describes write response. */
+/** Represents the write API response. */
 interface WriteResponse {
     success: boolean;
     path: string;
@@ -42,7 +42,7 @@ interface WriteResponse {
     modified: string;
 }
 
-/** Handles is binary file. */
+/** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
         if (content.codePointAt(i) === 0) return true;
@@ -50,7 +50,7 @@ function isBinaryFile(content: string): boolean {
     return false;
 }
 
-/** Handles list config files. */
+/** Performs list config files. */
 function listConfigFiles(): ConfigFile[] {
     const files: ConfigFile[] = [];
 
@@ -74,7 +74,7 @@ function listConfigFiles(): ConfigFile[] {
     return files;
 }
 
-/** Handles config files routes. */
+/** Registers config files API routes. */
 export default function configFilesRoutes(
     app: express.Application,
     _express: typeof express

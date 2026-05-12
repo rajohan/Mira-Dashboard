@@ -4,33 +4,33 @@ import path from "node:path";
 
 import express from "express";
 
-/** Describes completion request. */
+/** Represents completion request. */
 interface CompletionRequest {
     partial: string;
     cwd: string;
 }
 
-/** Describes cd request. */
+/** Represents cd request. */
 interface CdRequest {
     path: string;
     cwd: string;
 }
 
-/** Describes cd response. */
+/** Represents the cd API response. */
 interface CdResponse {
     success: boolean;
     newCwd: string;
     error?: string;
 }
 
-/** Describes completion item. */
+/** Represents completion item. */
 interface CompletionItem {
     completion: string;
     type: "file" | "directory" | "executable";
     display: string;
 }
 
-/** Describes completion response. */
+/** Represents the completion API response. */
 interface CompletionResponse {
     completions: CompletionItem[];
     commonPrefix: string;
@@ -38,7 +38,7 @@ interface CompletionResponse {
 
 const HOME_DIR = os.homedir();
 
-/** Handles expand path. */
+/** Performs expand path. */
 function expandPath(inputPath: string, cwd: string): string {
     if (inputPath.startsWith("/")) return inputPath;
     if (inputPath.startsWith("~/")) return HOME_DIR + inputPath.slice(1);
@@ -46,7 +46,7 @@ function expandPath(inputPath: string, cwd: string): string {
     return path.join(cwd, inputPath);
 }
 
-/** Handles get completions. */
+/** Returns completions. */
 async function getCompletions(partial: string, cwd: string): Promise<CompletionResponse> {
     const trimmed = partial.trim();
 
@@ -135,7 +135,7 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
     }
 }
 
-/** Handles terminal routes. */
+/** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/complete", express.json(), async (req, res) => {
         const { partial, cwd } = req.body as CompletionRequest;

@@ -5,7 +5,7 @@ import path from "path";
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
-/** Describes file item. */
+/** Represents file item. */
 interface FileItem {
     name: string;
     type: "file" | "directory";
@@ -15,7 +15,7 @@ interface FileItem {
     error?: boolean;
 }
 
-/** Describes file response. */
+/** Represents the file API response. */
 interface FileResponse {
     path: string;
     content: string;
@@ -27,7 +27,7 @@ interface FileResponse {
     truncated?: boolean;
 }
 
-/** Describes write response. */
+/** Represents the write API response. */
 interface WriteResponse {
     success: boolean;
     path: string;
@@ -35,7 +35,7 @@ interface WriteResponse {
     modified: string;
 }
 
-/** Handles is binary file. */
+/** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
         if (content.codePointAt(i) === 0) return true;
@@ -43,14 +43,14 @@ function isBinaryFile(content: string): boolean {
     return false;
 }
 
-/** Handles is image file. */
+/** Returns whether image file. */
 function isImageFile(filename: string): boolean {
     const ext = filename.split(".").pop()?.toLowerCase();
     const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
     return imageExts.includes(ext || "");
 }
 
-/** Handles get image mime type. */
+/** Returns image mime type. */
 function getImageMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -66,12 +66,12 @@ function getImageMimeType(filename: string): string {
     return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
-/** Handles should hide file. */
+/** Performs should hIDe file. */
 function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-/** Handles list directory. */
+/** Performs list directory. */
 function listDirectory(dirPath: string): FileItem[] {
     const items: FileItem[] = [];
     const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
@@ -119,7 +119,7 @@ function listDirectory(dirPath: string): FileItem[] {
     });
 }
 
-/** Handles files routes. */
+/** Registers files API routes. */
 export default function filesRoutes(
     app: express.Application,
     _express: typeof express

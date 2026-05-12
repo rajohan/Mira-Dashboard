@@ -8,7 +8,7 @@ const ELEVENLABS_STT_LANGUAGE = process.env.ELEVENLABS_STT_LANGUAGE || "nor";
 
 let activeTranscription = false;
 
-/** Handles audio extension. */
+/** Performs audio extension. */
 function audioExtension(contentType: string | undefined): string {
     if (!contentType) {
         return ".webm";
@@ -33,7 +33,7 @@ function audioExtension(contentType: string | undefined): string {
     return ".webm";
 }
 
-/** Handles transcript text from eleven labs. */
+/** Performs transcript text from eleven labs. */
 function transcriptTextFromElevenLabs(result: unknown): string {
     if (!result || typeof result !== "object") {
         return "";
@@ -61,7 +61,7 @@ function transcriptTextFromElevenLabs(result: unknown): string {
         .trim();
 }
 
-/** Handles transcribe with eleven labs. */
+/** Performs transcribe with eleven labs. */
 async function transcribeWithElevenLabs(
     audioBuffer: Buffer,
     contentType: string | undefined
@@ -110,7 +110,7 @@ async function transcribeWithElevenLabs(
     }
 }
 
-/** Handles stt routes. */
+/** Registers stt API routes. */
 export default function sttRoutes(app: express.Express, expressModule: typeof express) {
     app.post(
         "/api/stt/transcribe",

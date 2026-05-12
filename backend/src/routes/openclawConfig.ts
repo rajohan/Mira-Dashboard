@@ -8,19 +8,19 @@ import path from "path";
 
 import gateway from "../gateway.js";
 
-/** Describes config get response. */
+/** Represents the config get API response. */
 interface ConfigGetResponse {
     parsed?: Record<string, unknown>;
     hash?: string;
 }
 
-/** Handles get config snapshot. */
+/** Returns config snapshot. */
 async function getConfigSnapshot(): Promise<ConfigGetResponse> {
     const response = (await gateway.request("config.get", {})) as ConfigGetResponse;
     return response;
 }
 
-/** Handles patch config. */
+/** Performs patch config. */
 async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
     const snapshot = await getConfigSnapshot();
     if (!snapshot.hash) {
@@ -37,7 +37,7 @@ async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
 /** Defines skill source. */
 type SkillSource = "workspace" | "builtin" | "extra";
 
-/** Describes skill info. */
+/** Represents skill info. */
 interface SkillInfo {
     name: string;
     path: string;
@@ -56,7 +56,7 @@ const OPENCLAW_PACKAGE_ROOT = path.resolve(
 const OPENCLAW_BIN =
     process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw");
 
-/** Handles read skill description. */
+/** Performs read skill description. */
 function readSkillDescription(skillPath: string): string | undefined {
     try {
         const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
@@ -76,7 +76,7 @@ function readSkillDescription(skillPath: string): string | undefined {
     }
 }
 
-/** Handles collect skill directories. */
+/** Performs collect skill directories. */
 function collectSkillDirectories(root: string): string[] {
     try {
         return fs
@@ -89,7 +89,7 @@ function collectSkillDirectories(root: string): string[] {
     }
 }
 
-/** Handles collect extra skill directories. */
+/** Performs collect extra skill directories. */
 function collectExtraSkillDirectories(): string[] {
     const extensionsRoot = path.join(OPENCLAW_PACKAGE_ROOT, "dist/extensions");
     try {
@@ -104,18 +104,18 @@ function collectExtraSkillDirectories(): string[] {
     }
 }
 
-/** Handles get configured skill entries. */
+/** Returns configured skill entries. */
 function getConfiguredSkillEntries(config: Record<string, unknown> | undefined) {
     const skills = config?.skills as { entries?: Record<string, unknown> } | undefined;
     return skills?.entries || {};
 }
 
-/** Handles get skills. */
+/** Returns skills. */
 function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
 
-    /** Handles add skill. */
+    /** Performs add skill. */
     const addSkill = (skillPath: string, source: SkillSource) => {
         const name = path.basename(skillPath);
         const entry = (entries[name] || {}) as {
@@ -167,7 +167,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     );
 }
 
-/** Handles open claw config routes. */
+/** Registers OpenClaw config API routes. */
 export default function openClawConfigRoutes(app: express.Application): void {
     app.get("/api/config", (async (_req, res) => {
         try {

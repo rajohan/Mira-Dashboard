@@ -14,7 +14,7 @@ type Status = "todo" | "in-progress" | "blocked" | "done";
 /** Defines assignee. */
 type Assignee = TaskAssigneeId;
 
-/** Describes db task update. */
+/** Represents db task update. */
 interface DbTaskUpdate {
     id: number;
     task_id: number;
@@ -23,7 +23,7 @@ interface DbTaskUpdate {
     created_at: string;
 }
 
-/** Describes db task. */
+/** Represents db task. */
 interface DbTask {
     id: number;
     title: string;
@@ -37,7 +37,7 @@ interface DbTask {
     updated_at: string;
 }
 
-/** Describes cron job. */
+/** Represents cron job. */
 interface CronJob {
     id?: string;
     jobId?: string;
@@ -50,13 +50,13 @@ interface CronJob {
     [key: string]: unknown;
 }
 
-/** Describes cron list response. */
+/** Represents the cron list API response. */
 interface CronListResponse {
     jobs?: CronJob[];
     items?: CronJob[];
 }
 
-/** Describes task automation input. */
+/** Represents task automation input. */
 interface TaskAutomationInput {
     type?: string;
     recurring?: boolean;
@@ -68,12 +68,12 @@ interface TaskAutomationInput {
     [key: string]: unknown;
 }
 
-/** Handles is valid assignee. */
+/** Returns whether valID assignee. */
 function isValidAssignee(value: unknown): value is Assignee {
     return typeof value === "string" && TASK_ASSIGNEE_IDS.includes(value as Assignee);
 }
 
-/** Handles normalize status. */
+/** Normalizes status. */
 function normalizeStatus(columnLabel?: string): Status {
     if (columnLabel === "done") return "done";
     if (columnLabel === "blocked") return "blocked";
@@ -81,14 +81,14 @@ function normalizeStatus(columnLabel?: string): Status {
     return "todo";
 }
 
-/** Handles derive priority. */
+/** Performs derive priority. */
 function derivePriority(labels: string[]): "low" | "medium" | "high" {
     if (labels.includes("priority-high") || labels.includes("high")) return "high";
     if (labels.includes("priority-low") || labels.includes("low")) return "low";
     return "medium";
 }
 
-/** Handles labels from task. */
+/** Performs labels from task. */
 function labelsFromTask(task: DbTask): string[] {
     const base = (() => {
         try {
@@ -114,7 +114,7 @@ function labelsFromTask(task: DbTask): string[] {
     return base;
 }
 
-/** Handles parse record json. */
+/** Parses record JSON. */
 function parseRecordJson(value: string): Record<string, unknown> {
     try {
         const parsed = JSON.parse(value) as unknown;
@@ -126,7 +126,7 @@ function parseRecordJson(value: string): Record<string, unknown> {
     }
 }
 
-/** Handles normalize automation input. */
+/** Normalizes automation input. */
 function normalizeAutomationInput(value: unknown): string {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return "{}";
@@ -154,12 +154,12 @@ function normalizeAutomationInput(value: unknown): string {
     return JSON.stringify(automation);
 }
 
-/** Handles get cron job id. */
+/** Returns cron job ID. */
 function getCronJobId(job: CronJob): string {
     return String(job.jobId || job.id || "");
 }
 
-/** Handles normalize cron jobs. */
+/** Normalizes cron jobs. */
 function normalizeCronJobs(payload: unknown): CronJob[] {
     if (!payload || typeof payload !== "object") {
         return [];
@@ -177,7 +177,7 @@ function normalizeCronJobs(payload: unknown): CronJob[] {
     return [];
 }
 
-/** Handles fetch cron jobs by id. */
+/** Fetches cron jobs by ID. */
 async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
     try {
         const payload = await gateway.request("cron.list", { includeDisabled: true });
@@ -192,19 +192,19 @@ async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
     }
 }
 
-/** Handles number from record. */
+/** Performs number from record. */
 function numberFromRecord(record: Record<string, unknown> | undefined, key: string) {
     const value = record?.[key];
     return typeof value === "number" ? value : undefined;
 }
 
-/** Handles string from record. */
+/** Performs string from record. */
 function stringFromRecord(record: Record<string, unknown> | undefined, key: string) {
     const value = record?.[key];
     return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** Handles format schedule summary. */
+/** Formats schedule summary for display. */
 function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
     if (!schedule) {
         return;
@@ -233,7 +233,7 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
     return String(schedule.kind || "Scheduled");
 }
 
-/** Handles to frontend automation. */
+/** Performs to frontend automation. */
 function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>) {
     const stored = parseRecordJson(task.automation_json);
     const cronJobId = stringFromRecord(stored, "cronJobId");
@@ -272,7 +272,7 @@ function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>)
     };
 }
 
-/** Handles to frontend task. */
+/** Performs to frontend task. */
 function toFrontendTask(task: DbTask, cronJobsById?: Map<string, CronJob>) {
     const labels = labelsFromTask(task);
     const automation = toFrontendAutomation(task, cronJobsById);
@@ -297,7 +297,7 @@ function toFrontendTask(task: DbTask, cronJobsById?: Map<string, CronJob>) {
     };
 }
 
-/** Handles notify mira. */
+/** Performs notify mira. */
 async function notifyMira(eventType: string, task: { id: number; title: string }) {
     const message = `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task assigned to Mira.`;
 
@@ -308,7 +308,7 @@ async function notifyMira(eventType: string, task: { id: number; title: string }
     }
 }
 
-/** Handles to frontend task update. */
+/** Performs to frontend task update. */
 function toFrontendTaskUpdate(update: DbTaskUpdate) {
     return {
         id: update.id,
@@ -319,7 +319,7 @@ function toFrontendTaskUpdate(update: DbTaskUpdate) {
     };
 }
 
-/** Handles record event. */
+/** Performs record event. */
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
     db.prepare(
         `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
@@ -327,7 +327,7 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
     ).run(taskId, eventType, JSON.stringify(payload || {}), new Date().toISOString());
 }
 
-/** Handles tasks routes. */
+/** Registers tasks API routes. */
 export default function tasksRoutes(
     app: express.Application,
     _express: typeof express

@@ -1,6 +1,6 @@
 import { getCacheEntry, parseJsonField } from "./cacheStore.js";
 
-/** Describes open router quota. */
+/** Represents open router quota. */
 export interface OpenRouterQuota {
     usage: number;
     totalCredits: number;
@@ -9,7 +9,7 @@ export interface OpenRouterQuota {
     percentUsed: number | null;
 }
 
-/** Describes eleven labs quota. */
+/** Represents eleven labs quota. */
 export interface ElevenLabsQuota {
     used: number;
     total: number;
@@ -19,7 +19,7 @@ export interface ElevenLabsQuota {
     resetAt: string | null;
 }
 
-/** Describes zai quota. */
+/** Represents zai quota. */
 export interface ZaiQuota {
     level: string;
     fiveHour: {
@@ -32,7 +32,7 @@ export interface ZaiQuota {
     };
 }
 
-/** Describes open ai quota. */
+/** Represents open ai quota. */
 export interface OpenAiQuota {
     account: string | null;
     model: string | null;
@@ -44,7 +44,7 @@ export interface OpenAiQuota {
     resetAt: string | null;
 }
 
-/** Describes synthetic quota. */
+/** Represents synthetic quota. */
 export interface SyntheticQuota {
     subscription: {
         limit: number;
@@ -73,13 +73,13 @@ export interface SyntheticQuota {
     };
 }
 
-/** Describes quota error. */
+/** Represents quota error. */
 export interface QuotaError {
     status: "not_configured" | "error";
     note?: string;
 }
 
-/** Describes quotas response. */
+/** Represents the quotas API response. */
 export interface QuotasResponse {
     openrouter: OpenRouterQuota | QuotaError;
     elevenlabs: ElevenLabsQuota | QuotaError;
@@ -90,7 +90,7 @@ export interface QuotasResponse {
     cacheAgeMs: number;
 }
 
-/** Handles has quota status. */
+/** Returns whether quota status is present. */
 export function hasQuotaStatus(value: unknown): value is QuotaError {
     return (
         typeof value === "object" &&
@@ -100,7 +100,7 @@ export function hasQuotaStatus(value: unknown): value is QuotaError {
     );
 }
 
-/** Handles fetch cached quotas. */
+/** Fetches cached quotas. */
 export async function fetchCachedQuotas(): Promise<QuotasResponse> {
     const row = await getCacheEntry("quotas.summary");
     if (!row || row.status !== "fresh") {

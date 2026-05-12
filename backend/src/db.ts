@@ -6,7 +6,7 @@ const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, "mira-dashboard.db");
-/** Stores db. */
+/** Defines db. */
 export const db = new DatabaseSync(dbPath);
 
 db.exec(`

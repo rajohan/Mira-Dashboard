@@ -9,7 +9,7 @@ const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
-/** Handles get provider percent. */
+/** Returns provIDer percent. */
 function getProviderPercent(
     provider: ProviderKey,
     quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
@@ -43,7 +43,7 @@ function getProviderPercent(
     return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;
 }
 
-/** Handles get notification payload. */
+/** Returns notification payload. */
 function getNotificationPayload(
     provider: ProviderKey,
     bucket: number,
@@ -87,7 +87,7 @@ function getNotificationPayload(
     return null;
 }
 
-/** Handles ensure state row. */
+/** Performs ensure state row. */
 function ensureStateRow(provider: ProviderKey, bucket: number): void {
     db.prepare(
         `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
@@ -96,7 +96,7 @@ function ensureStateRow(provider: ProviderKey, bucket: number): void {
     ).run(provider, bucket, new Date().toISOString());
 }
 
-/** Handles get state. */
+/** Returns state. */
 function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
     const state = db
         .prepare(
@@ -109,7 +109,7 @@ function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
     };
 }
 
-/** Handles set state. */
+/** Performs set state. */
 function setState(provider: ProviderKey, bucket: number, isArmed: number): void {
     db.prepare(
         `UPDATE quota_alert_state
@@ -118,7 +118,7 @@ function setState(provider: ProviderKey, bucket: number, isArmed: number): void 
     ).run(isArmed, new Date().toISOString(), provider, bucket);
 }
 
-/** Handles insert notification. */
+/** Performs insert notification. */
 function insertNotification(
     provider: ProviderKey,
     bucket: number,
@@ -155,7 +155,7 @@ function insertNotification(
 
 let running = false;
 
-/** Handles run quota notification check. */
+/** Performs run quota notification check. */
 export async function runQuotaNotificationCheck(): Promise<void> {
     if (running) {
         return;
@@ -215,7 +215,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
     }
 }
 
-/** Handles start quota notification monitor. */
+/** Performs start quota notification monitor. */
 export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000

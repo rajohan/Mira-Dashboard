@@ -3,21 +3,21 @@ import { randomUUID } from "node:crypto";
 import { type ChildProcess, spawn } from "child_process";
 import express, { type RequestHandler } from "express";
 
-/** Describes exec request. */
+/** Represents exec request. */
 interface ExecRequest {
     command: string;
     args?: string[];
     cwd?: string;
 }
 
-/** Describes exec response. */
+/** Represents the exec API response. */
 interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
-/** Describes exec job. */
+/** Represents exec job. */
 interface ExecJob {
     id: string;
     status: "running" | "done";
@@ -29,12 +29,12 @@ interface ExecJob {
     process?: ChildProcess;
 }
 
-/** Describes exec start response. */
+/** Represents the exec start API response. */
 interface ExecStartResponse {
     jobId: string;
 }
 
-/** Describes exec job response. */
+/** Represents the exec job API response. */
 interface ExecJobResponse {
     jobId: string;
     status: "running" | "done";
@@ -49,7 +49,7 @@ const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const jobs = new Map<string, ExecJob>();
 
-/** Handles trim output. */
+/** Performs trim output. */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -58,7 +58,7 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
-/** Handles run exec command. */
+/** Performs run exec command. */
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
@@ -132,7 +132,7 @@ function runExecCommand(
     });
 }
 
-/** Handles cleanup jobs. */
+/** Performs cleanup jobs. */
 function cleanupJobs(): void {
     if (jobs.size <= MAX_JOBS) {
         return;
@@ -150,7 +150,7 @@ function cleanupJobs(): void {
     }
 }
 
-/** Handles exec routes. */
+/** Registers exec API routes. */
 export default function execRoutes(
     app: express.Application,
     _express: typeof express

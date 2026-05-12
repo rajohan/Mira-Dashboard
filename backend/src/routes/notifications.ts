@@ -6,7 +6,7 @@ import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 /** Defines notification type. */
 type NotificationType = "info" | "warning" | "error" | "success";
 
-/** Describes notification row. */
+/** Represents one notification row. */
 interface NotificationRow {
     id: number;
     title: string;
@@ -21,7 +21,7 @@ interface NotificationRow {
     occurred_at: string;
 }
 
-/** Handles list notifications. */
+/** Performs list notifications. */
 function listNotifications(limit: number): NotificationRow[] {
     const statement = db.prepare(`
         SELECT id, title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
@@ -33,7 +33,7 @@ function listNotifications(limit: number): NotificationRow[] {
     return statement.all(limit) as unknown as NotificationRow[];
 }
 
-/** Handles to response. */
+/** Performs to response. */
 function toResponse(row: NotificationRow) {
     let metadata: Record<string, unknown> = {};
     try {
@@ -59,7 +59,7 @@ function toResponse(row: NotificationRow) {
     };
 }
 
-/** Handles notifications routes. */
+/** Registers notifications API routes. */
 export default function notificationsRoutes(app: express.Application): void {
     app.get("/api/notifications", ((req, res) => {
         const limitValue = Number(req.query.limit);

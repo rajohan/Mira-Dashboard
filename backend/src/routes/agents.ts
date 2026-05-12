@@ -15,7 +15,7 @@ const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
-/** Stores per-agent dashboard metadata such as current task and task history. */
+/** Defines per-agent dashboard metadata such as current task and task history. */
 interface AgentMetadata {
     currentTask?: string;
     updatedAt?: string;
@@ -86,7 +86,7 @@ interface GatewaySessionSummary {
     updatedAt?: number | null;
 }
 
-/** Handles to display model name. */
+/** Performs to display model name. */
 function toDisplayModelName(model: string): string {
     if (!model) {
         return "unknown";
@@ -96,7 +96,7 @@ function toDisplayModelName(model: string): string {
     return slashIndex === -1 ? model : model.slice(slashIndex + 1);
 }
 
-/** Handles resolve configured model name. */
+/** Performs resolve configured model name. */
 function resolveConfiguredModelName(
     configuredModel: string | undefined,
     config: AgentsConfig
@@ -153,12 +153,12 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     return cached;
 }
 
-/** Handles now iso. */
+/** Performs now iso. */
 function nowIso(): string {
     return new Date().toISOString();
 }
 
-/** Handles close stale active tasks. */
+/** Performs close stale active tasks. */
 function closeStaleActiveTasks(): void {
     const cutoff = new Date(Date.now() - TASK_IDLE_TIMEOUT_MS).toISOString();
     db.prepare(
@@ -305,7 +305,7 @@ interface ActivityInfo {
     modTime: number;
 }
 
-/** Handles summarize tool activity. */
+/** Performs summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
     const normalizedTool = toolName.includes(".")
         ? toolName.split(".").pop() || toolName
@@ -551,7 +551,7 @@ function getChannelFromSessionKey(sessionKey: string): string | null {
     return null;
 }
 
-/** Handles determine status. */
+/** Performs determine status. */
 function determineStatus(lastModTime: number | null): "active" | "thinking" | "idle" {
     if (!lastModTime) return "idle";
 
@@ -566,7 +566,7 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
     return "idle";
 }
 
-/** Handles find best session for agent. */
+/** Performs find best session for agent. */
 function findBestSessionForAgent(
     agentId: string,
     sessions: GatewaySessionSummary[]
@@ -657,7 +657,7 @@ function getAgentStatus(agentId: string): AgentStatus {
     };
 }
 
-/** Handles agents routes. */
+/** Registers agents API routes. */
 export default function agentsRoutes(app: express.Application): void {
     app.use("/api/agents/:id/metadata", express.json());
 

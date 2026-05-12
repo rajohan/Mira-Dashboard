@@ -7,7 +7,7 @@ import {
     fetchCachedMoltbookProfile,
 } from "../lib/moltbookCache.js";
 
-/** Handles moltbook routes. */
+/** Registers moltbook API routes. */
 export default function moltbookRoutes(app: express.Application): void {
     app.get("/api/moltbook/home", (async (_req, res) => {
         try {
