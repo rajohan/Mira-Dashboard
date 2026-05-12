@@ -41,8 +41,12 @@ export function copyGuarded(source: GuardedPath, destination: GuardedPath): void
 }
 
 export function writeTextGuarded(path: GuardedPath, content: string): void {
-    // lgtm[js/http-to-file-access] Callers restrict writes to canonicalized local app/workspace paths; accepting text content is the purpose of these authenticated/local write endpoints.
-    fsOps.writeFileSync(guardedPathBuffer(path), content, "utf8");
+    const fd = fsOps.openSync(guardedPathBuffer(path), "w");
+    try {
+        Fs.writeSync(fd, content, undefined, "utf8");
+    } finally {
+        Fs.closeSync(fd);
+    }
 }
 
 export function statGuarded(path: GuardedPath): Fs.Stats {
