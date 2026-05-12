@@ -8,6 +8,7 @@ import { parse as parseShellCommand } from "shell-quote";
 
 import { spawnGuarded } from "../lib/guardedOps.js";
 
+/** Shell commands that first-party ops actions may execute through explicit shell mode. */
 const OPS_SHELL_COMMANDS = new Set([
     "__mira_dashboard_shell_smoke_test__",
     "sudo reboot",
@@ -26,6 +27,7 @@ interface ExecRequest {
     shell?: boolean;
 }
 
+/** Error type used for invalid exec API input that should return HTTP 400. */
 class ExecValidationError extends Error {
     constructor(message: string) {
         super(message);
@@ -33,11 +35,14 @@ class ExecValidationError extends Error {
     }
 }
 
-// Validate and sanitize exec request payload
+/** Maximum accepted command string length for exec API requests. */
 const MAX_COMMAND_LENGTH = 4096;
+/** Control characters that are never allowed in executable command strings. */
 const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
+/** Safe executable token pattern for direct, non-shell process spawning. */
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 
+/** Validates and sanitizes an exec request payload. */
 function validateExecRequest(payload: unknown): ExecRequest {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new ExecValidationError("request body must be a JSON object");
@@ -137,8 +142,11 @@ interface ExecJobResponse {
     endedAt: number | null;
 }
 
+/** Maximum retained stdout/stderr characters per exec job. */
 const MAX_OUTPUT_CHARS = 100_000;
+/** Maximum number of retained exec jobs before oldest jobs are cleaned up. */
 const MAX_JOBS = 100;
+/** In-memory exec job registry keyed by generated job id. */
 const jobs = new Map<string, ExecJob>();
 
 /** Performs trim output. */
@@ -150,6 +158,7 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+/** Parses a non-shell command string into executable and argv tokens. */
 function parseCommand(command: string): { executable: string; args: string[] } {
     let parsed: ReturnType<typeof parseShellCommand>;
     try {
@@ -179,6 +188,7 @@ function parseCommand(command: string): { executable: string; args: string[] } {
     return { executable, args: parsedArgs };
 }
 
+/** Resolves and validates the working directory used for an exec request. */
 function resolveCwd(cwd: string | undefined): string {
     if (!cwd) {
         return process.cwd();
@@ -201,7 +211,10 @@ function resolveCwd(cwd: string | undefined): string {
     }
 }
 
+/** Returns an approved first-party shell command or rejects unsafe shell mode. */
 function getApprovedShellCommand(command: string): string {
+    // Defense-in-depth: re-validate at execution boundary even though
+    // validateExecRequest already checked the whitelist.
     if (!OPS_SHELL_COMMANDS.has(command)) {
         throw new ExecValidationError(
             "shell mode is only available for approved ops commands"
@@ -211,6 +224,7 @@ function getApprovedShellCommand(command: string): string {
     return command;
 }
 
+/** Spawns a direct executable with shell expansion disabled. */
 function spawnExec(
     executable: string,
     args: string[],
@@ -219,6 +233,7 @@ function spawnExec(
     return spawnGuarded(executable, args, { ...cwdOption, shell: false });
 }
 
+/** Spawns an approved shell command via an explicit shell argv. */
 function spawnApprovedShell(
     command: string,
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }

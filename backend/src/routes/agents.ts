@@ -16,10 +16,10 @@ import { safePathWithinRoot } from "../lib/safePath.js";
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
-// Agent IDs may only contain alphanumeric chars, hyphens, underscores, and dots.
-// This prevents path traversal when constructing file paths from agent IDs.
+/** Matches agent ids that are safe to use as path segments. */
 const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
 
+/** Returns whether an agent id is safe for filesystem-backed agent metadata paths. */
 function isValidAgentId(id: string): boolean {
     return (
         typeof id === "string" &&
