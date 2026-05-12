@@ -247,7 +247,8 @@ export default function filesRoutes(
                     return;
                 }
 
-                const content = (await file.readFile()).toString("utf8");
+                const fullBuffer = await file.readFile();
+                const content = fullBuffer.toString("utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
