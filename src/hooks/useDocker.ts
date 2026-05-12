@@ -5,7 +5,7 @@ import {
     useQueryClient,
 } from "@tanstack/react-query";
 
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents docker container. */
 export interface DockerContainer {
@@ -197,20 +197,22 @@ export const dockerKeys = {
 
 /** Fetches containers. */
 async function fetchContainers(): Promise<DockerContainer[]> {
-    const data = await apiFetch<{ containers: DockerContainer[] }>("/docker/containers");
+    const data = await apiFetchRequired<{ containers: DockerContainer[] }>(
+        "/docker/containers"
+    );
     return data.containers || [];
 }
 
 /** Fetches container. */
 async function fetchContainer(containerId: string): Promise<DockerContainerDetails> {
-    return apiFetch<DockerContainerDetails>(
+    return apiFetchRequired<DockerContainerDetails>(
         `/docker/containers/${encodeURIComponent(containerId)}`
     );
 }
 
 /** Fetches container logs. */
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
-    const data = await apiFetch<{ content: string }>(
+    const data = await apiFetchRequired<{ content: string }>(
         `/docker/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`
     );
     return data.content || "";
@@ -218,19 +220,19 @@ async function fetchContainerLogs(containerId: string, tail: number): Promise<st
 
 /** Fetches images. */
 async function fetchImages(): Promise<DockerImage[]> {
-    const data = await apiFetch<{ images: DockerImage[] }>("/docker/images");
+    const data = await apiFetchRequired<{ images: DockerImage[] }>("/docker/images");
     return data.images || [];
 }
 
 /** Fetches volumes. */
 async function fetchVolumes(): Promise<DockerVolume[]> {
-    const data = await apiFetch<{ volumes: DockerVolume[] }>("/docker/volumes");
+    const data = await apiFetchRequired<{ volumes: DockerVolume[] }>("/docker/volumes");
     return data.volumes || [];
 }
 
 /** Fetches docker exec job. */
 async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
-    return apiFetch<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
+    return apiFetchRequired<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
 /** Fetches docker updater services. */
@@ -238,14 +240,15 @@ async function fetchDockerUpdaterServices(): Promise<{
     services: DockerUpdaterService[];
     summary: DockerUpdaterSummary;
 }> {
-    return apiFetch<{ services: DockerUpdaterService[]; summary: DockerUpdaterSummary }>(
-        "/docker/updater/services"
-    );
+    return apiFetchRequired<{
+        services: DockerUpdaterService[];
+        summary: DockerUpdaterSummary;
+    }>("/docker/updater/services");
 }
 
 /** Fetches docker updater events. */
 async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
-    const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(
+    const data = await apiFetchRequired<{ events: DockerUpdaterEvent[] }>(
         `/docker/updater/events?limit=${limit}`
     );
     return data.events || [];
@@ -352,7 +355,7 @@ export function useDockerAction() {
 
     return useMutation({
         mutationFn: ({ containerId, action }: { containerId: string; action: string }) =>
-            apiPost<{ output: string }>(
+            apiPostRequired<{ output: string }>(
                 `/docker/containers/${encodeURIComponent(containerId)}/action`,
                 {
                     action,
@@ -374,7 +377,7 @@ export function useDockerManualUpdate() {
 
     return useMutation({
         mutationFn: (serviceId: number) =>
-            apiPost<DockerManualUpdateResult>(
+            apiPostRequired<DockerManualUpdateResult>(
                 `/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`
             ),
         onSuccess: async () => {
@@ -396,7 +399,7 @@ export function useRunDockerUpdater() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<DockerUpdaterRunResult>("/docker/updater/run"),
+        mutationFn: () => apiPostRequired<DockerUpdaterRunResult>("/docker/updater/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
@@ -417,7 +420,7 @@ export function useDeleteDockerImage() {
 
     return useMutation({
         mutationFn: (imageId: string) =>
-            apiDelete<{ success: boolean }>(
+            apiDeleteRequired<{ success: boolean }>(
                 `/docker/images/${encodeURIComponent(imageId)}`
             ),
         onSuccess: async () => {
@@ -432,7 +435,7 @@ export function useDeleteDockerVolume() {
 
     return useMutation({
         mutationFn: (volumeName: string) =>
-            apiDelete<{ success: boolean }>(
+            apiDeleteRequired<{ success: boolean }>(
                 `/docker/volumes/${encodeURIComponent(volumeName)}`
             ),
         onSuccess: async () => {
@@ -447,7 +450,9 @@ export function useDockerPrune() {
 
     return useMutation({
         mutationFn: (target: "images" | "volumes") =>
-            apiPost<{ success: boolean; output: string }>("/docker/prune", { target }),
+            apiPostRequired<{ success: boolean; output: string }>("/docker/prune", {
+                target,
+            }),
         onSuccess: async (_, target) => {
             if (target === "images") {
                 await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
@@ -462,12 +467,15 @@ export function useDockerPrune() {
 
 /** Performs start docker exec. */
 export function startDockerExec(containerId: string, command: string) {
-    return apiPost<{ jobId: string }>("/docker/exec/start", { containerId, command });
+    return apiPostRequired<{ jobId: string }>("/docker/exec/start", {
+        containerId,
+        command,
+    });
 }
 
 /** Performs stop docker exec. */
 export function stopDockerExec(jobId: string) {
-    return apiPost<{ success: boolean }>(
+    return apiPostRequired<{ success: boolean }>(
         `/docker/exec/${encodeURIComponent(jobId)}/stop`
     );
 }

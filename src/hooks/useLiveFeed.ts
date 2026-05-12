@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { type Session } from "../types/session";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
 /** Represents the session history API response. */
 interface SessionHistoryResponse {
@@ -52,7 +52,7 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
         queryFn: async () => {
             const historyBySession = await Promise.all(
                 feedSessionCandidates.map(async (session) => {
-                    const history = await apiFetch<SessionHistoryResponse>(
+                    const history = await apiFetchRequired<SessionHistoryResponse>(
                         `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
                     );
 

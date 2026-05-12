@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
 /** Represents the health API response. */
 export interface HealthResponse {
@@ -12,7 +12,7 @@ export interface HealthResponse {
 
 /** Fetches health. */
 function fetchHealth() {
-    return apiFetch<HealthResponse>("/health");
+    return apiFetchRequired<HealthResponse>("/health");
 }
 
 /** Provides health. */

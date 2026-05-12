@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost, apiPut } from "./useApi";
+import { apiFetchRequired, apiPost, apiPostRequired, apiPut } from "./useApi";
 
 // Types
 /** Defines skill source. */
@@ -133,12 +133,12 @@ export const configKeys = {
 // Fetchers
 /** Fetches config. */
 async function fetchConfig(): Promise<OpenClawConfig> {
-    return apiFetch<OpenClawConfig>("/config");
+    return apiFetchRequired<OpenClawConfig>("/config");
 }
 
 /** Fetches skills. */
 async function fetchSkills(): Promise<Skill[]> {
-    const data = await apiFetch<{ skills: Skill[] }>("/skills");
+    const data = await apiFetchRequired<{ skills: Skill[] }>("/skills");
     return data.skills;
 }
 
@@ -163,7 +163,7 @@ async function createBackup(): Promise<{
     hash?: string;
     config: OpenClawConfig;
 }> {
-    return apiPost<{ createdAt: string; hash?: string; config: OpenClawConfig }>(
+    return apiPostRequired<{ createdAt: string; hash?: string; config: OpenClawConfig }>(
         "/backup"
     );
 }

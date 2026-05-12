@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 import { cacheKeys } from "./useCache";
 
 /** Represents backup job. */
@@ -31,7 +31,7 @@ export const backupKeys = {
 export function useKopiaBackup() {
     return useQuery({
         queryKey: backupKeys.kopia(),
-        queryFn: () => apiFetch<KopiaBackupResponse>("/backups/kopia"),
+        queryFn: () => apiFetchRequired<KopiaBackupResponse>("/backups/kopia"),
         refetchInterval: (query) => {
             const status = query.state.data?.job?.status;
             return status === "running" ? 1_000 : 5_000;
@@ -44,7 +44,7 @@ export function useKopiaBackup() {
 export function useWalgBackup() {
     return useQuery({
         queryKey: backupKeys.walg(),
-        queryFn: () => apiFetch<KopiaBackupResponse>("/backups/walg"),
+        queryFn: () => apiFetchRequired<KopiaBackupResponse>("/backups/walg"),
         refetchInterval: (query) => {
             const status = query.state.data?.job?.status;
             return status === "running" ? 1_000 : 5_000;
@@ -58,7 +58,8 @@ export function useRunKopiaBackup() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<{ ok: boolean; job: BackupJob }>("/backups/kopia/run"),
+        mutationFn: () =>
+            apiPostRequired<{ ok: boolean; job: BackupJob }>("/backups/kopia/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
@@ -76,7 +77,8 @@ export function useRunWalgBackup() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<{ ok: boolean; job: BackupJob }>("/backups/walg/run"),
+        mutationFn: () =>
+            apiPostRequired<{ ok: boolean; job: BackupJob }>("/backups/walg/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.walg() }),

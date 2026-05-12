@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents notification item. */
 export interface NotificationItem {
@@ -36,7 +36,7 @@ interface CreateNotificationInput {
 
 /** Fetches notifications. */
 function fetchNotifications() {
-    return apiFetch<NotificationsResponse>("/notifications");
+    return apiFetchRequired<NotificationsResponse>("/notifications");
 }
 
 /** Provides notifications. */
@@ -55,7 +55,10 @@ export function useCreateNotification() {
 
     return useMutation({
         mutationFn: (payload: CreateNotificationInput) =>
-            apiPost<{ ok: boolean; id: number | null }>("/notifications", payload),
+            apiPostRequired<{ ok: boolean; id: number | null }>(
+                "/notifications",
+                payload
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -67,7 +70,8 @@ export function useMarkNotificationRead() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (id: number) => apiPost<{ ok: boolean }>(`/notifications/${id}/read`),
+        mutationFn: (id: number) =>
+            apiPostRequired<{ ok: boolean }>(`/notifications/${id}/read`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -79,7 +83,8 @@ export function useMarkAllNotificationsRead() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<{ ok: boolean }>("/notifications/mark-all-read"),
+        mutationFn: () =>
+            apiPostRequired<{ ok: boolean }>("/notifications/mark-all-read"),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -92,7 +97,9 @@ export function useClearReadNotifications() {
 
     return useMutation({
         mutationFn: () =>
-            apiPost<{ ok: boolean; deleted: number }>("/notifications/clear-read"),
+            apiPostRequired<{ ok: boolean; deleted: number }>(
+                "/notifications/clear-read"
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -105,7 +112,7 @@ export function useDeleteNotification() {
 
     return useMutation({
         mutationFn: (id: number) =>
-            apiDelete<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
+            apiDeleteRequired<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },

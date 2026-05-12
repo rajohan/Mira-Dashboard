@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents cron job. */
 export interface CronJob {
@@ -29,7 +29,7 @@ export const cronKeys = {
 export function useCronJobs() {
     return useQuery({
         queryKey: cronKeys.jobs(),
-        queryFn: () => apiFetch<CronJobsResponse>("/cron/jobs"),
+        queryFn: () => apiFetchRequired<CronJobsResponse>("/cron/jobs"),
         select: (data) => data.jobs,
         refetchInterval: 10_000,
     });
@@ -41,7 +41,7 @@ export function useToggleCronJob() {
 
     return useMutation({
         mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-            apiPost<{ ok: boolean }>(`/cron/jobs/${id}/toggle`, { enabled }),
+            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/toggle`, { enabled }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -54,7 +54,7 @@ export function useUpdateCronJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
-            apiPost<{ ok: boolean }>(`/cron/jobs/${id}/update`, { patch }),
+            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/update`, { patch }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -67,7 +67,7 @@ export function useRunCronJobNow() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPost<{ ok: boolean }>(`/cron/jobs/${id}/run`),
+            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/run`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents pull request author. */
 export interface PullRequestAuthor {
@@ -98,19 +98,21 @@ export const pullRequestKeys = {
 
 /** Fetches pull requests. */
 async function fetchPullRequests(): Promise<PullRequestSummary[]> {
-    const response = await apiFetch<PullRequestsResponse>("/pull-requests");
+    const response = await apiFetchRequired<PullRequestsResponse>("/pull-requests");
     return response.pullRequests;
 }
 
 /** Fetches deployments. */
 async function fetchDeployments(): Promise<DeploymentJob[]> {
-    const response = await apiFetch<DeploymentsResponse>("/pull-requests/deployments");
+    const response = await apiFetchRequired<DeploymentsResponse>(
+        "/pull-requests/deployments"
+    );
     return response.deployments;
 }
 
 /** Fetches production checkout. */
 async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
-    const response = await apiFetch<ProductionCheckoutResponse>(
+    const response = await apiFetchRequired<ProductionCheckoutResponse>(
         "/pull-requests/production-checkout"
     );
     return response.checkout;
@@ -121,9 +123,12 @@ async function approvePullRequest(
     number: number,
     deploy: boolean
 ): Promise<PullRequestActionResponse> {
-    return apiPost<PullRequestActionResponse>(`/pull-requests/${number}/approve`, {
-        deploy,
-    });
+    return apiPostRequired<PullRequestActionResponse>(
+        `/pull-requests/${number}/approve`,
+        {
+            deploy,
+        }
+    );
 }
 
 /** Performs reject pull request. */
@@ -131,14 +136,16 @@ async function rejectPullRequest(
     number: number,
     comment?: string
 ): Promise<PullRequestActionResponse> {
-    return apiPost<PullRequestActionResponse>(`/pull-requests/${number}/reject`, {
+    return apiPostRequired<PullRequestActionResponse>(`/pull-requests/${number}/reject`, {
         comment,
     });
 }
 
 /** Performs deploy dashboard. */
 async function deployDashboard(): Promise<{ ok: boolean; deployment: DeploymentJob }> {
-    return apiPost<{ ok: boolean; deployment: DeploymentJob }>("/pull-requests/deploy");
+    return apiPostRequired<{ ok: boolean; deployment: DeploymentJob }>(
+        "/pull-requests/deploy"
+    );
 }
 
 /** Provides pull requests. */

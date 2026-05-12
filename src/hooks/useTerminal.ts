@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPost, apiPostRequired } from "./useApi";
 
 /** Represents the terminal job API response. */
 export interface TerminalJobResponse {
@@ -32,7 +32,7 @@ export function useStartTerminalCommand() {
 
     return useMutation({
         mutationFn: async (payload: TerminalCommand) =>
-            apiPost<{ jobId: string }>("/exec/start", payload),
+            apiPostRequired<{ jobId: string }>("/exec/start", payload),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: terminalKeys.history });
         },
@@ -43,7 +43,7 @@ export function useStartTerminalCommand() {
 export function useTerminalJob(jobId: string | null) {
     return useQuery({
         queryKey: terminalKeys.job(jobId),
-        queryFn: () => apiFetch<TerminalJobResponse>(`/exec/${jobId}`),
+        queryFn: () => apiFetchRequired<TerminalJobResponse>(`/exec/${jobId}`),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as TerminalJobResponse | undefined)?.status;
@@ -85,7 +85,7 @@ export async function getCompletions(
     partial: string,
     cwd: string
 ): Promise<CompletionResponse> {
-    return apiPost("/terminal/complete", { partial, cwd });
+    return apiPostRequired("/terminal/complete", { partial, cwd });
 }
 
 /** Represents the cd API response. */
@@ -97,7 +97,7 @@ export interface CdResponse {
 
 /** Performs change directory. */
 export async function changeDirectory(path: string, cwd: string): Promise<CdResponse> {
-    return apiPost("/terminal/cd", { path, cwd });
+    return apiPostRequired("/terminal/cd", { path, cwd });
 }
 
 /** Performs stop terminal job. */

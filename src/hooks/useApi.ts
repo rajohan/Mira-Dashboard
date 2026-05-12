@@ -17,7 +17,10 @@ function handleUnauthorized() {
 }
 
 /** Performs API fetch. */
-export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export async function apiFetch<T>(
+    endpoint: string,
+    options?: RequestInit
+): Promise<T | undefined> {
     const headers: HeadersInit = {
         "Content-Type": "application/json",
         ...options?.headers,
@@ -40,7 +43,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     }
 
     if (response.status === 204) {
-        return {} as T;
+        return undefined;
     }
 
     if (typeof response.text !== "function") {
@@ -49,14 +52,46 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
 
     const text = await response.text();
     if (!text) {
-        return {} as T;
+        return undefined;
     }
 
     return JSON.parse(text) as T;
 }
 
+/** Ensures API calls that require a JSON body fail clearly on empty responses. */
+export function requireApiResponse<T>(value: T | undefined): T {
+    if (value === undefined) {
+        throw new Error("API response body was empty");
+    }
+
+    return value;
+}
+
+/** Fetches an API response that must include a JSON body. */
+export async function apiFetchRequired<T>(
+    endpoint: string,
+    options?: RequestInit
+): Promise<T> {
+    return requireApiResponse(await apiFetch<T>(endpoint, options));
+}
+
+/** Posts to an API endpoint that must include a JSON body response. */
+export async function apiPostRequired<T>(endpoint: string, body?: unknown): Promise<T> {
+    return requireApiResponse(await apiPost<T>(endpoint, body));
+}
+
+/** Sends a PUT request to an API endpoint that must include a JSON body response. */
+export async function apiPutRequired<T>(endpoint: string, body: unknown): Promise<T> {
+    return requireApiResponse(await apiPut<T>(endpoint, body));
+}
+
+/** Sends a DELETE request to an API endpoint that must include a JSON body response. */
+export async function apiDeleteRequired<T>(endpoint: string): Promise<T> {
+    return requireApiResponse(await apiDelete<T>(endpoint));
+}
+
 /** Performs API post. */
-export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
+export function apiPost<T>(endpoint: string, body?: unknown): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
         method: "POST",
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -64,7 +99,7 @@ export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
 }
 
 /** Performs API put. */
-export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
+export function apiPut<T>(endpoint: string, body: unknown): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
         method: "PUT",
         body: JSON.stringify(body),
@@ -72,6 +107,6 @@ export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
 }
 
 /** Performs API delete. */
-export function apiDelete<T>(endpoint: string): Promise<T> {
+export function apiDelete<T>(endpoint: string): Promise<T | undefined> {
     return apiFetch<T>(endpoint, { method: "DELETE" });
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { FileNode } from "../types/file";
 import { getFileExtension, isJsonFile } from "../utils/fileUtils";
 import { validateJsonString } from "../utils/json";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
 /** Defines max preview size. */
@@ -86,7 +86,7 @@ export function useFileExplorerState() {
                 const data = await queryClient.fetchQuery({
                     queryKey: fileKeys.list(path),
                     queryFn: () =>
-                        apiFetch<{ files: FileNode[] }>(
+                        apiFetchRequired<{ files: FileNode[] }>(
                             `/files?path=${encodeURIComponent(path)}`
                         ),
                     staleTime: 30_000,

@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Defines ops action id. */
 export type OpsActionId =
@@ -107,7 +107,9 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
 export function useStartOpsAction() {
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
-            apiPost<{ jobId: string }>("/exec/start", { command: action.command }),
+            apiPostRequired<{ jobId: string }>("/exec/start", {
+                command: action.command,
+            }),
     });
 }
 
@@ -115,7 +117,7 @@ export function useStartOpsAction() {
 export function useExecJob(jobId: string | null) {
     return useQuery({
         queryKey: ["exec-job", jobId],
-        queryFn: () => apiFetch<ExecJobResponse>(`/exec/${jobId}`),
+        queryFn: () => apiFetchRequired<ExecJobResponse>(`/exec/${jobId}`),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as ExecJobResponse | undefined)?.status;

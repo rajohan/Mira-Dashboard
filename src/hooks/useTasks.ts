@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TaskAssigneeId } from "../constants/taskActors";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Defines task keys. */
 export const taskKeys = {
@@ -14,7 +14,7 @@ export const taskKeys = {
 
 /** Fetches tasks. */
 async function fetchTasks(): Promise<Task[]> {
-    return apiFetch<Task[]>("/tasks");
+    return apiFetchRequired<Task[]>("/tasks");
 }
 
 /** Creates task. */
@@ -25,7 +25,7 @@ async function createTask(
     assignee: TaskAssigneeId,
     automation?: Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
 ): Promise<Task> {
-    return apiPost<Task>("/tasks", { title, body, labels, assignee, automation });
+    return apiPostRequired<Task>("/tasks", { title, body, labels, assignee, automation });
 }
 
 /** Performs update task. */
@@ -41,7 +41,7 @@ async function updateTask(
         > | null;
     }
 ): Promise<Task> {
-    return apiFetch<Task>(`/tasks/${number}`, {
+    return apiFetchRequired<Task>(`/tasks/${number}`, {
         method: "PATCH",
         body: JSON.stringify(updates),
     });
@@ -49,12 +49,12 @@ async function updateTask(
 
 /** Performs move task. */
 async function moveTask(number: number, columnLabel: string): Promise<Task> {
-    return apiPost<Task>(`/tasks/${number}/move`, { columnLabel });
+    return apiPostRequired<Task>(`/tasks/${number}/move`, { columnLabel });
 }
 
 /** Performs assign task. */
 async function assignTask(number: number, assignee: TaskAssigneeId): Promise<Task> {
-    return apiPost<Task>(`/tasks/${number}/assign`, { assignee });
+    return apiPostRequired<Task>(`/tasks/${number}/assign`, { assignee });
 }
 
 /** Performs delete task. */
@@ -64,7 +64,7 @@ async function deleteTask(number: number): Promise<void> {
 
 /** Fetches task updates. */
 async function fetchTaskUpdates(taskId: number): Promise<TaskUpdate[]> {
-    return apiFetch<TaskUpdate[]>(`/tasks/${taskId}/updates`);
+    return apiFetchRequired<TaskUpdate[]>(`/tasks/${taskId}/updates`);
 }
 
 /** Creates task update. */
@@ -73,7 +73,7 @@ async function createTaskUpdate(
     author: TaskAssigneeId,
     messageMd: string
 ): Promise<TaskUpdate> {
-    return apiPost<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
+    return apiPostRequired<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
 }
 
 /** Performs update task update. */
@@ -83,7 +83,7 @@ async function updateTaskUpdate(
     author: TaskAssigneeId,
     messageMd: string
 ): Promise<TaskUpdate> {
-    return apiFetch<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
+    return apiFetchRequired<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
         method: "PATCH",
         body: JSON.stringify({ author, messageMd }),
     });

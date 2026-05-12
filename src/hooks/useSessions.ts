@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { deleteSessionFromCollection } from "../collections/sessions";
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDelete, apiFetchRequired, apiPost } from "./useApi";
 
 // Types
 /** Represents a paged session-history response returned by the dashboard API. */
@@ -38,7 +38,7 @@ async function fetchSessionHistory(
     offset = 0,
     limit = 50
 ): Promise<SessionHistoryResponse> {
-    const data = await apiFetch<SessionHistoryResponse>(
+    const data = await apiFetchRequired<SessionHistoryResponse>(
         `/sessions/${encodeURIComponent(key)}/history?offset=${offset}&limit=${limit}`
     );
 

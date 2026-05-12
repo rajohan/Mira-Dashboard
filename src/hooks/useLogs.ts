@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { LogFile } from "../types/log";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
 // Types
 /** Represents the log files API response. */
@@ -41,7 +41,7 @@ function isLogFile(file: unknown): file is LogFile {
 
 /** Fetches log files. */
 async function fetchLogFiles(): Promise<LogFile[]> {
-    const data = await apiFetch<LogFilesResponse>("/logs/info");
+    const data = await apiFetchRequired<LogFilesResponse>("/logs/info");
     const files = Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
 
     if (files.length > 0) {
@@ -53,7 +53,7 @@ async function fetchLogFiles(): Promise<LogFile[]> {
 
 /** Fetches log content. */
 async function fetchLogContent(file: string, lines: number): Promise<string> {
-    const data = await apiFetch<LogContentResponse>(
+    const data = await apiFetchRequired<LogContentResponse>(
         `/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
     );
     return typeof data.content === "string" ? data.content : "";

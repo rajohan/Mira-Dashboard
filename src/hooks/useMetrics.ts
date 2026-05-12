@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
 /** Represents the detailed system metrics payload returned by /api/metrics. */
 export interface Metrics {
@@ -50,7 +50,7 @@ export interface Metrics {
 
 /** Fetches the latest detailed system metrics snapshot. */
 async function fetchMetrics(): Promise<Metrics> {
-    return apiFetch<Metrics>("/metrics");
+    return apiFetchRequired<Metrics>("/metrics");
 }
 
 /** Provides periodically refreshed system metrics for dashboard cards. */

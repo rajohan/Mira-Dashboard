@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents log rotation summary. */
 export interface LogRotationSummary {
@@ -48,7 +48,7 @@ export const logRotationKeys = {
 export function useLogRotationStatus(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: logRotationKeys.status,
-        queryFn: () => apiFetch<LogRotationStatus>("/ops/log-rotation/status"),
+        queryFn: () => apiFetchRequired<LogRotationStatus>("/ops/log-rotation/status"),
         refetchInterval: refreshInterval,
         staleTime: 2_000,
     });
@@ -57,7 +57,8 @@ export function useLogRotationStatus(refreshInterval: number | false = false) {
 /** Provides run log rotation dry run. */
 export function useRunLogRotationDryRun() {
     return useMutation({
-        mutationFn: () => apiPost<LogRotationRunResult>("/ops/log-rotation/dry-run"),
+        mutationFn: () =>
+            apiPostRequired<LogRotationRunResult>("/ops/log-rotation/dry-run"),
     });
 }
 
@@ -66,7 +67,7 @@ export function useRunLogRotationNow() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<LogRotationRunResult>("/ops/log-rotation/run"),
+        mutationFn: () => apiPostRequired<LogRotationRunResult>("/ops/log-rotation/run"),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: logRotationKeys.status });
         },

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { FileContent, FileNode } from "../types/file";
-import { apiFetch, apiPut } from "./useApi";
+import { apiFetchRequired, apiPut } from "./useApi";
 
 // Types
 /** Represents the files API response. */
@@ -25,7 +25,7 @@ export const fileKeys = {
 /** Fetches files. */
 async function fetchFiles(path?: string): Promise<FileNode[]> {
     const endpoint = path ? `/files?path=${encodeURIComponent(path)}` : "/files";
-    const data = await apiFetch<FilesResponse>(endpoint);
+    const data = await apiFetchRequired<FilesResponse>(endpoint);
     return data.files || [];
 }
 
@@ -35,7 +35,7 @@ async function fetchFileContent(path: string): Promise<FileContent> {
     const endpoint = isConfig
         ? `/config-files/${encodeURIComponent(path.replace("config:", ""))}`
         : `/files/${encodeURIComponent(path)}`;
-    return apiFetch<FileContent>(endpoint);
+    return apiFetchRequired<FileContent>(endpoint);
 }
 
 /** Performs save file content. */
