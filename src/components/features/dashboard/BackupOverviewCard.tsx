@@ -111,13 +111,13 @@ export function BackupOverviewCard() {
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
 
-    /** Handles run backup interactions. */
+    /** Responds to run backup events. */
     const handleRunBackup = async () => {
         await runBackup.mutateAsync();
         setIsConfirmOpen(false);
     };
 
-    /** Handles run walg backup interactions. */
+    /** Responds to run walg backup events. */
     const handleRunWalgBackup = async () => {
         await runWalgBackup.mutateAsync();
     };

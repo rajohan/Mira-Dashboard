@@ -85,7 +85,7 @@ export function ChatComposer({
             return;
         }
 
-        /** Handles pointer down interactions. */
+        /** Responds to pointer down events. */
         const handlePointerDown = (event: PointerEvent) => {
             if (
                 event.target instanceof Node &&
@@ -97,7 +97,7 @@ export function ChatComposer({
             setShowEmojiPicker(false);
         };
 
-        /** Handles key down interactions. */
+        /** Responds to key down events. */
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 setShowEmojiPicker(false);

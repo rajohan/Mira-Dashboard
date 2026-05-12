@@ -403,7 +403,7 @@ export function useChatRuntimeEvents({
             }, delayMs);
         };
 
-        /** Handles runtime transcript event interactions. */
+        /** Responds to runtime transcript event events. */
         const handleRuntimeTranscriptEvent = (
             eventName: string | undefined,
             payload: unknown

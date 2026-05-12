@@ -64,7 +64,7 @@ export function TopQueriesTable({
         );
     }
 
-    /** Handles copy interactions. */
+    /** Responds to copy events. */
     const handleCopy = async () => {
         if (!selectedQuery) return;
         await navigator.clipboard.writeText(selectedQuery.query);
