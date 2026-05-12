@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
@@ -14,7 +15,7 @@ interface TestServer {
 }
 
 const logsDir = "/tmp/openclaw";
-const outsideDir = "/tmp/openclaw-logs-route-outside";
+const outsideDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-outside-"));
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
 
 class FakeWebSocket {

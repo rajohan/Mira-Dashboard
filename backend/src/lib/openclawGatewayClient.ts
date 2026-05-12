@@ -130,7 +130,7 @@ function generateIdentity(): DeviceIdentity {
 export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     fs.mkdirSync(Path.dirname(filePath), { recursive: true });
 
-    if (fs.existsSync(filePath)) {
+    try {
         const parsed = JSON.parse(
             fs.readFileSync(filePath, "utf8")
         ) as Partial<DeviceIdentity> & {
@@ -157,6 +157,8 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
 
             return identity;
         }
+    } catch {
+        // File doesn't exist or is invalid; generate new identity below
     }
 
     const identity = generateIdentity();
@@ -211,6 +213,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private ws: WebSocket | null = null;
     private requestId = 0;
     private readonly pending = new Map<string, PendingRequestEntry>();
+    private static readonly MAX_PENDING_REQUESTS = 1000;
     private closed = false;
     private reconnectTimer: NodeJS.Timeout | null = null;
     private connectChallengeTimer: NodeJS.Timeout | null = null;
@@ -289,6 +292,10 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     request(method: string, params: unknown = {}): Promise<unknown> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
+        }
+
+        if (this.pending.size >= OpenClawGatewayClient.MAX_PENDING_REQUESTS) {
+            return Promise.reject(new Error("Too many pending gateway requests"));
         }
 
         const id = String(++this.requestId);

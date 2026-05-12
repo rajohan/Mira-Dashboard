@@ -24,12 +24,10 @@ const DEFAULT_SETTINGS: Settings = {
 
 function loadSettings(): Settings {
     try {
-        if (fs.existsSync(SETTINGS_FILE)) {
-            const content = fs.readFileSync(SETTINGS_FILE, "utf8");
-            return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
-        }
-    } catch (error) {
-        console.error("[Settings] Load error:", (error as Error).message);
+        const content = fs.readFileSync(SETTINGS_FILE, "utf8");
+        return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
+    } catch {
+        // File doesn't exist or is unreadable; return defaults
     }
     return DEFAULT_SETTINGS;
 }
@@ -37,9 +35,7 @@ function loadSettings(): Settings {
 function saveSettings(settings: Settings): void {
     try {
         const dir = path.dirname(SETTINGS_FILE);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
+        fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf8");
     } catch (error) {
         console.error("[Settings] Save error:", (error as Error).message);

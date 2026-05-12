@@ -9,6 +9,19 @@ import gateway from "../gateway.js";
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
+// Agent IDs may only contain alphanumeric chars, hyphens, underscores, and dots.
+// This prevents path traversal when constructing file paths from agent IDs.
+const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
+
+function isValidAgentId(id: string): boolean {
+    return (
+        typeof id === "string" &&
+        id.length > 0 &&
+        id.length <= 64 &&
+        SAFE_AGENT_ID_RE.test(id)
+    );
+}
+
 // Activity thresholds (in milliseconds)
 const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
 const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
@@ -251,9 +264,6 @@ function parseAgentsConfig(): AgentsConfig | null {
 function getAgentMetadata(agentId: string): AgentMetadata | null {
     const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
     try {
-        if (!FS.existsSync(metadataPath)) {
-            return null;
-        }
         const content = FS.readFileSync(metadataPath, "utf8");
         return JSON5.parse(content) as AgentMetadata;
     } catch {
@@ -265,9 +275,6 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
 function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
     try {
-        if (!FS.existsSync(sessionsFile)) {
-            return [];
-        }
         const content = FS.readFileSync(sessionsFile, "utf8");
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
@@ -692,6 +699,12 @@ export default function agentsRoutes(app: express.Application): void {
             const agentId = Array.isArray(req.params.id)
                 ? req.params.id[0]
                 : req.params.id;
+
+            if (!isValidAgentId(agentId)) {
+                res.status(400).json({ error: "Invalid agent ID" });
+                return;
+            }
+
             const config = parseAgentsConfig();
 
             if (!config) {
@@ -745,6 +758,12 @@ export default function agentsRoutes(app: express.Application): void {
             const agentId = Array.isArray(req.params.id)
                 ? req.params.id[0]
                 : req.params.id;
+
+            if (!isValidAgentId(agentId)) {
+                res.status(400).json({ error: "Invalid agent ID" });
+                return;
+            }
+
             const { currentTask } = req.body as { currentTask?: string };
 
             if (!currentTask || currentTask.trim().length === 0) {
@@ -760,19 +779,15 @@ export default function agentsRoutes(app: express.Application): void {
             );
             const metadataDir = Path.dirname(metadataPath);
 
-            // Ensure directory exists
-            if (!FS.existsSync(metadataDir)) {
-                FS.mkdirSync(metadataDir, { recursive: true });
-            }
+            // Ensure directory exists (mkdirSync is recursive, so no TOCTOU risk)
+            FS.mkdirSync(metadataDir, { recursive: true });
 
-            // Read existing metadata or create new
+            // Read existing metadata or create new (atomic read, no existsSync check)
             let metadata: AgentMetadata = {};
-            if (FS.existsSync(metadataPath)) {
-                try {
-                    metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
-                } catch {
-                    // Start fresh if parse fails
-                }
+            try {
+                metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
+            } catch {
+                // File doesn't exist or is unreadable; start fresh
             }
 
             const safeTask =

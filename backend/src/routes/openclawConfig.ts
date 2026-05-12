@@ -216,8 +216,8 @@ export default function openClawConfigRoutes(app: express.Application): void {
             const name = String(req.params.name || "");
             const enabled = Boolean((req.body as { enabled?: boolean }).enabled);
 
-            if (!name) {
-                res.status(400).json({ error: "Skill name required" });
+            if (!name || !/^[a-zA-Z0-9_-]+$/u.test(name)) {
+                res.status(400).json({ error: "Invalid skill name" });
                 return;
             }
 

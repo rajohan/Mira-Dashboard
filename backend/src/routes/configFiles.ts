@@ -2,6 +2,8 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+import { safePathWithinRoot } from "../lib/safePath.js";
+
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 
@@ -95,14 +97,22 @@ export default function configFilesRoutes(
         }
 
         try {
-            const fullPath = path.join(OPENCLAW_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
 
-            if (!fs.existsSync(fullPath)) {
-                res.status(404).json({ error: "File not found" });
+            if (!fullPath) {
+                res.status(403).json({
+                    error: "Access denied: path outside allowed root",
+                });
                 return;
             }
 
-            const stat = fs.statSync(fullPath);
+            let stat: fs.Stats;
+            try {
+                stat = fs.statSync(fullPath);
+            } catch {
+                res.status(404).json({ error: "File not found" });
+                return;
+            }
 
             if (stat.isDirectory()) {
                 res.status(400).json({ error: "Path is a directory, not a file" });
@@ -164,17 +174,23 @@ export default function configFilesRoutes(
         }
 
         try {
-            const fullPath = path.join(OPENCLAW_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
+
+            if (!fullPath) {
+                res.status(403).json({
+                    error: "Access denied: path outside allowed root",
+                });
+                return;
+            }
 
             // Create backup
-            if (fs.existsSync(fullPath)) {
+            try {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } else {
+            } catch {
+                // File doesn't exist yet; ensure parent directory exists
                 const parentDir = path.dirname(fullPath);
-                if (!fs.existsSync(parentDir)) {
-                    fs.mkdirSync(parentDir, { recursive: true });
-                }
+                fs.mkdirSync(parentDir, { recursive: true });
             }
 
             fs.writeFileSync(fullPath, content, "utf8");

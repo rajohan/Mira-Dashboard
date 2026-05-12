@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 
 import dotenv from "dotenv";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -77,6 +78,28 @@ const healthHandler: express.RequestHandler = (_req, res) => {
 
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
+
+// Rate limiting: general API (60 req/min per IP)
+const apiLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later" },
+});
+
+// Stricter limit for auth endpoints (10 req/min per IP)
+const authLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many authentication attempts, please try again later" },
+});
+
+// Apply rate limiting before auth middleware
+app.use("/api/auth", authLimiter);
+app.use("/api", apiLimiter);
 
 app.get("/api/sessions", (request, response) => {
     const user = getAuthUserFromRequest(request);

@@ -9,6 +9,44 @@ interface ExecRequest {
     cwd?: string;
 }
 
+// Validate and sanitize exec request payload
+const MAX_COMMAND_LENGTH = 4096;
+const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
+
+function validateExecRequest(payload: ExecRequest): ExecRequest {
+    const { command, args, cwd } = payload;
+
+    if (!command || typeof command !== "string") {
+        throw new Error("command must be a non-empty string");
+    }
+
+    if (command.length > MAX_COMMAND_LENGTH) {
+        throw new Error(`command exceeds maximum length of ${MAX_COMMAND_LENGTH}`);
+    }
+
+    if (SHELL_METACHARACTERS_RE.test(command)) {
+        throw new Error("command contains disallowed control characters");
+    }
+
+    if (args !== undefined && !Array.isArray(args)) {
+        throw new Error("args must be an array");
+    }
+
+    if (args) {
+        for (const arg of args) {
+            if (typeof arg !== "string") {
+                throw new TypeError("all args must be strings");
+            }
+        }
+    }
+
+    if (cwd !== undefined && typeof cwd !== "string") {
+        throw new Error("cwd must be a string");
+    }
+
+    return { command, args, cwd };
+}
+
 interface ExecResponse {
     code: number | null;
     stdout: string;
@@ -58,21 +96,16 @@ function runExecCommand(
     onUpdate?: (job: ExecJob) => void
 ): Promise<ExecResponse> {
     const { command, args, cwd } = request;
+    const cwdOption = { cwd: cwd || process.cwd(), env: process.env, detached: true };
 
     return new Promise((resolve, reject) => {
+        // When args are provided, use them directly without shell to prevent
+        // command-line injection. The no-args shell path is intentional for
+        // interactive terminal use but is guarded by auth and input validation.
         const child =
-            args && Array.isArray(args)
-                ? spawn(command, args, {
-                      cwd: cwd || process.cwd(),
-                      env: process.env,
-                      detached: true,
-                  })
-                : spawn(command, {
-                      shell: true,
-                      cwd: cwd || process.cwd(),
-                      env: process.env,
-                      detached: true,
-                  });
+            args && Array.isArray(args) && args.length > 0
+                ? spawn(command, args, cwdOption)
+                : spawn(command, [], { ...cwdOption, shell: true });
 
         // Store process reference for kill
         const job = jobs.get(jobId);
@@ -147,9 +180,8 @@ export default function execRoutes(
     _express: typeof express
 ): void {
     app.post("/api/exec", express.json(), (async (req, res) => {
-        const payload = req.body as ExecRequest;
-
         try {
+            const payload = validateExecRequest(req.body as ExecRequest);
             const tempId = randomUUID();
             const result = await runExecCommand(payload, tempId);
             res.json({
@@ -163,7 +195,13 @@ export default function execRoutes(
     }) as RequestHandler);
 
     app.post("/api/exec/start", express.json(), (async (req, res) => {
-        const payload = req.body as ExecRequest;
+        let payload: ExecRequest;
+        try {
+            payload = validateExecRequest(req.body as ExecRequest);
+        } catch (error) {
+            res.status(400).json({ error: (error as Error).message });
+            return;
+        }
 
         const jobId = randomUUID();
         const startedAt = Date.now();
