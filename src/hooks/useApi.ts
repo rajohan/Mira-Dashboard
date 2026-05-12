@@ -39,7 +39,16 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
         throw new Error(error.error || `HTTP ${response.status}`);
     }
 
-    return response.json() as Promise<T>;
+    if (response.status === 204) {
+        return undefined as T;
+    }
+
+    const text = await response.text();
+    if (!text) {
+        return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
 }
 
 /** Performs API post. */
