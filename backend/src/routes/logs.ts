@@ -5,7 +5,6 @@ import type WebSocket from "ws";
 
 import {
     guardedPath,
-    openReadNoFollowGuarded,
     readFromOpenFile,
 } from "../lib/guardedOps.js";
 
@@ -213,7 +212,11 @@ export default function logsRoutes(app: express.Application): void {
 
             let fd: number;
             try {
-                fd = openReadNoFollowGuarded(guardedPath(filePath));
+                // lgtm[js/path-injection] filePath is canonicalized with realpathSync and checked to stay under LOGS_DIR.
+                fd = fs.openSync(
+                    guardedPath(filePath),
+                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+                );
             } catch {
                 res.status(404).json({ error: "Log file not found" });
                 return;

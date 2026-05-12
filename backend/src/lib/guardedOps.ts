@@ -41,13 +41,15 @@ export function readTextGuarded(path: GuardedPath): string {
 }
 
 /** Reads UTF-8 text while atomically refusing a symlink at the final path. */
-export function readTextNoFollowGuarded(path: GuardedPath): string {
-    const fd = openReadNoFollowGuarded(path);
+export async function readTextNoFollowGuarded(path: GuardedPath): Promise<string> {
+    const file = await Fs.promises.open(
+        guardedPathBuffer(path),
+        Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+    );
     try {
-        const stat = Fs.fstatSync(fd);
-        return readFromOpenFile(fd, stat.size).toString("utf8");
+        return await file.readFile("utf8");
     } finally {
-        Fs.closeSync(fd);
+        await file.close();
     }
 }
 
@@ -106,14 +108,6 @@ export async function writeTextNoFollowGuarded(
 /** Stats a validated path. */
 export function statGuarded(path: GuardedPath): Fs.Stats {
     return fsOps.statSync(guardedPathBuffer(path));
-}
-
-/** Opens a validated path for reading while refusing a final-component symlink. */
-export function openReadNoFollowGuarded(path: GuardedPath): number {
-    return fsOps.openSync(
-        guardedPathBuffer(path),
-        Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
-    );
 }
 
 /** Spawns a validated executable with explicit argument vector semantics. */

@@ -811,7 +811,9 @@ export default function agentsRoutes(app: express.Application): void {
             let metadata: AgentMetadata = {};
             try {
                 // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
-                metadata = JSON5.parse(readTextNoFollowGuarded(guardedPath(safeMetadataPath)));
+                metadata = JSON5.parse(
+                    await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
+                );
             } catch {
                 // File doesn't exist or is unreadable; start fresh
             }
