@@ -1,0 +1,10 @@
+# CodeQL analysis configuration for Mira Dashboard
+
+name: Mira Dashboard CodeQL Config
+
+# Exclude test files and generated code from analysis
+paths-ignore:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/*.test.ts"
+    - "**/*.test.tsx"
