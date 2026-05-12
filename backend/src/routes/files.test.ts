@@ -147,6 +147,13 @@ describe("files routes", () => {
         assert.equal(nestedUnderFile.status, 404);
         assert.equal(nestedUnderFile.body.error, "File not found");
 
+        const invalidNullByte = await requestJson<{ error: string }>(
+            server,
+            "/api/files/a%00b"
+        );
+        assert.equal(invalidNullByte.status, 404);
+        assert.equal(invalidNullByte.body.error, "File not found");
+
         await symlink("loop", path.join(workspaceRoot, "loop"));
         try {
             const symlinkLoop = await requestJson<{ error: string }>(

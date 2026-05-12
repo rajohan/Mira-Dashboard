@@ -144,6 +144,14 @@ describe("logs routes", () => {
             error: "Log file not found",
         });
 
+        const invalidNullByte = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("openclaw.log\0x")}`
+        );
+        assert.equal(invalidNullByte.status, 404);
+        assert.deepEqual(await invalidNullByte.json(), {
+            error: "Log file not found",
+        });
+
         const rootDirectory = await fetch(
             `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(".")}`
         );

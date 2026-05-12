@@ -206,7 +206,12 @@ export default function logsRoutes(app: express.Application): void {
                 filePath = fs.realpathSync(candidatePath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                if (
+                    code === "ENOENT" ||
+                    code === "ENOTDIR" ||
+                    code === "ELOOP" ||
+                    code === "ERR_INVALID_ARG_VALUE"
+                ) {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }

@@ -186,7 +186,12 @@ export default function filesRoutes(
                 fullPath = fs.realpathSync(candidatePath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                if (
+                    code === "ENOENT" ||
+                    code === "ENOTDIR" ||
+                    code === "ELOOP" ||
+                    code === "ERR_INVALID_ARG_VALUE"
+                ) {
                     res.status(404).json({ error: "File not found" });
                     return;
                 }
