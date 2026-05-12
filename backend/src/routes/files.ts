@@ -224,7 +224,9 @@ export default function filesRoutes(
                 // Handle image files
                 if (isImageFile(filename)) {
                     if (stat.size > MAX_FILE_SIZE) {
-                        res.status(413).json({ error: "Image file is too large to preview" });
+                        res.status(413).json({
+                            error: "Image file is too large to preview",
+                        });
                         return;
                     }
 
