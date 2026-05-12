@@ -842,7 +842,7 @@ export default function agentsRoutes(app: express.Application): void {
             metadata.updatedAt = ts;
 
             // Write back
-            writeTextGuarded(
+            await writeTextGuarded(
                 guardedPath(metadataPath),
                 JSON.stringify(metadata, null, 2)
             );

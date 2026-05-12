@@ -11,7 +11,6 @@ const fsOps = Fs as unknown as {
     mkdirSync: typeof Fs.mkdirSync;
     readFileSync: typeof Fs.readFileSync;
     copyFileSync: typeof Fs.copyFileSync;
-    writeFileSync: typeof Fs.writeFileSync;
     statSync: typeof Fs.statSync;
     openSync: typeof Fs.openSync;
 };
@@ -40,9 +39,16 @@ export function copyGuarded(source: GuardedPath, destination: GuardedPath): void
     fsOps.copyFileSync(guardedPathBuffer(source), guardedPathBuffer(destination));
 }
 
-export function writeTextGuarded(path: GuardedPath, content: string): void {
-    const contentToWrite = JSON.parse(JSON.stringify(content)) as string;
-    fsOps.writeFileSync(guardedPathBuffer(path), contentToWrite, "utf8");
+export async function writeTextGuarded(
+    path: GuardedPath,
+    content: string
+): Promise<void> {
+    const file = await Fs.promises.open(guardedPathBuffer(path), "w");
+    try {
+        await file.writeFile(content, "utf8");
+    } finally {
+        await file.close();
+    }
 }
 
 export function statGuarded(path: GuardedPath): Fs.Stats {

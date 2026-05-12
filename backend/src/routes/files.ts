@@ -316,7 +316,7 @@ export default function filesRoutes(
                 mkdirGuarded(guardedPath(path.dirname(fullPath)), { recursive: true });
             }
 
-            writeTextGuarded(guardedPath(fullPath), content);
+            await writeTextGuarded(guardedPath(fullPath), content);
             const stat = statGuarded(guardedPath(fullPath));
 
             res.json({
