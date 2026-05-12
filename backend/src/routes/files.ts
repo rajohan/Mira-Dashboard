@@ -173,14 +173,26 @@ export default function filesRoutes(
                 return;
             }
 
-            // Open file first to avoid TOCTOU race between stat and read
+            // Open file first to avoid TOCTOU race between stat and read.
+            // O_NOFOLLOW rejects a final-component symlink if the path is swapped
+            // after canonicalization but before open.
             let fd: number | undefined;
             try {
                 // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
-                fd = fs.openSync(fullPath, "r");
+                fd = fs.openSync(
+                    fullPath,
+                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+                );
             } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT") {
                     res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                if (code === "ELOOP") {
+                    res.status(403).json({
+                        error: "Access denied: symlinks are not readable",
+                    });
                     return;
                 }
                 throw error;

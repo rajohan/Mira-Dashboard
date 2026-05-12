@@ -75,5 +75,10 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
  * Strips path separators and parent directory references.
  */
 export function sanitizeFilename(name: string): string {
-    return path.basename(name);
+    const base = path.basename(name);
+    if (!base || base === "." || base === ".." || base.includes("\0")) {
+        throw new Error("Invalid filename");
+    }
+
+    return base;
 }
