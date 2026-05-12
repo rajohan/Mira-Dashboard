@@ -200,9 +200,9 @@ export function useDeleteTask() {
 /** Provides task updates. */
 export function useTaskUpdates(taskId: number | null) {
     return useQuery({
-        queryKey: taskId ? taskKeys.updates(taskId) : taskKeys.all,
+        queryKey: taskId === null ? taskKeys.all : taskKeys.updates(taskId),
         queryFn: () => fetchTaskUpdates(taskId!),
-        enabled: !!taskId,
+        enabled: taskId !== null,
         staleTime: 5_000,
         refetchInterval: AUTO_REFRESH_MS,
     });
