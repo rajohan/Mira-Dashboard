@@ -40,7 +40,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     }
 
     if (response.status === 204) {
-        return undefined as T;
+        return {} as T;
     }
 
     if (typeof response.text !== "function") {
@@ -49,7 +49,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
 
     const text = await response.text();
     if (!text) {
-        return undefined as T;
+        return {} as T;
     }
 
     return JSON.parse(text) as T;
