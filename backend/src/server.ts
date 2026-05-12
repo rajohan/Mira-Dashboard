@@ -44,7 +44,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.set("trust proxy", 1);
+const trustProxy = process.env.TRUST_PROXY ?? "loopback";
+app.set("trust proxy", trustProxy);
 app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -88,6 +89,7 @@ const apiLimiter = rateLimit({
     max: 600,
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (request) => request.path.startsWith("/auth"),
     message: { error: "Too many requests, please try again later" },
 });
 

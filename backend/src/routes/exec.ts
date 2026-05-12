@@ -166,9 +166,17 @@ function resolveCwd(cwd: string | undefined): string {
         throw new ExecValidationError("cwd must be an absolute path");
     }
 
-    // cwd must be an absolute path without null bytes; it is canonicalized before use as child_process cwd.
-    // codeql[js/path-injection]
-    return fs.realpathSync(cwd);
+    try {
+        // cwd must be an absolute path without null bytes; it is canonicalized before use as child_process cwd.
+        // codeql[js/path-injection]
+        return fs.realpathSync(cwd);
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") {
+            throw new ExecValidationError("cwd does not exist");
+        }
+        throw error;
+    }
 }
 
 function getApprovedShellCommand(command: string): string {
