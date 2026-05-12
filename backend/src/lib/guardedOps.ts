@@ -13,7 +13,10 @@ const fsOps = Fs as unknown as {
     readFileSync: typeof Fs.readFileSync;
     copyFileSync: typeof Fs.copyFileSync;
     statSync: typeof Fs.statSync;
-    openSync: typeof Fs.openSync;
+};
+
+const fsPromiseOps = Fs.promises as unknown as {
+    open: typeof Fs.promises.open;
 };
 
 const childProcessOps = ChildProcess as unknown as {
@@ -42,10 +45,7 @@ export function readTextGuarded(path: GuardedPath): string {
 
 /** Reads UTF-8 text while atomically refusing a symlink at the final path. */
 export async function readTextNoFollowGuarded(path: GuardedPath): Promise<string> {
-    const file = await Fs.promises.open(
-        guardedPathBuffer(path),
-        Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
-    );
+    const file = await openReadNoFollowGuarded(path);
     try {
         return await file.readFile("utf8");
     } finally {
@@ -70,6 +70,16 @@ export function readFromOpenFile(fd: number, byteLength: number): Buffer {
 /** Copies a file between two validated paths. */
 export function copyGuarded(source: GuardedPath, destination: GuardedPath): void {
     fsOps.copyFileSync(guardedPathBuffer(source), guardedPathBuffer(destination));
+}
+
+/** Opens a validated path for reading while refusing a final-component symlink. */
+export async function openReadNoFollowGuarded(
+    path: GuardedPath
+): Promise<Fs.promises.FileHandle> {
+    return Reflect.apply(fsPromiseOps.open, Fs.promises, [
+        guardedPathBuffer(path),
+        Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW,
+    ]) as Promise<Fs.promises.FileHandle>;
 }
 
 /** Writes UTF-8 text to a validated path. */

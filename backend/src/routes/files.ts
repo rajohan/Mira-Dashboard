@@ -6,6 +6,7 @@ import {
     copyGuarded,
     guardedPath,
     mkdirGuarded,
+    openReadNoFollowGuarded,
     statGuarded,
     writeTextGuarded,
 } from "../lib/guardedOps.js";
@@ -185,11 +186,7 @@ export default function filesRoutes(
             // after canonicalization but before open.
             let file: fs.promises.FileHandle | undefined;
             try {
-                // codeql[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT before this no-follow open.
-                file = await fs.promises.open(
-                    guardedPath(fullPath),
-                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-                );
+                file = await openReadNoFollowGuarded(guardedPath(fullPath));
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT") {
