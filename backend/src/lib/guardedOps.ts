@@ -41,12 +41,8 @@ export function copyGuarded(source: GuardedPath, destination: GuardedPath): void
 }
 
 export function writeTextGuarded(path: GuardedPath, content: string): void {
-    const fd = fsOps.openSync(guardedPathBuffer(path), "w");
-    try {
-        Fs.writevSync(fd, [Buffer.from(content, "utf8")]);
-    } finally {
-        Fs.closeSync(fd);
-    }
+    const contentToWrite = JSON.parse(JSON.stringify(content)) as string;
+    fsOps.writeFileSync(guardedPathBuffer(path), contentToWrite, "utf8");
 }
 
 export function statGuarded(path: GuardedPath): Fs.Stats {
