@@ -72,7 +72,8 @@ export function useAgentTaskHistory(limit = 8) {
 export function useAgentStatus(agentId: string) {
     return useQuery<Agent>({
         queryKey: ["agents", "status", agentId],
-        queryFn: () => apiFetchRequired<Agent>(`/agents/${agentId}/status`),
+        queryFn: () =>
+            apiFetchRequired<Agent>(`/agents/${encodeURIComponent(agentId)}/status`),
         refetchInterval: 5000,
         staleTime: 4000,
     });

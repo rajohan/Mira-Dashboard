@@ -117,7 +117,8 @@ export function useStartOpsAction() {
 export function useExecJob(jobId: string | null) {
     return useQuery({
         queryKey: ["exec-job", jobId],
-        queryFn: () => apiFetchRequired<ExecJobResponse>(`/exec/${jobId}`),
+        queryFn: () =>
+            apiFetchRequired<ExecJobResponse>(`/exec/${encodeURIComponent(jobId || "")}`),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as ExecJobResponse | undefined)?.status;

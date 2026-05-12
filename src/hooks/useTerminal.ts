@@ -43,7 +43,10 @@ export function useStartTerminalCommand() {
 export function useTerminalJob(jobId: string | null) {
     return useQuery({
         queryKey: terminalKeys.job(jobId),
-        queryFn: () => apiFetchRequired<TerminalJobResponse>(`/exec/${jobId}`),
+        queryFn: () =>
+            apiFetchRequired<TerminalJobResponse>(
+                `/exec/${encodeURIComponent(jobId || "")}`
+            ),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as TerminalJobResponse | undefined)?.status;
@@ -102,7 +105,7 @@ export async function changeDirectory(path: string, cwd: string): Promise<CdResp
 
 /** Performs stop terminal job. */
 export async function stopTerminalJob(jobId: string): Promise<void> {
-    await apiPost(`/exec/${jobId}/stop`, {});
+    await apiPost(`/exec/${encodeURIComponent(jobId)}/stop`, {});
 }
 
 /** Provides terminal history. */

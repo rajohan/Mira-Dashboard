@@ -51,7 +51,7 @@ export async function apiFetch<T>(
     }
 
     const text = await response.text();
-    if (!text) {
+    if (!text.trim()) {
         return undefined;
     }
 
