@@ -214,6 +214,11 @@ export default function filesRoutes(
 
                 // Handle image files
                 if (isImageFile(filename)) {
+                    if (stat.size > MAX_FILE_SIZE) {
+                        res.status(413).json({ error: "Image file is too large to preview" });
+                        return;
+                    }
+
                     const buffer = await file.readFile();
                     const base64 = buffer.toString("base64");
                     const mimeType = getImageMimeType(filename);
