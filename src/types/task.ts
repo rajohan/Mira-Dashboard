@@ -1,6 +1,5 @@
 import type { TaskAssigneeId } from "../constants/taskActors";
 
-/** Describes task automation. */
 export interface TaskAutomation {
     type: "cron";
     recurring: boolean;
@@ -20,7 +19,6 @@ export interface TaskAutomation {
     source?: "cron" | "stored";
 }
 
-/** Describes task. */
 export interface Task {
     number: number;
     title: string;
@@ -34,7 +32,6 @@ export interface Task {
     automation?: TaskAutomation;
 }
 
-/** Describes task update. */
 export interface TaskUpdate {
     id: number;
     taskId: number;
@@ -43,5 +40,4 @@ export interface TaskUpdate {
     createdAt: string;
 }
 
-/** Defines column id. */
 export type ColumnId = "todo" | "in-progress" | "blocked" | "done";

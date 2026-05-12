@@ -7,7 +7,6 @@ import { authActions } from "../../stores/authStore";
 import { Button } from "../ui/Button";
 import { NotificationBell } from "./NotificationBell";
 
-/** Describes app header props. */
 interface AppHeaderProps {
     title: string;
     isSidebarOpen: boolean;
@@ -15,7 +14,6 @@ interface AppHeaderProps {
     onOpenSidebar: () => void;
 }
 
-/** Renders the app header UI. */
 export function AppHeader({
     title,
     isSidebarOpen,

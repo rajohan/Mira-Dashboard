@@ -2,7 +2,6 @@ import { RefreshCw } from "lucide-react";
 
 import { Button } from "./Button";
 
-/** Describes refresh button props. */
 interface RefreshButtonProps {
     onClick: () => void;
     isLoading?: boolean;
@@ -12,7 +11,6 @@ interface RefreshButtonProps {
     variant?: "primary" | "secondary" | "ghost" | "danger";
 }
 
-/** Renders the refresh button UI. */
 export function RefreshButton({
     onClick,
     isLoading = false,

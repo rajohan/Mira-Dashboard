@@ -7,7 +7,6 @@ import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 
-/** Describes tool settings. */
 interface ToolSettings {
     profile?: string;
     webSearchEnabled: boolean;
@@ -20,13 +19,11 @@ interface ToolSettings {
     sessionsVisibility?: string;
 }
 
-/** Describes tool section props. */
 interface ToolSectionProps extends ToolSettings {
     onSave: (values: ToolSettings) => Promise<void>;
     saving: boolean;
 }
 
-/** Renders the tool section UI. */
 export function ToolSection({
     profile,
     webSearchEnabled,

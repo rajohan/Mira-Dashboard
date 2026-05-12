@@ -1,12 +1,10 @@
 import { type LogEntry } from "../../../types/log";
 import { formatLogTime, getLevelColor, getSubsystemColor } from "../../../utils/logUtils";
 
-/** Describes log line props. */
 interface LogLineProps {
     log: LogEntry;
 }
 
-/** Renders the log line UI. */
 export function LogLine({ log }: LogLineProps) {
     const level = typeof log.level === "string" ? log.level : "";
     const subsystem = typeof log.subsystem === "string" ? log.subsystem : "";

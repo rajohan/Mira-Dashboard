@@ -16,7 +16,6 @@ import { EmptyState } from "../../ui/EmptyState";
 
 const columnHelper = createColumnHelper<DockerVolume>();
 
-/** Handles truncate middle. */
 function truncateMiddle(value: string, maxLength = 48): string {
     if (value.length <= maxLength) {
         return value;
@@ -27,7 +26,6 @@ function truncateMiddle(value: string, maxLength = 48): string {
     return `${value.slice(0, startLength)}...${value.slice(-endLength)}`;
 }
 
-/** Describes docker volumes table props. */
 interface DockerVolumesTableProps {
     volumes: DockerVolume[];
     onDelete: (volumeName: string) => void;
@@ -35,7 +33,6 @@ interface DockerVolumesTableProps {
     isPruning?: boolean;
 }
 
-/** Renders the docker volumes table UI. */
 export function DockerVolumesTable({
     volumes,
     onDelete,

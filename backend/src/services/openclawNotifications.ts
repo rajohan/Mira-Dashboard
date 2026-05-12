@@ -4,13 +4,11 @@ import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 
-/** Describes alert state. */
 interface AlertState {
     is_armed: number;
     last_latest: string | null;
 }
 
-/** Handles get state. */
 function getState(): AlertState {
     const row = db
         .prepare("SELECT is_armed, last_latest FROM openclaw_alert_state WHERE id = 1")
@@ -22,7 +20,6 @@ function getState(): AlertState {
     };
 }
 
-/** Handles set state. */
 function setState(state: AlertState): void {
     db.prepare(
         `INSERT INTO openclaw_alert_state (id, is_armed, last_latest, updated_at)
@@ -34,7 +31,6 @@ function setState(state: AlertState): void {
     ).run(state.is_armed, state.last_latest, new Date().toISOString());
 }
 
-/** Handles insert update available notification. */
 function insertUpdateAvailableNotification(current: string, latest: string): void {
     const now = new Date().toISOString();
     const dedupeKey = `openclaw:update:${latest}`;
@@ -64,7 +60,6 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 
 let running = false;
 
-/** Handles run open claw notification check. */
 export async function runOpenClawNotificationCheck(): Promise<void> {
     if (running) {
         return;
@@ -105,7 +100,6 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
     }
 }
 
-/** Handles start open claw notification monitor. */
 export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000

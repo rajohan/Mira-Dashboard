@@ -3,7 +3,6 @@ import { ChevronDown } from "lucide-react";
 
 import { Card, CardTitle } from "../ui/Card";
 
-/** Describes expandable card props. */
 interface ExpandableCardProps {
     title: string;
     icon: React.ComponentType<{ size?: number; className?: string }>;
@@ -11,7 +10,6 @@ interface ExpandableCardProps {
     defaultExpanded?: boolean;
 }
 
-/** Renders the expandable card UI. */
 export function ExpandableCard({
     title,
     icon: Icon,
@@ -38,7 +36,6 @@ export function ExpandableCard({
     );
 }
 
-/** Renders the read only field UI. */
 export function ReadOnlyField({
     label,
     value,

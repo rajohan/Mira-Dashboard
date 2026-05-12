@@ -21,7 +21,6 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 
-/** Describes chat messages list props. */
 interface ChatMessagesListProps {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
@@ -38,7 +37,6 @@ interface ChatMessagesListProps {
     onDeleteMessage: (messageKey: string) => void;
 }
 
-/** Renders the attachment icon UI. */
 function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     if (attachment.kind === "image") {
         return <ImageIcon className="h-4 w-4" />;
@@ -51,14 +49,12 @@ function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     return <Paperclip className="h-4 w-4" />;
 }
 
-/** Handles base64 to text. */
 function base64ToText(base64: string): string {
     const binary = window.atob(base64);
     const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
     return new TextDecoder().decode(bytes);
 }
 
-/** Handles preview from attachment. */
 function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -86,7 +82,6 @@ function previewFromAttachment(
     };
 }
 
-/** Renders the attachment list UI. */
 function AttachmentList({
     attachments,
     onPreview,
@@ -142,7 +137,6 @@ function AttachmentList({
     );
 }
 
-/** Renders the delete message button UI. */
 function DeleteMessageButton({
     messageKey,
     onDelete,
@@ -163,7 +157,6 @@ function DeleteMessageButton({
     );
 }
 
-/** Renders the tts button UI. */
 function TtsButton({
     text,
     messageKey,
@@ -204,7 +197,6 @@ function TtsButton({
     );
 }
 
-/** Renders the typing indicator UI. */
 function TypingIndicator({ text = "Thinking" }: { text?: string }) {
     return (
         <div className="flex justify-start pb-3">
@@ -228,7 +220,6 @@ function TypingIndicator({ text = "Thinking" }: { text?: string }) {
     );
 }
 
-/** Renders the chat messages list UI. */
 export function ChatMessagesList({
     isLoadingHistory,
     isAtBottom,
@@ -249,7 +240,6 @@ export function ChatMessagesList({
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
     const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
 
-    /** Handles stop audio. */
     const stopAudio = () => {
         audioReference.current?.pause();
         audioReference.current = null;
@@ -262,7 +252,6 @@ export function ChatMessagesList({
         setPlayingMessageKey(null);
     };
 
-    /** Handles speak message. */
     const speakMessage = async (messageKey: string, text: string) => {
         if (playingMessageKey === messageKey) {
             stopAudio();

@@ -4,7 +4,6 @@ import { Card } from "../components/ui/Card";
 import { LoadingState } from "../components/ui/LoadingState";
 import { useAgentsStatus } from "../hooks/useAgents";
 
-/** Renders the agents UI. */
 export function Agents() {
     const { data, isLoading, error } = useAgentsStatus();
 

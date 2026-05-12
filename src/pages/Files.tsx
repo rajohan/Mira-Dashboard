@@ -7,7 +7,6 @@ import { RefreshButton } from "../components/ui/RefreshButton";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { getSyntaxClass } from "../utils/fileUtils";
 
-/** Renders the files UI. */
 export function Files() {
     const {
         files,

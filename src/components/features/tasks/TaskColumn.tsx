@@ -5,7 +5,6 @@ import type { ColumnId, Task } from "../../../types/task";
 import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
 import { TaskCard } from "./TaskCard";
 
-/** Describes task column props. */
 interface TaskColumnProps {
     id: ColumnId;
     tasks: Task[];
@@ -13,7 +12,6 @@ interface TaskColumnProps {
     onTaskClick: (task: Task) => void;
 }
 
-/** Renders the task column UI. */
 export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) {
     const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
     const { setNodeRef } = useDroppable({ id });

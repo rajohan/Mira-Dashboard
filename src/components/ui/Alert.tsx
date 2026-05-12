@@ -2,10 +2,8 @@ import { AlertCircle, CheckCircle, Info, XCircle } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-/** Defines alert variant. */
 type AlertVariant = "error" | "success" | "warning" | "info";
 
-/** Describes alert props. */
 interface AlertProps {
     variant?: AlertVariant;
     title?: string;
@@ -43,7 +41,6 @@ const variants: Record<
     },
 };
 
-/** Renders the alert UI. */
 export function Alert({ variant = "info", title, children, className }: AlertProps) {
     const { border, bg, text, icon } = variants[variant];
 

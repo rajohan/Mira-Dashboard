@@ -11,7 +11,6 @@ import {
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
-/** Renders the cron overview card UI. */
 export function CronOverviewCard() {
     const { data: jobs = [] } = useCronJobs();
 

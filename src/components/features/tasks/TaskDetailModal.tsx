@@ -18,7 +18,6 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
-/** Handles format elapsed ms. */
 function formatElapsedMs(value: number): string {
     if (!Number.isFinite(value) || value < 0) {
         return "—";
@@ -40,7 +39,6 @@ function formatElapsedMs(value: number): string {
     return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
-/** Describes task detail modal props. */
 interface TaskDetailModalProps {
     task: Task | null;
     onClose: () => void;
@@ -62,7 +60,6 @@ interface TaskDetailModalProps {
     onDeleteUpdate: (updateId: number) => Promise<void>;
 }
 
-/** Renders the task detail modal UI. */
 export function TaskDetailModal({
     task,
     onClose,
@@ -136,26 +133,22 @@ export function TaskDetailModal({
               ? TASK_ASSIGNEES.raymond.githubUrl
               : null;
 
-    /** Handles handle move. */
     const handleMove = async (column: ColumnId) => {
         await onMove(column);
     };
 
-    /** Handles handle assign. */
     const handleAssign = async (assignee: TaskAssigneeId) => {
         setIsAssigning(true);
         await onAssign(assignee);
         setIsAssigning(false);
     };
 
-    /** Handles handle delete task. */
     const handleDeleteTask = async () => {
         setIsDeleting(true);
         await onDelete();
         setIsDeleting(false);
     };
 
-    /** Handles handle save task. */
     const handleSaveTask = async () => {
         const nextLabels = task.labels
             .map((label) => label.name)
@@ -189,7 +182,6 @@ export function TaskDetailModal({
         setIsEditingTask(false);
     };
 
-    /** Handles handle add update. */
     const handleAddUpdate = async () => {
         if (!progressMessage.trim()) {
             return;
@@ -199,13 +191,11 @@ export function TaskDetailModal({
         setProgressMessage("");
     };
 
-    /** Handles start edit update. */
     const startEditUpdate = (update: TaskUpdate) => {
         setEditingUpdateId(update.id);
         setEditingUpdateMessage(update.messageMd);
     };
 
-    /** Handles save update edit. */
     const saveUpdateEdit = async () => {
         if (!editingUpdateId || !editingUpdateMessage.trim()) {
             return;

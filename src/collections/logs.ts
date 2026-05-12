@@ -5,7 +5,6 @@ import { queryClient } from "../lib/queryClient";
 import type { LogEntry } from "../types/log";
 import { parseLogLine } from "../utils/logUtils";
 
-/** Stores logs collection. */
 export const logsCollection = createCollection(
     queryCollectionOptions({
         queryKey: ["logs"],
@@ -18,7 +17,6 @@ export const logsCollection = createCollection(
 
 void logsCollection.preload();
 
-/** Handles write log from web socket. */
 export function writeLogFromWebSocket(line: string) {
     if (!logsCollection.isReady()) {
         return;

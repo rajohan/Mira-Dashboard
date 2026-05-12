@@ -18,7 +18,6 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 let lastVisibleLogFiles: LogFile[] = [];
 
-/** Handles is named log file. */
 function isNamedLogFile(file: unknown): file is LogFile {
     return (
         Boolean(file) &&
@@ -28,12 +27,10 @@ function isNamedLogFile(file: unknown): file is LogFile {
     );
 }
 
-/** Handles compare log file names descending. */
 function compareLogFileNamesDescending(a: { name?: unknown }, b: { name?: unknown }) {
     return String(b.name || "").localeCompare(String(a.name || ""));
 }
 
-/** Renders the logs UI. */
 export function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [lineCount, setLineCount] = useState<number>(100);
@@ -113,7 +110,6 @@ export function Logs() {
         });
     }, [isConnected, connectionId, request]);
 
-    /** Handles load log content. */
     const loadLogContent = async () => {
         if (!selectedFile) return;
 
@@ -163,7 +159,6 @@ export function Logs() {
         return true;
     });
 
-    /** Handles toggle level. */
     const toggleLevel = (level: string) => {
         const next = new Set(levelFilter);
         if (next.has(level)) {
@@ -174,7 +169,6 @@ export function Logs() {
         setLevelFilter(next);
     };
 
-    /** Handles handle export. */
     const handleExport = () => {
         const content = filteredLogs
             .map((log) => (typeof log.raw === "string" ? log.raw : String(log.msg || "")))
@@ -197,7 +191,6 @@ export function Logs() {
         measureElement: (element) => Math.ceil(element.getBoundingClientRect().height),
     });
 
-    /** Handles check is at bottom. */
     const checkIsAtBottom = () => {
         const el = logContainerRef.current;
         if (!el) return true;
@@ -206,7 +199,6 @@ export function Logs() {
         );
     };
 
-    /** Handles handle scroll. */
     const handleScroll = () => {
         const el = logContainerRef.current;
         if (el) {
@@ -218,7 +210,6 @@ export function Logs() {
         setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
-    /** Handles scroll to bottom. */
     const scrollToBottom = () => {
         const el = logContainerRef.current;
         if (!el) return;
@@ -232,7 +223,6 @@ export function Logs() {
         if (filteredLogs.length === 0) return;
 
         if (!shouldStickToBottomRef.current) {
-            /** Handles restore scroll top. */
             const restoreScrollTop = () => {
                 const el = logContainerRef.current;
                 if (!el || shouldStickToBottomRef.current) {
@@ -259,7 +249,6 @@ export function Logs() {
 
     const sortedLogFiles = [...availableLogFiles].sort(compareLogFileNamesDescending);
 
-    /** Handles clear logs. */
     const clearLogs = () => {
         const existingKeys = Array.from(logsCollection, ([key]) => String(key));
         for (const key of existingKeys) {

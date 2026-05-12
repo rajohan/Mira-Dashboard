@@ -12,7 +12,6 @@ import { type ReactNode, useState } from "react";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
-/** Describes props. */
 interface Props<T extends object> {
     data: T[];
     // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.
@@ -24,7 +23,6 @@ interface Props<T extends object> {
     renderMobileCard?: (row: T) => ReactNode;
 }
 
-/** Renders the database table shell UI. */
 export function DatabaseTableShell<T extends object>({
     data,
     columns,

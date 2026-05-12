@@ -1,6 +1,5 @@
 import { getCacheEntry, parseJsonField } from "./cacheStore.js";
 
-/** Describes cached open claw version. */
 export interface CachedOpenClawVersion {
     current: string;
     latest: string | null;
@@ -8,7 +7,6 @@ export interface CachedOpenClawVersion {
     checkedAt: number;
 }
 
-/** Describes system host payload. */
 interface SystemHostPayload {
     version?: CachedOpenClawVersion;
     gateway?: Record<string, unknown> | null;
@@ -23,7 +21,6 @@ interface SystemHostPayload {
     checkedAt?: string;
 }
 
-/** Describes cached system host response. */
 export interface CachedSystemHostResponse {
     source: string;
     status: string;
@@ -36,7 +33,6 @@ export interface CachedSystemHostResponse {
     meta: Record<string, unknown>;
 }
 
-/** Handles fetch cached system host. */
 export async function fetchCachedSystemHost(): Promise<CachedSystemHostResponse> {
     const row = await getCacheEntry("system.host");
     if (!row || row.status !== "fresh") {

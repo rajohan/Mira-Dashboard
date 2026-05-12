@@ -18,7 +18,6 @@ const OPS_SHELL_COMMANDS = new Set([
     "$HOME/.local/bin/openclaw update --yes",
 ]);
 
-/** Describes exec request. */
 interface ExecRequest {
     command: string;
     args?: string[];
@@ -26,7 +25,6 @@ interface ExecRequest {
     shell?: boolean;
 }
 
-/** Implements exec validation error. */
 class ExecValidationError extends Error {
     constructor(message: string) {
         super(message);
@@ -39,7 +37,6 @@ const MAX_COMMAND_LENGTH = 4096;
 const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 
-/** Handles validate exec request. */
 function validateExecRequest(payload: unknown): ExecRequest {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new ExecValidationError("request body must be a JSON object");
@@ -96,14 +93,12 @@ function validateExecRequest(payload: unknown): ExecRequest {
     return { command, args, cwd, shell };
 }
 
-/** Describes exec response. */
 interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
-/** Describes exec job. */
 interface ExecJob {
     id: string;
     status: "running" | "done";
@@ -115,12 +110,10 @@ interface ExecJob {
     process?: ChildProcess;
 }
 
-/** Describes exec start response. */
 interface ExecStartResponse {
     jobId: string;
 }
 
-/** Describes exec job response. */
 interface ExecJobResponse {
     jobId: string;
     status: "running" | "done";
@@ -135,7 +128,6 @@ const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const jobs = new Map<string, ExecJob>();
 
-/** Handles trim output. */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -144,7 +136,6 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
-/** Handles parse command. */
 function parseCommand(command: string): { executable: string; args: string[] } {
     const parsed = parseShellCommand(command);
     const parts: string[] = [];
@@ -166,7 +157,6 @@ function parseCommand(command: string): { executable: string; args: string[] } {
     return { executable, args: parsedArgs };
 }
 
-/** Handles resolve cwd. */
 function resolveCwd(cwd: string | undefined): string {
     if (!cwd) {
         return process.cwd();
@@ -189,7 +179,6 @@ function resolveCwd(cwd: string | undefined): string {
     }
 }
 
-/** Handles get approved shell command. */
 function getApprovedShellCommand(command: string): string {
     switch (command) {
         case "__mira_dashboard_shell_smoke_test__": {
@@ -221,7 +210,6 @@ function getApprovedShellCommand(command: string): string {
     }
 }
 
-/** Handles spawn exec. */
 function spawnExec(
     executable: string,
     args: string[],
@@ -230,7 +218,6 @@ function spawnExec(
     return spawnGuarded(executable, args, { ...cwdOption, shell: false });
 }
 
-/** Handles spawn approved shell. */
 function spawnApprovedShell(
     command: string,
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
@@ -238,7 +225,6 @@ function spawnApprovedShell(
     return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
 }
 
-/** Handles run exec command. */
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
@@ -313,7 +299,6 @@ function runExecCommand(
     });
 }
 
-/** Handles cleanup jobs. */
 function cleanupJobs(): void {
     if (jobs.size <= MAX_JOBS) {
         return;
@@ -331,7 +316,6 @@ function cleanupJobs(): void {
     }
 }
 
-/** Handles exec routes. */
 export default function execRoutes(
     app: express.Application,
     _express: typeof express

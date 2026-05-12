@@ -4,7 +4,6 @@ import { Card } from "../../ui/Card";
 import { agentStatusColors, agentStatusLabels } from "./status";
 import { StatusIndicator } from "./StatusIndicator";
 
-/** Renders the agent card UI. */
 export function AgentCard({
     id,
     status,

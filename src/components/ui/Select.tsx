@@ -3,14 +3,12 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes select option. */
 interface SelectOption {
     value: string;
     label: string;
     description?: string;
 }
 
-/** Describes select props. */
 interface SelectProps {
     value: string;
     onChange: (value: string) => void;
@@ -22,7 +20,6 @@ interface SelectProps {
     menuWidth?: string;
 }
 
-/** Renders the select UI. */
 export function Select({
     value,
     onChange,

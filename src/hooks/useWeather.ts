@@ -1,6 +1,5 @@
 import { useCacheEntry } from "./useCache";
 
-/** Describes weather data. */
 export interface WeatherData {
     location: string;
     temperatureC: number | null;
@@ -19,7 +18,6 @@ export interface WeatherData {
     fetchedAt: number;
 }
 
-/** Handles use weather. */
 export function useWeather(refreshInterval: number | false = false) {
     const query = useCacheEntry<WeatherData>("weather.spydeberg", refreshInterval);
 

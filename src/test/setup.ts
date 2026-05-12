@@ -16,7 +16,6 @@ afterEach(() => {
     cleanup();
 });
 
-/** Implements resize observer mock. */
 class ResizeObserverMock implements ResizeObserver {
     observe() {}
     unobserve() {}

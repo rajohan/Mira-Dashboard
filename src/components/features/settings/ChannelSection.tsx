@@ -5,7 +5,6 @@ import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Switch } from "../../ui/Switch";
 
-/** Describes channel summary. */
 interface ChannelSummary {
     id: string;
     enabled: boolean;
@@ -13,14 +12,12 @@ interface ChannelSummary {
     details?: string;
 }
 
-/** Describes channel section props. */
 interface ChannelSectionProps {
     channels: ChannelSummary[];
     onSave: (channels: ChannelSummary[]) => Promise<void>;
     saving: boolean;
 }
 
-/** Renders the channel section UI. */
 export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps) {
     const [draftChannels, setDraftChannels] = useState(channels);
 

@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "./useApi";
 import { cacheKeys } from "./useCache";
 
-/** Describes backup job. */
 export interface BackupJob {
     id: string;
     type: "kopia" | "walg";
@@ -15,19 +14,16 @@ export interface BackupJob {
     endedAt: number | null;
 }
 
-/** Describes kopia backup response. */
 interface KopiaBackupResponse {
     job: BackupJob | null;
 }
 
-/** Stores backup keys. */
 export const backupKeys = {
     all: ["backups"] as const,
     kopia: () => [...backupKeys.all, "kopia"] as const,
     walg: () => [...backupKeys.all, "walg"] as const,
 };
 
-/** Handles use kopia backup. */
 export function useKopiaBackup() {
     return useQuery({
         queryKey: backupKeys.kopia(),
@@ -40,7 +36,6 @@ export function useKopiaBackup() {
     });
 }
 
-/** Handles use walg backup. */
 export function useWalgBackup() {
     return useQuery({
         queryKey: backupKeys.walg(),
@@ -53,7 +48,6 @@ export function useWalgBackup() {
     });
 }
 
-/** Handles use run kopia backup. */
 export function useRunKopiaBackup() {
     const queryClient = useQueryClient();
 
@@ -71,7 +65,6 @@ export function useRunKopiaBackup() {
     });
 }
 
-/** Handles use run walg backup. */
 export function useRunWalgBackup() {
     const queryClient = useQueryClient();
 

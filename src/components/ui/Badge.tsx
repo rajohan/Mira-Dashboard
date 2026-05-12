@@ -1,7 +1,6 @@
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-/** Describes badge props. */
 interface BadgeProps {
     children: React.ReactNode;
     variant?:
@@ -29,7 +28,6 @@ const variantStyles: Record<string, string> = {
     subagent: "bg-orange-500/20 text-orange-400 border-orange-500/30",
 };
 
-/** Renders the badge UI. */
 export function Badge({ children, variant = "default", className }: BadgeProps) {
     const combined = twMerge(
         clsx(
@@ -41,7 +39,6 @@ export function Badge({ children, variant = "default", className }: BadgeProps) 
     return <span className={combined}>{children}</span>;
 }
 
-/** Handles get session type variant. */
 export function getSessionTypeVariant(
     type: string | null | undefined
 ): BadgeProps["variant"] {

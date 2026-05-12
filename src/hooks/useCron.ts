@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
 
-/** Describes cron job. */
 export interface CronJob {
     id?: string;
     jobId?: string;
@@ -14,18 +13,15 @@ export interface CronJob {
     [key: string]: unknown;
 }
 
-/** Describes cron jobs response. */
 interface CronJobsResponse {
     jobs: CronJob[];
 }
 
-/** Stores cron keys. */
 export const cronKeys = {
     all: ["cron"] as const,
     jobs: () => [...cronKeys.all, "jobs"] as const,
 };
 
-/** Handles use cron jobs. */
 export function useCronJobs() {
     return useQuery({
         queryKey: cronKeys.jobs(),
@@ -35,7 +31,6 @@ export function useCronJobs() {
     });
 }
 
-/** Handles use toggle cron job. */
 export function useToggleCronJob() {
     const queryClient = useQueryClient();
 
@@ -48,7 +43,6 @@ export function useToggleCronJob() {
     });
 }
 
-/** Handles use update cron job. */
 export function useUpdateCronJob() {
     const queryClient = useQueryClient();
 
@@ -61,7 +55,6 @@ export function useUpdateCronJob() {
     });
 }
 
-/** Handles use run cron job now. */
 export function useRunCronJobNow() {
     const queryClient = useQueryClient();
 

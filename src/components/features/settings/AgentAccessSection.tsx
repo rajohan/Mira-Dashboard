@@ -9,14 +9,12 @@ import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
-/** Describes agent access section props. */
 interface AgentAccessSectionProps {
     agents: AgentConfig[];
     onSave: (agents: AgentConfig[]) => Promise<void>;
     saving: boolean;
 }
 
-/** Handles tool enabled. */
 function toolEnabled(agent: AgentConfig, toolId: string): boolean {
     if (agent.tools?.deny?.includes(toolId)) {
         return false;
@@ -29,7 +27,6 @@ function toolEnabled(agent: AgentConfig, toolId: string): boolean {
     return true;
 }
 
-/** Handles update tool. */
 function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): AgentConfig {
     const deny = new Set(agent.tools?.deny || []);
     const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
@@ -60,7 +57,6 @@ const riskStyles: Record<ToolRisk, string> = {
     critical: "border-red-500/20 bg-red-500/5 text-red-300",
 };
 
-/** Renders the agent access section UI. */
 export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectionProps) {
     const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
     const [toolFilter, setToolFilter] = useState("");
@@ -81,7 +77,6 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
             .includes(toolFilter.toLowerCase())
     );
 
-    /** Handles update agent. */
     const updateAgent = (
         agentId: string,
         updater: (agent: AgentConfig) => AgentConfig

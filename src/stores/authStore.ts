@@ -1,12 +1,10 @@
 import { Store, useStore } from "@tanstack/react-store";
 
-/** Describes auth user. */
 export interface AuthUser {
     id: number;
     username: string;
 }
 
-/** Describes auth state. */
 interface AuthState {
     user: AuthUser | null;
     isAuthenticated: boolean;
@@ -14,14 +12,12 @@ interface AuthState {
     bootstrapRequired: boolean;
 }
 
-/** Describes session response. */
 interface SessionResponse {
     authenticated: boolean;
     bootstrapRequired: boolean;
     user: AuthUser | null;
 }
 
-/** Describes auth actions. */
 interface AuthActions {
     initialize: () => Promise<void>;
     refreshSession: () => Promise<SessionResponse>;
@@ -37,12 +33,10 @@ const initialState: AuthState = {
     bootstrapRequired: false,
 };
 
-/** Stores auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
 let initializePromise: Promise<void> | null = null;
 
-/** Handles fetch session. */
 async function fetchSession(): Promise<SessionResponse> {
     const response = await fetch("/api/auth/session", {
         credentials: "include",
@@ -55,7 +49,6 @@ async function fetchSession(): Promise<SessionResponse> {
     return response.json() as Promise<SessionResponse>;
 }
 
-/** Stores auth actions. */
 export const authActions: AuthActions = {
     async initialize() {
         if (!initializePromise) {
@@ -107,7 +100,6 @@ export const authActions: AuthActions = {
     },
 };
 
-/** Handles use auth store. */
 export function useAuthStore(): AuthState & AuthActions {
     const state = useStore(authStore, (s) => s);
     return {
@@ -116,12 +108,10 @@ export function useAuthStore(): AuthState & AuthActions {
     };
 }
 
-/** Handles use auth user. */
 export function useAuthUser(): AuthUser | null {
     return useStore(authStore, (state) => state.user);
 }
 
-/** Handles use is authenticated. */
 export function useIsAuthenticated(): boolean {
     return useStore(authStore, (state) => state.isAuthenticated);
 }

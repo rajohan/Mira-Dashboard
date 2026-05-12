@@ -37,19 +37,16 @@ const navItems = [
     { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
-/** Describes layout props. */
 interface LayoutProps {
     children: ReactNode;
 }
 
-/** Describes system host cache. */
 interface SystemHostCache {
     version?: {
         current?: string;
     };
 }
 
-/** Renders the layout UI. */
 export function Layout({ children }: LayoutProps) {
     const location = useLocation();
     const sidebarId = useId();

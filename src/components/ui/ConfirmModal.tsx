@@ -1,7 +1,6 @@
 import { Button } from "./Button";
 import { Modal } from "./Modal";
 
-/** Describes confirm modal props. */
 interface ConfirmModalProps {
     isOpen: boolean;
     title: string;
@@ -14,7 +13,6 @@ interface ConfirmModalProps {
     danger?: boolean;
 }
 
-/** Renders the confirm modal UI. */
 export function ConfirmModal({
     isOpen,
     title,

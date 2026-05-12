@@ -14,7 +14,6 @@ import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ConfirmModal } from "../../ui/ConfirmModal";
 
-/** Renders the service actions card UI. */
 export function ServiceActionsCard() {
     const startAction = useStartOpsAction();
     const refreshCache = useRefreshCacheEntry();
@@ -63,7 +62,6 @@ export function ServiceActionsCard() {
         }
     }, [execJob.data, refreshCache, runningActionId, runningActionLabel]);
 
-    /** Handles confirm run. */
     async function confirmRun() {
         if (!pendingAction) {
             return;

@@ -39,7 +39,6 @@ const columns = [
     }),
 ];
 
-/** Renders the pg bouncer pools table UI. */
 export function PgBouncerPoolsTable({
     data,
 }: {

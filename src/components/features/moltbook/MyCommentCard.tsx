@@ -2,12 +2,10 @@ import { type MiraComment } from "../../../types/moltbook";
 import { formatTime, getMoltbookUrl, truncate } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes my comment card props. */
 interface MyCommentCardProps {
     comment: MiraComment;
 }
 
-/** Renders the my comment card UI. */
 export function MyCommentCard({ comment }: MyCommentCardProps) {
     return (
         <Card className="p-3 sm:p-4">

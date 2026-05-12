@@ -15,7 +15,6 @@ import { safePathWithinRoot } from "../lib/safePath.js";
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
-/** Describes file item. */
 interface FileItem {
     name: string;
     type: "file" | "directory";
@@ -25,7 +24,6 @@ interface FileItem {
     error?: boolean;
 }
 
-/** Describes file response. */
 interface FileResponse {
     path: string;
     content: string;
@@ -37,7 +35,6 @@ interface FileResponse {
     truncated?: boolean;
 }
 
-/** Describes write response. */
 interface WriteResponse {
     success: boolean;
     path: string;
@@ -45,7 +42,6 @@ interface WriteResponse {
     modified: string;
 }
 
-/** Handles is binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
         if (content.codePointAt(i) === 0) return true;
@@ -53,14 +49,12 @@ function isBinaryFile(content: string): boolean {
     return false;
 }
 
-/** Handles is image file. */
 function isImageFile(filename: string): boolean {
     const ext = filename.split(".").pop()?.toLowerCase();
     const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
     return imageExts.includes(ext || "");
 }
 
-/** Handles get image mime type. */
 function getImageMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -76,12 +70,10 @@ function getImageMimeType(filename: string): string {
     return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
-/** Handles should hide file. */
 function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-/** Handles list directory. */
 function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
     const fullPath = safePathWithinRoot(dirPath || ".", WORKSPACE_ROOT);
@@ -134,7 +126,6 @@ function listDirectory(dirPath: string): FileItem[] | null {
     });
 }
 
-/** Handles files routes. */
 export default function filesRoutes(
     app: express.Application,
     _express: typeof express

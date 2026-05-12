@@ -1,4 +1,3 @@
-/** Stores task assignees. */
 export const TASK_ASSIGNEES = {
     mira: {
         id: "mira-2026",
@@ -12,10 +11,8 @@ export const TASK_ASSIGNEES = {
     },
 } as const;
 
-/** Defines task assignee id. */
 export type TaskAssigneeId = (typeof TASK_ASSIGNEES)[keyof typeof TASK_ASSIGNEES]["id"];
 
-/** Stores task assignee ids. */
 export const TASK_ASSIGNEE_IDS = [
     TASK_ASSIGNEES.mira.id,
     TASK_ASSIGNEES.raymond.id,

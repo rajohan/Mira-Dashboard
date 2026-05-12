@@ -5,19 +5,16 @@ import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
-/** Stores task keys. */
 export const taskKeys = {
     all: ["tasks"] as const,
     list: () => [...taskKeys.all, "list"] as const,
     updates: (taskId: number) => [...taskKeys.all, "updates", taskId] as const,
 };
 
-/** Handles fetch tasks. */
 async function fetchTasks(): Promise<Task[]> {
     return apiFetch<Task[]>("/tasks");
 }
 
-/** Handles create task. */
 async function createTask(
     title: string,
     body: string,
@@ -28,7 +25,6 @@ async function createTask(
     return apiPost<Task>("/tasks", { title, body, labels, assignee, automation });
 }
 
-/** Handles update task. */
 async function updateTask(
     number: number,
     updates: {
@@ -47,27 +43,22 @@ async function updateTask(
     });
 }
 
-/** Handles move task. */
 async function moveTask(number: number, columnLabel: string): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/move`, { columnLabel });
 }
 
-/** Handles assign task. */
 async function assignTask(number: number, assignee: TaskAssigneeId): Promise<Task> {
     return apiPost<Task>(`/tasks/${number}/assign`, { assignee });
 }
 
-/** Handles delete task. */
 async function deleteTask(number: number): Promise<void> {
     await apiDelete(`/tasks/${number}`);
 }
 
-/** Handles fetch task updates. */
 async function fetchTaskUpdates(taskId: number): Promise<TaskUpdate[]> {
     return apiFetch<TaskUpdate[]>(`/tasks/${taskId}/updates`);
 }
 
-/** Handles create task update. */
 async function createTaskUpdate(
     taskId: number,
     author: TaskAssigneeId,
@@ -76,7 +67,6 @@ async function createTaskUpdate(
     return apiPost<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
 }
 
-/** Handles update task update. */
 async function updateTaskUpdate(
     taskId: number,
     updateId: number,
@@ -89,12 +79,10 @@ async function updateTaskUpdate(
     });
 }
 
-/** Handles delete task update. */
 async function deleteTaskUpdate(taskId: number, updateId: number): Promise<void> {
     await apiDelete(`/tasks/${taskId}/updates/${updateId}`);
 }
 
-/** Handles use tasks. */
 export function useTasks() {
     return useQuery({
         queryKey: taskKeys.list(),
@@ -104,7 +92,6 @@ export function useTasks() {
     });
 }
 
-/** Handles use create task. */
 export function useCreateTask() {
     const queryClient = useQueryClient();
 
@@ -131,7 +118,6 @@ export function useCreateTask() {
     });
 }
 
-/** Handles use update task. */
 export function useUpdateTask() {
     const queryClient = useQueryClient();
 
@@ -157,7 +143,6 @@ export function useUpdateTask() {
     });
 }
 
-/** Handles use move task. */
 export function useMoveTask() {
     const queryClient = useQueryClient();
 
@@ -170,7 +155,6 @@ export function useMoveTask() {
     });
 }
 
-/** Handles use assign task. */
 export function useAssignTask() {
     const queryClient = useQueryClient();
 
@@ -188,7 +172,6 @@ export function useAssignTask() {
     });
 }
 
-/** Handles use delete task. */
 export function useDeleteTask() {
     const queryClient = useQueryClient();
 
@@ -200,7 +183,6 @@ export function useDeleteTask() {
     });
 }
 
-/** Handles use task updates. */
 export function useTaskUpdates(taskId: number | null) {
     return useQuery({
         queryKey: taskId ? taskKeys.updates(taskId) : taskKeys.all,
@@ -211,7 +193,6 @@ export function useTaskUpdates(taskId: number | null) {
     });
 }
 
-/** Handles use create task update. */
 export function useCreateTaskUpdate() {
     const queryClient = useQueryClient();
 
@@ -234,7 +215,6 @@ export function useCreateTaskUpdate() {
     });
 }
 
-/** Handles use update task update. */
 export function useUpdateTaskUpdate() {
     const queryClient = useQueryClient();
 
@@ -259,7 +239,6 @@ export function useUpdateTaskUpdate() {
     });
 }
 
-/** Handles use delete task update. */
 export function useDeleteTaskUpdate() {
     const queryClient = useQueryClient();
 

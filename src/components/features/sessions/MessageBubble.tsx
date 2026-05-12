@@ -1,13 +1,11 @@
 import { formatDate } from "../../../utils/format";
 
-/** Describes message bubble props. */
 interface MessageBubbleProps {
     role: string;
     content: string;
     timestamp?: string;
 }
 
-/** Renders the message bubble UI. */
 export function MessageBubble({ role, content, timestamp }: MessageBubbleProps) {
     return (
         <div className="border-primary-700 bg-primary-800 text-primary-100 w-full rounded-2xl border px-3 py-2 text-sm shadow-sm">

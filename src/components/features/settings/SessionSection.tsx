@@ -5,14 +5,12 @@ import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
-/** Describes session section props. */
 interface SessionSectionProps {
     idleMinutes: number;
     onSave: (idleMinutes: number) => Promise<void>;
     saving: boolean;
 }
 
-/** Renders the session section UI. */
 export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionProps) {
     const form = useForm({
         defaultValues: { idleMinutes },

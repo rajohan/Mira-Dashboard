@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { apiFetch, apiPost } from "./useApi";
 
-/** Defines ops action id. */
 export type OpsActionId =
     | "gateway_restart"
     | "system_restart"
@@ -11,7 +10,6 @@ export type OpsActionId =
     | "openclaw_update"
     | "openclaw_cleanup";
 
-/** Describes ops action definition. */
 export interface OpsActionDefinition {
     id: OpsActionId;
     label: string;
@@ -23,14 +21,12 @@ export interface OpsActionDefinition {
     danger?: boolean;
 }
 
-/** Describes exec response. */
 export interface ExecResponse {
     code: number | null;
     stdout: string;
     stderr: string;
 }
 
-/** Describes exec job response. */
 export interface ExecJobResponse extends ExecResponse {
     jobId: string;
     status: "running" | "done";
@@ -38,7 +34,6 @@ export interface ExecJobResponse extends ExecResponse {
     endedAt: number | null;
 }
 
-/** Stores ops actions. */
 export const OPS_ACTIONS: OpsActionDefinition[] = [
     {
         id: "system_restart",
@@ -103,7 +98,6 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
     },
 ];
 
-/** Handles use start ops action. */
 export function useStartOpsAction() {
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
@@ -114,7 +108,6 @@ export function useStartOpsAction() {
     });
 }
 
-/** Handles use exec job. */
 export function useExecJob(jobId: string | null) {
     return useQuery({
         queryKey: ["exec-job", jobId],

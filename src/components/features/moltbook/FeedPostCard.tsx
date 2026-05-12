@@ -4,12 +4,10 @@ import { type MoltbookPost } from "../../../hooks/useMoltbook";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes feed post card props. */
 interface FeedPostCardProps {
     post: MoltbookPost;
 }
 
-/** Renders the feed post card UI. */
 export function FeedPostCard({ post }: FeedPostCardProps) {
     return (
         <Card className="p-3 sm:p-4">

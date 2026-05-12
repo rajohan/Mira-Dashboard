@@ -2,14 +2,12 @@ import { Button } from "../../../components/ui/Button";
 import { cn } from "../../../utils/cn";
 import { getLevelColor } from "../../../utils/logUtils";
 
-/** Describes level filter props. */
 interface LevelFilterProps {
     levels: readonly string[];
     activeLevels: Set<string>;
     onToggle: (level: string) => void;
 }
 
-/** Renders the level filter UI. */
 export function LevelFilter({ levels, activeLevels, onToggle }: LevelFilterProps) {
     return (
         <div className="flex flex-wrap items-center gap-1">

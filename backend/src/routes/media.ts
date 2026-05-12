@@ -22,12 +22,10 @@ const MIME_TYPES: Record<string, string> = {
     ".txt": "text/plain; charset=utf-8",
 };
 
-/** Handles mime type from path. */
 function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
-/** Handles media routes. */
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
         const requestedPath = String(request.query.path || "");

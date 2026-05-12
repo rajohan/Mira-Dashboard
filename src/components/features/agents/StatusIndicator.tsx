@@ -1,6 +1,5 @@
 import { agentStatusColors } from "./status";
 
-/** Renders the status indicator UI. */
 export function StatusIndicator({ status }: { status: keyof typeof agentStatusColors }) {
     const colors = agentStatusColors[status];
     const pulseClass =

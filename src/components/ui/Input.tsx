@@ -4,14 +4,12 @@ import { forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes input props. */
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     description?: string;
     error?: string;
 }
 
-/** Renders the input UI. */
 export const Input = forwardRef<HTMLInputElement, InputProps>(
     ({ className, label, description, error, ...props }, ref) => {
         return (

@@ -5,7 +5,6 @@ import { Card, CardTitle } from "../../ui/Card";
 import { ConfigSection } from "./ConfigSection";
 import { FileTreeItem } from "./FileTreeItem";
 
-/** Describes files sidebar props. */
 interface FilesSidebarProps {
     files: FileNode[];
     rootLoading: boolean;
@@ -15,7 +14,6 @@ interface FilesSidebarProps {
     onToggle: (path: string) => void;
 }
 
-/** Renders the files sidebar UI. */
 export function FilesSidebar({
     files,
     rootLoading,

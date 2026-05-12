@@ -17,7 +17,6 @@ import { EmptyState } from "../../ui/EmptyState";
 
 const columnHelper = createColumnHelper<DockerContainer>();
 
-/** Handles parse percent. */
 function parsePercent(value: string | undefined): number {
     if (!value) {
         return -1;
@@ -27,7 +26,6 @@ function parsePercent(value: string | undefined): number {
     return match ? Number.parseFloat(match[0]) : -1;
 }
 
-/** Handles parse memory used mi b. */
 function parseMemoryUsedMiB(value: string | undefined): number {
     if (!value) {
         return -1;
@@ -56,7 +54,6 @@ function parseMemoryUsedMiB(value: string | undefined): number {
     return amount * (factors[unit] || 1);
 }
 
-/** Handles format memory used mb. */
 function formatMemoryUsedMb(value: string | undefined): string {
     const usedMiB = parseMemoryUsedMiB(value);
     if (usedMiB < 0) {
@@ -71,7 +68,6 @@ function formatMemoryUsedMb(value: string | undefined): string {
     return `${usedMb.toFixed(0)} MB`;
 }
 
-/** Handles get health rank. */
 function getHealthRank(health: string): number {
     switch (health) {
         case "healthy":
@@ -87,7 +83,6 @@ function getHealthRank(health: string): number {
     }
 }
 
-/** Handles get health variant. */
 function getHealthVariant(
     container: DockerContainer
 ): "success" | "warning" | "error" | "default" {
@@ -97,7 +92,6 @@ function getHealthVariant(
     return "default";
 }
 
-/** Handles get state variant. */
 function getStateVariant(state: string): "success" | "warning" | "error" | "default" {
     if (state === "running") return "success";
     if (state === "exited") return "error";
@@ -105,7 +99,6 @@ function getStateVariant(state: string): "success" | "warning" | "error" | "defa
     return "default";
 }
 
-/** Handles get state rank. */
 function getStateRank(state: string): number {
     switch (state) {
         case "running":
@@ -125,7 +118,6 @@ function getStateRank(state: string): number {
     }
 }
 
-/** Describes docker containers table props. */
 interface DockerContainersTableProps {
     containers: DockerContainer[];
     onDetails: (containerId: string) => void;
@@ -135,7 +127,6 @@ interface DockerContainersTableProps {
     onRestartStack: () => void;
 }
 
-/** Renders the docker containers table UI. */
 export function DockerContainersTable({
     containers,
     onDetails,

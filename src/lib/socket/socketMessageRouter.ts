@@ -5,7 +5,6 @@ import type { AgentInfo, Session } from "../../types/session";
 import type { SocketEnvelope } from "../../types/socket";
 import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
 
-/** Handles extract sessions from payload. */
 function extractSessionsFromPayload(payload: unknown): Session[] {
     if (Array.isArray(payload)) {
         return payload as Session[];
@@ -33,7 +32,6 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
     return [];
 }
 
-/** Handles read gateway connection state. */
 function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
     if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
@@ -46,7 +44,6 @@ function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
     return null;
 }
 
-/** Handles handle socket message. */
 export function handleSocketMessage(raw: unknown): boolean | null {
     const validated = socketEnvelopeSchema.safeParse(raw);
     if (!validated.success) {

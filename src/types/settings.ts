@@ -1,7 +1,5 @@
-/** Defines skill source. */
 export type SkillSource = "workspace" | "builtin" | "extra";
 
-/** Describes skill. */
 export interface Skill {
     name: string;
     description?: string;
@@ -10,7 +8,6 @@ export interface Skill {
     source?: SkillSource;
 }
 
-/** Describes config. */
 export interface Config {
     gateway?: {
         port?: number;
@@ -58,7 +55,6 @@ export interface Config {
     };
 }
 
-/** Describes settings form. */
 export interface SettingsForm {
     idleMinutes: number;
     heartbeatEvery: number;

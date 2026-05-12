@@ -28,7 +28,6 @@ import {
 } from "../hooks";
 import { formatDate } from "../utils/format";
 
-/** Defines pending action. */
 type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
@@ -39,18 +38,15 @@ type PendingAction =
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 
-/** Handles is mira pull request. */
 function isMiraPullRequest(pr: PullRequestSummary): boolean {
     return pr.author?.login === MIRA_AUTHOR;
 }
 
-/** Handles author label. */
 function authorLabel(pr: PullRequestSummary): string {
     if (pr.author?.login === DEPENDABOT_AUTHOR) return "Dependabot";
     return pr.author?.login || "Unknown author";
 }
 
-/** Handles status variant. */
 function statusVariant(value: string | undefined) {
     const normalized = (value || "").toLowerCase();
     if (["mergeable", "clean", "ok", "success"].includes(normalized)) {
@@ -74,7 +70,6 @@ function statusVariant(value: string | undefined) {
     return "default" as const;
 }
 
-/** Handles summarize checks. */
 function summarizeChecks(checks: unknown[] | undefined) {
     if (!checks?.length) {
         return { label: "No CI checks", variant: "default" as const };
@@ -99,7 +94,6 @@ function summarizeChecks(checks: unknown[] | undefined) {
     return { label: "Checks passed", variant: "success" as const };
 }
 
-/** Handles deployment variant. */
 function deploymentVariant(status: DeploymentJob["status"]) {
     if (status === "ok") return "success" as const;
     if (status === "failed") return "error" as const;
@@ -107,7 +101,6 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     return "info" as const;
 }
 
-/** Handles checkout variant. */
 function checkoutVariant(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout) return "default" as const;
     if (!checkout.isProductionRoot || !checkout.isClean) return "error" as const;
@@ -115,7 +108,6 @@ function checkoutVariant(checkout: ProductionCheckoutStatus | undefined) {
     return "success" as const;
 }
 
-/** Handles checkout label. */
 function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout) return "Checking production checkout";
     if (!checkout.isProductionRoot) return "Wrong root";
@@ -124,7 +116,6 @@ function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     return "Ready to deploy";
 }
 
-/** Handles checkout message. */
 function checkoutMessage(
     checkout: ProductionCheckoutStatus | undefined,
     error: Error | null
@@ -143,7 +134,6 @@ function checkoutMessage(
     return "Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees.";
 }
 
-/** Handles action label. */
 function actionLabel(action: PendingAction) {
     if (!action) return "Confirm";
     switch (action.type) {
@@ -158,7 +148,6 @@ function actionLabel(action: PendingAction) {
     }
 }
 
-/** Handles action message. */
 function actionMessage(action: PendingAction) {
     if (!action) return "";
     switch (action.type) {
@@ -173,13 +162,11 @@ function actionMessage(action: PendingAction) {
     }
 }
 
-/** Handles action result message. */
 function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
     if (!cleanup) return message;
     return `${message}\n${cleanup.message}`;
 }
 
-/** Handles normalize pull request body. */
 function normalizePullRequestBody(body: string): string {
     if (!body.includes("\n") && body.includes(String.raw`\n`)) {
         return body.replaceAll(String.raw`\n`, "\n");
@@ -188,7 +175,6 @@ function normalizePullRequestBody(body: string): string {
     return body;
 }
 
-/** Renders the pull request description UI. */
 function PullRequestDescription({ body }: { body: string }) {
     const normalizedBody = normalizePullRequestBody(body);
 
@@ -211,7 +197,6 @@ function PullRequestDescription({ body }: { body: string }) {
     );
 }
 
-/** Renders the pull request card UI. */
 function PullRequestCard({
     pr,
     actions,
@@ -269,7 +254,6 @@ function PullRequestCard({
     );
 }
 
-/** Renders the pull requests UI. */
 export function PullRequests() {
     const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
     const { data: deployments = [] } = usePullRequestDeployments();
@@ -293,7 +277,6 @@ export function PullRequests() {
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
-    /** Handles confirm action. */
     async function confirmAction() {
         if (!pendingAction) return;
 

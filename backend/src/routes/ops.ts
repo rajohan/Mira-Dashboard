@@ -11,7 +11,6 @@ const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
 const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
-/** Handles async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return (req, res, next) => {
         Promise.resolve(handler(req, res, next)).catch((error) => {
@@ -27,7 +26,6 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     };
 }
 
-/** Handles build n8n script env. */
 function buildN8nScriptEnv() {
     return {
         ...process.env,
@@ -39,7 +37,6 @@ function buildN8nScriptEnv() {
     };
 }
 
-/** Handles build postgres uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -48,7 +45,6 @@ function buildPostgresUri(database = N8N_DATABASE) {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
-/** Handles read log rotation status. */
 async function readLogRotationStatus() {
     const sql = `SELECT COALESCE(data->'lastRun', 'null'::jsonb)::text FROM cache_entries WHERE key = '${LOG_ROTATION_STATE_KEY}'`;
     const { stdout } = await execFileAsync(
@@ -67,7 +63,6 @@ async function readLogRotationStatus() {
     };
 }
 
-/** Handles run log rotation. */
 async function runLogRotation(options: { dryRun: boolean }) {
     const args = [LOG_ROTATION_SCRIPT, "--config", LOG_ROTATION_CONFIG, "--json"];
 
@@ -98,7 +93,6 @@ async function runLogRotation(options: { dryRun: boolean }) {
     };
 }
 
-/** Handles ops routes. */
 export default function opsRoutes(app: express.Application): void {
     app.get(
         "/api/ops/log-rotation/status",

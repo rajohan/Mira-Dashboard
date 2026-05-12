@@ -35,7 +35,6 @@ const CHAT_EMOJIS = [
     "🚀",
 ];
 
-/** Describes chat composer props. */
 interface ChatComposerProps {
     attachments: ChatSendAttachment[];
     canSend: boolean;
@@ -56,7 +55,6 @@ interface ChatComposerProps {
     onToggleRecording: () => void;
 }
 
-/** Renders the chat composer UI. */
 export function ChatComposer({
     attachments,
     canSend,
@@ -85,7 +83,6 @@ export function ChatComposer({
             return;
         }
 
-        /** Handles handle pointer down. */
         const handlePointerDown = (event: PointerEvent) => {
             if (
                 event.target instanceof Node &&
@@ -97,7 +94,6 @@ export function ChatComposer({
             setShowEmojiPicker(false);
         };
 
-        /** Handles handle key down. */
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 setShowEmojiPicker(false);
@@ -113,7 +109,6 @@ export function ChatComposer({
         };
     }, [showEmojiPicker]);
 
-    /** Handles insert emoji. */
     const insertEmoji = (emoji: string) => {
         const textarea = textareaReference.current;
         const selectionStart = textarea?.selectionStart ?? draft.length;

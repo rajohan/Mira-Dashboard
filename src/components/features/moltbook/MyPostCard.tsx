@@ -4,12 +4,10 @@ import { type MiraPost } from "../../../types/moltbook";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes my post card props. */
 interface MyPostCardProps {
     post: MiraPost;
 }
 
-/** Renders the my post card UI. */
 export function MyPostCard({ post }: MyPostCardProps) {
     return (
         <Card className="p-3 sm:p-4">

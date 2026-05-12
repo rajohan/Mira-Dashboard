@@ -4,7 +4,6 @@ import { useCacheEntry } from "../../../hooks/useCache";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
-/** Describes git repo summary. */
 interface GitRepoSummary {
     key: string;
     name: string;
@@ -22,7 +21,6 @@ interface GitRepoSummary {
     };
 }
 
-/** Describes git workspace cache. */
 interface GitWorkspaceCache {
     repos: GitRepoSummary[];
     dirtyRepos: string[];
@@ -31,7 +29,6 @@ interface GitWorkspaceCache {
     checkedAt: string;
 }
 
-/** Renders the git overview card UI. */
 export function GitOverviewCard() {
     const { data, isLoading, isError } = useCacheEntry<GitWorkspaceCache>(
         "git.workspace",

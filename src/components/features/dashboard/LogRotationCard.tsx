@@ -9,7 +9,6 @@ import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
-/** Renders the log rotation card UI. */
 export function LogRotationCard() {
     const status = useLogRotationStatus(30_000);
     const dryRun = useRunLogRotationDryRun();

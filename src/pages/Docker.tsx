@@ -40,7 +40,6 @@ import {
     useDockerVolumes,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
-/** Renders the docker UI. */
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -109,12 +108,10 @@ export function Docker() {
         (service) => service.updateAvailable
     );
 
-    /** Handles format action error. */
     function formatActionError(error: unknown): string {
         return error instanceof Error ? error.message : String(error);
     }
 
-    /** Handles show action output. */
     function showActionOutput(output: string) {
         setActionOutput(output);
         requestAnimationFrame(() => {
@@ -125,7 +122,6 @@ export function Docker() {
         });
     }
 
-    /** Handles handle container action. */
     async function handleContainerAction(
         containerId: string,
         action: "start" | "stop" | "restart" | "update"
@@ -141,7 +137,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle stack restart. */
     async function handleStackRestart(service?: string) {
         showActionOutput(
             service ? `Restarting ${service}...` : "Restarting Docker stack..."
@@ -166,7 +161,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle manual update. */
     async function handleManualUpdate(serviceId: number) {
         showActionOutput("Running manual Docker update...");
         try {
@@ -182,7 +176,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle prune. */
     async function handlePrune(target: "images" | "volumes") {
         setPruningTarget(target);
         showActionOutput(`Removing unused Docker ${target}...`);
@@ -198,7 +191,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle dangerous delete. */
     async function handleDangerousDelete() {
         if (!dangerousDelete || deleteImage.isPending || deleteVolume.isPending) {
             return;
@@ -219,7 +211,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle run docker updater. */
     async function handleRunDockerUpdater() {
         showActionOutput("Running Docker updater...");
         try {
@@ -230,7 +221,6 @@ export function Docker() {
         }
     }
 
-    /** Handles handle start console. */
     async function handleStartConsole(containerId: string) {
         const result = await startDockerExec(containerId, consoleCommand);
         setConsoleJobId(result.jobId);

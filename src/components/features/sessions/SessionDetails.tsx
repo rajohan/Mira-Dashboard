@@ -10,7 +10,6 @@ import { MessageBubble } from "./MessageBubble";
 import { SessionActionsDropdown } from "./SessionActionsDropdown";
 import { SessionStatsBar } from "./SessionStatsBar";
 
-/** Describes session details props. */
 interface SessionDetailsProps {
     session: Session | null;
     onClose: () => void;
@@ -19,14 +18,12 @@ interface SessionDetailsProps {
     onReset: () => void;
 }
 
-/** Renders the session details UI. */
 export function SessionDetails(props: SessionDetailsProps) {
     if (!props.session) return null;
 
     return <OpenSessionDetails {...props} session={props.session} />;
 }
 
-/** Renders the open session details UI. */
 function OpenSessionDetails({
     session,
     onClose,

@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
-/** Describes notification item. */
 export interface NotificationItem {
     id: number;
     title: string;
@@ -17,13 +16,11 @@ export interface NotificationItem {
     occurredAt: string;
 }
 
-/** Describes notifications response. */
 export interface NotificationsResponse {
     items: NotificationItem[];
     unreadCount: number;
 }
 
-/** Describes create notification input. */
 interface CreateNotificationInput {
     title: string;
     description: string;
@@ -34,12 +31,10 @@ interface CreateNotificationInput {
     occurredAt?: string;
 }
 
-/** Handles fetch notifications. */
 function fetchNotifications() {
     return apiFetch<NotificationsResponse>("/notifications");
 }
 
-/** Handles use notifications. */
 export function useNotifications(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: ["notifications"],
@@ -49,7 +44,6 @@ export function useNotifications(refreshInterval: number | false = false) {
     });
 }
 
-/** Handles use create notification. */
 export function useCreateNotification() {
     const queryClient = useQueryClient();
 
@@ -62,7 +56,6 @@ export function useCreateNotification() {
     });
 }
 
-/** Handles use mark notification read. */
 export function useMarkNotificationRead() {
     const queryClient = useQueryClient();
 
@@ -74,7 +67,6 @@ export function useMarkNotificationRead() {
     });
 }
 
-/** Handles use mark all notifications read. */
 export function useMarkAllNotificationsRead() {
     const queryClient = useQueryClient();
 
@@ -86,7 +78,6 @@ export function useMarkAllNotificationsRead() {
     });
 }
 
-/** Handles use clear read notifications. */
 export function useClearReadNotifications() {
     const queryClient = useQueryClient();
 
@@ -99,7 +90,6 @@ export function useClearReadNotifications() {
     });
 }
 
-/** Handles use delete notification. */
 export function useDeleteNotification() {
     const queryClient = useQueryClient();
 

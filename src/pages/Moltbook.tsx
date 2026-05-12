@@ -25,7 +25,6 @@ const SORT_OPTIONS = [
     { value: "new", label: "New" },
 ] as const;
 
-/** Renders the moltbook UI. */
 export function Moltbook() {
     const [sort, setSort] = useState<"hot" | "new">("hot");
     const [activeTab, setActiveTab] = useState<"feed" | "posts" | "comments">("feed");

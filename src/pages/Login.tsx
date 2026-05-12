@@ -8,13 +8,11 @@ import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { authActions } from "../stores/authStore";
 
-/** Describes bootstrap response. */
 interface BootstrapResponse {
     bootstrapRequired: boolean;
     hasGatewayToken: boolean;
 }
 
-/** Renders the login UI. */
 export function Login() {
     const navigate = useNavigate();
     const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | null>(null);

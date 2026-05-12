@@ -5,7 +5,6 @@ import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
-/** Describes cache status card item. */
 interface CacheStatusCardItem {
     key: string;
     label: string;
@@ -13,13 +12,11 @@ interface CacheStatusCardItem {
     refreshKeys?: string[];
 }
 
-/** Describes cache status card props. */
 interface CacheStatusCardProps {
     title: string;
     items: CacheStatusCardItem[];
 }
 
-/** Handles get variant. */
 function getVariant(status?: string): "success" | "warning" | "error" | "default" {
     if (status === "fresh") return "success";
     if (status === "stale") return "warning";
@@ -27,7 +24,6 @@ function getVariant(status?: string): "success" | "warning" | "error" | "default
     return "default";
 }
 
-/** Renders the cache status card UI. */
 export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
     const { data } = useCacheHeartbeat(30_000);
     const refreshCache = useRefreshCacheEntry();

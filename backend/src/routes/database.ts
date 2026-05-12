@@ -5,7 +5,6 @@ import express, { type RequestHandler } from "express";
 
 const execFileAsync = promisify(execFile);
 
-/** Describes postgres database row. */
 interface PostgresDatabaseRow {
     datname: string;
     size_pretty: string;
@@ -18,13 +17,11 @@ interface PostgresDatabaseRow {
     cache_hit_ratio: string;
 }
 
-/** Describes connection counts row. */
 interface ConnectionCountsRow {
     state: string | null;
     count: string;
 }
 
-/** Describes dead tuple row. */
 interface DeadTupleRow {
     schemaname: string;
     relname: string;
@@ -35,7 +32,6 @@ interface DeadTupleRow {
     last_autoanalyze: string | null;
 }
 
-/** Describes top query row. */
 interface TopQueryRow {
     query: string;
     calls: string;
@@ -46,7 +42,6 @@ interface TopQueryRow {
     shared_blks_read: string;
 }
 
-/** Describes pg bouncer pool row. */
 interface PgBouncerPoolRow {
     database: string;
     user: string;
@@ -59,7 +54,6 @@ interface PgBouncerPoolRow {
     pool_mode: string;
 }
 
-/** Describes pg bouncer stats row. */
 interface PgBouncerStatsRow {
     database: string;
     total_xact_count: string;
@@ -72,7 +66,6 @@ interface PgBouncerStatsRow {
     total_sent: string;
 }
 
-/** Handles parse table. */
 function parseTable<T extends object>(output: string): T[] {
     const trimmed = output.trim();
     if (!trimmed) {
@@ -93,7 +86,6 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
-/** Handles run docker exec. */
 async function runDockerExec(container: string, command: string) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
@@ -108,7 +100,6 @@ async function runDockerExec(container: string, command: string) {
     return stdout;
 }
 
-/** Handles build postgres uri. */
 function buildPostgresUri(database = "postgres") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -117,7 +108,6 @@ function buildPostgresUri(database = "postgres") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
-/** Handles build pg bouncer uri. */
 function buildPgBouncerUri(database = "pgbouncer") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -126,7 +116,6 @@ function buildPgBouncerUri(database = "pgbouncer") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
-/** Handles query postgres. */
 async function queryPostgres(sql: string, database = "postgres") {
     const uri = buildPostgresUri(database);
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
@@ -136,7 +125,6 @@ async function queryPostgres(sql: string, database = "postgres") {
     );
 }
 
-/** Handles query pg bouncer. */
 async function queryPgBouncer(sql: string) {
     const uri = buildPgBouncerUri();
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
@@ -146,7 +134,6 @@ async function queryPgBouncer(sql: string) {
     );
 }
 
-/** Handles sum by. */
 function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     let total = 0;
     for (const row of rows) {
@@ -155,7 +142,6 @@ function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     return total;
 }
 
-/** Handles query all user databases. */
 async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]> {
     const databases = parseTable<{ datname: string }>(
         await queryPostgres(`
@@ -182,7 +168,6 @@ let torrentCountCache: {
     timestamp: number;
 } | null = null;
 
-/** Handles get torrent counts. */
 async function getTorrentCounts() {
     if (
         torrentCountCache &&
@@ -209,7 +194,6 @@ async function getTorrentCounts() {
     return data;
 }
 
-/** Handles get database overview. */
 async function getDatabaseOverview() {
     const torrentCounts = await getTorrentCounts();
 
@@ -365,7 +349,6 @@ async function getDatabaseOverview() {
     };
 }
 
-/** Handles database routes. */
 export default function databaseRoutes(app: express.Application): void {
     app.get("/api/database/overview", (async (_req, res) => {
         try {
