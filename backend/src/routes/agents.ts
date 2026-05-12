@@ -8,7 +8,9 @@ import gateway from "../gateway.js";
 import {
     guardedPath,
     mkdirGuarded,
+    readdirGuarded,
     readTextNoFollowGuarded,
+    statGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
@@ -20,13 +22,35 @@ const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
 
 /** Returns whether an agent id is safe for filesystem-backed agent metadata paths. */
-function isValidAgentId(id: string): boolean {
+export function isValidAgentId(id: string): boolean {
     return (
         typeof id === "string" &&
         id.length > 0 &&
         id.length <= 64 &&
+        id !== "." &&
+        id !== ".." &&
         SAFE_AGENT_ID_RE.test(id)
     );
+}
+
+/** Returns the canonical sessions directory for a validated agent id. */
+function getSafeAgentSessionsDir(agentId: string): string | null {
+    if (!isValidAgentId(agentId)) {
+        return null;
+    }
+
+    const sessionsDir = safePathWithinRoot(Path.join(agentId, "sessions"), AGENTS_DIR);
+    if (!sessionsDir) {
+        return null;
+    }
+
+    try {
+        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        const expectedSessionsDir = Path.join(realAgentsDir, agentId, "sessions");
+        return sessionsDir === expectedSessionsDir ? sessionsDir : null;
+    } catch {
+        return null;
+    }
 }
 
 // Activity thresholds (in milliseconds)
@@ -283,11 +307,17 @@ function parseAgentsConfig(): AgentsConfig | null {
 }
 
 // Read agent metadata file for current task
-/** Reads metadata.json for an agent using validated no-follow file access. */
-function getAgentMetadata(agentId: string): AgentMetadata | null {
-    const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
+/** Reads metadata.json for an agent using validated file access. */
+async function getAgentMetadata(agentId: string): Promise<AgentMetadata | null> {
+    const sessionsDir = getSafeAgentSessionsDir(agentId);
+    if (!sessionsDir) {
+        return null;
+    }
+
     try {
-        const content = FS.readFileSync(metadataPath, "utf8");
+        const content = await readTextNoFollowGuarded(
+            guardedPath(Path.join(sessionsDir, "metadata.json"))
+        );
         return JSON5.parse(content) as AgentMetadata;
     } catch {
         return null;
@@ -296,10 +326,16 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
 
 // Get sessions from agent's sessions.json file
 /** Loads cached session summaries from the agent sessions directory. */
-function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
-    const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
+async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]> {
+    const sessionsDir = getSafeAgentSessionsDir(agentId);
+    if (!sessionsDir) {
+        return [];
+    }
+
     try {
-        const content = FS.readFileSync(sessionsFile, "utf8");
+        const content = await readTextNoFollowGuarded(
+            guardedPath(Path.join(sessionsDir, "sessions.json"))
+        );
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
     } catch (error) {
@@ -413,21 +449,30 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 }
 
 /** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
-function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
-    const sessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
-    if (!FS.existsSync(sessionsDir)) {
+async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo | null> {
+    const sessionsDir = getSafeAgentSessionsDir(agentId);
+    if (!sessionsDir) {
         return null;
     }
 
     try {
         // Find most recently modified JSONL file
-        const files = FS.readdirSync(sessionsDir)
-            .filter((f) => f.endsWith(".jsonl"))
-            .map((f) => ({
-                name: f,
-                path: Path.join(sessionsDir, f),
-                mtime: FS.statSync(Path.join(sessionsDir, f)).mtimeMs,
-            }))
+        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+            .flatMap((entry) => {
+                const sessionPath = Path.join(sessionsDir, entry.name);
+                try {
+                    return [
+                        {
+                            name: entry.name,
+                            path: sessionPath,
+                            mtime: statGuarded(guardedPath(sessionPath)).mtimeMs,
+                        },
+                    ];
+                } catch {
+                    return [];
+                }
+            })
             .sort((a, b) => b.mtime - a.mtime);
 
         if (files.length === 0) {
@@ -443,7 +488,7 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
         }
 
         // Read the file and find last user message and tool use
-        const content = FS.readFileSync(latestFile.path, "utf8");
+        const content = await readTextNoFollowGuarded(guardedPath(latestFile.path));
         const lines = content.trim().split("\n");
 
         let lastTask: string | null = null;
@@ -522,26 +567,21 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
 
 /** Returns the modification time for a session file, or null when it cannot be read. */
 function getSessionFileModTime(agentId: string): number | null {
-    // Check for session files in agents directory
-    const agentDir = Path.join(AGENTS_DIR, agentId);
-    if (!FS.existsSync(agentDir)) {
+    const sessionsDir = getSafeAgentSessionsDir(agentId);
+    if (!sessionsDir) {
         return null;
     }
 
     try {
-        // Look for JSONL session files
-        const sessionsDir = Path.join(agentDir, "sessions");
-        if (!FS.existsSync(sessionsDir)) {
-            return null;
-        }
-
-        const files = FS.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+            .map((entry) => entry.name);
         let latestModTime = 0;
 
         for (const file of files) {
             const filePath = Path.join(sessionsDir, file);
             try {
-                const stat = FS.statSync(filePath);
+                const stat = statGuarded(guardedPath(filePath));
                 if (stat.mtimeMs > latestModTime) {
                     latestModTime = stat.mtimeMs;
                 }
@@ -621,16 +661,13 @@ function findBestSessionForAgent(
 }
 
 /** Builds one dashboard agent status by combining config, metadata, sessions, and activity hints. */
-function getAgentStatus(agentId: string): AgentStatus {
-    // Auto-close stale active tasks before reading current state
-    closeStaleActiveTasks();
-
+async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     // Current task priority: active history task -> metadata -> inferred activity
     const activeTask = getActiveHistoryTask(agentId);
-    const metadata = getAgentMetadata(agentId);
+    const metadata = await getAgentMetadata(agentId);
 
     // Get sessions from agent's sessions.json file
-    const fileSessions = getAgentSessionsFromFiles(agentId);
+    const fileSessions = await getAgentSessionsFromFiles(agentId);
 
     // Find most recent session
     let latestSession: SessionInfo | null = null;
@@ -645,7 +682,7 @@ function getAgentStatus(agentId: string): AgentStatus {
     }
 
     // Get activity from JSONL file
-    const activity = getLatestActivityFromFile(agentId);
+    const activity = await getLatestActivityFromFile(agentId);
 
     // Determine status from file modification time
     const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
@@ -694,6 +731,7 @@ export default function agentsRoutes(app: express.Application): void {
     // Get all agents with status
     app.get("/api/agents/status", (async (_req, res) => {
         try {
+            closeStaleActiveTasks();
             const config = parseAgentsConfig();
             if (!config) {
                 res.status(404).json({ error: "Agent configuration not found" });
@@ -703,21 +741,24 @@ export default function agentsRoutes(app: express.Application): void {
             const defaultModel = config.defaults?.model?.primary || "unknown";
             const sessions = await getGatewaySessionsForAgents();
 
-            const agents: AgentStatus[] = config.list.map((agent) => {
-                const status = getAgentStatus(agent.id);
-                const configuredModel = resolveConfiguredModelName(
-                    agent.model?.primary || defaultModel,
-                    config
-                );
-                const matchingSession = status.sessionKey
-                    ? sessions.find((session) => session.key === status.sessionKey)
-                    : findBestSessionForAgent(agent.id, sessions);
-                status.model =
-                    matchingSession?.model && matchingSession.model !== configuredModel
-                        ? matchingSession.model
-                        : configuredModel;
-                return status;
-            });
+            const agents: AgentStatus[] = await Promise.all(
+                config.list.map(async (agent) => {
+                    const status = await getAgentStatus(agent.id);
+                    const configuredModel = resolveConfiguredModelName(
+                        agent.model?.primary || defaultModel,
+                        config
+                    );
+                    const matchingSession = status.sessionKey
+                        ? sessions.find((session) => session.key === status.sessionKey)
+                        : findBestSessionForAgent(agent.id, sessions);
+                    status.model =
+                        matchingSession?.model &&
+                        matchingSession.model !== configuredModel
+                            ? matchingSession.model
+                            : configuredModel;
+                    return status;
+                })
+            );
 
             res.json({ agents, timestamp: Date.now() });
         } catch (error) {
@@ -738,6 +779,7 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
+            closeStaleActiveTasks();
             const config = parseAgentsConfig();
 
             if (!config) {
@@ -751,7 +793,7 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const status = getAgentStatus(agentId);
+            const status = await getAgentStatus(agentId);
             const sessions = await getGatewaySessionsForAgents();
             const configuredModel = resolveConfiguredModelName(
                 agentConfig.model?.primary || config.defaults?.model?.primary,

@@ -5,12 +5,12 @@ import path from "path";
 import {
     copyGuarded,
     guardedPath,
-    mkdirGuarded,
     openReadNoFollowGuarded,
+    readdirGuarded,
     statGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
-import { safePathWithinRoot } from "../lib/safePath.js";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
@@ -91,7 +91,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
     }
 
     try {
-        const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+        const entries = readdirGuarded(guardedPath(fullPath), { withFileTypes: true });
         for (const entry of entries) {
             if (shouldHideFile(entry.name)) continue;
 
@@ -106,7 +106,9 @@ function listDirectory(dirPath: string): FileItem[] | null {
             } else {
                 // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
                 try {
-                    const stat = fs.statSync(path.join(fullPath, entry.name));
+                    const stat = statGuarded(
+                        guardedPath(path.join(fullPath, entry.name))
+                    );
                     items.push({
                         name: entry.name,
                         type: "file",
@@ -317,19 +319,26 @@ export default function filesRoutes(
                 return;
             }
 
+            const safeFullPath = prepareSafeWriteTargetWithinRoot(
+                fullPath,
+                WORKSPACE_ROOT
+            );
+            if (!safeFullPath) {
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
+            }
+
             try {
-                const backupPath = fullPath + ".bak";
-                copyGuarded(guardedPath(fullPath), guardedPath(backupPath));
+                const backupPath = safeFullPath + ".bak";
+                copyGuarded(guardedPath(safeFullPath), guardedPath(backupPath));
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
-
-                mkdirGuarded(guardedPath(path.dirname(fullPath)), { recursive: true });
             }
 
-            await writeTextNoFollowGuarded(guardedPath(fullPath), content);
-            const stat = statGuarded(guardedPath(fullPath));
+            await writeTextNoFollowGuarded(guardedPath(safeFullPath), content);
+            const stat = statGuarded(guardedPath(safeFullPath));
 
             res.json({
                 success: true,

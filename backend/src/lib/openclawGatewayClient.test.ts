@@ -265,6 +265,47 @@ describe("OpenClaw gateway client websocket protocol", () => {
         }
     });
 
+    it("clamps gateway tick intervals before arming watchdog timers", async () => {
+        let connectFrame: Record<string, unknown> | undefined;
+        const server = await startGatewayServer((socket) => {
+            socket.on("message", (raw) => {
+                connectFrame = JSON.parse(raw.toString()) as Record<string, unknown>;
+                socket.send(
+                    JSON.stringify({
+                        type: "res",
+                        id: connectFrame.id,
+                        ok: true,
+                        payload: { type: "hello-ok", policy: { tickIntervalMs: 1 } },
+                    })
+                );
+            });
+            socket.send(
+                JSON.stringify({
+                    type: "event",
+                    event: "connect.challenge",
+                    payload: { nonce: "nonce-1" },
+                })
+            );
+        });
+        const client = new OpenClawGatewayClient({ url: server.url });
+
+        try {
+            client.start();
+            await waitFor(() => connectFrame, "connect frame");
+            await waitFor(
+                () =>
+                    (client as unknown as { tickIntervalMs: number }).tickIntervalMs ===
+                    1000
+                        ? true
+                        : undefined,
+                "clamped tick interval"
+            );
+        } finally {
+            client.stop();
+            await server.close();
+        }
+    });
+
     it("reports malformed server messages and missing connect nonces without crashing", async () => {
         let socketRef: WebSocket | undefined;
         const errors: string[] = [];

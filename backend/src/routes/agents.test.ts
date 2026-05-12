@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -86,6 +86,7 @@ describe("agents routes", () => {
                                 id: "researcher",
                                 model: { primary: "synthetic/hf:moonshotai/Kimi-K2.5" },
                             },
+                            { id: "alias-agent" },
                         ],
                     },
                 },
@@ -143,7 +144,7 @@ describe("agents routes", () => {
         assert.equal(config.body.defaults.model.primary, "codex");
         assert.deepEqual(
             config.body.list.map((agent) => agent.id),
-            [agentId, "researcher"]
+            [agentId, "researcher", "alias-agent"]
         );
 
         const status = await requestJson<{
@@ -167,6 +168,10 @@ describe("agents routes", () => {
     });
 
     it("validates, stores, and rotates current task metadata into history", async () => {
+        const { isValidAgentId: validateAgentId } = await import("./agents.js");
+        assert.equal(validateAgentId("."), false);
+        assert.equal(validateAgentId(".."), false);
+
         const invalid = await requestJson<{ error: string }>(
             server,
             `/api/agents/${agentId}/metadata`,
@@ -296,6 +301,29 @@ describe("agents routes", () => {
         assert.equal(response.body.sessionKey, "channel:discord:team");
         assert.equal(response.body.channel, "discord");
         assert.match(response.body.lastActivity, /^\d{4}-\d{2}-\d{2}T/u);
+    });
+
+    it("rejects symlink aliases to another agent's sessions", async () => {
+        const agentsRoot = path.join(homeDir, ".openclaw", "agents");
+        const aliasPath = path.join(agentsRoot, "alias-agent");
+        try {
+            await symlink("researcher", aliasPath, "dir");
+
+            const response = await requestJson<{
+                id: string;
+                currentTask: string | null;
+                currentActivity: string | null;
+                sessionKey: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.id, "alias-agent");
+            assert.equal(response.body.currentTask, null);
+            assert.equal(response.body.currentActivity, null);
+            assert.equal(response.body.sessionKey, null);
+        } finally {
+            await rm(aliasPath, { force: true });
+        }
     });
 
     it("returns 404s when config or agent entries are missing", async () => {

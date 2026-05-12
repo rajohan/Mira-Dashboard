@@ -233,5 +233,20 @@ describe("config files routes", () => {
         );
         assert.equal(missingContent.status, 400);
         assert.equal(missingContent.body.error, "Content required");
+
+        const openclawPath = path.join(openclawRoot, "openclaw.json");
+        const openclawBeforeInvalid = await readFile(openclawPath, "utf8");
+
+        const invalidContent = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/openclaw.json",
+            { method: "PUT", body: { content: { nested: true } } }
+        );
+        assert.equal(invalidContent.status, 400);
+        assert.equal(invalidContent.body.error, "Invalid content");
+        assert.equal(await readFile(openclawPath, "utf8"), openclawBeforeInvalid);
+        await assert.rejects(
+            readFile(path.join(openclawRoot, "openclaw.json.bak"), "utf8")
+        );
     });
 });
