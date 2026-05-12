@@ -40,6 +40,7 @@ const HOME_DIR = os.homedir();
 
 /** Performs expand path. */
 function expandPath(inputPath: string, cwd: string): string {
+    if (inputPath.includes("\0")) return cwd; // Reject null bytes
     if (inputPath.startsWith("/")) return inputPath;
     if (inputPath.startsWith("~/")) return HOME_DIR + inputPath.slice(1);
     if (inputPath === "~") return HOME_DIR;
@@ -140,7 +141,7 @@ export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/complete", express.json(), async (req, res) => {
         const { partial, cwd } = req.body as CompletionRequest;
 
-        if (!partial || typeof partial !== "string") {
+        if (!partial || typeof partial !== "string" || partial.includes("\0")) {
             res.status(400).json({ error: "Missing or invalid partial" });
             return;
         }
@@ -155,7 +156,7 @@ export default function terminalRoutes(app: express.Application): void {
 
         const resolvedCwd = cwd || HOME_DIR;
 
-        if (!targetPath || typeof targetPath !== "string") {
+        if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
             res.status(400).json({
                 success: false,
                 newCwd: resolvedCwd,

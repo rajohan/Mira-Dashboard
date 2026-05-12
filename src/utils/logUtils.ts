@@ -98,13 +98,13 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
         } else {
             msg = positionalZero;
         }
-    } else if (positionalZero != null && positionalZero !== "") {
+    } else if (positionalZero != null && String(positionalZero) !== "") {
         msg = stringifyCompact(positionalZero);
     }
 
     if (!msg && typeof positionalOne === "string") {
         msg = positionalOne;
-    } else if (!msg && positionalOne != null) {
+    } else if (!msg && positionalOne != null && String(positionalOne) !== "") {
         msg = stringifyCompact(positionalOne);
     }
 

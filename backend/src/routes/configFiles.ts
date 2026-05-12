@@ -2,6 +2,8 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+import { safePathWithinRoot } from "../lib/safePath.js";
+
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 
@@ -101,27 +103,53 @@ export default function configFilesRoutes(
         }
 
         try {
-            const fullPath = path.join(OPENCLAW_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
 
-            if (!fs.existsSync(fullPath)) {
-                res.status(404).json({ error: "File not found" });
+            if (!fullPath) {
+                res.status(403).json({
+                    error: "Access denied: path outside allowed root",
+                });
                 return;
             }
 
-            const stat = fs.statSync(fullPath);
-
-            if (stat.isDirectory()) {
-                res.status(400).json({ error: "Path is a directory, not a file" });
-                return;
+            let fd: number | undefined;
+            try {
+                fd = fs.openSync(fullPath, "r");
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
             }
 
-            if (stat.size > MAX_FILE_SIZE) {
-                const fd = fs.openSync(fullPath, "r");
-                const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
-                fs.closeSync(fd);
+            try {
+                const stat = fs.fstatSync(fd);
 
-                const content = buffer.toString("utf8", 0, bytesRead);
+                if (stat.isDirectory()) {
+                    res.status(400).json({ error: "Path is a directory, not a file" });
+                    return;
+                }
+
+                if (stat.size > MAX_FILE_SIZE) {
+                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                    const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+                    const content = buffer.toString("utf8", 0, bytesRead);
+                    const isBinary = isBinaryFile(content);
+
+                    res.json({
+                        path: "config:" + filePath,
+                        relPath: filePath,
+                        content: isBinary ? "[Binary file]" : content,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isBinary: isBinary,
+                        truncated: true,
+                    } satisfies ConfigFileResponse);
+                    return;
+                }
+
+                const content = fs.readFileSync(fd, "utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
@@ -131,22 +159,11 @@ export default function configFilesRoutes(
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
-                    truncated: true,
                 } satisfies ConfigFileResponse);
-                return;
+            } finally {
+                fs.closeSync(fd);
             }
-
-            const content = fs.readFileSync(fullPath, "utf8");
-            const isBinary = isBinaryFile(content);
-
-            res.json({
-                path: "config:" + filePath,
-                relPath: filePath,
-                content: isBinary ? "[Binary file]" : content,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                isBinary: isBinary,
-            } satisfies ConfigFileResponse);
+            return;
         } catch (error) {
             console.error("[ConfigFiles] Read error:", (error as Error).message);
             res.status(500).json({ error: (error as Error).message });
@@ -170,17 +187,27 @@ export default function configFilesRoutes(
         }
 
         try {
-            const fullPath = path.join(OPENCLAW_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
+
+            if (!fullPath) {
+                res.status(403).json({
+                    error: "Access denied: path outside allowed root",
+                });
+                return;
+            }
 
             // Create backup
-            if (fs.existsSync(fullPath)) {
+            try {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } else {
-                const parentDir = path.dirname(fullPath);
-                if (!fs.existsSync(parentDir)) {
-                    fs.mkdirSync(parentDir, { recursive: true });
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
                 }
+
+                // File doesn't exist yet; ensure parent directory exists
+                const parentDir = path.dirname(fullPath);
+                fs.mkdirSync(parentDir, { recursive: true });
             }
 
             fs.writeFileSync(fullPath, content, "utf8");

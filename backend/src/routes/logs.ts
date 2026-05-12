@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
+import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
+
 const LOGS_DIR = "/tmp/openclaw";
 const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
 let logWatcher: NodeJS.Timeout | null = null;
@@ -176,19 +178,57 @@ export default function logsRoutes(app: express.Application): void {
         }
 
         try {
-            const filePath = path.resolve(LOGS_DIR, logFile);
+            let realRoot: string;
+            try {
+                realRoot = fs.realpathSync(REAL_LOGS_DIR);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
+            }
 
-            if (!filePath.startsWith(`${REAL_LOGS_DIR}${path.sep}`)) {
+            const candidatePath = path.resolve(realRoot, logFile);
+
+            if (
+                candidatePath !== realRoot &&
+                !candidatePath.startsWith(realRoot + path.sep)
+            ) {
                 res.status(403).json({ error: "Access denied" });
                 return;
             }
 
-            if (!fs.existsSync(filePath)) {
+            let filePath: string;
+            try {
+                filePath = fs.realpathSync(candidatePath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
+            }
+
+            if (filePath !== realRoot && !filePath.startsWith(realRoot + path.sep)) {
+                res.status(403).json({ error: "Access denied" });
+                return;
+            }
+
+            let file: fs.promises.FileHandle;
+            try {
+                file = await openReadNoFollowGuarded(guardedPath(filePath));
+            } catch {
                 res.status(404).json({ error: "Log file not found" });
                 return;
             }
 
-            let content = fs.readFileSync(filePath, "utf8");
+            let content: string;
+            try {
+                content = await file.readFile("utf8");
+            } finally {
+                await file.close();
+            }
 
             if (lines) {
                 const allLines = content.split("\n").filter((l) => l.trim());

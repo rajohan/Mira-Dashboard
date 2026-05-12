@@ -5,9 +5,29 @@ import Path from "path";
 
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import {
+    guardedPath,
+    mkdirGuarded,
+    readTextNoFollowGuarded,
+    writeTextNoFollowGuarded,
+} from "../lib/guardedOps.js";
+import { safePathWithinRoot } from "../lib/safePath.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
+
+// Agent IDs may only contain alphanumeric chars, hyphens, underscores, and dots.
+// This prevents path traversal when constructing file paths from agent IDs.
+const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
+
+function isValidAgentId(id: string): boolean {
+    return (
+        typeof id === "string" &&
+        id.length > 0 &&
+        id.length <= 64 &&
+        SAFE_AGENT_ID_RE.test(id)
+    );
+}
 
 // Activity thresholds (in milliseconds)
 const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
@@ -267,9 +287,6 @@ function parseAgentsConfig(): AgentsConfig | null {
 function getAgentMetadata(agentId: string): AgentMetadata | null {
     const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
     try {
-        if (!FS.existsSync(metadataPath)) {
-            return null;
-        }
         const content = FS.readFileSync(metadataPath, "utf8");
         return JSON5.parse(content) as AgentMetadata;
     } catch {
@@ -282,9 +299,6 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
 function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
     try {
-        if (!FS.existsSync(sessionsFile)) {
-            return [];
-        }
         const content = FS.readFileSync(sessionsFile, "utf8");
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
@@ -718,6 +732,12 @@ export default function agentsRoutes(app: express.Application): void {
             const agentId = Array.isArray(req.params.id)
                 ? req.params.id[0]
                 : req.params.id;
+
+            if (!isValidAgentId(agentId)) {
+                res.status(400).json({ error: "Invalid agent ID" });
+                return;
+            }
+
             const config = parseAgentsConfig();
 
             if (!config) {
@@ -771,6 +791,13 @@ export default function agentsRoutes(app: express.Application): void {
             const agentId = Array.isArray(req.params.id)
                 ? req.params.id[0]
                 : req.params.id;
+
+            if (!isValidAgentId(agentId)) {
+                res.status(400).json({ error: "Invalid agent ID" });
+                return;
+            }
+            const safeAgentId = agentId.replaceAll(/[^a-zA-Z0-9._-]/gu, "");
+
             const { currentTask } = req.body as { currentTask?: string };
 
             if (!currentTask || currentTask.trim().length === 0) {
@@ -778,27 +805,43 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const metadataPath = Path.join(
-                AGENTS_DIR,
-                agentId,
-                "sessions",
-                "metadata.json"
+            FS.mkdirSync(AGENTS_DIR, { recursive: true });
+            const metadataPath = safePathWithinRoot(
+                Path.join(safeAgentId, "sessions", "metadata.json"),
+                AGENTS_DIR
             );
-            const metadataDir = Path.dirname(metadataPath);
 
-            // Ensure directory exists
-            if (!FS.existsSync(metadataDir)) {
-                FS.mkdirSync(metadataDir, { recursive: true });
+            if (!metadataPath) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
             }
 
-            // Read existing metadata or create new
+            const metadataDir = Path.dirname(metadataPath);
+
+            // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
+            mkdirGuarded(guardedPath(metadataDir), { recursive: true });
+
+            const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+            const realMetadataDir = FS.realpathSync(metadataDir);
+            if (
+                realMetadataDir !== realAgentsDir &&
+                !realMetadataDir.startsWith(realAgentsDir + Path.sep)
+            ) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
+            }
+
+            const safeMetadataPath = Path.join(realMetadataDir, "metadata.json");
+
+            // Read existing metadata or create new (atomic read, no existsSync check)
             let metadata: AgentMetadata = {};
-            if (FS.existsSync(metadataPath)) {
-                try {
-                    metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
-                } catch {
-                    // Start fresh if parse fails
-                }
+            try {
+                // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
+                metadata = JSON5.parse(
+                    await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
+                );
+            } catch {
+                // File doesn't exist or is unreadable; start fresh
             }
 
             const safeTask =
@@ -837,8 +880,17 @@ export default function agentsRoutes(app: express.Application): void {
 
             metadata.updatedAt = ts;
 
-            // Write back
-            FS.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            const latestMetadataDir = FS.realpathSync(metadataDir);
+            if (latestMetadataDir !== realMetadataDir) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
+            }
+
+            // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
+            await writeTextNoFollowGuarded(
+                guardedPath(Path.join(latestMetadataDir, "metadata.json")),
+                JSON.stringify(metadata, null, 2)
+            );
             res.json(metadata);
         } catch (error) {
             console.error("[Agents] Metadata update error:", (error as Error).message);

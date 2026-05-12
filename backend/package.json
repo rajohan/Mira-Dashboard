@@ -16,9 +16,12 @@
         "test:coverage": "node --experimental-test-coverage --test-coverage-lines=79 --test-coverage-branches=64 --test-coverage-functions=72 --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\""
     },
     "dependencies": {
+        "@types/shell-quote": "^1.7.5",
         "dotenv": "^17.4.2",
         "express": "^5.2.1",
+        "express-rate-limit": "^8.5.1",
         "json5": "^2.2.3",
+        "shell-quote": "^1.8.3",
         "ws": "^8.20.0"
     },
     "devDependencies": {
