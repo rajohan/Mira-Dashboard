@@ -5,6 +5,7 @@ import path from "path";
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
+/** Represents file item. */
 interface FileItem {
     name: string;
     type: "file" | "directory";
@@ -14,6 +15,7 @@ interface FileItem {
     error?: boolean;
 }
 
+/** Represents the file API response. */
 interface FileResponse {
     path: string;
     content: string;
@@ -25,6 +27,7 @@ interface FileResponse {
     truncated?: boolean;
 }
 
+/** Represents the write API response. */
 interface WriteResponse {
     success: boolean;
     path: string;
@@ -32,6 +35,7 @@ interface WriteResponse {
     modified: string;
 }
 
+/** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
         if (content.codePointAt(i) === 0) return true;
@@ -39,12 +43,14 @@ function isBinaryFile(content: string): boolean {
     return false;
 }
 
+/** Returns whether image file. */
 function isImageFile(filename: string): boolean {
     const ext = filename.split(".").pop()?.toLowerCase();
     const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
     return imageExts.includes(ext || "");
 }
 
+/** Returns image mime type. */
 function getImageMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -60,10 +66,12 @@ function getImageMimeType(filename: string): string {
     return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
+/** Performs should hIDe file. */
 function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
+/** Performs list directory. */
 function listDirectory(dirPath: string): FileItem[] {
     const items: FileItem[] = [];
     const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
@@ -111,6 +119,7 @@ function listDirectory(dirPath: string): FileItem[] {
     });
 }
 
+/** Registers files API routes. */
 export default function filesRoutes(
     app: express.Application,
     _express: typeof express

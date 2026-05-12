@@ -5,10 +5,12 @@ const execFileAsync = promisify(execFile);
 
 let testDockerBin: string | undefined;
 
+/** Performs set cache store docker bin for tests. */
 export function setCacheStoreDockerBinForTests(dockerBin: string | undefined) {
     testDockerBin = dockerBin;
 }
 
+/** Represents one cache entry row. */
 export interface CacheEntryRow {
     key: string;
     data: string;
@@ -23,6 +25,7 @@ export interface CacheEntryRow {
     meta: string;
 }
 
+/** Parses table. */
 export function parseTable<T extends object>(output: string): T[] {
     const trimmed = output.trim();
     if (!trimmed) {
@@ -43,6 +46,7 @@ export function parseTable<T extends object>(output: string): T[] {
     });
 }
 
+/** Performs run docker exec. */
 async function runDockerExec(container: string, command: string) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
@@ -58,6 +62,7 @@ async function runDockerExec(container: string, command: string) {
     return stdout;
 }
 
+/** Builds PostgreSQL uri. */
 function buildPostgresUri(database = "n8n") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -66,6 +71,7 @@ function buildPostgresUri(database = "n8n") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
+/** Performs query n8n cache. */
 async function queryN8nCache(sql: string) {
     const uri = buildPostgresUri("n8n");
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
@@ -75,6 +81,7 @@ async function queryN8nCache(sql: string) {
     );
 }
 
+/** Parses JSON field. */
 export function parseJsonField<T>(value: string): T | null {
     if (!value) {
         return null;
@@ -87,6 +94,7 @@ export function parseJsonField<T>(value: string): T | null {
     }
 }
 
+/** Returns cache entry. */
 export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> {
     const escapedKey = key.replaceAll("'", "''");
     const rows = parseTable<CacheEntryRow>(
@@ -112,6 +120,7 @@ export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> 
     return rows[0] || null;
 }
 
+/** Returns all cache entries. */
 export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
     return parseTable<CacheEntryRow>(
         await queryN8nCache(`
