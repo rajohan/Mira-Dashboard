@@ -135,6 +135,14 @@ describe("logs routes", () => {
         );
         assert.equal(missing.status, 404);
         assert.deepEqual(await missing.json(), { error: "Log file not found" });
+
+        const nestedUnderFile = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(`${testFiles[1]}/extra`)}`
+        );
+        assert.equal(nestedUnderFile.status, 404);
+        assert.deepEqual(await nestedUnderFile.json(), {
+            error: "Log file not found",
+        });
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {

@@ -159,7 +159,7 @@ function trimOutput(text: string): string {
 }
 
 /** Parses a non-shell command string into executable and argv tokens. */
-function parseCommand(command: string): { executable: string; args: string[] } {
+function parseDirectCommand(command: string): { executable: string; args: string[] } {
     let parsed: ReturnType<typeof parseShellCommand>;
     try {
         parsed = parseShellCommand(command, (key) => `$${key}`);
@@ -241,6 +241,14 @@ function spawnApprovedShell(
     return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
 }
 
+/** Spawns an authenticated dashboard terminal command with shell semantics preserved. */
+function spawnTerminalShell(
+    command: string,
+    cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
+): ChildProcess {
+    return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
+}
+
 /** Returns the public error payload for exec route failures without leaking internals. */
 function execErrorResponse(error: unknown): { status: number; error: string } {
     if (error instanceof ExecValidationError) {
@@ -255,7 +263,8 @@ function execErrorResponse(error: unknown): { status: number; error: string } {
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
-    onUpdate?: (job: ExecJob) => void
+    onUpdate?: (job: ExecJob) => void,
+    options: { allowTerminalShell?: boolean } = {}
 ): Promise<ExecResponse> {
     const { command, args, cwd, shell } = request;
     const safeCwd = resolveCwd(cwd);
@@ -264,10 +273,12 @@ function runExecCommand(
     if (shell) {
         const approvedCommand = getApprovedShellCommand(command);
         childFactory = () => spawnApprovedShell(approvedCommand, cwdOption);
+    } else if (options.allowTerminalShell && args === undefined) {
+        childFactory = () => spawnTerminalShell(command, cwdOption);
     } else {
         const commandParts = Array.isArray(args)
             ? { executable: command, args }
-            : parseCommand(command);
+            : parseDirectCommand(command);
         childFactory = () =>
             spawnExec(commandParts.executable, commandParts.args, cwdOption);
     }
@@ -389,15 +400,20 @@ export default function execRoutes(
 
         let runPromise: Promise<ExecResponse>;
         try {
-            runPromise = runExecCommand(payload, jobId, (update) => {
-                const current = jobs.get(jobId);
-                if (!current) {
-                    return;
-                }
+            runPromise = runExecCommand(
+                payload,
+                jobId,
+                (update) => {
+                    const current = jobs.get(jobId);
+                    if (!current) {
+                        return;
+                    }
 
-                current.stdout = update.stdout;
-                current.stderr = update.stderr;
-            });
+                    current.stdout = update.stdout;
+                    current.stderr = update.stderr;
+                },
+                { allowTerminalShell: true }
+            );
         } catch (error) {
             jobs.delete(jobId);
             const response = execErrorResponse(error);

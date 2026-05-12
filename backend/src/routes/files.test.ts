@@ -140,6 +140,13 @@ describe("files routes", () => {
         );
         assert.equal(missing.status, 404);
 
+        const nestedUnderFile = await requestJson<{ error: string }>(
+            server,
+            "/api/files/src%2Fapp.ts%2Fextra"
+        );
+        assert.equal(nestedUnderFile.status, 404);
+        assert.equal(nestedUnderFile.body.error, "File not found");
+
         const denied = await requestJson<{ error: string }>(
             server,
             "/api/files/..%2Foutside.txt"

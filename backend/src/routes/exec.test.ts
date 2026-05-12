@@ -108,7 +108,7 @@ describe("exec routes", () => {
         assert.equal(response.body.stderr, "warn exec\n");
     });
 
-    it("keeps arbitrary shell syntax out of terminal commands", async () => {
+    it("keeps arbitrary shell syntax out of one-shot direct commands", async () => {
         const rejected = await requestJson<{ error: string }>(server, "/api/exec", {
             method: "POST",
             body: { command: "echo safe && echo unsafe" },
@@ -116,6 +116,20 @@ describe("exec routes", () => {
 
         assert.equal(rejected.status, 400);
         assert.match(rejected.body.error, /shell operators/u);
+    });
+
+    it("preserves shell operators for background terminal commands", async () => {
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: { command: "printf alpha && printf beta" },
+        });
+
+        assert.equal(started.status, 200);
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 0);
+        assert.equal(job.stdout, "alphabeta");
+        assert.equal(job.stderr, "");
     });
 
     it("allows approved ops commands to run through explicit shell mode", async () => {
