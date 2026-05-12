@@ -8,7 +8,3 @@ paths-ignore:
     - "**/dist/**"
     - "**/*.test.ts"
     - "**/*.test.tsx"
-    # Centralized filesystem/child_process wrappers. Route-level callers validate
-    # and canonicalize inputs before branding paths for these low-level sinks;
-    # analyzing this wrapper itself creates duplicate PR annotations at the sink.
-    - "backend/src/lib/guardedOps.ts"

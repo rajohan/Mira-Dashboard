@@ -287,8 +287,13 @@ export default function filesRoutes(
         const filePath = decodeURIComponent(req.params[0] || "");
         const { content } = req.body as { content?: string };
 
-        if (content === undefined) {
+        if (typeof content !== "string") {
             res.status(400).json({ error: "Content required" });
+            return;
+        }
+
+        if (Buffer.byteLength(content, "utf8") > MAX_FILE_SIZE) {
+            res.status(413).json({ error: "Content exceeds maximum file size" });
             return;
         }
 
