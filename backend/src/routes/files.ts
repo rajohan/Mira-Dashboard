@@ -6,7 +6,6 @@ import {
     copyGuarded,
     guardedPath,
     mkdirGuarded,
-    readFromOpenFile,
     statGuarded,
     writeTextGuarded,
 } from "../lib/guardedOps.js";
@@ -184,11 +183,9 @@ export default function filesRoutes(
             // Open file first to avoid TOCTOU race between stat and read.
             // O_NOFOLLOW rejects a final-component symlink if the path is swapped
             // after canonicalization but before open.
-            let fd: number | undefined;
+            let file: fs.promises.FileHandle | undefined;
             try {
-                // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
-                // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
-                fd = fs.openSync(
+                file = await fs.promises.open(
                     guardedPath(fullPath),
                     fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
                 );
@@ -208,7 +205,7 @@ export default function filesRoutes(
             }
 
             try {
-                const stat = fs.fstatSync(fd);
+                const stat = await file.stat();
 
                 if (stat.isDirectory()) {
                     res.status(400).json({ error: "Path is a directory, not a file" });
@@ -219,7 +216,7 @@ export default function filesRoutes(
 
                 // Handle image files
                 if (isImageFile(filename)) {
-                    const buffer = readFromOpenFile(fd, stat.size);
+                    const buffer = await file.readFile();
                     const base64 = buffer.toString("base64");
                     const mimeType = getImageMimeType(filename);
 
@@ -236,8 +233,9 @@ export default function filesRoutes(
                 }
 
                 if (stat.size > MAX_FILE_SIZE) {
-                    const buffer = readFromOpenFile(fd, MAX_FILE_SIZE);
-                    const content = buffer.toString("utf8");
+                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                    const { bytesRead } = await file.read(buffer, 0, MAX_FILE_SIZE, 0);
+                    const content = buffer.subarray(0, bytesRead).toString("utf8");
                     const isBinary = isBinaryFile(content);
 
                     res.json({
@@ -251,7 +249,7 @@ export default function filesRoutes(
                     return;
                 }
 
-                const content = readFromOpenFile(fd, stat.size).toString("utf8");
+                const content = (await file.readFile()).toString("utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
@@ -262,7 +260,7 @@ export default function filesRoutes(
                     isBinary: isBinary,
                 } satisfies FileResponse);
             } finally {
-                if (fd !== undefined) fs.closeSync(fd);
+                if (file) await file.close();
             }
         } catch (error) {
             console.error("[Backend] File read error:", (error as Error).message);
