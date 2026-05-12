@@ -25,17 +25,27 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
 
     // For existing paths, use realpathSync to resolve symlinks and
     // canonicalize (CodeQL recognizes this as a path sanitizer).
+    // For non-existing paths, just normalize.
     let canonicalRoot: string;
+    let canonicalResolved: string;
     try {
         canonicalRoot = fs.realpathSync(rootDir);
     } catch {
         canonicalRoot = path.normalize(rootDir);
     }
+    try {
+        canonicalResolved = fs.realpathSync(resolved);
+    } catch {
+        canonicalResolved = resolved;
+    }
 
     const normalizedRoot = canonicalRoot + path.sep;
 
-    if (resolved === canonicalRoot || resolved.startsWith(normalizedRoot)) {
-        return resolved;
+    if (
+        canonicalResolved === canonicalRoot ||
+        canonicalResolved.startsWith(normalizedRoot)
+    ) {
+        return canonicalResolved;
     }
 
     return null;

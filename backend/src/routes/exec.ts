@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { type ChildProcess, spawn } from "child_process";
 import express, { type RequestHandler } from "express";
+import path from "path";
 
 interface ExecRequest {
     command: string;
@@ -105,7 +106,10 @@ function runExecCommand(
     onUpdate?: (job: ExecJob) => void
 ): Promise<ExecResponse> {
     const { command, args, cwd } = request;
-    const cwdOption = { cwd: cwd || process.cwd(), env: process.env, detached: true };
+    // Validate cwd: reject null bytes and restrict to absolute or known paths
+    const safeCwd =
+        cwd && !cwd.includes("\0") && path.isAbsolute(cwd) ? cwd : process.cwd();
+    const cwdOption = { cwd: safeCwd, env: process.env, detached: true };
 
     return new Promise((resolve, reject) => {
         // When args are provided, use them directly without shell to prevent
@@ -113,7 +117,7 @@ function runExecCommand(
         // interactive terminal use but is guarded by auth and input validation.
         const child = Array.isArray(args)
             ? spawn(command, args, cwdOption)
-            : spawn(command, [], { ...cwdOption, shell: true });
+            : spawn("/bin/sh", ["-c", command], cwdOption);
 
         // Store process reference for kill
         const job = jobs.get(jobId);

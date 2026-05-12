@@ -142,46 +142,64 @@ export default function filesRoutes(
                 return;
             }
 
-            let stat: fs.Stats;
+            // Open file first to avoid TOCTOU race between stat and read
+            let fd: number | undefined;
             try {
-                stat = fs.statSync(fullPath);
-            } catch {
-                res.status(404).json({ error: "File not found" });
-                return;
+                fd = fs.openSync(fullPath, "r");
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
             }
 
-            if (stat.isDirectory()) {
-                res.status(400).json({ error: "Path is a directory, not a file" });
-                return;
-            }
+            try {
+                const stat = fs.fstatSync(fd);
 
-            const filename = path.basename(filePath);
+                if (stat.isDirectory()) {
+                    res.status(400).json({ error: "Path is a directory, not a file" });
+                    return;
+                }
 
-            // Handle image files
-            if (isImageFile(filename)) {
-                const buffer = fs.readFileSync(fullPath);
-                const base64 = buffer.toString("base64");
-                const mimeType = getImageMimeType(filename);
+                const filename = path.basename(filePath);
 
-                res.json({
-                    path: filePath,
-                    content: base64,
-                    mimeType: mimeType,
-                    size: stat.size,
-                    modified: stat.mtime.toISOString(),
-                    isImage: true,
-                    isBinary: true,
-                } satisfies FileResponse);
-                return;
-            }
+                // Handle image files
+                if (isImageFile(filename)) {
+                    const buffer = fs.readFileSync(fd);
+                    const base64 = buffer.toString("base64");
+                    const mimeType = getImageMimeType(filename);
 
-            if (stat.size > MAX_FILE_SIZE) {
-                const fd = fs.openSync(fullPath, "r");
-                const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
-                fs.closeSync(fd);
+                    res.json({
+                        path: filePath,
+                        content: base64,
+                        mimeType: mimeType,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isImage: true,
+                        isBinary: true,
+                    } satisfies FileResponse);
+                    return;
+                }
 
-                const content = buffer.toString("utf8", 0, bytesRead);
+                if (stat.size > MAX_FILE_SIZE) {
+                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                    const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+                    const content = buffer.toString("utf8", 0, bytesRead);
+                    const isBinary = isBinaryFile(content);
+
+                    res.json({
+                        path: filePath,
+                        content: isBinary ? "[Binary file]" : content,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isBinary: isBinary,
+                        truncated: true,
+                    } satisfies FileResponse);
+                    return;
+                }
+
+                const content = fs.readFileSync(fd, "utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
@@ -190,21 +208,10 @@ export default function filesRoutes(
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
-                    truncated: true,
                 } satisfies FileResponse);
-                return;
+            } finally {
+                if (fd !== undefined) fs.closeSync(fd);
             }
-
-            const content = fs.readFileSync(fullPath, "utf8");
-            const isBinary = isBinaryFile(content);
-
-            res.json({
-                path: filePath,
-                content: isBinary ? "[Binary file]" : content,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                isBinary: isBinary,
-            } satisfies FileResponse);
         } catch (error) {
             console.error("[Backend] File read error:", (error as Error).message);
             res.status(500).json({ error: (error as Error).message });
@@ -243,7 +250,17 @@ export default function filesRoutes(
             }
 
             fs.writeFileSync(fullPath, content, "utf8");
-            const stat = fs.statSync(fullPath);
+
+            let stat: fs.Stats;
+            try {
+                stat = fs.statSync(fullPath);
+            } catch {
+                res.json({
+                    success: true,
+                    path: filePath,
+                });
+                return;
+            }
 
             res.json({
                 success: true,
