@@ -168,7 +168,17 @@ export default function logsRoutes(app: express.Application): void {
         }
 
         try {
-            const realRoot = fs.realpathSync(REAL_LOGS_DIR);
+            let realRoot: string;
+            try {
+                realRoot = fs.realpathSync(REAL_LOGS_DIR);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
+            }
+
             const candidatePath = path.resolve(realRoot, logFile);
 
             if (

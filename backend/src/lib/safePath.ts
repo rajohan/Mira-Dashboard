@@ -23,32 +23,51 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
 
     const resolved = path.resolve(rootDir, userPath);
 
-    // For existing paths, use realpathSync to resolve symlinks and
-    // canonicalize (CodeQL recognizes this as a path sanitizer).
-    // For non-existing paths, just normalize.
+    // Resolve the root and the deepest existing ancestor. For paths that do not
+    // exist yet, this still catches symlink escapes such as root/link/new-file
+    // where link points outside root.
     let canonicalRoot: string;
-    let canonicalResolved: string;
     try {
         canonicalRoot = fs.realpathSync(rootDir);
     } catch {
-        canonicalRoot = path.normalize(rootDir);
-    }
-    try {
-        canonicalResolved = fs.realpathSync(resolved);
-    } catch {
-        canonicalResolved = resolved;
+        return null;
     }
 
-    const normalizedRoot = canonicalRoot + path.sep;
+    let existingAncestor = resolved;
+    const missingParts: string[] = [];
 
-    if (
-        canonicalResolved === canonicalRoot ||
-        canonicalResolved.startsWith(normalizedRoot)
-    ) {
-        return canonicalResolved;
+    while (true) {
+        try {
+            const canonicalAncestor = fs.realpathSync(existingAncestor);
+            let canonicalResolved = canonicalAncestor;
+            for (let index = missingParts.length - 1; index >= 0; index -= 1) {
+                canonicalResolved = path.join(canonicalResolved, missingParts[index]);
+            }
+
+            const normalizedRoot = canonicalRoot + path.sep;
+
+            if (
+                canonicalResolved === canonicalRoot ||
+                canonicalResolved.startsWith(normalizedRoot)
+            ) {
+                return canonicalResolved;
+            }
+
+            return null;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                return null;
+            }
+
+            const parent = path.dirname(existingAncestor);
+            if (parent === existingAncestor) {
+                return null;
+            }
+
+            missingParts.push(path.basename(existingAncestor));
+            existingAncestor = parent;
+        }
     }
-
-    return null;
 }
 
 /**

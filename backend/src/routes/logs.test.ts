@@ -123,10 +123,9 @@ describe("logs routes", () => {
     });
 
     it("rejects traversal and reports missing logs", async () => {
+        const traversal = path.relative(logsDir, path.join(outsideDir, "secret.log"));
         const denied = await fetch(
-            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
-                "../openclaw-logs-route-outside/secret.log"
-            )}`
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(traversal)}`
         );
         assert.equal(denied.status, 403);
         assert.deepEqual(await denied.json(), { error: "Access denied" });

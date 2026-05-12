@@ -773,6 +773,7 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
+            FS.mkdirSync(AGENTS_DIR, { recursive: true });
             const metadataPath = safePathWithinRoot(
                 Path.join(safeAgentId, "sessions", "metadata.json"),
                 AGENTS_DIR

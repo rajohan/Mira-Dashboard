@@ -2,6 +2,8 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+import { safePathWithinRoot } from "../lib/safePath.js";
+
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
@@ -64,9 +66,13 @@ function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-function listDirectory(dirPath: string): FileItem[] {
+function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
-    const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
+    const fullPath = safePathWithinRoot(dirPath || ".", WORKSPACE_ROOT);
+
+    if (!fullPath) {
+        return null;
+    }
 
     try {
         const entries = fs.readdirSync(fullPath, { withFileTypes: true });
@@ -121,6 +127,10 @@ export default function filesRoutes(
         try {
             const dirPath = (req.query.path as string) || "";
             const files = listDirectory(dirPath);
+            if (!files) {
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
+            }
             res.json({ files, root: WORKSPACE_ROOT });
         } catch (error) {
             console.error("[Backend] Files list error:", (error as Error).message);
@@ -251,21 +261,22 @@ export default function filesRoutes(
         }
 
         try {
-            const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
 
-            if (!fullPath.startsWith(WORKSPACE_ROOT)) {
+            if (!fullPath) {
                 res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
 
-            if (fs.existsSync(fullPath)) {
+            try {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } else {
-                const parentDir = path.dirname(fullPath);
-                if (!fs.existsSync(parentDir)) {
-                    fs.mkdirSync(parentDir, { recursive: true });
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
                 }
+
+                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
             }
 
             fs.writeFileSync(fullPath, content, "utf8");

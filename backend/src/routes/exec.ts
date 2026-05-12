@@ -35,8 +35,12 @@ const MAX_COMMAND_LENGTH = 4096;
 const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 
-function validateExecRequest(payload: ExecRequest): ExecRequest {
-    const { command, args, cwd, shell } = payload;
+function validateExecRequest(payload: unknown): ExecRequest {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new ExecValidationError("request body must be a JSON object");
+    }
+
+    const { command, args, cwd, shell } = payload as ExecRequest;
 
     if (!command || typeof command !== "string") {
         throw new ExecValidationError("command must be a non-empty string");
@@ -306,15 +310,26 @@ export default function execRoutes(
             endedAt: null,
         });
 
-        void runExecCommand(payload, jobId, (update) => {
-            const current = jobs.get(jobId);
-            if (!current) {
-                return;
-            }
+        let runPromise: Promise<ExecResponse>;
+        try {
+            runPromise = runExecCommand(payload, jobId, (update) => {
+                const current = jobs.get(jobId);
+                if (!current) {
+                    return;
+                }
 
-            current.stdout = update.stdout;
-            current.stderr = update.stderr;
-        })
+                current.stdout = update.stdout;
+                current.stderr = update.stderr;
+            });
+        } catch (error) {
+            jobs.delete(jobId);
+            res.status(error instanceof ExecValidationError ? 400 : 500).json({
+                error: (error as Error).message,
+            });
+            return;
+        }
+
+        void runPromise
             .then((result) => {
                 const current = jobs.get(jobId);
                 if (!current) {
