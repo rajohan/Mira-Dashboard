@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -140,11 +140,43 @@ describe("files routes", () => {
         );
         assert.equal(missing.status, 404);
 
+        const nestedUnderFile = await requestJson<{ error: string }>(
+            server,
+            "/api/files/src%2Fapp.ts%2Fextra"
+        );
+        assert.equal(nestedUnderFile.status, 404);
+        assert.equal(nestedUnderFile.body.error, "File not found");
+
+        const invalidNullByte = await requestJson<{ error: string }>(
+            server,
+            "/api/files/a%00b"
+        );
+        assert.equal(invalidNullByte.status, 404);
+        assert.equal(invalidNullByte.body.error, "File not found");
+
+        await symlink("loop", path.join(workspaceRoot, "loop"));
+        try {
+            const symlinkLoop = await requestJson<{ error: string }>(
+                server,
+                "/api/files/loop"
+            );
+            assert.equal(symlinkLoop.status, 404);
+            assert.equal(symlinkLoop.body.error, "File not found");
+        } finally {
+            await rm(path.join(workspaceRoot, "loop"), { force: true });
+        }
+
         const denied = await requestJson<{ error: string }>(
             server,
             "/api/files/..%2Foutside.txt"
         );
         assert.equal(denied.status, 403);
+
+        const deniedList = await requestJson<{ error: string }>(
+            server,
+            "/api/files?path=..%2F.."
+        );
+        assert.equal(deniedList.status, 403);
     });
 
     it("writes files, creates parents, and backs up overwritten content", async () => {
@@ -192,5 +224,29 @@ describe("files routes", () => {
         );
         assert.equal(missingContent.status, 400);
         assert.equal(missingContent.body.error, "Content required");
+
+        const deniedWrite = await requestJson<{ error: string }>(
+            server,
+            "/api/files/..%2Foutside.txt",
+            { method: "PUT", body: { content: "nope" } }
+        );
+        assert.equal(deniedWrite.status, 403);
+    });
+
+    it("rejects writes through workspace symlinks", async () => {
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-files-outside-"));
+        try {
+            await symlink(outsideDir, path.join(workspaceRoot, "outside-link"));
+            const denied = await requestJson<{ error: string }>(
+                server,
+                "/api/files/outside-link%2Fnew.txt",
+                { method: "PUT", body: { content: "nope" } }
+            );
+
+            assert.equal(denied.status, 403);
+        } finally {
+            await rm(path.join(workspaceRoot, "outside-link"), { force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
     });
 });

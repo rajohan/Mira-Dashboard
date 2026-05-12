@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
@@ -14,7 +15,7 @@ interface TestServer {
 }
 
 const logsDir = "/tmp/openclaw";
-const outsideDir = "/tmp/openclaw-logs-route-outside";
+const outsideDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-outside-"));
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
 
 class FakeWebSocket {
@@ -122,10 +123,9 @@ describe("logs routes", () => {
     });
 
     it("rejects traversal and reports missing logs", async () => {
+        const traversal = path.relative(logsDir, path.join(outsideDir, "secret.log"));
         const denied = await fetch(
-            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
-                "../openclaw-logs-route-outside/secret.log"
-            )}`
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(traversal)}`
         );
         assert.equal(denied.status, 403);
         assert.deepEqual(await denied.json(), { error: "Access denied" });
@@ -135,6 +135,44 @@ describe("logs routes", () => {
         );
         assert.equal(missing.status, 404);
         assert.deepEqual(await missing.json(), { error: "Log file not found" });
+
+        const nestedUnderFile = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(`${testFiles[1]}/extra`)}`
+        );
+        assert.equal(nestedUnderFile.status, 404);
+        assert.deepEqual(await nestedUnderFile.json(), {
+            error: "Log file not found",
+        });
+
+        const invalidNullByte = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("openclaw.log\0x")}`
+        );
+        assert.equal(invalidNullByte.status, 404);
+        assert.deepEqual(await invalidNullByte.json(), {
+            error: "Log file not found",
+        });
+
+        const rootDirectory = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(".")}`
+        );
+        assert.equal(rootDirectory.status, 404);
+        assert.deepEqual(await rootDirectory.json(), {
+            error: "Log file not found",
+        });
+
+        const loopPath = path.join(logsDir, "loop.log");
+        await symlink("loop.log", loopPath);
+        try {
+            const symlinkLoop = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("loop.log")}`
+            );
+            assert.equal(symlinkLoop.status, 404);
+            assert.deepEqual(await symlinkLoop.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            await rm(loopPath, { force: true });
+        }
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {

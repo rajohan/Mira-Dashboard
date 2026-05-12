@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 
 import dotenv from "dotenv";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -43,6 +44,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+/** Parses Express trust-proxy config from environment strings. */
+function parseTrustProxy(value: string | undefined): boolean | number | string {
+    if (value === undefined || value.trim() === "") {
+        return "loopback";
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+
+    const numeric = Number(normalized);
+    if (Number.isInteger(numeric) && numeric >= 0) {
+        return numeric;
+    }
+
+    return value;
+}
+
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -78,6 +99,31 @@ const healthHandler: express.RequestHandler = (_req, res) => {
 
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
+
+// Rate limiting: general API (600 req/min per IP). This intentionally stays
+// above normal dashboard polling (terminal jobs poll every 500ms) while still
+// bounding abusive request bursts.
+const apiLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (request) => request.path.startsWith("/auth"),
+    message: { error: "Too many requests, please try again later" },
+});
+
+// Stricter limit for auth endpoints (20 req/min per IP)
+const authLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many authentication attempts, please try again later" },
+});
+
+// Apply rate limiting before auth middleware
+app.use("/api/auth", authLimiter);
+app.use("/api", apiLimiter);
 
 app.get("/api/sessions", (request, response) => {
     const user = getAuthUserFromRequest(request);

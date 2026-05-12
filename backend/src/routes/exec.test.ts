@@ -108,6 +108,84 @@ describe("exec routes", () => {
         assert.equal(response.body.stderr, "warn exec\n");
     });
 
+    it("keeps arbitrary shell syntax out of one-shot direct commands", async () => {
+        const rejected = await requestJson<{ error: string }>(server, "/api/exec", {
+            method: "POST",
+            body: { command: "echo safe && echo unsafe" },
+        });
+
+        assert.equal(rejected.status, 400);
+        assert.match(rejected.body.error, /shell operators/u);
+    });
+
+    it("preserves shell operators for background terminal commands", async () => {
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: { command: "printf alpha && printf beta" },
+        });
+
+        assert.equal(started.status, 200);
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 0);
+        assert.equal(job.stdout, "alphabeta");
+        assert.equal(job.stderr, "");
+    });
+
+    it("allows approved ops commands to run through explicit shell mode", async () => {
+        const response = await requestJson<{
+            code: number;
+            stdout: string;
+            stderr: string;
+        }>(server, "/api/exec", {
+            method: "POST",
+            body: {
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.code, 127);
+        assert.match(response.body.stderr, /not found/u);
+    });
+
+    it("rejects unapproved shell mode commands", async () => {
+        const rejected = await requestJson<{ error: string }>(server, "/api/exec", {
+            method: "POST",
+            body: { command: "echo nope", shell: true },
+        });
+
+        assert.equal(rejected.status, 400);
+        assert.match(rejected.body.error, /approved ops commands/u);
+    });
+
+    it("allows approved shell mode commands for background jobs", async () => {
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: {
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            },
+        });
+
+        assert.equal(started.status, 200);
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 127);
+        assert.match(job.stderr, /not found/u);
+    });
+
+    it("rejects unapproved shell mode commands for background jobs", async () => {
+        const rejected = await requestJson<{ error: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: { command: "echo nope", shell: true },
+        });
+
+        assert.equal(rejected.status, 400);
+        assert.match(rejected.body.error, /approved ops commands/u);
+    });
+
     it("starts background jobs and exposes their final state", async () => {
         const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
             method: "POST",

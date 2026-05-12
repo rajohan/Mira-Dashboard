@@ -167,6 +167,20 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     );
 }
 
+/** Returns whether a discovered or configured skill key is safe to patch. */
+function isValidSkillName(name: string): boolean {
+    return (
+        name.length > 0 &&
+        name.length <= 128 &&
+        !name.includes("\0") &&
+        !name.includes("/") &&
+        !name.includes("\\") &&
+        name !== "__proto__" &&
+        name !== "prototype" &&
+        name !== "constructor"
+    );
+}
+
 /** Registers OpenClaw config API routes. */
 export default function openClawConfigRoutes(app: express.Application): void {
     app.get("/api/config", (async (_req, res) => {
@@ -228,8 +242,8 @@ export default function openClawConfigRoutes(app: express.Application): void {
             const name = String(req.params.name || "");
             const enabled = Boolean((req.body as { enabled?: boolean }).enabled);
 
-            if (!name) {
-                res.status(400).json({ error: "Skill name required" });
+            if (!isValidSkillName(name)) {
+                res.status(400).json({ error: "Invalid skill name" });
                 return;
             }
 

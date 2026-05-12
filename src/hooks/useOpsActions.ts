@@ -109,6 +109,7 @@ export function useStartOpsAction() {
         mutationFn: async (action: OpsActionDefinition) =>
             apiPostRequired<{ jobId: string }>("/exec/start", {
                 command: action.command,
+                shell: true,
             }),
     });
 }

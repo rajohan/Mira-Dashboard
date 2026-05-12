@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
+import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
+
 const LOGS_DIR = "/tmp/openclaw";
 const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
 let logWatcher: NodeJS.Timeout | null = null;
@@ -176,19 +178,70 @@ export default function logsRoutes(app: express.Application): void {
         }
 
         try {
-            const filePath = path.resolve(LOGS_DIR, logFile);
-
-            if (!filePath.startsWith(`${REAL_LOGS_DIR}${path.sep}`)) {
-                res.status(403).json({ error: "Access denied" });
-                return;
+            let realRoot: string;
+            try {
+                realRoot = fs.realpathSync(REAL_LOGS_DIR);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
             }
 
-            if (!fs.existsSync(filePath)) {
+            const candidatePath = path.resolve(realRoot, logFile);
+
+            if (candidatePath === realRoot) {
                 res.status(404).json({ error: "Log file not found" });
                 return;
             }
 
-            let content = fs.readFileSync(filePath, "utf8");
+            if (!candidatePath.startsWith(realRoot + path.sep)) {
+                res.status(403).json({ error: "Access denied" });
+                return;
+            }
+
+            let filePath: string;
+            try {
+                filePath = fs.realpathSync(candidatePath);
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (
+                    code === "ENOENT" ||
+                    code === "ENOTDIR" ||
+                    code === "ELOOP" ||
+                    code === "ERR_INVALID_ARG_VALUE"
+                ) {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
+            }
+
+            if (filePath === realRoot) {
+                res.status(404).json({ error: "Log file not found" });
+                return;
+            }
+
+            if (!filePath.startsWith(realRoot + path.sep)) {
+                res.status(403).json({ error: "Access denied" });
+                return;
+            }
+
+            let file: fs.promises.FileHandle;
+            try {
+                file = await openReadNoFollowGuarded(guardedPath(filePath));
+            } catch {
+                res.status(404).json({ error: "Log file not found" });
+                return;
+            }
+
+            let content: string;
+            try {
+                content = await file.readFile("utf8");
+            } finally {
+                await file.close();
+            }
 
             if (lines) {
                 const allLines = content.split("\n").filter((l) => l.trim());

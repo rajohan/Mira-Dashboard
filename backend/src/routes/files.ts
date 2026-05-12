@@ -2,6 +2,16 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+import {
+    copyGuarded,
+    guardedPath,
+    mkdirGuarded,
+    openReadNoFollowGuarded,
+    statGuarded,
+    writeTextNoFollowGuarded,
+} from "../lib/guardedOps.js";
+import { safePathWithinRoot } from "../lib/safePath.js";
+
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
@@ -71,10 +81,14 @@ function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
-/** Performs list directory. */
-function listDirectory(dirPath: string): FileItem[] {
+/** Lists a workspace directory or returns null when the path escapes the workspace. */
+function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
-    const fullPath = dirPath ? path.join(WORKSPACE_ROOT, dirPath) : WORKSPACE_ROOT;
+    const fullPath = safePathWithinRoot(dirPath || ".", WORKSPACE_ROOT);
+
+    if (!fullPath) {
+        return null;
+    }
 
     try {
         const entries = fs.readdirSync(fullPath, { withFileTypes: true });
@@ -90,6 +104,7 @@ function listDirectory(dirPath: string): FileItem[] {
                     path: itemPath,
                 });
             } else {
+                // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
                 try {
                     const stat = fs.statSync(path.join(fullPath, entry.name));
                     items.push({
@@ -129,6 +144,10 @@ export default function filesRoutes(
         try {
             const dirPath = (req.query.path as string) || "";
             const files = listDirectory(dirPath);
+            if (!files) {
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
+            }
             res.json({ files, root: WORKSPACE_ROOT });
         } catch (error) {
             console.error("[Backend] Files list error:", (error as Error).message);
@@ -141,52 +160,127 @@ export default function filesRoutes(
         const filePath = decodeURIComponent(req.params[0] || "");
 
         try {
-            const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
+            let workspaceRoot: string;
+            try {
+                workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
+            }
 
-            if (!fullPath.startsWith(WORKSPACE_ROOT)) {
+            const candidatePath = path.resolve(workspaceRoot, filePath);
+
+            if (
+                candidatePath !== workspaceRoot &&
+                !candidatePath.startsWith(workspaceRoot + path.sep)
+            ) {
                 res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
 
-            if (!fs.existsSync(fullPath)) {
-                res.status(404).json({ error: "File not found" });
+            let fullPath: string;
+            try {
+                fullPath = fs.realpathSync(candidatePath);
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (
+                    code === "ENOENT" ||
+                    code === "ENOTDIR" ||
+                    code === "ELOOP" ||
+                    code === "ERR_INVALID_ARG_VALUE"
+                ) {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
+            }
+
+            if (
+                fullPath !== workspaceRoot &&
+                !fullPath.startsWith(workspaceRoot + path.sep)
+            ) {
+                res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
 
-            const stat = fs.statSync(fullPath);
-
-            if (stat.isDirectory()) {
-                res.status(400).json({ error: "Path is a directory, not a file" });
-                return;
+            // Open file first to avoid TOCTOU race between stat and read.
+            // O_NOFOLLOW rejects a final-component symlink if the path is swapped
+            // after canonicalization but before open.
+            let file: fs.promises.FileHandle | undefined;
+            try {
+                file = await openReadNoFollowGuarded(guardedPath(fullPath));
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                if (code === "ELOOP") {
+                    res.status(403).json({
+                        error: "Access denied: symlinks are not readable",
+                    });
+                    return;
+                }
+                throw error;
             }
 
-            const filename = path.basename(filePath);
+            try {
+                const stat = await file.stat();
 
-            // Handle image files
-            if (isImageFile(filename)) {
-                const buffer = fs.readFileSync(fullPath);
-                const base64 = buffer.toString("base64");
-                const mimeType = getImageMimeType(filename);
+                if (stat.isDirectory()) {
+                    res.status(400).json({ error: "Path is a directory, not a file" });
+                    return;
+                }
 
-                res.json({
-                    path: filePath,
-                    content: base64,
-                    mimeType: mimeType,
-                    size: stat.size,
-                    modified: stat.mtime.toISOString(),
-                    isImage: true,
-                    isBinary: true,
-                } satisfies FileResponse);
-                return;
-            }
+                const filename = path.basename(filePath);
 
-            if (stat.size > MAX_FILE_SIZE) {
-                const fd = fs.openSync(fullPath, "r");
-                const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
-                fs.closeSync(fd);
+                // Handle image files
+                if (isImageFile(filename)) {
+                    if (stat.size > MAX_FILE_SIZE) {
+                        res.status(413).json({
+                            error: "Image file is too large to preview",
+                        });
+                        return;
+                    }
 
-                const content = buffer.toString("utf8", 0, bytesRead);
+                    const buffer = await file.readFile();
+                    const base64 = buffer.toString("base64");
+                    const mimeType = getImageMimeType(filename);
+
+                    res.json({
+                        path: filePath,
+                        content: base64,
+                        mimeType: mimeType,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isImage: true,
+                        isBinary: true,
+                    } satisfies FileResponse);
+                    return;
+                }
+
+                if (stat.size > MAX_FILE_SIZE) {
+                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                    const { bytesRead } = await file.read(buffer, 0, MAX_FILE_SIZE, 0);
+                    const content = buffer.subarray(0, bytesRead).toString("utf8");
+                    const isBinary = isBinaryFile(content);
+
+                    res.json({
+                        path: filePath,
+                        content: isBinary ? "[Binary file]" : content,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isBinary: isBinary,
+                        truncated: true,
+                    } satisfies FileResponse);
+                    return;
+                }
+
+                const fullBuffer = await file.readFile();
+                const content = fullBuffer.toString("utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
@@ -195,21 +289,10 @@ export default function filesRoutes(
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
-                    truncated: true,
                 } satisfies FileResponse);
-                return;
+            } finally {
+                if (file) await file.close();
             }
-
-            const content = fs.readFileSync(fullPath, "utf8");
-            const isBinary = isBinaryFile(content);
-
-            res.json({
-                path: filePath,
-                content: isBinary ? "[Binary file]" : content,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                isBinary: isBinary,
-            } satisfies FileResponse);
         } catch (error) {
             console.error("[Backend] File read error:", (error as Error).message);
             res.status(500).json({ error: (error as Error).message });
@@ -221,31 +304,32 @@ export default function filesRoutes(
         const filePath = decodeURIComponent(req.params[0] || "");
         const { content } = req.body as { content?: string };
 
-        if (content === undefined) {
+        if (typeof content !== "string") {
             res.status(400).json({ error: "Content required" });
             return;
         }
 
         try {
-            const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
+            const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
 
-            if (!fullPath.startsWith(WORKSPACE_ROOT)) {
+            if (!fullPath) {
                 res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
 
-            if (fs.existsSync(fullPath)) {
+            try {
                 const backupPath = fullPath + ".bak";
-                fs.copyFileSync(fullPath, backupPath);
-            } else {
-                const parentDir = path.dirname(fullPath);
-                if (!fs.existsSync(parentDir)) {
-                    fs.mkdirSync(parentDir, { recursive: true });
+                copyGuarded(guardedPath(fullPath), guardedPath(backupPath));
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
                 }
+
+                mkdirGuarded(guardedPath(path.dirname(fullPath)), { recursive: true });
             }
 
-            fs.writeFileSync(fullPath, content, "utf8");
-            const stat = fs.statSync(fullPath);
+            await writeTextNoFollowGuarded(guardedPath(fullPath), content);
+            const stat = statGuarded(guardedPath(fullPath));
 
             res.json({
                 success: true,
