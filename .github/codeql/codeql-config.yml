@@ -3,17 +3,8 @@
 name: Mira Dashboard CodeQL Config
 
 # Exclude test files and generated code from analysis.
-# The operator-local file/log/agent/exec routes are guarded by route-local
-# validation, canonicalization, allowlists, and regression tests. CodeQL still
-# reports these operator-controlled sinks as new PR alerts, so keep them out of
-# blocking PR CodeQL until the routes are redesigned around narrower typed
-# operations that the query pack can model without broad false positives.
 paths-ignore:
     - "**/node_modules/**"
     - "**/dist/**"
     - "**/*.test.ts"
     - "**/*.test.tsx"
-    - "backend/src/routes/agents.ts"
-    - "backend/src/routes/exec.ts"
-    - "backend/src/routes/files.ts"
-    - "backend/src/routes/logs.ts"
