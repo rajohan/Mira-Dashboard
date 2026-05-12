@@ -70,6 +70,19 @@ function getImageMimeType(filename: string): string {
     return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
+function readFromOpenFile(fd: number, byteLength: number): Buffer {
+    const buffer = Buffer.alloc(byteLength);
+    let offset = 0;
+
+    while (offset < byteLength) {
+        const bytesRead = fs.readSync(fd, buffer, offset, byteLength - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+    }
+
+    return offset === byteLength ? buffer : buffer.subarray(0, offset);
+}
+
 function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
@@ -218,7 +231,7 @@ export default function filesRoutes(
 
                 // Handle image files
                 if (isImageFile(filename)) {
-                    const buffer = fs.readFileSync(fd);
+                    const buffer = readFromOpenFile(fd, stat.size);
                     const base64 = buffer.toString("base64");
                     const mimeType = getImageMimeType(filename);
 
@@ -235,9 +248,8 @@ export default function filesRoutes(
                 }
 
                 if (stat.size > MAX_FILE_SIZE) {
-                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                    const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
-                    const content = buffer.toString("utf8", 0, bytesRead);
+                    const buffer = readFromOpenFile(fd, MAX_FILE_SIZE);
+                    const content = buffer.toString("utf8");
                     const isBinary = isBinaryFile(content);
 
                     res.json({
@@ -251,7 +263,7 @@ export default function filesRoutes(
                     return;
                 }
 
-                const content = fs.readFileSync(fd, "utf8");
+                const content = readFromOpenFile(fd, stat.size).toString("utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
