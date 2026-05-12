@@ -5,7 +5,7 @@ import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
-/** Describes session section props. */
+/** Provides props for session section. */
 interface SessionSectionProps {
     idleMinutes: number;
     onSave: (idleMinutes: number) => Promise<void>;

@@ -7,7 +7,7 @@ import { formatDuration } from "../../../utils/format";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
 
-/** Describes task card props. */
+/** Provides props for task card. */
 interface TaskCardProps {
     task: Task;
     isDragging?: boolean;

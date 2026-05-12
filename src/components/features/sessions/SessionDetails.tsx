@@ -10,7 +10,7 @@ import { MessageBubble } from "./MessageBubble";
 import { SessionActionsDropdown } from "./SessionActionsDropdown";
 import { SessionStatsBar } from "./SessionStatsBar";
 
-/** Describes session details props. */
+/** Provides props for session details. */
 interface SessionDetailsProps {
     session: Session | null;
     onClose: () => void;

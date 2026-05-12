@@ -63,7 +63,7 @@ export function ServiceActionsCard() {
         }
     }, [execJob.data, refreshCache, runningActionId, runningActionLabel]);
 
-    /** Handles confirm run. */
+    /** Performs confirm run. */
     async function confirmRun() {
         if (!pendingAction) {
             return;

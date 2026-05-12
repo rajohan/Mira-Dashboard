@@ -4,7 +4,7 @@ import { type MiraPost } from "../../../types/moltbook";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes my post card props. */
+/** Provides props for my post card. */
 interface MyPostCardProps {
     post: MiraPost;
 }

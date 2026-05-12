@@ -13,7 +13,7 @@ import { Card } from "../../ui/Card";
 import { FileContentViewer } from "./FileContentViewer";
 import { PreviewToggle } from "./PreviewToggle";
 
-/** Describes file editor panel props. */
+/** Provides props for file editor panel. */
 interface FileEditorPanelProps {
     selectedPath: string | null;
     fileContent?: FileContent;

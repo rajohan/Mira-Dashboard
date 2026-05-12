@@ -16,13 +16,13 @@ import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { Textarea } from "../../ui/Textarea";
 
-/** Describes json validation state. */
+/** Represents JSON valIDation state. */
 interface JsonValidationState {
     valid: boolean;
     error: string | null;
 }
 
-/** Describes cron job details props. */
+/** Provides props for cron job details. */
 interface CronJobDetailsProps {
     job: CronJob;
     lastTriggeredAt?: number;

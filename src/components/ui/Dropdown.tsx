@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes dropdown item. */
+/** Represents dropdown item. */
 export interface DropdownItem {
     label: string;
     onClick?: () => void;
@@ -12,7 +12,7 @@ export interface DropdownItem {
     disabled?: boolean;
 }
 
-/** Describes dropdown props. */
+/** Provides props for dropdown. */
 interface DropdownProps {
     label?: string;
     icon?: React.ReactNode;

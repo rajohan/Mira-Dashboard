@@ -3,7 +3,7 @@ import { Star, User, Users } from "lucide-react";
 import { type MiraProfile } from "../../../types/moltbook";
 import { getMoltbookUrl } from "../../../utils/moltbookUtils";
 
-/** Describes profile card props. */
+/** Provides props for profile card. */
 interface ProfileCardProps {
     profile: MiraProfile;
     unreadCount: number;

@@ -1,40 +1,40 @@
 import type { ChatHistoryMessage } from "./chatTypes";
 
-/** Stores max attachment bytes. */
+/** Defines max attachment bytes. */
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-/** Stores max attachments. */
+/** Defines max attachments. */
 export const MAX_ATTACHMENTS = 10;
-/** Stores chat history limit. */
+/** Defines chat history limit. */
 export const CHAT_HISTORY_LIMIT = 1000;
-/** Stores optimistic message retention ms. */
+/** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
-/** Describes chat model option. */
+/** Represents chat model option. */
 export interface ChatModelOption {
     id?: string;
     label?: string;
     name?: string;
 }
 
-/** Handles data url to base64. */
+/** Performs data URL to base64. */
 export function dataUrlToBase64(dataUrl: string): string {
     const commaIndex = dataUrl.indexOf(",");
     return commaIndex === -1 ? dataUrl : dataUrl.slice(commaIndex + 1);
 }
 
-/** Handles base64 to text. */
+/** Performs base64 to text. */
 export function base64ToText(base64: string): string {
     const binary = window.atob(base64);
     const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
     return new TextDecoder().decode(bytes);
 }
 
-/** Handles message identity. */
+/** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
     return `${message.role.toLowerCase()}::${message.text.trim()}`;
 }
 
-/** Handles message delete key. */
+/** Performs message delete key. */
 export function messageDeleteKey(message: ChatHistoryMessage): string {
     return [
         message.role.toLowerCase(),
@@ -44,7 +44,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
     ].join("::");
 }
 
-/** Handles assistant text looks recovered. */
+/** Performs assistant text looks recovered. */
 function assistantTextLooksRecovered(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();
@@ -67,7 +67,7 @@ function assistantTextLooksRecovered(left: string, right: string): boolean {
     );
 }
 
-/** Handles dedupe messages. */
+/** Performs dedupe messages. */
 export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
     const seen = new Set<string>();
     const deduped: ChatHistoryMessage[] = [];
@@ -90,7 +90,7 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
     return deduped;
 }
 
-/** Handles message timestamp ms. */
+/** Performs message timestamp milliseconds. */
 function messageTimestampMs(message: ChatHistoryMessage): number | null {
     const timestamp = message.timestamp
         ? new Date(message.timestamp).getTime()
@@ -98,7 +98,7 @@ function messageTimestampMs(message: ChatHistoryMessage): number | null {
     return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-/** Handles insert messages by timestamp. */
+/** Performs insert messages by timestamp. */
 function insertMessagesByTimestamp(
     baseMessages: ChatHistoryMessage[],
     messagesToInsert: ChatHistoryMessage[]
@@ -146,7 +146,7 @@ function insertMessagesByTimestamp(
     return merged;
 }
 
-/** Handles merge with recent optimistic messages. */
+/** Performs merge with recent optimistic messages. */
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
@@ -204,7 +204,7 @@ export function mergeWithRecentOptimisticMessages(
     return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));
 }
 
-/** Handles read file as data url. */
+/** Performs read file as data URL. */
 export function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -223,7 +223,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     });
 }
 
-/** Handles display mime type. */
+/** Performs display mime type. */
 export function displayMimeType(file: File): string {
     return file.type || "application/octet-stream";
 }

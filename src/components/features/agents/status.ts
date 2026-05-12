@@ -1,4 +1,4 @@
-/** Stores agent status colors. */
+/** Defines agent status colors. */
 export const agentStatusColors = {
     active: {
         bg: "bg-emerald-400",
@@ -26,7 +26,7 @@ export const agentStatusColors = {
     },
 } as const;
 
-/** Stores agent status labels. */
+/** Defines agent status labels. */
 export const agentStatusLabels = {
     active: "Working",
     thinking: "Thinking",

@@ -5,7 +5,7 @@ import { cn } from "../../utils/cn";
 /** Defines alert variant. */
 type AlertVariant = "error" | "success" | "warning" | "info";
 
-/** Describes alert props. */
+/** Provides props for alert. */
 interface AlertProps {
     variant?: AlertVariant;
     title?: string;

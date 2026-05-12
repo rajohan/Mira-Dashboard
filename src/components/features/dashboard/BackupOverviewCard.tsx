@@ -68,7 +68,7 @@ type WalgCacheData = {
     ok?: boolean;
 };
 
-/** Handles get variant. */
+/** Returns variant. */
 function getVariant(status?: string, ok?: boolean) {
     if (status === "error") return "error" as const;
     if (ok === true) return "success" as const;
@@ -76,7 +76,7 @@ function getVariant(status?: string, ok?: boolean) {
     return "default" as const;
 }
 
-/** Handles format path. */
+/** Formats path for display. */
 function formatPath(path: string | null | undefined) {
     if (!path) return "Unknown source";
     if (path === "/source/docker") return "Docker";
@@ -111,13 +111,13 @@ export function BackupOverviewCard() {
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
 
-    /** Handles handle run backup. */
+    /** Handles run backup interactions. */
     const handleRunBackup = async () => {
         await runBackup.mutateAsync();
         setIsConfirmOpen(false);
     };
 
-    /** Handles handle run walg backup. */
+    /** Handles run walg backup interactions. */
     const handleRunWalgBackup = async () => {
         await runWalgBackup.mutateAsync();
     };

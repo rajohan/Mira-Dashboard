@@ -2,7 +2,7 @@ import { Description, Field, Label, Switch as HeadlessSwitch } from "@headlessui
 
 import { cn } from "../../utils/cn";
 
-/** Describes switch props. */
+/** Provides props for switch. */
 interface SwitchProps {
     checked: boolean;
     onChange: (checked: boolean) => void;

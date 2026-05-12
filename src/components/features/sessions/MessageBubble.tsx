@@ -1,6 +1,6 @@
 import { formatDate } from "../../../utils/format";
 
-/** Describes message bubble props. */
+/** Provides props for message bubble. */
 interface MessageBubbleProps {
     role: string;
     content: string;

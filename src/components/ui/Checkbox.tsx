@@ -8,7 +8,7 @@ import { Check } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes checkbox props. */
+/** Provides props for checkbox. */
 interface CheckboxProps {
     checked: boolean;
     onChange: (checked: boolean) => void;

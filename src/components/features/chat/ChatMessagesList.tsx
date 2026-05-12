@@ -21,7 +21,7 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 
-/** Describes chat messages list props. */
+/** Provides props for chat messages list. */
 interface ChatMessagesListProps {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
@@ -51,14 +51,14 @@ function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     return <Paperclip className="h-4 w-4" />;
 }
 
-/** Handles base64 to text. */
+/** Performs base64 to text. */
 function base64ToText(base64: string): string {
     const binary = window.atob(base64);
     const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
     return new TextDecoder().decode(bytes);
 }
 
-/** Handles preview from attachment. */
+/** Performs preview from attachment. */
 function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -249,7 +249,7 @@ export function ChatMessagesList({
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
     const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
 
-    /** Handles stop audio. */
+    /** Performs stop audio. */
     const stopAudio = () => {
         audioReference.current?.pause();
         audioReference.current = null;
@@ -262,7 +262,7 @@ export function ChatMessagesList({
         setPlayingMessageKey(null);
     };
 
-    /** Handles speak message. */
+    /** Performs speak message. */
     const speakMessage = async (messageKey: string, text: string) => {
         if (playingMessageKey === messageKey) {
             stopAudio();

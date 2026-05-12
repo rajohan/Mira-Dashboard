@@ -2,7 +2,7 @@ import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { Card } from "../../ui/Card";
 import { formatBytes, formatNumber } from "./databaseUtils";
 
-/** Describes props. */
+/** Represents props. */
 interface Props {
     overview: DatabaseOverviewResponse["overview"];
 }

@@ -1,7 +1,7 @@
 import { type LogEntry } from "../../../types/log";
 import { formatLogTime, getLevelColor, getSubsystemColor } from "../../../utils/logUtils";
 
-/** Describes log line props. */
+/** Provides props for log line. */
 interface LogLineProps {
     log: LogEntry;
 }

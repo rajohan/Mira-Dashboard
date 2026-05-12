@@ -4,7 +4,7 @@ import { forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes input props. */
+/** Provides props for input. */
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     description?: string;

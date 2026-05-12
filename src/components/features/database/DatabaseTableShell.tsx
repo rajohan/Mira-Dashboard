@@ -12,7 +12,7 @@ import { type ReactNode, useState } from "react";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
-/** Describes props. */
+/** Represents props. */
 interface Props<T extends object> {
     data: T[];
     // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.

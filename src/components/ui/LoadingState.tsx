@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 
-/** Describes loading state props. */
+/** Provides props for loading state. */
 interface LoadingStateProps {
     message?: string;
     size?: "sm" | "md" | "lg" | "fullscreen";

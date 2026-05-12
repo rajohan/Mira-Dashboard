@@ -23,7 +23,7 @@ const CodePreview = lazy(() =>
     import("./viewers/CodePreview").then((module) => ({ default: module.CodePreview }))
 );
 
-/** Describes file content viewer props. */
+/** Provides props for file content viewer. */
 interface FileContentViewerProps {
     fileContent: FileContent;
     editedContent: string;

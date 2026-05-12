@@ -1,6 +1,6 @@
 import { Card } from "./Card";
 
-/** Describes metric card props. */
+/** Provides props for metric card. */
 interface MetricCardProps {
     title: string;
     value?: string | number;
@@ -39,7 +39,7 @@ export function MetricCard({
     color = "blue",
     icon,
 }: MetricCardProps) {
-    /** Handles get color. */
+    /** Returns color. */
     const getColor = (p: number): "green" | "blue" | "orange" | "red" => {
         if (p < 50) return "green";
         if (p < 75) return "blue";

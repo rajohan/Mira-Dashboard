@@ -26,12 +26,12 @@ import {
     mergeWithRecentOptimisticMessages,
 } from "./chatUtils";
 
-/** Describes mutable reference. */
+/** Represents mutable reference. */
 interface MutableReference<T> {
     current: T;
 }
 
-/** Describes pending delta update. */
+/** Represents pending delta update. */
 interface PendingDeltaUpdate {
     runId?: string;
     aliases: string[];
@@ -50,7 +50,7 @@ const NON_WORK_TOOL_NAMES = new Set([
     "typing",
 ]);
 
-/** Handles compact status text. */
+/** Performs compact status text. */
 function compactStatusText(value: string): string {
     const normalized = value.replaceAll(/\s+/g, " ").trim();
     return normalized.length > 120
@@ -58,12 +58,12 @@ function compactStatusText(value: string): string {
         : normalized;
 }
 
-/** Handles string value. */
+/** Performs string value. */
 function stringValue(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** Handles format tool name. */
+/** Formats tool name for display. */
 function formatToolName(value: string): string {
     const withoutNamespace = value.startsWith("functions.")
         ? value.slice("functions.".length)
@@ -79,7 +79,7 @@ function formatToolName(value: string): string {
         : normalized;
 }
 
-/** Handles detail from args. */
+/** Performs detail from args. */
 function detailFromArgs(value: unknown): string | undefined {
     if (!isRecord(value)) {
         return stringValue(value);
@@ -107,12 +107,12 @@ function detailFromArgs(value: unknown): string | undefined {
     return undefined;
 }
 
-/** Handles normalize runtime stream. */
+/** Normalizes runtime stream. */
 function normalizeRuntimeStream(value: string): string {
     return value === "command_output" ? "command-output" : value;
 }
 
-/** Handles runtime progress text. */
+/** Performs runtime progress text. */
 function runtimeProgressText(
     eventName: string,
     stream: string,
@@ -206,7 +206,7 @@ function runtimeProgressText(
     return undefined;
 }
 
-/** Handles is new run for stream. */
+/** Returns whether new run for stream. */
 function isNewRunForStream(
     existing: { runId?: string; aliases?: string[] } | undefined,
     incomingRunId: string | undefined
@@ -219,7 +219,7 @@ function isNewRunForStream(
     );
 }
 
-/** Handles is runtime work event. */
+/** Returns whether runtime work event. */
 function isRuntimeWorkEvent(
     eventName: string,
     stream: string,
@@ -234,7 +234,7 @@ function isRuntimeWorkEvent(
     );
 }
 
-/** Describes use chat runtime events params. */
+/** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParams {
     request: <T = unknown>(
         method: string,
@@ -256,7 +256,7 @@ interface UseChatRuntimeEventsParams {
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
 }
 
-/** Handles use chat runtime events. */
+/** Provides chat runtime events. */
 export function useChatRuntimeEvents({
     request,
     subscribe,
@@ -279,7 +279,7 @@ export function useChatRuntimeEvents({
     updateActiveStreamsReference.current = updateActiveStreams;
 
     useEffect(() => {
-        /** Handles flush pending delta updates. */
+        /** Performs flush pending delta updates. */
         const flushPendingDeltaUpdates = () => {
             if (pendingDeltaFlushTimerReference.current !== null) {
                 window.clearTimeout(pendingDeltaFlushTimerReference.current);
@@ -333,7 +333,7 @@ export function useChatRuntimeEvents({
             updateActiveStreamsReference.current(() => next);
         };
 
-        /** Handles queue delta update. */
+        /** Performs queue delta update. */
         const queueDeltaUpdate = (
             streamSessionKey: string,
             runId: string,
@@ -357,7 +357,7 @@ export function useChatRuntimeEvents({
             }
         };
 
-        /** Handles refresh selected history soon. */
+        /** Performs refresh selected history soon. */
         const refreshSelectedHistorySoon = (delayMs = 450) => {
             if (!selectedSessionKey) {
                 return;
@@ -403,7 +403,7 @@ export function useChatRuntimeEvents({
             }, delayMs);
         };
 
-        /** Handles handle runtime transcript event. */
+        /** Handles runtime transcript event interactions. */
         const handleRuntimeTranscriptEvent = (
             eventName: string | undefined,
             payload: unknown
@@ -544,7 +544,7 @@ export function useChatRuntimeEvents({
                 ? selectedSessionKey
                 : streamForRun?.sessionKey || eventSessionKey;
 
-            /** Handles refresh history after terminal event. */
+            /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
                     if (!shouldStickToBottomReference.current) {

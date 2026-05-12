@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { CONFIG_TOP_FILES, CRON_DIR_FILES, HOOKS_DIR_FILES } from "./fileConstants";
 
-/** Describes config section props. */
+/** Provides props for config section. */
 interface ConfigSectionProps {
     selectedPath: string | null;
     onSelect: (path: string) => void;

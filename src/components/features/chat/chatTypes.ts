@@ -1,4 +1,4 @@
-/** Describes chat image block. */
+/** Represents chat image block. */
 export interface ChatImageBlock {
     type: "image";
     mimeType?: string;
@@ -10,7 +10,7 @@ export interface ChatImageBlock {
     };
 }
 
-/** Describes chat attachment display. */
+/** Represents chat attachment display. */
 export interface ChatAttachmentDisplay {
     id: string;
     fileName: string;
@@ -21,7 +21,7 @@ export interface ChatAttachmentDisplay {
     kind: "image" | "text" | "file";
 }
 
-/** Describes chat preview item. */
+/** Represents chat preview item. */
 export interface ChatPreviewItem {
     title: string;
     mimeType?: string;
@@ -31,7 +31,7 @@ export interface ChatPreviewItem {
     sizeBytes?: number;
 }
 
-/** Describes chat send attachment. */
+/** Represents chat send attachment. */
 export interface ChatSendAttachment {
     id: string;
     file: File;
@@ -43,7 +43,7 @@ export interface ChatSendAttachment {
     kind: "image" | "text" | "file";
 }
 
-/** Describes chat gateway attachment. */
+/** Represents chat gateway attachment. */
 export interface ChatGatewayAttachment {
     type: string;
     mimeType: string;
@@ -51,19 +51,19 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
-/** Describes chat thinking display. */
+/** Represents chat thinking display. */
 export interface ChatThinkingDisplay {
     text: string;
 }
 
-/** Describes chat tool call display. */
+/** Represents chat tool call display. */
 export interface ChatToolCallDisplay {
     id?: string;
     name: string;
     arguments?: unknown;
 }
 
-/** Describes chat tool result display. */
+/** Represents chat tool result display. */
 export interface ChatToolResultDisplay {
     id?: string;
     name?: string;
@@ -72,13 +72,13 @@ export interface ChatToolResultDisplay {
     images?: ChatImageBlock[];
 }
 
-/** Describes chat visibility settings. */
+/** Represents chat visibility settings. */
 export interface ChatVisibilitySettings {
     showThinking: boolean;
     showTools: boolean;
 }
 
-/** Describes chat history message. */
+/** Represents chat history message. */
 export interface ChatHistoryMessage {
     role: string;
     content: unknown;
@@ -93,7 +93,7 @@ export interface ChatHistoryMessage {
     runId?: string;
 }
 
-/** Describes raw chat history message. */
+/** Represents raw chat history message. */
 export interface RawChatHistoryMessage {
     role?: string;
     content?: unknown;
@@ -111,7 +111,7 @@ export interface RawChatHistoryMessage {
     MediaTypes?: string[];
 }
 
-/** Describes chat stream event message. */
+/** Represents chat stream event message. */
 export interface ChatStreamEventMessage {
     sessionKey?: string;
     runId?: string;
@@ -123,25 +123,25 @@ export interface ChatStreamEventMessage {
     delta?: unknown;
 }
 
-/** Describes chat row. */
+/** Represents one chat row. */
 export interface ChatRow {
     key: string;
     kind: "message" | "stream" | "typing";
     message: ChatHistoryMessage;
 }
 
-/** Stores default chat visibility. */
+/** Defines default chat visibility. */
 export const DEFAULT_CHAT_VISIBILITY: ChatVisibilitySettings = {
     showThinking: false,
     showTools: false,
 };
 
-/** Handles is record. */
+/** Returns whether record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-/** Handles extract images. */
+/** Extracts images. */
 export function extractImages(content: unknown): ChatImageBlock[] {
     if (!Array.isArray(content)) {
         return [];
@@ -156,7 +156,7 @@ export function extractImages(content: unknown): ChatImageBlock[] {
     });
 }
 
-/** Handles extract thinking blocks. */
+/** Extracts thinking blocks. */
 export function extractThinkingBlocks(content: unknown): ChatThinkingDisplay[] {
     if (!Array.isArray(content)) {
         return [];
@@ -184,7 +184,7 @@ export function extractThinkingBlocks(content: unknown): ChatThinkingDisplay[] {
     return blocks;
 }
 
-/** Handles extract tool calls. */
+/** Extracts tool calls. */
 export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
     if (!Array.isArray(content)) {
         return [];
@@ -207,7 +207,7 @@ export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
     return toolCalls;
 }
 
-/** Handles attachment kind. */
+/** Performs attachment kind. */
 export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] {
     if (mimeType.startsWith("image/")) {
         return "image";
@@ -220,7 +220,7 @@ export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] 
     return "file";
 }
 
-/** Handles gateway attachments. */
+/** Performs gateway attachments. */
 export function gatewayAttachments(
     attachments: ChatSendAttachment[]
 ): ChatGatewayAttachment[] {
@@ -232,7 +232,7 @@ export function gatewayAttachments(
     }));
 }
 
-/** Handles optimistic attachment display. */
+/** Performs optimistic attachment display. */
 export function optimisticAttachmentDisplay(
     attachments: ChatSendAttachment[]
 ): ChatAttachmentDisplay[] {
@@ -247,12 +247,12 @@ export function optimisticAttachmentDisplay(
     }));
 }
 
-/** Handles file name from path. */
+/** Performs file name from path. */
 function fileNameFromPath(path: string): string {
     return path.split(/[\\/]/).pop() || path;
 }
 
-/** Handles mime type from path. */
+/** Performs mime type from path. */
 function mimeTypeFromPath(path: string): string {
     const extension = path.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -276,12 +276,12 @@ function mimeTypeFromPath(path: string): string {
         : "application/octet-stream";
 }
 
-/** Handles media url from path. */
+/** Performs media URL from path. */
 function mediaUrlFromPath(path: string): string {
     return `/api/media?path=${encodeURIComponent(path)}`;
 }
 
-/** Handles extract media directive attachments. */
+/** Extracts media directive attachments. */
 function extractMediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
     const attachments: ChatAttachmentDisplay[] = [];
     const mediaPattern = /^MEDIA:(.+)$/gm;
@@ -307,7 +307,7 @@ function extractMediaDirectiveAttachments(text: string): ChatAttachmentDisplay[]
     return attachments;
 }
 
-/** Handles text to base64. */
+/** Performs text to base64. */
 function textToBase64(text: string): string {
     const bytes = new TextEncoder().encode(text);
     let binary = "";
@@ -318,7 +318,7 @@ function textToBase64(text: string): string {
     return window.btoa(binary);
 }
 
-/** Handles extract inline file attachments. */
+/** Extracts inline file attachments. */
 function extractInlineFileAttachments(text: string): ChatAttachmentDisplay[] {
     const filePattern = /<file\s+name="([^"]+)"\s+mime="([^"]+)">([\s\S]*?)<\/file>/g;
     const attachments: ChatAttachmentDisplay[] = [];
@@ -353,7 +353,7 @@ function extractInlineFileAttachments(text: string): ChatAttachmentDisplay[] {
     return attachments;
 }
 
-/** Handles strip inline file markup. */
+/** Performs strip inline file markup. */
 function stripInlineFileMarkup(text: string): string {
     return text
         .replaceAll(/^MEDIA:.+$/gm, "")
@@ -363,7 +363,7 @@ function stripInlineFileMarkup(text: string): string {
         .trim();
 }
 
-/** Handles extract media reference attachments. */
+/** Extracts media reference attachments. */
 function extractMediaReferenceAttachments(
     message: RawChatHistoryMessage
 ): ChatAttachmentDisplay[] {
@@ -393,7 +393,7 @@ function extractMediaReferenceAttachments(
     });
 }
 
-/** Handles is tool role. */
+/** Returns whether tool role. */
 function isToolRole(role: string): boolean {
     const normalizedRole = role.toLowerCase();
     return (
@@ -403,7 +403,7 @@ function isToolRole(role: string): boolean {
     );
 }
 
-/** Handles extract tool result. */
+/** Extracts tool result. */
 function extractToolResult(
     message: RawChatHistoryMessage,
     content: unknown
@@ -432,7 +432,7 @@ function extractToolResult(
     };
 }
 
-/** Handles strip generated media only text. */
+/** Performs strip generated media only text. */
 function stripGeneratedMediaOnlyText(
     text: string,
     images: ChatImageBlock[],
@@ -456,7 +456,7 @@ function stripGeneratedMediaOnlyText(
         .trimEnd();
 }
 
-/** Handles normalize chat history message. */
+/** Normalizes chat history message. */
 export function normalizeChatHistoryMessage(
     message: RawChatHistoryMessage
 ): ChatHistoryMessage {
@@ -493,7 +493,7 @@ export function normalizeChatHistoryMessage(
     };
 }
 
-/** Handles normalize text. */
+/** Normalizes text. */
 export function normalizeText(content: unknown): string {
     if (typeof content === "string") {
         return content;
@@ -535,7 +535,7 @@ export function normalizeText(content: unknown): string {
     return "";
 }
 
-/** Handles is renderable chat history message. */
+/** Returns whether renderable chat history message. */
 export function isRenderableChatHistoryMessage(
     message: ChatHistoryMessage,
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY
@@ -563,7 +563,7 @@ export function isRenderableChatHistoryMessage(
     );
 }
 
-/** Handles normalize visible chat history messages. */
+/** Normalizes visible chat history messages. */
 export function normalizeVisibleChatHistoryMessages(
     messages: RawChatHistoryMessage[],
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY

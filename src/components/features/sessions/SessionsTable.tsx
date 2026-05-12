@@ -20,7 +20,7 @@ import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 const columnHelper = createColumnHelper<Session>();
 
-/** Describes sessions table props. */
+/** Provides props for sessions table. */
 interface SessionsTableProps {
     sessions: Session[];
     onSelectSession: (session: Session) => void;

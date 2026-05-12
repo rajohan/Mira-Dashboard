@@ -12,7 +12,7 @@ type SkillStatusFilter = "all" | "enabled" | "disabled";
 /** Defines skill source filter. */
 type SkillSourceFilter = "all" | "workspace" | "builtin" | "extra";
 
-/** Describes skills section props. */
+/** Provides props for skills section. */
 interface SkillsSectionProps {
     skills: Skill[];
     onToggle: (skillName: string, enabled: boolean) => void;

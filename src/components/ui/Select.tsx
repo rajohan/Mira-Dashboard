@@ -3,14 +3,14 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes select option. */
+/** Represents select option. */
 interface SelectOption {
     value: string;
     label: string;
     description?: string;
 }
 
-/** Describes select props. */
+/** Provides props for select. */
 interface SelectProps {
     value: string;
     onChange: (value: string) => void;

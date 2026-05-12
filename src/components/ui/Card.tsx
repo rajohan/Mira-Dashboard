@@ -2,7 +2,7 @@ import { forwardRef, type HTMLAttributes } from "react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes card props. */
+/** Provides props for card. */
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
     variant?: "default" | "bordered";
 }

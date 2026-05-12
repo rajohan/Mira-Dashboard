@@ -2,7 +2,7 @@ import { Shield } from "lucide-react";
 
 import { ExpandableCard, ReadOnlyField } from "../../ui/ExpandableCard";
 
-/** Describes security section props. */
+/** Provides props for security section. */
 interface SecuritySectionProps {
     authProfiles: number;
     commandRestartEnabled: boolean;

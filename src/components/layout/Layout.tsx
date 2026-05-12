@@ -37,12 +37,12 @@ const navItems = [
     { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
-/** Describes layout props. */
+/** Provides props for layout. */
 interface LayoutProps {
     children: ReactNode;
 }
 
-/** Describes system host cache. */
+/** Represents system host cache. */
 interface SystemHostCache {
     version?: {
         current?: string;

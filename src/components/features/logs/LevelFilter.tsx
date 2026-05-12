@@ -2,7 +2,7 @@ import { Button } from "../../../components/ui/Button";
 import { cn } from "../../../utils/cn";
 import { getLevelColor } from "../../../utils/logUtils";
 
-/** Describes level filter props. */
+/** Provides props for level filter. */
 interface LevelFilterProps {
     levels: readonly string[];
     activeLevels: Set<string>;

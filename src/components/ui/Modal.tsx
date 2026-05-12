@@ -5,7 +5,7 @@ import { type ReactNode } from "react";
 import { cn } from "../../utils/cn";
 import { Button } from "./Button";
 
-/** Describes modal props. */
+/** Provides props for modal. */
 interface ModalProps {
     isOpen: boolean;
     onClose: () => void;

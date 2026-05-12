@@ -6,7 +6,7 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 
-/** Handles format tool arguments. */
+/** Formats tool arguments for display. */
 function formatToolArguments(toolCall: ChatToolCallDisplay): string {
     if (toolCall.arguments === undefined) {
         return "";

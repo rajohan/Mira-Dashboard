@@ -2,7 +2,7 @@ import { Database, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 
 import { Dropdown, type DropdownItem } from "../../ui/Dropdown";
 
-/** Describes session actions dropdown props. */
+/** Provides props for session actions dropdown. */
 interface SessionActionsDropdownProps {
     onCompact: () => void;
     onReset: () => void;

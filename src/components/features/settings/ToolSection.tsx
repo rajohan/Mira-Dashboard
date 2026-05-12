@@ -7,7 +7,7 @@ import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 
-/** Describes tool settings. */
+/** Represents tool settings. */
 interface ToolSettings {
     profile?: string;
     webSearchEnabled: boolean;
@@ -20,7 +20,7 @@ interface ToolSettings {
     sessionsVisibility?: string;
 }
 
-/** Describes tool section props. */
+/** Provides props for tool section. */
 interface ToolSectionProps extends ToolSettings {
     onSave: (values: ToolSettings) => Promise<void>;
     saving: boolean;

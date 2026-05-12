@@ -4,7 +4,7 @@ import { type MoltbookPost } from "../../../hooks/useMoltbook";
 import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes feed post card props. */
+/** Provides props for feed post card. */
 interface FeedPostCardProps {
     post: MoltbookPost;
 }

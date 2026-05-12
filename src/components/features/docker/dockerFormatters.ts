@@ -1,6 +1,6 @@
 import { formatDate } from "../../../utils/format";
 
-/** Handles format bytes. */
+/** Formats bytes for display. */
 export function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";
@@ -18,7 +18,7 @@ export function formatBytes(bytes: number): string {
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-/** Handles format docker memory. */
+/** Formats docker memory for display. */
 export function formatDockerMemory(value: string | undefined): string {
     if (!value) {
         return "—";
@@ -29,7 +29,7 @@ export function formatDockerMemory(value: string | undefined): string {
         return value;
     }
 
-    /** Handles parse part. */
+    /** Parses part. */
     const parsePart = (part: string): number | null => {
         const match = part.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]i?B|B)$/i);
         if (!match) {
@@ -63,7 +63,7 @@ export function formatDockerMemory(value: string | undefined): string {
     return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
 }
 
-/** Handles format timestamp. */
+/** Formats timestamp for display. */
 export function formatTimestamp(value: string | null | undefined): string {
     if (!value) {
         return "—";
@@ -77,7 +77,7 @@ export function formatTimestamp(value: string | null | undefined): string {
     return formatDate(date);
 }
 
-/** Handles format updater transition. */
+/** Formats updater transition for display. */
 export function formatUpdaterTransition(event: {
     fromTag: string | null;
     toTag: string | null;
@@ -89,7 +89,7 @@ export function formatUpdaterTransition(event: {
     return `${from} → ${to}`;
 }
 
-/** Handles format version display. */
+/** Formats version display for display. */
 export function formatVersionDisplay(tag: string | null, digest: string | null): string {
     if (tag) {
         return tag;
@@ -102,7 +102,7 @@ export function formatVersionDisplay(tag: string | null, digest: string | null):
     return "—";
 }
 
-/** Handles format full version display. */
+/** Formats full version display for display. */
 export function formatFullVersionDisplay(
     tag: string | null,
     digest: string | null

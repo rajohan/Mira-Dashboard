@@ -1,7 +1,7 @@
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
-/** Describes code preview props. */
+/** Provides props for code preview. */
 interface CodePreviewProps {
     language: string;
     content: string;

@@ -5,7 +5,7 @@ import type { ColumnId, Task } from "../../../types/task";
 import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
 import { TaskCard } from "./TaskCard";
 
-/** Describes task column props. */
+/** Provides props for task column. */
 interface TaskColumnProps {
     id: ColumnId;
     tasks: Task[];

@@ -9,14 +9,14 @@ import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
-/** Describes agent access section props. */
+/** Provides props for agent access section. */
 interface AgentAccessSectionProps {
     agents: AgentConfig[];
     onSave: (agents: AgentConfig[]) => Promise<void>;
     saving: boolean;
 }
 
-/** Handles tool enabled. */
+/** Performs tool enabled. */
 function toolEnabled(agent: AgentConfig, toolId: string): boolean {
     if (agent.tools?.deny?.includes(toolId)) {
         return false;
@@ -29,7 +29,7 @@ function toolEnabled(agent: AgentConfig, toolId: string): boolean {
     return true;
 }
 
-/** Handles update tool. */
+/** Performs update tool. */
 function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): AgentConfig {
     const deny = new Set(agent.tools?.deny || []);
     const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
@@ -81,7 +81,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
             .includes(toolFilter.toLowerCase())
     );
 
-    /** Handles update agent. */
+    /** Performs update agent. */
     const updateAgent = (
         agentId: string,
         updater: (agent: AgentConfig) => AgentConfig

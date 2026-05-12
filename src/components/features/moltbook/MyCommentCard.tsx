@@ -2,7 +2,7 @@ import { type MiraComment } from "../../../types/moltbook";
 import { formatTime, getMoltbookUrl, truncate } from "../../../utils/moltbookUtils";
 import { Card } from "../../ui/Card";
 
-/** Describes my comment card props. */
+/** Provides props for my comment card. */
 interface MyCommentCardProps {
     comment: MiraComment;
 }

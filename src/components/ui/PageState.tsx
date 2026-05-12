@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Describes page state props. */
+/** Provides props for page state. */
 interface PageStateProps {
     isLoading?: boolean;
     loading?: ReactNode;

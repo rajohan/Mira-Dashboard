@@ -9,7 +9,7 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
-/** Describes new task modal props. */
+/** Provides props for new task modal. */
 interface NewTaskModalProps {
     isOpen: boolean;
     onClose: () => void;

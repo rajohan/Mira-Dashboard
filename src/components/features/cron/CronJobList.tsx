@@ -9,7 +9,7 @@ import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
-/** Describes cron job list props. */
+/** Provides props for cron job list. */
 interface CronJobListProps {
     jobs: CronJob[];
     selectedId: string;

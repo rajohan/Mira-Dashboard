@@ -2,7 +2,7 @@ import { formatSize } from "../../../utils/format";
 import { Modal } from "../../ui/Modal";
 import type { ChatPreviewItem } from "./chatTypes";
 
-/** Describes attachment preview modal props. */
+/** Provides props for attachment preview modal. */
 interface AttachmentPreviewModalProps {
     previewItem: ChatPreviewItem | null;
     onClose: () => void;

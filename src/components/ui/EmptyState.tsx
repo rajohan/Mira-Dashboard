@@ -1,6 +1,6 @@
 import { Card } from "./Card";
 
-/** Describes empty state props. */
+/** Provides props for empty state. */
 interface EmptyStateProps {
     message?: string;
     children?: React.ReactNode;

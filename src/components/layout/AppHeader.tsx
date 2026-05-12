@@ -7,7 +7,7 @@ import { authActions } from "../../stores/authStore";
 import { Button } from "../ui/Button";
 import { NotificationBell } from "./NotificationBell";
 
-/** Describes app header props. */
+/** Provides props for app header. */
 interface AppHeaderProps {
     title: string;
     isSidebarOpen: boolean;

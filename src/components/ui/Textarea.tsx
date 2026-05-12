@@ -4,7 +4,7 @@ import { forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 
-/** Describes textarea props. */
+/** Provides props for textarea. */
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
     label?: string;
     description?: string;

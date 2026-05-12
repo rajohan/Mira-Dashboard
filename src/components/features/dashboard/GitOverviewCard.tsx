@@ -4,7 +4,7 @@ import { useCacheEntry } from "../../../hooks/useCache";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
-/** Describes git repo summary. */
+/** Represents git repo summary. */
 interface GitRepoSummary {
     key: string;
     name: string;
@@ -22,7 +22,7 @@ interface GitRepoSummary {
     };
 }
 
-/** Describes git workspace cache. */
+/** Represents git workspace cache. */
 interface GitWorkspaceCache {
     repos: GitRepoSummary[];
     dirtyRepos: string[];

@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 
 import { Card, CardTitle } from "../ui/Card";
 
-/** Describes expandable card props. */
+/** Provides props for expandable card. */
 interface ExpandableCardProps {
     title: string;
     icon: React.ComponentType<{ size?: number; className?: string }>;
