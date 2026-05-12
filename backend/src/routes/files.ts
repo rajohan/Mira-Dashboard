@@ -6,7 +6,7 @@ import {
     copyGuarded,
     guardedPath,
     mkdirGuarded,
-    openGuarded,
+    openReadNoFollowGuarded,
     readFromOpenFile,
     statGuarded,
     writeTextGuarded,
@@ -188,10 +188,7 @@ export default function filesRoutes(
             let fd: number | undefined;
             try {
                 // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
-                fd = openGuarded(
-                    guardedPath(fullPath),
-                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-                );
+                fd = openReadNoFollowGuarded(guardedPath(fullPath));
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT") {

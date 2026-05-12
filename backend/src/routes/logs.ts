@@ -5,9 +5,8 @@ import type WebSocket from "ws";
 
 import {
     guardedPath,
-    openGuarded,
+    openReadNoFollowGuarded,
     readFromOpenFile,
-    readTextGuarded,
 } from "../lib/guardedOps.js";
 
 const LOGS_DIR = "/tmp/openclaw";
@@ -214,10 +213,7 @@ export default function logsRoutes(app: express.Application): void {
 
             let fd: number;
             try {
-                fd = openGuarded(
-                    guardedPath(filePath),
-                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-                );
+                fd = openReadNoFollowGuarded(guardedPath(filePath));
             } catch {
                 res.status(404).json({ error: "Log file not found" });
                 return;
