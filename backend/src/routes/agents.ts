@@ -15,13 +15,13 @@ const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
-/** Describes agent metadata. */
+/** Stores per-agent dashboard metadata such as current task and task history. */
 interface AgentMetadata {
     currentTask?: string;
     updatedAt?: string;
 }
 
-/** Describes agent config. */
+/** Represents one configured OpenClaw agent entry from agents.yml. */
 interface AgentConfig {
     id: string;
     default?: boolean;
@@ -34,7 +34,7 @@ interface AgentConfig {
     };
 }
 
-/** Describes agents config. */
+/** Represents the parsed agents.yml payload keyed by agent id. */
 interface AgentsConfig {
     defaults: {
         model?: {
@@ -46,7 +46,7 @@ interface AgentsConfig {
     list: AgentConfig[];
 }
 
-/** Describes session info. */
+/** Captures lightweight session file metadata used to infer agent activity. */
 interface SessionInfo {
     key?: string;
     sessionId?: string;
@@ -56,7 +56,7 @@ interface SessionInfo {
     label?: string;
 }
 
-/** Describes agent status. */
+/** Summarizes dashboard-facing status, activity, and metadata for one agent. */
 interface AgentStatus {
     id: string;
     status: "active" | "thinking" | "idle" | "offline";
@@ -68,7 +68,7 @@ interface AgentStatus {
     channel: string | null;
 }
 
-/** Describes agent task history item. */
+/** Records an archived current-task value with timing metadata. */
 interface AgentTaskHistoryItem {
     id: number;
     agentId: string;
@@ -79,7 +79,7 @@ interface AgentTaskHistoryItem {
     lastActivityAt: string;
 }
 
-/** Describes gateway session summary. */
+/** Normalizes Gateway session data needed to map live sessions back to agents. */
 interface GatewaySessionSummary {
     key: string;
     model: string;
@@ -122,7 +122,7 @@ function resolveConfiguredModelName(
     return toDisplayModelName(configured);
 }
 
-/** Handles get gateway sessions for agents. */
+/** Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure. */
 async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     const cached = gateway.getSessions().map((session) => ({
         key: session.key,
@@ -168,7 +168,7 @@ function closeStaleActiveTasks(): void {
     ).run(nowIso(), nowIso(), cutoff);
 }
 
-/** Handles get active history task. */
+/** Finds the most recent non-finished task in agent history for active-task inference. */
 function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
     const row = db
         .prepare(
@@ -205,7 +205,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
     };
 }
 
-/** Handles get latest completed tasks. */
+/** Returns recently completed task-history entries for dashboard display. */
 function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     const rows = db
         .prepare(
@@ -236,7 +236,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     }));
 }
 
-/** Handles parse agents config. */
+/** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
 function parseAgentsConfig(): AgentsConfig | null {
     const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
 
@@ -263,7 +263,7 @@ function parseAgentsConfig(): AgentsConfig | null {
 }
 
 // Read agent metadata file for current task
-/** Handles get agent metadata. */
+/** Reads metadata.json for an agent using validated no-follow file access. */
 function getAgentMetadata(agentId: string): AgentMetadata | null {
     const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
     try {
@@ -278,7 +278,7 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
 }
 
 // Get sessions from agent's sessions.json file
-/** Handles get agent sessions from files. */
+/** Loads cached session summaries from the agent sessions directory. */
 function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
     try {
@@ -298,7 +298,7 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
 }
 
 // Get activity from a JSONL session file
-/** Describes activity info. */
+/** Captures the latest observed agent activity label and timestamp. */
 interface ActivityInfo {
     task: string | null; // High-level task (from last user message)
     activity: string | null; // Current activity (from last tool use)
@@ -398,7 +398,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     return normalizedTool;
 }
 
-/** Handles get latest activity from file. */
+/** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
 function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
     const sessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
     if (!FS.existsSync(sessionsDir)) {
@@ -506,7 +506,7 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
     }
 }
 
-/** Handles get session file mod time. */
+/** Returns the modification time for a session file, or null when it cannot be read. */
 function getSessionFileModTime(agentId: string): number | null {
     // Check for session files in agents directory
     const agentDir = Path.join(AGENTS_DIR, agentId);
@@ -542,7 +542,7 @@ function getSessionFileModTime(agentId: string): number | null {
     }
 }
 
-/** Handles get channel from session key. */
+/** Infers the source channel encoded in an OpenClaw session key. */
 function getChannelFromSessionKey(sessionKey: string): string | null {
     const parts = sessionKey.split(":");
     if (parts[0] === "channel") {
@@ -606,7 +606,7 @@ function findBestSessionForAgent(
     })[0];
 }
 
-/** Handles get agent status. */
+/** Builds one dashboard agent status by combining config, metadata, sessions, and activity hints. */
 function getAgentStatus(agentId: string): AgentStatus {
     // Auto-close stale active tasks before reading current state
     closeStaleActiveTasks();
