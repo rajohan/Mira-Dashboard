@@ -15,6 +15,7 @@ import {
 } from "../auth.js";
 import gateway from "../gateway.js";
 
+/** Handles read session id. */
 function readSessionId(cookieHeader?: string): string | null {
     if (!cookieHeader) {
         return null;
@@ -30,6 +31,7 @@ function readSessionId(cookieHeader?: string): string | null {
     return null;
 }
 
+/** Handles validate username. */
 function validateUsername(username: unknown): string | null {
     if (typeof username !== "string") {
         return null;
@@ -43,6 +45,7 @@ function validateUsername(username: unknown): string | null {
     return normalized;
 }
 
+/** Handles validate password. */
 function validatePassword(password: unknown): string | null {
     if (typeof password !== "string") {
         return null;
@@ -55,6 +58,7 @@ function validatePassword(password: unknown): string | null {
     return password;
 }
 
+/** Handles auth routes. */
 export default function authRoutes(app: express.Application): void {
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({

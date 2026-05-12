@@ -4,6 +4,7 @@ import { deleteSessionFromCollection } from "../collections/sessions";
 import { apiDelete, apiFetch, apiPost } from "./useApi";
 
 // Types
+/** Describes session history response. */
 interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
     total?: number;
@@ -11,6 +12,7 @@ interface SessionHistoryResponse {
     nextOffset?: number;
 }
 
+/** Handles is valid infinite history data. */
 function isValidInfiniteHistoryData(data: unknown): boolean {
     if (data == null) return true;
     if (typeof data !== "object") return false;
@@ -20,6 +22,7 @@ function isValidInfiniteHistoryData(data: unknown): boolean {
 }
 
 // Query keys
+/** Stores session keys. */
 export const sessionKeys = {
     all: ["sessions"] as const,
     history: (key: string): ["sessions", "history", string] => [
@@ -29,6 +32,7 @@ export const sessionKeys = {
     ],
 };
 
+/** Handles fetch session history. */
 async function fetchSessionHistory(
     key: string,
     offset = 0,
@@ -44,6 +48,7 @@ async function fetchSessionHistory(
     };
 }
 
+/** Handles session action. */
 async function sessionAction(
     key: string,
     action: "stop" | "compact" | "reset"
@@ -51,10 +56,12 @@ async function sessionAction(
     await apiPost(`/sessions/${encodeURIComponent(key)}/action`, { action });
 }
 
+/** Handles delete session request. */
 async function deleteSessionRequest(key: string): Promise<void> {
     await apiDelete(`/sessions/${encodeURIComponent(key)}`);
 }
 
+/** Handles use session history. */
 export function useSessionHistory(key: string | null | undefined, limit = 50) {
     const queryClient = useQueryClient();
     const sessionKey = typeof key === "string" ? key.trim() : "";
@@ -78,6 +85,7 @@ export function useSessionHistory(key: string | null | undefined, limit = 50) {
     });
 }
 
+/** Handles use session action. */
 export function useSessionAction() {
     return useMutation({
         mutationFn: ({
@@ -90,6 +98,7 @@ export function useSessionAction() {
     });
 }
 
+/** Handles use delete session. */
 export function useDeleteSession() {
     return useMutation({
         mutationFn: deleteSessionRequest,

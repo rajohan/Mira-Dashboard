@@ -1,3 +1,4 @@
+/** Describes file node. */
 export interface FileNode {
     name: string;
     path: string;
@@ -8,6 +9,7 @@ export interface FileNode {
     loaded?: boolean;
 }
 
+/** Describes file content. */
 export interface FileContent {
     content: string;
     path: string;

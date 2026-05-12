@@ -7,12 +7,14 @@ import { formatDuration } from "../../../utils/format";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
 
+/** Describes task card props. */
 interface TaskCardProps {
     task: Task;
     isDragging?: boolean;
     onClick: () => void;
 }
 
+/** Renders the task card UI. */
 export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
     const { attributes, listeners, setNodeRef, transform } = useSortable({
         id: String(task.number),

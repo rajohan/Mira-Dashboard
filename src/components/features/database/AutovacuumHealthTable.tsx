@@ -25,6 +25,7 @@ const columns = [
     }),
 ];
 
+/** Renders the autovacuum health table UI. */
 export function AutovacuumHealthTable({
     data,
 }: {

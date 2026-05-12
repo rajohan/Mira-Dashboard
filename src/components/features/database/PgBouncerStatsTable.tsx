@@ -25,6 +25,7 @@ const columns = [
     }),
 ];
 
+/** Renders the pg bouncer stats table UI. */
 export function PgBouncerStatsTable({
     data,
 }: {

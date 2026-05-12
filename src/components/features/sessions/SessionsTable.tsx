@@ -20,6 +20,7 @@ import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 const columnHelper = createColumnHelper<Session>();
 
+/** Describes sessions table props. */
 interface SessionsTableProps {
     sessions: Session[];
     onSelectSession: (session: Session) => void;
@@ -28,6 +29,7 @@ interface SessionsTableProps {
     onDelete: (session: Session) => void;
 }
 
+/** Renders the sessions table UI. */
 export function SessionsTable({
     sessions,
     onSelectSession,

@@ -3,10 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { type Session } from "../types/session";
 import { apiFetch } from "./useApi";
 
+/** Describes session history response. */
 interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
 }
 
+/** Describes feed item. */
 export interface FeedItem {
     id: string;
     sessionKey: string;
@@ -17,12 +19,14 @@ export interface FeedItem {
     timestamp: number;
 }
 
+/** Stores live feed keys. */
 export const liveFeedKeys = {
     all: ["live-feed"] as const,
     list: (sessionSignature: string, updatedSignature: string) =>
         [...liveFeedKeys.all, sessionSignature, updatedSignature] as const,
 };
 
+/** Handles is feed session. */
 function isFeedSession(session: unknown): session is Session {
     return (
         !!session &&
@@ -32,6 +36,7 @@ function isFeedSession(session: unknown): session is Session {
     );
 }
 
+/** Handles use live feed. */
 export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
     const feedSessionCandidates = Array.isArray(sessions)
         ? sessions.filter(isFeedSession).slice(0, 20)

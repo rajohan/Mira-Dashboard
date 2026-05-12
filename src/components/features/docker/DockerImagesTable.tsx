@@ -16,6 +16,7 @@ import { EmptyState } from "../../ui/EmptyState";
 
 const columnHelper = createColumnHelper<DockerImage>();
 
+/** Handles format bytes. */
 function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";
@@ -33,6 +34,7 @@ function formatBytes(bytes: number): string {
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+/** Describes docker images table props. */
 interface DockerImagesTableProps {
     images: DockerImage[];
     onDelete: (imageId: string, label: string) => void;
@@ -40,6 +42,7 @@ interface DockerImagesTableProps {
     isPruning?: boolean;
 }
 
+/** Renders the docker images table UI. */
 export function DockerImagesTable({
     images,
     onDelete,

@@ -26,6 +26,7 @@ import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 const FEED_BOTTOM_THRESHOLD_PX = 32;
 const MAX_STICKY_LIVE_FEED_ITEMS = 500;
 
+/** Renders the sessions UI. */
 export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
     const sessionActions = useSessionActions();
@@ -133,6 +134,7 @@ export function Sessions() {
         ? Math.max(feedVirtualizer.getTotalSize() - lastFeedVirtualItem.end, 0)
         : 0;
 
+    /** Handles check feed is at bottom. */
     const checkFeedIsAtBottom = () => {
         const container = liveFeedContainerReference.current;
 
@@ -146,6 +148,7 @@ export function Sessions() {
         );
     };
 
+    /** Handles scroll feed to bottom. */
     const scrollFeedToBottom = () => {
         const container = liveFeedContainerReference.current;
         if (!container || feedRows.length === 0) {
@@ -158,6 +161,7 @@ export function Sessions() {
         lastKnownFeedScrollTopReference.current = container.scrollTop;
     };
 
+    /** Handles handle feed scroll. */
     const handleFeedScroll = () => {
         const container = liveFeedContainerReference.current;
         if (container) {
@@ -205,6 +209,7 @@ export function Sessions() {
         scrollFeedToBottom,
     ]);
 
+    /** Handles role count. */
     const roleCount = (role: string) =>
         liveFeed.filter((item) => item.role === role).length;
 
@@ -233,6 +238,7 @@ export function Sessions() {
         })),
     ];
 
+    /** Handles handle delete confirm. */
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
 

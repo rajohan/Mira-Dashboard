@@ -3,6 +3,7 @@ import { createColumnHelper } from "@tanstack/react-table";
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { DatabaseTableShell } from "./DatabaseTableShell";
 
+/** Describes database row. */
 interface DatabaseRow {
     datname: string;
     size_pretty: string;
@@ -19,6 +20,7 @@ interface DatabaseRow {
     total_query_count: number;
 }
 
+/** Handles merge with pool data. */
 function mergeWithPoolData(
     databases: DatabaseOverviewResponse["databases"],
     pools: DatabaseOverviewResponse["pgbouncerPools"],
@@ -92,12 +94,14 @@ const columns = [
     }),
 ];
 
+/** Describes props. */
 interface Props {
     databases: DatabaseOverviewResponse["databases"];
     pools: DatabaseOverviewResponse["pgbouncerPools"];
     stats: DatabaseOverviewResponse["pgbouncerStats"];
 }
 
+/** Renders the databases table UI. */
 export function DatabasesTable({ databases, pools, stats }: Props) {
     const data = mergeWithPoolData(databases, pools, stats);
     return (

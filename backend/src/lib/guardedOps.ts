@@ -1,6 +1,7 @@
 import * as ChildProcess from "node:child_process";
 import * as Fs from "node:fs";
 
+/** Defines guarded path. */
 export type GuardedPath = string & { readonly __guardedPath: unique symbol };
 
 /** Marks a previously validated path so filesystem helpers only accept reviewed path values. */

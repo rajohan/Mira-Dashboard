@@ -1,5 +1,6 @@
 import { getCacheEntry, parseJsonField } from "./cacheStore.js";
 
+/** Describes moltbook announcement. */
 export interface MoltbookAnnouncement {
     postId: string | null;
     title: string | null;
@@ -8,6 +9,7 @@ export interface MoltbookAnnouncement {
     preview: string | null;
 }
 
+/** Describes moltbook home cache. */
 export interface MoltbookHomeCache {
     pendingRequestCount: number;
     unreadMessageCount: number;
@@ -20,15 +22,18 @@ export interface MoltbookHomeCache {
     fetchedAt: string;
 }
 
+/** Describes moltbook profile cache. */
 export interface MoltbookProfileCache {
     agent: Record<string, unknown> | null;
 }
 
+/** Describes moltbook my content cache. */
 export interface MoltbookMyContentCache {
     posts: unknown[];
     comments: unknown[];
 }
 
+/** Describes moltbook feed cache. */
 export interface MoltbookFeedCache {
     posts: unknown[];
     feedType: string | null;
@@ -37,6 +42,7 @@ export interface MoltbookFeedCache {
     tip: string | null;
 }
 
+/** Describes moltbook cache response. */
 export interface MoltbookCacheResponse<T> {
     source: string;
     status: string;
@@ -49,6 +55,7 @@ export interface MoltbookCacheResponse<T> {
     meta: Record<string, unknown>;
 }
 
+/** Handles fetch cached moltbook entry. */
 async function fetchCachedMoltbookEntry<T>(
     key: string
 ): Promise<MoltbookCacheResponse<T>> {
@@ -75,18 +82,22 @@ async function fetchCachedMoltbookEntry<T>(
     };
 }
 
+/** Handles fetch cached moltbook home. */
 export async function fetchCachedMoltbookHome() {
     return fetchCachedMoltbookEntry<MoltbookHomeCache>("moltbook.home");
 }
 
+/** Handles fetch cached moltbook profile. */
 export async function fetchCachedMoltbookProfile() {
     return fetchCachedMoltbookEntry<MoltbookProfileCache>("moltbook.profile");
 }
 
+/** Handles fetch cached moltbook my content. */
 export async function fetchCachedMoltbookMyContent() {
     return fetchCachedMoltbookEntry<MoltbookMyContentCache>("moltbook.my-content");
 }
 
+/** Handles fetch cached moltbook feed. */
 export async function fetchCachedMoltbookFeed(sort: "hot" | "new") {
     return fetchCachedMoltbookEntry<MoltbookFeedCache>(`moltbook.feed.${sort}`);
 }

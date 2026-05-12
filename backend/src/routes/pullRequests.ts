@@ -21,16 +21,19 @@ const DASHBOARD_PR_AUTHORS = [MIRA_AUTHOR, DEPENDABOT_AUTHOR];
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 
+/** Describes command result. */
 interface CommandResult {
     stdout: string;
     stderr: string;
 }
 
+/** Describes pull request author. */
 interface PullRequestAuthor {
     login?: string;
     name?: string;
 }
 
+/** Describes pull request summary. */
 interface PullRequestSummary {
     number: number;
     title: string;
@@ -51,6 +54,7 @@ interface PullRequestSummary {
     changedFiles?: number;
 }
 
+/** Describes deployment job. */
 interface DeploymentJob {
     id: string;
     status: "building" | "restart-scheduled" | "ok" | "failed";
@@ -62,6 +66,7 @@ interface DeploymentJob {
     stderr?: string;
 }
 
+/** Describes production checkout status. */
 interface ProductionCheckoutStatus {
     root: string;
     expectedRoot: string;
@@ -76,12 +81,14 @@ interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
+/** Describes git worktree. */
 interface GitWorktree {
     path: string;
     branch?: string;
     head?: string;
 }
 
+/** Describes worktree cleanup result. */
 interface WorktreeCleanupResult {
     status: "removed" | "skipped" | "warning";
     branch: string;
@@ -89,6 +96,7 @@ interface WorktreeCleanupResult {
     message: string;
 }
 
+/** Handles async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return (req, res, next) => {
         Promise.resolve(handler(req, res, next)).catch((error) => {
@@ -105,19 +113,23 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     };
 }
 
+/** Handles ensure deployment dir. */
 function ensureDeploymentDir(): void {
     fs.mkdirSync(DEPLOYMENT_DIR, { recursive: true });
 }
 
+/** Handles deployment path. */
 function deploymentPath(jobId: string): string {
     return path.join(DEPLOYMENT_DIR, `${jobId}.json`);
 }
 
+/** Handles write deployment job. */
 function writeDeploymentJob(job: DeploymentJob): void {
     ensureDeploymentDir();
     fs.writeFileSync(deploymentPath(job.id), JSON.stringify(job, null, 2));
 }
 
+/** Handles read deployment jobs. */
 function readDeploymentJobs(): DeploymentJob[] {
     ensureDeploymentDir();
     return fs
@@ -131,10 +143,12 @@ function readDeploymentJobs(): DeploymentJob[] {
         .slice(0, 10);
 }
 
+/** Handles trim output. */
 function trimOutput(value: string): string {
     return value.slice(-20_000);
 }
 
+/** Handles build command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
     const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN;
     return {
@@ -148,6 +162,7 @@ function buildCommandEnv(): NodeJS.ProcessEnv {
     };
 }
 
+/** Handles run command. */
 async function runCommand(
     command: string,
     args: string[],
@@ -166,6 +181,7 @@ async function runCommand(
     };
 }
 
+/** Handles run gh json. */
 async function runGhJson<T>(args: string[]): Promise<T> {
     const { stdout } = await execFileAsync("gh", args, {
         cwd: DASHBOARD_ROOT,
@@ -177,6 +193,7 @@ async function runGhJson<T>(args: string[]): Promise<T> {
     return JSON.parse(String(stdout || "null")) as T;
 }
 
+/** Handles list dashboard pull requests. */
 async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     const pullRequestsByNumber = new Map<number, PullRequestSummary>();
 
@@ -226,6 +243,7 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     );
 }
 
+/** Handles get pull request. */
 async function getPullRequest(number: number): Promise<PullRequestSummary> {
     return runGhJson<PullRequestSummary>([
         "pr",
@@ -256,6 +274,7 @@ async function getPullRequest(number: number): Promise<PullRequestSummary> {
     ]);
 }
 
+/** Handles validate pr number. */
 function validatePrNumber(value: unknown): number {
     const number = Number(value);
     if (!Number.isInteger(number) || number <= 0) {
@@ -264,6 +283,7 @@ function validatePrNumber(value: unknown): number {
     return number;
 }
 
+/** Handles parse git worktrees. */
 function parseGitWorktrees(output: string): GitWorktree[] {
     return output
         .trim()
@@ -287,6 +307,7 @@ function parseGitWorktrees(output: string): GitWorktree[] {
         .filter((worktree) => worktree.path);
 }
 
+/** Handles is path inside root. */
 function isPathInsideRoot(value: string, root: string): boolean {
     const resolvedValue = path.resolve(value);
     const resolvedRoot = path.resolve(root);
@@ -294,6 +315,7 @@ function isPathInsideRoot(value: string, root: string): boolean {
     return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+/** Handles find worktree for branch. */
 async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null> {
     const { stdout } = await runCommand("git", ["worktree", "list", "--porcelain"], {
         timeoutMs: 30_000,
@@ -306,6 +328,7 @@ async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null
     );
 }
 
+/** Handles cleanup pull request worktree. */
 async function cleanupPullRequestWorktree(
     branch: string
 ): Promise<WorktreeCleanupResult> {
@@ -365,6 +388,7 @@ async function cleanupPullRequestWorktree(
     }
 }
 
+/** Handles validate mira pr. */
 function validateMiraPr(pr: PullRequestSummary): void {
     if (pr.author?.login !== MIRA_AUTHOR) {
         throw new Error("Only Mira-authored pull requests can be managed here");
@@ -381,6 +405,7 @@ function validateMiraPr(pr: PullRequestSummary): void {
     }
 }
 
+/** Handles get production checkout status. */
 async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> {
     const [{ stdout: root }, { stdout: branch }, { stdout: head }, { stdout: status }] =
         await Promise.all([
@@ -430,6 +455,7 @@ async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> 
     };
 }
 
+/** Handles ensure production checkout. */
 async function ensureProductionCheckout(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
@@ -444,6 +470,7 @@ async function ensureProductionCheckout(): Promise<void> {
     }
 }
 
+/** Handles ensure production ready for deploy. */
 async function ensureProductionReadyForDeploy(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
@@ -454,6 +481,7 @@ async function ensureProductionReadyForDeploy(): Promise<void> {
     }
 }
 
+/** Handles sync master. */
 async function syncMaster(): Promise<void> {
     await ensureProductionCheckout();
     await runCommand("git", ["fetch", "--prune", "origin"], { timeoutMs: 120_000 });
@@ -464,10 +492,12 @@ async function syncMaster(): Promise<void> {
     await ensureProductionReadyForDeploy();
 }
 
+/** Handles shell quote. */
 function shellQuote(value: string): string {
     return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
+/** Handles schedule restart health check. */
 async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandResult> {
     const jobPath = deploymentPath(job.id);
     const okJob: DeploymentJob = {
@@ -509,6 +539,7 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
     );
 }
 
+/** Handles deploy latest. */
 async function deployLatest(): Promise<DeploymentJob> {
     const now = new Date().toISOString();
     const job: DeploymentJob = {
@@ -557,6 +588,7 @@ async function deployLatest(): Promise<DeploymentJob> {
     }
 }
 
+/** Handles approve pull request. */
 async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
@@ -586,6 +618,7 @@ async function approvePullRequest(number: number, deploy: boolean) {
     };
 }
 
+/** Handles reject pull request. */
 async function rejectPullRequest(number: number, comment: string) {
     const pr = await getPullRequest(number);
     validateMiraPr(pr);
@@ -604,6 +637,7 @@ async function rejectPullRequest(number: number, comment: string) {
     };
 }
 
+/** Handles pull requests routes. */
 export default function pullRequestsRoutes(app: express.Application): void {
     app.get(
         "/api/pull-requests",

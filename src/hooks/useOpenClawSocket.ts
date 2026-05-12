@@ -13,6 +13,7 @@ import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { useIsAuthenticated } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
 
+/** Describes open claw socket context value. */
 interface OpenClawSocketContextValue {
     isConnected: boolean;
     error: string | null;
@@ -28,6 +29,7 @@ interface OpenClawSocketContextValue {
 
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
 
+/** Handles open claw socket provider. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useIsAuthenticated();
     const clientRef = useRef<SocketClient | null>(null);
@@ -37,6 +39,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const [connectionId, setConnectionId] = useState(0);
 
+    /** Handles connect. */
     const connect = () => {
         if (!isAuthenticated) {
             setError("Not authenticated");
@@ -77,12 +80,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         clientRef.current.connect();
     };
 
+    /** Handles disconnect. */
     const disconnect = () => {
         clientRef.current?.disconnect();
         clientRef.current = null;
         setIsConnected(false);
     };
 
+    /** Handles request. */
     const request = <T = unknown>(
         method: string,
         params?: Record<string, unknown>
@@ -133,6 +138,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             return;
         }
 
+        /** Handles resync visible socket. */
         const resyncVisibleSocket = () => {
             if (document.visibilityState === "hidden") {
                 return;
@@ -164,6 +170,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
+    /** Handles subscribe. */
     const subscribe = (listener: (data: unknown) => void) => {
         listenersRef.current.add(listener);
         return () => {
@@ -188,11 +195,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/** Describes use open claw socket options. */
 interface UseOpenClawSocketOptions {
     onConnect?: () => void;
     onDisconnect?: () => void;
 }
 
+/** Handles use open claw socket. */
 export function useOpenClawSocket(options?: UseOpenClawSocketOptions) {
     const context = useContext(OpenClawSocketContext);
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+/** Describes page state props. */
 interface PageStateProps {
     isLoading?: boolean;
     loading?: ReactNode;
@@ -10,6 +11,7 @@ interface PageStateProps {
     children: ReactNode;
 }
 
+/** Renders the page state UI. */
 export function PageState({
     isLoading = false,
     loading,

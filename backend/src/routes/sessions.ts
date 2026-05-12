@@ -2,6 +2,7 @@ import express, { type RequestHandler } from "express";
 
 import gateway, { type Session } from "../gateway.js";
 
+/** Describes history message. */
 interface HistoryMessage {
     id: string;
     role: string;
@@ -10,12 +11,14 @@ interface HistoryMessage {
     tokens?: number;
 }
 
+/** Describes history response. */
 interface HistoryResponse {
     messages: HistoryMessage[];
     total: number;
     hasMore: boolean;
 }
 
+/** Handles sessions routes. */
 export default function sessionsRoutes(app: express.Application): void {
     // List sessions with optional filtering
     app.get("/api/sessions/list", (async (req, res) => {

@@ -1,10 +1,12 @@
 import type { SocketEnvelope } from "../../types/socket";
 
+/** Describes pending request. */
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
 }
 
+/** Describes socket client options. */
 interface SocketClientOptions {
     url: string;
     onOpen?: () => void;
@@ -13,6 +15,7 @@ interface SocketClientOptions {
     onMessage?: (data: SocketEnvelope) => void;
 }
 
+/** Describes socket client. */
 export interface SocketClient {
     connect: () => void;
     disconnect: () => void;
@@ -23,12 +26,14 @@ export interface SocketClient {
     isOpen: () => boolean;
 }
 
+/** Handles create socket client. */
 export function createSocketClient(options: SocketClientOptions): SocketClient {
     let ws: WebSocket | null = null;
     let shouldReconnect = true;
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
 
+    /** Handles connect. */
     const connect = () => {
         if (
             ws?.readyState === WebSocket.OPEN ||
@@ -82,6 +87,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
     };
 
+    /** Handles disconnect. */
     const disconnect = () => {
         shouldReconnect = false;
         ws?.close(1000, "Intentional disconnect");
@@ -93,6 +99,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         pendingRequests.clear();
     };
 
+    /** Handles request. */
     const request = <T = unknown>(
         method: string,
         params?: Record<string, unknown>
@@ -127,6 +134,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
     };
 
+    /** Handles is open. */
     const isOpen = () => ws?.readyState === WebSocket.OPEN;
 
     return {

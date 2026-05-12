@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 
+/** Handles static routes. */
 export default function staticRoutes(
     app: express.Application,
     frontendPath: string

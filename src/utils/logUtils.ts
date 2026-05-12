@@ -1,12 +1,15 @@
 import type { LogEntry } from "../types/log";
 import { formatOsloTime } from "./format";
 
+/** Stores line options. */
 export const LINE_OPTIONS = [100, 500, 1000, 2000, 5000] as const;
 
+/** Stores log levels. */
 export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 
 let logIdCounter = 0;
 
+/** Handles safe json parse. */
 function safeJsonParse(value: string): unknown {
     try {
         return JSON.parse(value);
@@ -15,6 +18,7 @@ function safeJsonParse(value: string): unknown {
     }
 }
 
+/** Handles stringify compact. */
 function stringifyCompact(value: unknown): string {
     try {
         const serialized = JSON.stringify(value);
@@ -24,10 +28,12 @@ function stringifyCompact(value: unknown): string {
     }
 }
 
+/** Handles normalize subsystem candidate. */
 function normalizeSubsystemCandidate(value: string): string {
     return value.replace(/^agent\//, "");
 }
 
+/** Handles extract subsystem and message. */
 function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: string } {
     const bracketMatch = msg.match(/^\[([^\]]+)\]\s*/);
     if (bracketMatch) {
@@ -48,6 +54,7 @@ function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: stri
     return { subsystem: "", msg };
 }
 
+/** Handles normalize structured message. */
 function normalizeStructuredMessage(parsed: Record<string, unknown>): {
     msg: string;
     subsystem: string;
@@ -127,6 +134,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
     return { subsystem, msg };
 }
 
+/** Handles build dedupe key. */
 function buildDedupeKey(entry: {
     ts?: string;
     level?: string;
@@ -143,6 +151,7 @@ function buildDedupeKey(entry: {
         .trim();
 }
 
+/** Handles parse log line. */
 export function parseLogLine(line: string, index?: number): LogEntry | null {
     if (!line || !line.trim()) return null;
 
@@ -206,6 +215,7 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
     }
 }
 
+/** Handles format log time. */
 export function formatLogTime(ts?: string): string {
     if (!ts) return "";
     try {
@@ -215,6 +225,7 @@ export function formatLogTime(ts?: string): string {
     }
 }
 
+/** Handles get level color. */
 export function getLevelColor(level?: string): string {
     const l = (level || "info").toLowerCase();
     switch (l) {
@@ -242,6 +253,7 @@ export function getLevelColor(level?: string): string {
     }
 }
 
+/** Handles get subsystem color. */
 export function getSubsystemColor(subsystem?: string): string {
     if (!subsystem) return "";
     const s = subsystem.toLowerCase();

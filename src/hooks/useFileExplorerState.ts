@@ -7,8 +7,10 @@ import { validateJsonString } from "../utils/json";
 import { apiFetch } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
+/** Stores max preview size. */
 export const MAX_PREVIEW_SIZE = 100_000;
 
+/** Handles use file explorer state. */
 export function useFileExplorerState() {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -52,6 +54,7 @@ export function useFileExplorerState() {
         }
     }, [fileContent]);
 
+    /** Handles handle toggle. */
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
@@ -65,6 +68,7 @@ export function useFileExplorerState() {
 
         setExpandedPaths((prev) => new Set(prev).add(path));
 
+        /** Handles find node. */
         const findNode = (nodes: FileNode[]): FileNode | undefined => {
             for (const node of nodes) {
                 if (node.path === path) return node;
@@ -88,6 +92,7 @@ export function useFileExplorerState() {
                     staleTime: 30_000,
                 });
                 const children = data.files || [];
+                /** Handles update node. */
                 const updateNode = (nodes: FileNode[]): FileNode[] => {
                     return nodes.map((n) => {
                         if (n.path === path) return { ...n, children, loaded: true };
@@ -102,12 +107,14 @@ export function useFileExplorerState() {
         }
     };
 
+    /** Handles handle select. */
     const handleSelect = (path: string) => {
         setSelectedPath(path);
         setHasChanges(false);
         setError(null);
     };
 
+    /** Handles handle content change. */
     const handleContentChange = (value: string) => {
         setEditedContent(value);
         setHasChanges(value !== fileContent?.content);
@@ -120,6 +127,7 @@ export function useFileExplorerState() {
         ? validateJsonString(editedContent, jsonValidationMode)
         : { valid: true, error: null };
 
+    /** Handles handle save. */
     const handleSave = async () => {
         if (!selectedPath || !fileContent) return;
 
@@ -140,6 +148,7 @@ export function useFileExplorerState() {
         }
     };
 
+    /** Handles handle refresh. */
     const handleRefresh = () => {
         void refetchRoot();
         if (selectedPath) {

@@ -1,11 +1,13 @@
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
+/** Describes code preview props. */
 interface CodePreviewProps {
     language: string;
     content: string;
 }
 
+/** Renders the code preview UI. */
 export function CodePreview({ language, content }: CodePreviewProps) {
     return (
         <div className="h-full min-w-0 overflow-auto">

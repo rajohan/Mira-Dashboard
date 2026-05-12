@@ -1,5 +1,6 @@
 import type { ChatModelOption } from "./chatUtils";
 
+/** Describes slash command definition. */
 export interface SlashCommandDefinition {
     name: string;
     aliases?: string[];
@@ -8,12 +9,14 @@ export interface SlashCommandDefinition {
     choices?: string[];
 }
 
+/** Describes slash command suggestion. */
 export interface SlashCommandSuggestion {
     value: string;
     title: string;
     description: string;
 }
 
+/** Stores thinking choices. */
 export const THINKING_CHOICES = [
     "off",
     "minimal",
@@ -24,12 +27,18 @@ export const THINKING_CHOICES = [
     "max",
     "adaptive",
 ];
+/** Stores mode choices. */
 export const MODE_CHOICES = ["status", "on", "off"];
+/** Stores verbose choices. */
 export const VERBOSE_CHOICES = ["off", "on", "full"];
+/** Stores reasoning choices. */
 export const REASONING_CHOICES = ["off", "on", "stream"];
+/** Stores elevated choices. */
 export const ELEVATED_CHOICES = ["off", "on", "ask", "full"];
+/** Stores usage choices. */
 export const USAGE_CHOICES = ["off", "tokens", "on", "full"];
 
+/** Stores slash commands. */
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     { name: "/help", description: "Show available commands" },
     { name: "/commands", description: "List available slash commands" },
@@ -107,6 +116,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     },
 ];
 
+/** Handles slash command canonical name. */
 export function slashCommandCanonicalName(rawCommand: string): string {
     const command = rawCommand.toLowerCase();
     return (
@@ -115,6 +125,7 @@ export function slashCommandCanonicalName(rawCommand: string): string {
     );
 }
 
+/** Handles build slash command suggestions. */
 export function buildSlashCommandSuggestions(
     draft: string,
     chatModelOptions: ChatModelOption[]

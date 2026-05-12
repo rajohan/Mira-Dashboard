@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost, apiPut } from "./useApi";
 
 // Types
+/** Defines skill source. */
 export type SkillSource = "workspace" | "builtin" | "extra";
 
+/** Describes skill. */
 export interface Skill {
     name: string;
     path: string;
@@ -13,6 +15,7 @@ export interface Skill {
     source?: SkillSource;
 }
 
+/** Describes agent config. */
 export interface AgentConfig {
     id: string;
     default?: boolean;
@@ -27,6 +30,7 @@ export interface AgentConfig {
     [key: string]: unknown;
 }
 
+/** Describes open claw config. */
 export interface OpenClawConfig {
     __hash?: string;
     agents?: {
@@ -120,33 +124,40 @@ export interface OpenClawConfig {
 }
 
 // Query keys
+/** Stores config keys. */
 export const configKeys = {
     config: (): ["config"] => ["config"],
     skills: (): ["skills"] => ["skills"],
 };
 
 // Fetchers
+/** Handles fetch config. */
 async function fetchConfig(): Promise<OpenClawConfig> {
     return apiFetch<OpenClawConfig>("/config");
 }
 
+/** Handles fetch skills. */
 async function fetchSkills(): Promise<Skill[]> {
     const data = await apiFetch<{ skills: Skill[] }>("/skills");
     return data.skills;
 }
 
+/** Handles update config. */
 async function updateConfig(config: OpenClawConfig): Promise<void> {
     await apiPut("/config", config);
 }
 
+/** Handles toggle skill. */
 async function toggleSkill(name: string, enabled: boolean): Promise<void> {
     await apiPost(`/skills/${name}`, { enabled });
 }
 
+/** Handles restart gateway. */
 async function restartGateway(): Promise<void> {
     await apiPost("/restart");
 }
 
+/** Handles create backup. */
 async function createBackup(): Promise<{
     createdAt: string;
     hash?: string;
@@ -158,6 +169,7 @@ async function createBackup(): Promise<{
 }
 
 // Hooks
+/** Handles use config. */
 export function useConfig() {
     return useQuery({
         queryKey: ["config"],
@@ -166,6 +178,7 @@ export function useConfig() {
     });
 }
 
+/** Handles use skills. */
 export function useSkills() {
     return useQuery({
         queryKey: ["skills"],
@@ -174,6 +187,7 @@ export function useSkills() {
     });
 }
 
+/** Handles use update config. */
 export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
@@ -185,6 +199,7 @@ export function useUpdateConfig() {
     });
 }
 
+/** Handles use toggle skill. */
 export function useToggleSkill() {
     const queryClient = useQueryClient();
 
@@ -197,12 +212,14 @@ export function useToggleSkill() {
     });
 }
 
+/** Handles use restart gateway. */
 export function useRestartGateway() {
     return useMutation({
         mutationFn: restartGateway,
     });
 }
 
+/** Handles use create backup. */
 export function useCreateBackup() {
     return useMutation({
         mutationFn: createBackup,

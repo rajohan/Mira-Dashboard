@@ -7,9 +7,12 @@ import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 
+/** Defines skill status filter. */
 type SkillStatusFilter = "all" | "enabled" | "disabled";
+/** Defines skill source filter. */
 type SkillSourceFilter = "all" | "workspace" | "builtin" | "extra";
 
+/** Describes skills section props. */
 interface SkillsSectionProps {
     skills: Skill[];
     onToggle: (skillName: string, enabled: boolean) => void;
@@ -21,6 +24,7 @@ const sourceLabels: Record<Exclude<SkillSourceFilter, "all">, string> = {
     extra: "Extra",
 };
 
+/** Renders the skills section UI. */
 export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
     const [statusFilter, setStatusFilter] = useState<SkillStatusFilter>("all");
     const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
