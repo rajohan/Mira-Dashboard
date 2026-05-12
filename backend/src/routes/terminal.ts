@@ -1,8 +1,9 @@
-import { readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import express from "express";
+
+import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.js";
 
 /** Represents completion request. */
 interface CompletionRequest {
@@ -72,7 +73,9 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
     }
 
     try {
-        const entries = await readdir(searchDir, { withFileTypes: true });
+        const entries = await readdirGuardedAsync(guardedPath(searchDir), {
+            withFileTypes: true,
+        });
         const matches: CompletionItem[] = [];
 
         for (const entry of entries) {
@@ -88,7 +91,7 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
                 type = "directory";
             } else if (entry.isFile()) {
                 try {
-                    const stats = await stat(fullPath);
+                    const stats = await statGuardedAsync(guardedPath(fullPath));
                     if (stats.mode & 0o111) {
                         type = "executable";
                     }
@@ -190,7 +193,7 @@ export default function terminalRoutes(app: express.Application): void {
 
         // Check if directory exists
         try {
-            const stats = await stat(newPath);
+            const stats = await statGuardedAsync(guardedPath(newPath));
             if (!stats.isDirectory()) {
                 res.status(400).json({
                     success: false,

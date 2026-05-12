@@ -8,6 +8,7 @@ import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 const LOGS_DIR = "/tmp/openclaw";
 const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
 let logWatcher: NodeJS.Timeout | null = null;
+let logPollInFlight = false;
 let lastLogSize = 0;
 let lastLogFile = "";
 const logSubscribers = new Set<WebSocket>();
@@ -25,50 +26,72 @@ function getTodayLogFile(): string {
     return path.join(LOGS_DIR, "openclaw-" + today + ".log");
 }
 
+/** Polls the current OpenClaw log once, serialized by startLogWatcher. */
+async function pollLogFile(): Promise<void> {
+    const logFile = getTodayLogFile();
+
+    let file: fs.promises.FileHandle | undefined;
+    try {
+        file = await openReadNoFollowGuarded(guardedPath(logFile));
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+
+    try {
+        const stat = await file.stat();
+
+        if (logFile !== lastLogFile) {
+            lastLogFile = logFile;
+            lastLogSize = stat.size;
+            return;
+        }
+
+        if (stat.size < lastLogSize) {
+            lastLogSize = 0;
+        }
+
+        if (stat.size > lastLogSize) {
+            const buffer = Buffer.alloc(stat.size - lastLogSize);
+            await file.read(buffer, 0, buffer.length, lastLogSize);
+
+            const lines = buffer
+                .toString("utf8")
+                .split("\n")
+                .filter((l) => l.trim());
+            lastLogSize = stat.size;
+
+            for (const line of lines) {
+                const msg = JSON.stringify({ type: "log", line });
+                for (const ws of logSubscribers) {
+                    try {
+                        ws.send(msg);
+                    } catch {
+                        // Ignore errors from closed connections
+                    }
+                }
+            }
+        }
+    } finally {
+        await file.close();
+    }
+}
+
 /** Performs start log watcher. */
 function startLogWatcher(): void {
     if (logWatcher) return;
 
     logWatcher = setInterval(() => {
-        try {
-            const logFile = getTodayLogFile();
+        if (logPollInFlight) return;
+        logPollInFlight = true;
 
-            if (!fs.existsSync(logFile)) return;
-
-            const stat = fs.statSync(logFile);
-
-            if (logFile !== lastLogFile) {
-                lastLogFile = logFile;
-                lastLogSize = stat.size;
-                return;
-            }
-
-            if (stat.size > lastLogSize) {
-                const fd = fs.openSync(logFile, "r");
-                const buffer = Buffer.alloc(stat.size - lastLogSize);
-                fs.readSync(fd, buffer, 0, buffer.length, lastLogSize);
-                fs.closeSync(fd);
-
-                const lines = buffer
-                    .toString("utf8")
-                    .split("\n")
-                    .filter((l) => l.trim());
-                lastLogSize = stat.size;
-
-                for (const line of lines) {
-                    const msg = JSON.stringify({ type: "log", line });
-                    for (const ws of logSubscribers) {
-                        try {
-                            ws.send(msg);
-                        } catch {
-                            // Ignore errors from closed connections
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("[LogWatcher] Error:", (error as Error).message);
-        }
+        void pollLogFile()
+            .catch((error: unknown) => {
+                console.error("[LogWatcher] Error:", (error as Error).message);
+            })
+            .finally(() => {
+                logPollInFlight = false;
+            });
     }, 1000);
 }
 
@@ -130,6 +153,7 @@ export const __testing = {
             clearInterval(logWatcher);
         }
         logWatcher = null;
+        logPollInFlight = false;
         lastLogSize = 0;
         lastLogFile = "";
         logSubscribers.clear();

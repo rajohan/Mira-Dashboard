@@ -7,6 +7,8 @@ import WebSocket from "ws";
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
+const MIN_TICK_INTERVAL_MS = 1_000;
+const MAX_TICK_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
 
 /** Defines device identity. */
@@ -89,6 +91,18 @@ function base64UrlEncode(buffer: Buffer): string {
         .replaceAll("+", "-")
         .replaceAll("/", "_")
         .replace(/=+$/u, "");
+}
+
+/** Clamps timer durations from Gateway policy before they reach setInterval/setTimeout. */
+function sanitizeTimerDurationMs(value: unknown, fallback: number): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return fallback;
+    }
+
+    return Math.min(
+        Math.max(Math.trunc(value), MIN_TICK_INTERVAL_MS),
+        MAX_TICK_INTERVAL_MS
+    );
 }
 
 /** Performs derive public key raw. */
@@ -461,9 +475,10 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             ) {
                 this.backoffMs = 1_000;
                 this.lastTickAt = Date.now();
-                this.tickIntervalMs =
-                    (payload as GatewayHelloOk).policy?.tickIntervalMs ||
-                    DEFAULT_TICK_INTERVAL_MS;
+                this.tickIntervalMs = sanitizeTimerDurationMs(
+                    (payload as GatewayHelloOk).policy?.tickIntervalMs,
+                    DEFAULT_TICK_INTERVAL_MS
+                );
                 this.startTickWatch();
                 this.opts.onHelloOk?.(payload as GatewayHelloOk);
             }

@@ -2,10 +2,17 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
-import { safePathWithinRoot } from "../lib/safePath.js";
+import {
+    copyGuarded,
+    guardedPath,
+    statGuarded,
+    writeTextNoFollowGuarded,
+} from "../lib/guardedOps.js";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
+const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 
 // Allowed config files (whitelist for security)
 const ALLOWED_CONFIG_FILES = [
@@ -191,6 +198,11 @@ export default function configFilesRoutes(
             return;
         }
 
+        if (typeof content !== "string" || content.length > MAX_CONFIG_WRITE_SIZE) {
+            res.status(400).json({ error: "Invalid content" });
+            return;
+        }
+
         // Check if file is in whitelist
         if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
             res.status(403).json({ error: "Access denied: file not in allowed list" });
@@ -207,22 +219,29 @@ export default function configFilesRoutes(
                 return;
             }
 
+            const safeFullPath = prepareSafeWriteTargetWithinRoot(
+                fullPath,
+                OPENCLAW_ROOT
+            );
+            if (!safeFullPath) {
+                res.status(403).json({
+                    error: "Access denied: path outside allowed root",
+                });
+                return;
+            }
+
             // Create backup
             try {
-                const backupPath = fullPath + ".bak";
-                fs.copyFileSync(fullPath, backupPath);
+                const backupPath = safeFullPath + ".bak";
+                copyGuarded(guardedPath(safeFullPath), guardedPath(backupPath));
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
-
-                // File doesn't exist yet; ensure parent directory exists
-                const parentDir = path.dirname(fullPath);
-                fs.mkdirSync(parentDir, { recursive: true });
             }
 
-            fs.writeFileSync(fullPath, content, "utf8");
-            const stat = fs.statSync(fullPath);
+            await writeTextNoFollowGuarded(guardedPath(safeFullPath), content);
+            const stat = statGuarded(guardedPath(safeFullPath));
 
             res.json({
                 success: true,

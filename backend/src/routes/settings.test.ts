@@ -116,6 +116,34 @@ describe("settings routes", () => {
         assert.equal(reloaded.body.sidebarCollapsed, true);
     });
 
+    it("validates settings updates before writing them", async () => {
+        const invalidTheme = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { theme: "solarized" } }
+        );
+        assert.equal(invalidTheme.status, 400);
+        assert.equal(invalidTheme.body.error, "Invalid theme");
+
+        const clamped = await requestJson<{
+            defaultModel: string;
+            refreshInterval: number;
+        }>(server, "/api/settings", {
+            method: "PUT",
+            body: { defaultModel: " codex ", refreshInterval: 500_000 },
+        });
+        assert.equal(clamped.status, 200);
+        assert.equal(clamped.body.defaultModel, "codex");
+        assert.equal(clamped.body.refreshInterval, 60_000);
+
+        const saved = JSON.parse(await readFile(settingsPath, "utf8")) as Record<
+            string,
+            unknown
+        >;
+        assert.equal(saved.defaultModel, "codex");
+        assert.equal(saved.refreshInterval, 60_000);
+    });
+
     it("falls back to defaults when the settings file is malformed", async () => {
         await writeFile(settingsPath, "not json", "utf8");
         const originalError = console.error;

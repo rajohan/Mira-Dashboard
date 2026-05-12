@@ -10,6 +10,7 @@ export function guardedPath(path: string): GuardedPath {
 
 const fsOps = Fs as unknown as {
     mkdirSync: typeof Fs.mkdirSync;
+    readdirSync: typeof Fs.readdirSync;
     readFileSync: typeof Fs.readFileSync;
     copyFileSync: typeof Fs.copyFileSync;
     statSync: typeof Fs.statSync;
@@ -17,6 +18,8 @@ const fsOps = Fs as unknown as {
 
 const fsPromiseOps = Fs.promises as unknown as {
     open: typeof Fs.promises.open;
+    readdir: typeof Fs.promises.readdir;
+    stat: typeof Fs.promises.stat;
 };
 
 const childProcessOps = ChildProcess as unknown as {
@@ -38,9 +41,35 @@ export function readJson5Guarded(path: GuardedPath): string {
     return fsOps.readFileSync(guardedPathBuffer(path), "utf8");
 }
 
+/** Lists directory entries from a validated path. */
+export function readdirGuarded(
+    path: GuardedPath,
+    options: { withFileTypes: true }
+): Fs.Dirent[] {
+    return fsOps.readdirSync(guardedPathBuffer(path), options);
+}
+
 /** Reads a UTF-8 text file from a validated path. */
 export function readTextGuarded(path: GuardedPath): string {
     return fsOps.readFileSync(guardedPathBuffer(path), "utf8");
+}
+
+/** Lists directory entries from a validated path without blocking the request thread. */
+export async function readdirGuardedAsync(
+    path: GuardedPath,
+    options: { withFileTypes: true }
+): Promise<Fs.Dirent[]> {
+    return Reflect.apply(fsPromiseOps.readdir, Fs.promises, [
+        guardedPathBuffer(path),
+        options,
+    ]) as Promise<Fs.Dirent[]>;
+}
+
+/** Stats a validated path without blocking the request thread. */
+export async function statGuardedAsync(path: GuardedPath): Promise<Fs.Stats> {
+    return Reflect.apply(fsPromiseOps.stat, Fs.promises, [
+        guardedPathBuffer(path),
+    ]) as Promise<Fs.Stats>;
 }
 
 /** Reads UTF-8 text while atomically refusing a symlink at the final path. */

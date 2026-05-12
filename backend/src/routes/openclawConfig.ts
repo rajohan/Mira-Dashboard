@@ -20,18 +20,23 @@ async function getConfigSnapshot(): Promise<ConfigGetResponse> {
     return response;
 }
 
-/** Applies a partial OpenClaw config update using the latest config hash. */
-async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
+/** Applies a raw partial OpenClaw config update using the latest config hash. */
+async function patchConfigRaw(raw: string): Promise<unknown> {
     const snapshot = await getConfigSnapshot();
     if (!snapshot.hash) {
         throw new Error("OpenClaw config hash unavailable");
     }
 
     return gateway.request("config.patch", {
-        raw: JSON.stringify(patch),
+        raw,
         baseHash: snapshot.hash,
         note: "Updated from Mira Dashboard settings",
     });
+}
+
+/** Applies a partial OpenClaw config update using the latest config hash. */
+async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
+    return patchConfigRaw(JSON.stringify(patch));
 }
 
 /** Defines skill source. */
@@ -240,20 +245,21 @@ export default function openClawConfigRoutes(app: express.Application): void {
     app.post("/api/skills/:name", express.json(), (async (req, res) => {
         try {
             const name = String(req.params.name || "");
-            const enabled = Boolean((req.body as { enabled?: boolean }).enabled);
+            const enabled = (req.body as { enabled?: unknown }).enabled;
 
             if (!isValidSkillName(name)) {
                 res.status(400).json({ error: "Invalid skill name" });
                 return;
             }
 
-            await patchConfig({
-                skills: {
-                    entries: {
-                        [name]: { enabled },
-                    },
-                },
-            });
+            if (typeof enabled !== "boolean") {
+                res.status(400).json({ error: "Invalid enabled value" });
+                return;
+            }
+
+            await patchConfigRaw(
+                `{"skills":{"entries":{${JSON.stringify(name)}:{"enabled":${JSON.stringify(enabled)}}}}}`
+            );
             res.json({ ok: true });
         } catch (error) {
             res.status(500).json({ error: (error as Error).message });

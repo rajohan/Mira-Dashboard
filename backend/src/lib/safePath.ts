@@ -72,6 +72,105 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
 }
 
 /**
+ * Creates any missing parent directories for a previously root-validated write target.
+ *
+ * Directory creation starts from the deepest existing canonical ancestor instead of
+ * calling `mkdir -p` on the lexical target path. That prevents a concurrently swapped
+ * symlinked ancestor from causing directory creation outside the allowed root.
+ */
+export function prepareSafeWriteTargetWithinRoot(
+    fullPath: string,
+    rootDir: string
+): string | null {
+    if (!fullPath || fullPath.includes("\0")) {
+        return null;
+    }
+
+    try {
+        const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDir));
+        fs.mkdirSync(Buffer.from(canonicalRoot), { recursive: true });
+
+        const realRoot = fs.realpathSync(canonicalRoot);
+        if (realRoot !== canonicalRoot) {
+            return null;
+        }
+
+        const normalizedRoot = realRoot + path.sep;
+        const resolvedTarget = path.resolve(fullPath);
+
+        if (resolvedTarget !== realRoot && !resolvedTarget.startsWith(normalizedRoot)) {
+            return null;
+        }
+
+        const targetParent = path.dirname(resolvedTarget);
+        const missingSegments: string[] = [];
+        let existingAncestor = targetParent;
+
+        while (true) {
+            try {
+                const realAncestor = fs.realpathSync(existingAncestor);
+                const ancestorStat = fs.statSync(Buffer.from(realAncestor));
+
+                if (!ancestorStat.isDirectory()) {
+                    return null;
+                }
+
+                if (
+                    realAncestor !== realRoot &&
+                    !realAncestor.startsWith(normalizedRoot)
+                ) {
+                    return null;
+                }
+
+                let realParent = realAncestor;
+                for (let index = missingSegments.length - 1; index >= 0; index -= 1) {
+                    const nextParent = path.join(realParent, missingSegments[index]);
+                    try {
+                        fs.mkdirSync(Buffer.from(nextParent));
+                    } catch (error) {
+                        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                            throw error;
+                        }
+                    }
+
+                    const realNextParent = fs.realpathSync(nextParent);
+                    const nextParentStat = fs.statSync(Buffer.from(realNextParent));
+
+                    if (!nextParentStat.isDirectory()) {
+                        return null;
+                    }
+
+                    if (
+                        realNextParent !== realRoot &&
+                        !realNextParent.startsWith(normalizedRoot)
+                    ) {
+                        return null;
+                    }
+
+                    realParent = realNextParent;
+                }
+
+                return path.join(realParent, path.basename(resolvedTarget));
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+
+                const parent = path.dirname(existingAncestor);
+                if (parent === existingAncestor) {
+                    return null;
+                }
+
+                missingSegments.push(path.basename(existingAncestor));
+                existingAncestor = parent;
+            }
+        }
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Sanitize a filename to prevent directory traversal components.
  * Strips path separators and parent directory references.
  */
