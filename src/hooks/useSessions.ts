@@ -105,9 +105,10 @@ export function useDeleteSession() {
     return useMutation({
         mutationFn: deleteSessionRequest,
         onSuccess: (_, key) => {
-            deleteSessionFromCollection(key);
+            const sessionKey = key.trim();
+            deleteSessionFromCollection(sessionKey);
             queryClient.removeQueries({
-                queryKey: sessionKeys.history(key),
+                queryKey: sessionKeys.history(sessionKey),
                 exact: true,
             });
             queryClient.invalidateQueries({ queryKey: sessionKeys.all });

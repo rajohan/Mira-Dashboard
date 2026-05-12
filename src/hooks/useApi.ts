@@ -46,7 +46,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
 export function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
     return apiFetch<T>(endpoint, {
         method: "POST",
-        body: body ? JSON.stringify(body) : undefined,
+        body: body === undefined ? undefined : JSON.stringify(body),
     });
 }
 
