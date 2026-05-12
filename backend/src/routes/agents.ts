@@ -764,6 +764,7 @@ export default function agentsRoutes(app: express.Application): void {
                 res.status(400).json({ error: "Invalid agent ID" });
                 return;
             }
+            const safeAgentId = agentId.replaceAll(/[^a-zA-Z0-9._-]/gu, "");
 
             const { currentTask } = req.body as { currentTask?: string };
 
@@ -773,7 +774,7 @@ export default function agentsRoutes(app: express.Application): void {
             }
 
             const metadataPath = safePathWithinRoot(
-                Path.join(agentId, "sessions", "metadata.json"),
+                Path.join(safeAgentId, "sessions", "metadata.json"),
                 AGENTS_DIR
             );
 

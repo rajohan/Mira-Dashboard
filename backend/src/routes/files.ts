@@ -2,8 +2,6 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
-import { safePathWithinRoot } from "../lib/safePath.js";
-
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
@@ -135,9 +133,32 @@ export default function filesRoutes(
         const filePath = decodeURIComponent(req.params[0] || "");
 
         try {
-            const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
+            const workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+            const candidatePath = path.resolve(workspaceRoot, filePath);
 
-            if (!fullPath) {
+            if (
+                candidatePath !== workspaceRoot &&
+                !candidatePath.startsWith(workspaceRoot + path.sep)
+            ) {
+                res.status(403).json({ error: "Access denied: path outside workspace" });
+                return;
+            }
+
+            let fullPath: string;
+            try {
+                fullPath = fs.realpathSync(candidatePath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
+            }
+
+            if (
+                fullPath !== workspaceRoot &&
+                !fullPath.startsWith(workspaceRoot + path.sep)
+            ) {
                 res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
@@ -229,38 +250,25 @@ export default function filesRoutes(
         }
 
         try {
-            const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
+            const fullPath = path.resolve(WORKSPACE_ROOT, filePath);
 
-            if (!fullPath) {
+            if (!fullPath.startsWith(WORKSPACE_ROOT)) {
                 res.status(403).json({ error: "Access denied: path outside workspace" });
                 return;
             }
 
-            try {
+            if (fs.existsSync(fullPath)) {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                    throw error;
-                }
-
-                // File doesn't exist yet; ensure parent directory exists
+            } else {
                 const parentDir = path.dirname(fullPath);
-                fs.mkdirSync(parentDir, { recursive: true });
+                if (!fs.existsSync(parentDir)) {
+                    fs.mkdirSync(parentDir, { recursive: true });
+                }
             }
 
             fs.writeFileSync(fullPath, content, "utf8");
-
-            let stat: fs.Stats;
-            try {
-                stat = fs.statSync(fullPath);
-            } catch {
-                res.json({
-                    success: true,
-                    path: filePath,
-                });
-                return;
-            }
+            const stat = fs.statSync(fullPath);
 
             res.json({
                 success: true,

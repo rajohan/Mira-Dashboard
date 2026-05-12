@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { type ChildProcess, spawn } from "child_process";
 import express, { type RequestHandler } from "express";
+import fs from "fs";
 import path from "path";
+import { parse as parseShellCommand } from "shell-quote";
 
 interface ExecRequest {
     command: string;
@@ -20,6 +22,7 @@ class ExecValidationError extends Error {
 // Validate and sanitize exec request payload
 const MAX_COMMAND_LENGTH = 4096;
 const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
+const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 
 function validateExecRequest(payload: ExecRequest): ExecRequest {
     const { command, args, cwd } = payload;
@@ -36,6 +39,12 @@ function validateExecRequest(payload: ExecRequest): ExecRequest {
 
     if (SHELL_METACHARACTERS_RE.test(command)) {
         throw new ExecValidationError("command contains disallowed control characters");
+    }
+
+    if (args !== undefined && !EXECUTABLE_RE.test(command)) {
+        throw new ExecValidationError(
+            "command must be an executable path when args are provided"
+        );
     }
 
     if (args !== undefined && !Array.isArray(args)) {
@@ -100,24 +109,53 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+function parseCommand(command: string): { executable: string; args: string[] } {
+    const parsed = parseShellCommand(command);
+    const parts: string[] = [];
+
+    for (const part of parsed) {
+        if (typeof part !== "string") {
+            throw new ExecValidationError(
+                "shell operators, redirects, and substitutions are not supported"
+            );
+        }
+        parts.push(part);
+    }
+
+    const [executable, ...parsedArgs] = parts;
+    if (!executable || !EXECUTABLE_RE.test(executable)) {
+        throw new ExecValidationError("command must start with an executable path");
+    }
+
+    return { executable, args: parsedArgs };
+}
+
+function resolveCwd(cwd: string | undefined): string {
+    if (!cwd) {
+        return process.cwd();
+    }
+
+    if (cwd.includes("\0") || !path.isAbsolute(cwd)) {
+        throw new ExecValidationError("cwd must be an absolute path");
+    }
+
+    return fs.realpathSync(cwd);
+}
+
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
     onUpdate?: (job: ExecJob) => void
 ): Promise<ExecResponse> {
     const { command, args, cwd } = request;
-    // Validate cwd: reject null bytes and restrict to absolute or known paths
-    const safeCwd =
-        cwd && !cwd.includes("\0") && path.isAbsolute(cwd) ? cwd : process.cwd();
+    const safeCwd = resolveCwd(cwd);
     const cwdOption = { cwd: safeCwd, env: process.env, detached: true };
+    const commandParts = Array.isArray(args)
+        ? { executable: command, args }
+        : parseCommand(command);
 
     return new Promise((resolve, reject) => {
-        // When args are provided, use them directly without shell to prevent
-        // command-line injection. The no-args shell path is intentional for
-        // interactive terminal use but is guarded by auth and input validation.
-        const child = Array.isArray(args)
-            ? spawn(command, args, cwdOption)
-            : spawn("/bin/sh", ["-c", command], cwdOption);
+        const child = spawn(commandParts.executable, commandParts.args, cwdOption);
 
         // Store process reference for kill
         const job = jobs.get(jobId);

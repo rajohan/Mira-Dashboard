@@ -3,8 +3,6 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
-import { safePathWithinRoot } from "../lib/safePath.js";
-
 const LOGS_DIR = "/tmp/openclaw";
 const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
 let logWatcher: NodeJS.Timeout | null = null;
@@ -170,9 +168,29 @@ export default function logsRoutes(app: express.Application): void {
         }
 
         try {
-            const filePath = safePathWithinRoot(logFile, REAL_LOGS_DIR);
+            const realRoot = fs.realpathSync(REAL_LOGS_DIR);
+            const candidatePath = path.resolve(realRoot, logFile);
 
-            if (!filePath) {
+            if (
+                candidatePath !== realRoot &&
+                !candidatePath.startsWith(realRoot + path.sep)
+            ) {
+                res.status(403).json({ error: "Access denied" });
+                return;
+            }
+
+            let filePath: string;
+            try {
+                filePath = fs.realpathSync(candidatePath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                throw error;
+            }
+
+            if (filePath !== realRoot && !filePath.startsWith(realRoot + path.sep)) {
                 res.status(403).json({ error: "Access denied" });
                 return;
             }
