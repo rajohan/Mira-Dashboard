@@ -43,6 +43,10 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
         return undefined as T;
     }
 
+    if (typeof response.text !== "function") {
+        return response.json() as Promise<T>;
+    }
+
     const text = await response.text();
     if (!text) {
         return undefined as T;
