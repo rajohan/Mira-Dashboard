@@ -15,7 +15,7 @@ interface ModelSectionProps {
     saving: boolean;
 }
 
-/** Parses list. */
+/** Splits comma/newline-delimited model IDs, trims whitespace, and removes empty entries. */
 function parseList(value: string): string[] {
     return value
         .split(/[\n,]/)

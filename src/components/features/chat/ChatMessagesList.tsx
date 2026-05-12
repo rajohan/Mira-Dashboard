@@ -8,7 +8,7 @@ import {
     Trash2,
     Volume2,
 } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -256,8 +256,8 @@ export function ChatMessagesList({
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
     const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
 
-    /** Performs stop audio. */
-    const stopAudio = () => {
+    /** Stops active TTS playback and releases the object URL. */
+    const stopAudio = useCallback(() => {
         audioReference.current?.pause();
         audioReference.current = null;
 
@@ -267,9 +267,9 @@ export function ChatMessagesList({
         }
 
         setPlayingMessageKey(null);
-    };
+    }, []);
 
-    useEffect(() => stopAudio, []);
+    useEffect(() => () => stopAudio(), [stopAudio]);
 
     /** Speaks or stops the selected chat message. */
     const speakMessage = async (messageKey: string, text: string) => {
