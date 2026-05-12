@@ -166,6 +166,7 @@ function resolveCwd(cwd: string | undefined): string {
         throw new ExecValidationError("cwd must be an absolute path");
     }
 
+    // codeql[js/path-injection]: cwd must be an absolute path without null bytes; it is canonicalized before use as child_process cwd.
     return fs.realpathSync(cwd);
 }
 
