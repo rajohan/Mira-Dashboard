@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { type ChildProcess, spawn } from "child_process";
+import { type ChildProcess } from "child_process";
 import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 import { parse as parseShellCommand } from "shell-quote";
+
+import { spawnGuarded } from "../lib/guardedOps.js";
 
 const OPS_SHELL_COMMANDS = new Set([
     "__mira_dashboard_shell_smoke_test__",
@@ -203,14 +205,14 @@ function spawnExec(
     args: string[],
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
 ): ChildProcess {
-    return spawn(executable, args, { ...cwdOption, shell: false });
+    return spawnGuarded(executable, args, { ...cwdOption, shell: false });
 }
 
 function spawnApprovedShell(
     command: string,
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
 ): ChildProcess {
-    return spawn("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
+    return spawnGuarded("/bin/sh", ["-c", command], { ...cwdOption, shell: false });
 }
 
 function runExecCommand(

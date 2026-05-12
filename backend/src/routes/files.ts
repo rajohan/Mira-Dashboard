@@ -2,6 +2,13 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
+import {
+    copyGuarded,
+    guardedPath,
+    openGuarded,
+    statGuarded,
+    writeTextGuarded,
+} from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
@@ -179,8 +186,8 @@ export default function filesRoutes(
             let fd: number | undefined;
             try {
                 // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
-                fd = fs.openSync(
-                    fullPath,
+                fd = openGuarded(
+                    guardedPath(fullPath),
                     fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
                 );
             } catch (error) {
@@ -282,7 +289,7 @@ export default function filesRoutes(
 
             try {
                 const backupPath = fullPath + ".bak";
-                fs.copyFileSync(fullPath, backupPath);
+                copyGuarded(guardedPath(fullPath), guardedPath(backupPath));
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
@@ -291,8 +298,8 @@ export default function filesRoutes(
                 fs.mkdirSync(path.dirname(fullPath), { recursive: true });
             }
 
-            fs.writeFileSync(fullPath, content, "utf8");
-            const stat = fs.statSync(fullPath);
+            writeTextGuarded(guardedPath(fullPath), content);
+            const stat = statGuarded(guardedPath(fullPath));
 
             res.json({
                 success: true,

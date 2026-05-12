@@ -5,6 +5,12 @@ import Path from "path";
 
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import {
+    guardedPath,
+    mkdirGuarded,
+    readJson5Guarded,
+    writeTextGuarded,
+} from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
@@ -788,13 +794,13 @@ export default function agentsRoutes(app: express.Application): void {
 
             // Ensure directory exists (mkdirSync is recursive, so no TOCTOU risk)
             // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
-            FS.mkdirSync(metadataDir, { recursive: true });
+            mkdirGuarded(guardedPath(metadataDir), { recursive: true });
 
             // Read existing metadata or create new (atomic read, no existsSync check)
             let metadata: AgentMetadata = {};
             try {
                 // lgtm[js/path-injection] metadataPath is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
-                metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
+                metadata = JSON5.parse(readJson5Guarded(guardedPath(metadataPath)));
             } catch {
                 // File doesn't exist or is unreadable; start fresh
             }
@@ -836,7 +842,10 @@ export default function agentsRoutes(app: express.Application): void {
             metadata.updatedAt = ts;
 
             // Write back
-            FS.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            writeTextGuarded(
+                guardedPath(metadataPath),
+                JSON.stringify(metadata, null, 2)
+            );
             res.json(metadata);
         } catch (error) {
             console.error("[Agents] Metadata update error:", (error as Error).message);
