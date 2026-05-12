@@ -139,9 +139,10 @@ describe("config files routes", () => {
         assert.equal(missing.status, 404);
 
         const openclawConfig = path.join(openclawRoot, "openclaw.json");
+        const originalOpenclawConfig = await readFile(openclawConfig, "utf8");
         await rm(openclawConfig, { force: true });
-        await symlink("openclaw.json", openclawConfig);
         try {
+            await symlink("openclaw.json", openclawConfig);
             const symlinkLoop = await requestJson<{ error: string }>(
                 server,
                 "/api/config-files/openclaw.json"
@@ -150,7 +151,7 @@ describe("config files routes", () => {
             assert.equal(symlinkLoop.body.error, "File not found");
         } finally {
             await rm(openclawConfig, { force: true });
-            await writeFile(openclawConfig, '{"model":"codex"}\n');
+            await writeFile(openclawConfig, originalOpenclawConfig);
         }
     });
 
