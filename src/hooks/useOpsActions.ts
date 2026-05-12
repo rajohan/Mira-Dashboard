@@ -101,7 +101,10 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
 export function useStartOpsAction() {
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
-            apiPost<{ jobId: string }>("/exec/start", { command: action.command }),
+            apiPost<{ jobId: string }>("/exec/start", {
+                command: action.command,
+                shell: true,
+            }),
     });
 }
 

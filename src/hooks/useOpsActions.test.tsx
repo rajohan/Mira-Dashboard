@@ -43,7 +43,10 @@ describe("ops actions hooks", () => {
         });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/exec/start",
-            expect.objectContaining({ method: "POST" })
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ command: action.command, shell: true }),
+            })
         );
 
         const { result: job } = renderHook(() => useExecJob("j1"), { wrapper });

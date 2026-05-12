@@ -6,10 +6,21 @@ import fs from "fs";
 import path from "path";
 import { parse as parseShellCommand } from "shell-quote";
 
+const OPS_SHELL_COMMANDS = new Set([
+    "__mira_dashboard_shell_smoke_test__",
+    "sudo reboot",
+    "sudo apt-get autoremove -y && sudo apt-get autoclean -y && sudo journalctl --vacuum-time=14d && sudo docker system prune -af",
+    "bash -lc 'sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; apt_status=$?; sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a; dpkg_status=$?; if [ $apt_status -ne 0 ]; then exit $apt_status; fi; exit $dpkg_status'",
+    "export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}; $HOME/.local/bin/openclaw gateway restart",
+    "find $HOME/.openclaw/agents -type f -path '*/sessions/*' -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/agents -type d -path '*/sessions/*' -empty -delete 2>/dev/null || true; find $HOME/.openclaw/media -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/workspace/images -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/tmp -type f -mtime +7 -delete 2>/dev/null || true; find $HOME/.openclaw/delivery-queue/failed -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/completions -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/cron/runs -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/logs -type f -mtime +14 -delete 2>/dev/null || true",
+    "$HOME/.local/bin/openclaw update --yes",
+]);
+
 interface ExecRequest {
     command: string;
     args?: string[];
     cwd?: string;
+    shell?: boolean;
 }
 
 class ExecValidationError extends Error {
@@ -25,7 +36,7 @@ const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 
 function validateExecRequest(payload: ExecRequest): ExecRequest {
-    const { command, args, cwd } = payload;
+    const { command, args, cwd, shell } = payload;
 
     if (!command || typeof command !== "string") {
         throw new ExecValidationError("command must be a non-empty string");
@@ -39,6 +50,16 @@ function validateExecRequest(payload: ExecRequest): ExecRequest {
 
     if (SHELL_METACHARACTERS_RE.test(command)) {
         throw new ExecValidationError("command contains disallowed control characters");
+    }
+
+    if (args !== undefined && shell) {
+        throw new ExecValidationError("args cannot be combined with shell mode");
+    }
+
+    if (shell && !OPS_SHELL_COMMANDS.has(command)) {
+        throw new ExecValidationError(
+            "shell mode is only available for approved ops commands"
+        );
     }
 
     if (args !== undefined && !EXECUTABLE_RE.test(command)) {
@@ -63,7 +84,7 @@ function validateExecRequest(payload: ExecRequest): ExecRequest {
         throw new ExecValidationError("cwd must be a string");
     }
 
-    return { command, args, cwd };
+    return { command, args, cwd, shell };
 }
 
 interface ExecResponse {
@@ -142,17 +163,31 @@ function resolveCwd(cwd: string | undefined): string {
     return fs.realpathSync(cwd);
 }
 
+function getApprovedShellCommand(command: string): string {
+    for (const approvedCommand of OPS_SHELL_COMMANDS) {
+        if (command === approvedCommand) {
+            return approvedCommand;
+        }
+    }
+
+    throw new ExecValidationError(
+        "shell mode is only available for approved ops commands"
+    );
+}
+
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
     onUpdate?: (job: ExecJob) => void
 ): Promise<ExecResponse> {
-    const { command, args, cwd } = request;
+    const { command, args, cwd, shell } = request;
     const safeCwd = resolveCwd(cwd);
     const cwdOption = { cwd: safeCwd, env: process.env, detached: true };
-    const commandParts = Array.isArray(args)
-        ? { executable: command, args }
-        : parseCommand(command);
+    const commandParts = shell
+        ? { executable: "/bin/sh", args: ["-c", getApprovedShellCommand(command)] }
+        : Array.isArray(args)
+          ? { executable: command, args }
+          : parseCommand(command);
 
     return new Promise((resolve, reject) => {
         const child = spawn(commandParts.executable, commandParts.args, cwdOption);
