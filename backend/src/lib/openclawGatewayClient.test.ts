@@ -265,7 +265,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         }
     });
 
-    it("clamps gateway tick intervals before arming watchdog timers", async () => {
+    it("clamps gateway tick thresholds without using them as timer cadence", async () => {
         let connectFrame: Record<string, unknown> | undefined;
         const server = await startGatewayServer((socket) => {
             socket.on("message", (raw) => {
@@ -275,7 +275,10 @@ describe("OpenClaw gateway client websocket protocol", () => {
                         type: "res",
                         id: connectFrame.id,
                         ok: true,
-                        payload: { type: "hello-ok", policy: { tickIntervalMs: 1 } },
+                        payload: {
+                            type: "hello-ok",
+                            policy: { tickIntervalMs: 1_000_000 },
+                        },
                     })
                 );
             });
@@ -292,14 +295,17 @@ describe("OpenClaw gateway client websocket protocol", () => {
         try {
             client.start();
             await waitFor(() => connectFrame, "connect frame");
-            await waitFor(
-                () =>
-                    (client as unknown as { tickIntervalMs: number }).tickIntervalMs ===
-                    1000
-                        ? true
-                        : undefined,
-                "clamped tick interval"
-            );
+            const state = await waitFor(() => {
+                const gatewayClient = client as unknown as {
+                    tickIntervalMs: number;
+                    tickTimer: { _idleTimeout?: number } | null;
+                };
+                return gatewayClient.tickIntervalMs === 300_000 && gatewayClient.tickTimer
+                    ? gatewayClient
+                    : undefined;
+            }, "clamped tick interval");
+
+            assert.equal(state.tickTimer?._idleTimeout, 1000);
         } finally {
             client.stop();
             await server.close();
