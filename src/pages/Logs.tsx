@@ -174,7 +174,7 @@ export function Logs() {
         setLevelFilter(next);
     };
 
-    /** Handles handle export. */
+    /** Exports the currently filtered log lines as a downloadable text file. */
     const handleExport = () => {
         const content = filteredLogs
             .map((log) => (typeof log.raw === "string" ? log.raw : String(log.msg || "")))
@@ -206,7 +206,7 @@ export function Logs() {
         );
     };
 
-    /** Handles handle scroll. */
+    /** Updates scroll state when the log viewport scrolls. */
     const handleScroll = () => {
         const el = logContainerRef.current;
         if (el) {
