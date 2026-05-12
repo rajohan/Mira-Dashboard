@@ -43,6 +43,7 @@ const columns = [
     }),
 ];
 
+/** Renders the top queries table UI. */
 export function TopQueriesTable({
     enabled,
     data,
@@ -63,6 +64,7 @@ export function TopQueriesTable({
         );
     }
 
+    /** Responds to copy events. */
     const handleCopy = async () => {
         if (!selectedQuery) return;
         await navigator.clipboard.writeText(selectedQuery.query);

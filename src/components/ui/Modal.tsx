@@ -5,6 +5,7 @@ import { type ReactNode } from "react";
 import { cn } from "../../utils/cn";
 import { Button } from "./Button";
 
+/** Provides props for modal. */
 interface ModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -22,6 +23,7 @@ const SIZE_CLASSES = {
     "3xl": "max-w-3xl",
 };
 
+/** Renders the modal UI. */
 export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
     return (
         <Dialog open={isOpen} onClose={onClose} className="relative z-50">

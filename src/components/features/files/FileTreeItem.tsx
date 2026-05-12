@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, File, Folder, RefreshCw } from "lucide-react
 import type { FileNode } from "../../../types/file";
 import { getFileExtension } from "../../../utils/fileUtils";
 
+/** Provides props for file tree item. */
 interface FileTreeItemProps {
     node: FileNode;
     selectedPath: string | null;
@@ -12,6 +13,7 @@ interface FileTreeItemProps {
     depth?: number;
 }
 
+/** Returns file icon. */
 function getFileIcon(filename: string, type: "file" | "directory") {
     if (type === "directory")
         return <Folder size={16} className="flex-shrink-0 text-yellow-400" />;
@@ -62,6 +64,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
     return <File size={16} className="text-primary-400 flex-shrink-0" />;
 }
 
+/** Renders the file tree item UI. */
 export function FileTreeItem({
     node,
     selectedPath,

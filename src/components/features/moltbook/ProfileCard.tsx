@@ -3,11 +3,13 @@ import { Star, User, Users } from "lucide-react";
 import { type MiraProfile } from "../../../types/moltbook";
 import { getMoltbookUrl } from "../../../utils/moltbookUtils";
 
+/** Provides props for profile card. */
 interface ProfileCardProps {
     profile: MiraProfile;
     unreadCount: number;
 }
 
+/** Renders the profile card UI. */
 export function ProfileCard({ profile, unreadCount }: ProfileCardProps) {
     return (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">

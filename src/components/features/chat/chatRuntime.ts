@@ -8,6 +8,7 @@ import {
     type RawChatHistoryMessage,
 } from "./chatTypes";
 
+/** Represents active chat stream. */
 export interface ActiveChatStream {
     sessionKey: string;
     runId: string;
@@ -18,8 +19,10 @@ export interface ActiveChatStream {
     updatedAt: string;
 }
 
+/** Defines active chat streams. */
 export type ActiveChatStreams = Record<string, ActiveChatStream>;
 
+/** Performs merge stream text. */
 export function mergeStreamText(previous: string, next: string): string {
     if (!next.trim()) {
         return previous;
@@ -40,15 +43,18 @@ export function mergeStreamText(previous: string, next: string): string {
     return `${previous}${next}`;
 }
 
+/** Performs unique strings. */
 export function uniqueStrings(values: Array<string | undefined>): string[] {
     return [...new Set(values.filter(Boolean))] as string[];
 }
 
+/** Represents parsed agent session key. */
 interface ParsedAgentSessionKey {
     agentId: string;
     rest: string;
 }
 
+/** Parses agent session key. */
 function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
     const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
     if (!match) {
@@ -61,6 +67,7 @@ function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null 
     };
 }
 
+/** Returns whether same session key. */
 export function isSameSessionKey(left?: string, right?: string): boolean {
     const normalizedLeft = left?.trim().toLowerCase();
     const normalizedRight = right?.trim().toLowerCase();
@@ -94,6 +101,7 @@ export function isSameSessionKey(left?: string, right?: string): boolean {
     return false;
 }
 
+/** Normalizes assistant payload. */
 export function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
     if (value && typeof value === "object" && !Array.isArray(value)) {
         const record = value as RawChatHistoryMessage;
@@ -111,6 +119,7 @@ export function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
     });
 }
 
+/** Performs final message from payload. */
 export function finalMessageFromPayload(
     payload: ChatStreamEventMessage
 ): ChatHistoryMessage {
@@ -121,6 +130,7 @@ export function finalMessageFromPayload(
     };
 }
 
+/** Performs merge stream message. */
 export function mergeStreamMessage(
     previous: ChatHistoryMessage | undefined,
     next: ChatHistoryMessage,
@@ -142,10 +152,12 @@ export function mergeStreamMessage(
     };
 }
 
+/** Returns whether record. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+/** Performs payload is command message. */
 export function payloadIsCommandMessage(value: unknown): boolean {
     return Boolean(
         value &&
@@ -155,6 +167,7 @@ export function payloadIsCommandMessage(value: unknown): boolean {
     );
 }
 
+/** Creates local system message. */
 export function createLocalSystemMessage(text: string): ChatHistoryMessage {
     return {
         role: "system",
@@ -167,6 +180,7 @@ export function createLocalSystemMessage(text: string): ChatHistoryMessage {
     };
 }
 
+/** Performs text looks like recovered stream. */
 function textLooksLikeRecoveredStream(historyText: string, streamText: string): boolean {
     const normalizedHistoryText = historyText.trim();
     const normalizedStreamText = streamText.trim();
@@ -180,6 +194,7 @@ function textLooksLikeRecoveredStream(historyText: string, streamText: string): 
     );
 }
 
+/** Performs history contains recovered stream. */
 export function historyContainsRecoveredStream(
     messages: ChatHistoryMessage[],
     streamText: string
@@ -191,6 +206,7 @@ export function historyContainsRecoveredStream(
     );
 }
 
+/** Performs visible history messages. */
 export function visibleHistoryMessages(
     messages: RawChatHistoryMessage[] = [],
     visibility: ChatVisibilitySettings
@@ -198,6 +214,7 @@ export function visibleHistoryMessages(
     return normalizeVisibleChatHistoryMessages(messages, visibility);
 }
 
+/** Creates chat visibility. */
 export function createChatVisibility(
     showThinking: boolean,
     showTools: boolean
@@ -205,6 +222,7 @@ export function createChatVisibility(
     return { showThinking, showTools };
 }
 
+/** Performs should show stream row. */
 export function shouldShowStreamRow(
     selectedStreamText: string,
     selectedStreamMessage: ChatHistoryMessage | undefined,

@@ -18,6 +18,7 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
+/** Formats elapsed milliseconds into a short human-readable duration. */
 function formatElapsedMs(value: number): string {
     if (!Number.isFinite(value) || value < 0) {
         return "—";
@@ -39,6 +40,7 @@ function formatElapsedMs(value: number): string {
     return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
+/** Provides task data and callbacks used by the task detail modal. */
 interface TaskDetailModalProps {
     task: Task | null;
     onClose: () => void;
@@ -60,6 +62,7 @@ interface TaskDetailModalProps {
     onDeleteUpdate: (updateId: number) => Promise<void>;
 }
 
+/** Renders the task detail modal UI. */
 export function TaskDetailModal({
     task,
     onClose,
@@ -133,22 +136,26 @@ export function TaskDetailModal({
               ? TASK_ASSIGNEES.raymond.githubUrl
               : null;
 
+    /** Moves the task to the selected column. */
     const handleMove = async (column: ColumnId) => {
         await onMove(column);
     };
 
+    /** Assigns the task to the selected assignee. */
     const handleAssign = async (assignee: TaskAssigneeId) => {
         setIsAssigning(true);
         await onAssign(assignee);
         setIsAssigning(false);
     };
 
+    /** Deletes the current task. */
     const handleDeleteTask = async () => {
         setIsDeleting(true);
         await onDelete();
         setIsDeleting(false);
     };
 
+    /** Persists task edits, including priority and automation metadata. */
     const handleSaveTask = async () => {
         const nextLabels = task.labels
             .map((label) => label.name)
@@ -182,6 +189,7 @@ export function TaskDetailModal({
         setIsEditingTask(false);
     };
 
+    /** Adds a new progress update when the message is non-empty. */
     const handleAddUpdate = async () => {
         if (!progressMessage.trim()) {
             return;
@@ -191,11 +199,13 @@ export function TaskDetailModal({
         setProgressMessage("");
     };
 
+    /** Starts editing the selected progress update. */
     const startEditUpdate = (update: TaskUpdate) => {
         setEditingUpdateId(update.id);
         setEditingUpdateMessage(update.messageMd);
     };
 
+    /** Saves the in-progress edit for a progress update. */
     const saveUpdateEdit = async () => {
         if (!editingUpdateId || !editingUpdateMessage.trim()) {
             return;

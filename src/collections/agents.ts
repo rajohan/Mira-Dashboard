@@ -4,6 +4,7 @@ import { createCollection } from "@tanstack/react-db";
 import { queryClient } from "../lib/queryClient";
 import type { AgentInfo } from "../types/session";
 
+/** Defines agents collection. */
 export const agentsCollection = createCollection(
     queryCollectionOptions({
         queryKey: ["agents"],
@@ -16,6 +17,7 @@ export const agentsCollection = createCollection(
 
 void agentsCollection.preload();
 
+/** Performs write agents from WebSocket. */
 export function writeAgentsFromWebSocket(agents: AgentInfo[]) {
     if (!agentsCollection.isReady()) {
         return;

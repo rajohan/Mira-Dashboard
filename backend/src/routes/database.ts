@@ -5,6 +5,7 @@ import express, { type RequestHandler } from "express";
 
 const execFileAsync = promisify(execFile);
 
+/** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
     datname: string;
     size_pretty: string;
@@ -17,11 +18,13 @@ interface PostgresDatabaseRow {
     cache_hit_ratio: string;
 }
 
+/** Represents a grouped pg_stat_activity connection count by state. */
 interface ConnectionCountsRow {
     state: string | null;
     count: string;
 }
 
+/** Represents table bloat/autovacuum health data for a user table. */
 interface DeadTupleRow {
     schemaname: string;
     relname: string;
@@ -32,6 +35,7 @@ interface DeadTupleRow {
     last_autoanalyze: string | null;
 }
 
+/** Represents one pg_stat_statements row for the slowest/highest-cost queries. */
 interface TopQueryRow {
     query: string;
     calls: string;
@@ -42,6 +46,7 @@ interface TopQueryRow {
     shared_blks_read: string;
 }
 
+/** Represents one row from PgBouncer SHOW POOLS output. */
 interface PgBouncerPoolRow {
     database: string;
     user: string;
@@ -54,6 +59,7 @@ interface PgBouncerPoolRow {
     pool_mode: string;
 }
 
+/** Represents one row from PgBouncer SHOW STATS output. */
 interface PgBouncerStatsRow {
     database: string;
     total_xact_count: string;
@@ -66,6 +72,7 @@ interface PgBouncerStatsRow {
     total_sent: string;
 }
 
+/** Parses tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array. */
 function parseTable<T extends object>(output: string): T[] {
     const trimmed = output.trim();
     if (!trimmed) {
@@ -86,6 +93,7 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
+/** Runs a shell command inside a Docker container and returns raw stdout. */
 async function runDockerExec(container: string, command: string) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
@@ -100,6 +108,7 @@ async function runDockerExec(container: string, command: string) {
     return stdout;
 }
 
+/** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -108,6 +117,7 @@ function buildPostgresUri(database = "postgres") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
+/** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
@@ -116,6 +126,7 @@ function buildPgBouncerUri(database = "pgbouncer") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
+/** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
 async function queryPostgres(sql: string, database = "postgres") {
     const uri = buildPostgresUri(database);
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
@@ -125,6 +136,7 @@ async function queryPostgres(sql: string, database = "postgres") {
     );
 }
 
+/** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
 async function queryPgBouncer(sql: string) {
     const uri = buildPgBouncerUri();
     const escapedSql = sql.replaceAll('"', String.raw`\"`);
@@ -134,6 +146,7 @@ async function queryPgBouncer(sql: string) {
     );
 }
 
+/** Sums numeric values selected from a row collection. */
 function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     let total = 0;
     for (const row of rows) {
@@ -142,6 +155,7 @@ function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     return total;
 }
 
+/** Runs a SQL query against every connectable non-template database and concatenates parsed rows. */
 async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]> {
     const databases = parseTable<{ datname: string }>(
         await queryPostgres(`
@@ -168,6 +182,7 @@ let torrentCountCache: {
     timestamp: number;
 } | null = null;
 
+/** Returns cached torrent counts for Comet and Bitmagnet, refreshing at most once per hour. */
 async function getTorrentCounts() {
     if (
         torrentCountCache &&
@@ -194,6 +209,7 @@ async function getTorrentCounts() {
     return data;
 }
 
+/** Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint. */
 async function getDatabaseOverview() {
     const torrentCounts = await getTorrentCounts();
 
@@ -349,6 +365,7 @@ async function getDatabaseOverview() {
     };
 }
 
+/** Registers GET /api/database/overview for aggregated PostgreSQL and PgBouncer monitoring data. */
 export default function databaseRoutes(app: express.Application): void {
     app.get("/api/database/overview", (async (_req, res) => {
         try {

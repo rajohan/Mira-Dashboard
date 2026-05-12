@@ -12,6 +12,7 @@ import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
+/** Represents props. */
 interface Props<T extends object> {
     data: T[];
     // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.
@@ -23,10 +24,15 @@ interface Props<T extends object> {
     renderMobileCard?: (row: T) => ReactNode;
 }
 
+/** Returns whether a focused row/card should activate from its own keyboard event. */
 function shouldActivateRow(event: KeyboardEvent<HTMLElement>) {
-    return event.key === "Enter" || event.key === " ";
+    return (
+        event.currentTarget === event.target &&
+        (event.key === "Enter" || event.key === " ")
+    );
 }
 
+/** Renders the database table shell UI. */
 export function DatabaseTableShell<T extends object>({
     data,
     columns,

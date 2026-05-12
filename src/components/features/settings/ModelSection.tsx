@@ -5,6 +5,7 @@ import { Button } from "../../ui/Button";
 import { ExpandableCard, ReadOnlyField } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
+/** Provides props for model section. */
 interface ModelSectionProps {
     defaultModel: string;
     fallbacks: string[];
@@ -14,6 +15,7 @@ interface ModelSectionProps {
     saving: boolean;
 }
 
+/** Splits comma/newline-delimited model IDs, trims whitespace, and removes empty entries. */
 function parseList(value: string): string[] {
     return value
         .split(/[\n,]/)
@@ -21,6 +23,7 @@ function parseList(value: string): string[] {
         .filter(Boolean);
 }
 
+/** Renders the model section UI. */
 export function ModelSection({
     defaultModel,
     fallbacks,

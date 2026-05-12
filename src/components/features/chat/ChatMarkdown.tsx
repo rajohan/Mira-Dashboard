@@ -10,6 +10,7 @@ import { cn } from "../../../utils/cn";
 
 const JSON_LANGUAGES = new Set(["json", "json5", "jsonc"]);
 
+/** Performs children to text. */
 function childrenToText(children: ReactNode): string {
     if (typeof children === "string" || typeof children === "number") {
         return String(children);
@@ -26,11 +27,13 @@ function childrenToText(children: ReactNode): string {
     return "";
 }
 
+/** Performs code language from class name. */
 function codeLanguageFromClassName(className?: string): string {
     const language = className?.match(/language-([^\s]+)/)?.[1]?.toLowerCase();
     return language || "text";
 }
 
+/** Normalizes syntax language. */
 function normalizeSyntaxLanguage(language: string): string {
     const aliases: Record<string, string> = {
         js: "javascript",
@@ -50,6 +53,7 @@ function normalizeSyntaxLanguage(language: string): string {
     return aliases[language] || language;
 }
 
+/** Performs looks like JSON. */
 function looksLikeJson(code: string): boolean {
     const trimmed = code.trim();
     return (
@@ -58,6 +62,7 @@ function looksLikeJson(code: string): boolean {
     );
 }
 
+/** Parses JSON block. */
 function parseJsonBlock(code: string): object | null {
     try {
         const parsed = JSON5.parse(code) as unknown;
@@ -67,6 +72,7 @@ function parseJsonBlock(code: string): object | null {
     }
 }
 
+/** Returns pre code block. */
 function getPreCodeBlock(children: ReactNode): { code: string; language: string } | null {
     const child = Children.toArray(children)[0];
 
@@ -80,6 +86,7 @@ function getPreCodeBlock(children: ReactNode): { code: string; language: string 
     };
 }
 
+/** Renders the chat code block UI. */
 function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     const shouldTryJson = JSON_LANGUAGES.has(language) || looksLikeJson(code);
     const parsedJson = shouldTryJson ? parseJsonBlock(code) : null;
@@ -265,6 +272,7 @@ const markdownComponents: Components = {
     },
 };
 
+/** Renders the chat markdown UI. */
 export function ChatMarkdown({ text }: { text: string }) {
     return (
         <div

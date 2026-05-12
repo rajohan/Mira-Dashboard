@@ -1,6 +1,7 @@
 import type { MiraComment, MiraContent, MiraPost, MiraProfile } from "../types/moltbook";
 import { useCacheEntry } from "./useCache";
 
+/** Represents moltbook post. */
 export interface MoltbookPost {
     id: string;
     title: string;
@@ -15,6 +16,7 @@ export interface MoltbookPost {
     you_follow_author?: boolean;
 }
 
+/** Represents moltbook home. */
 export interface MoltbookHome {
     pendingRequestCount: number;
     unreadMessageCount: number;
@@ -33,19 +35,23 @@ export interface MoltbookHome {
     fetchedAt: string;
 }
 
+/** Represents moltbook profile cache. */
 interface MoltbookProfileCache {
     agent?: MiraProfile;
 }
 
+/** Represents the my content API response. */
 interface MyContentResponse {
     posts: MiraPost[];
     comments: MiraComment[];
 }
 
+/** Represents the moltbook feed API response. */
 interface MoltbookFeedResponse {
     posts?: Record<string, unknown>[];
 }
 
+/** Defines moltbook keys. */
 export const moltbookKeys = {
     home: (): ["moltbook", "home"] => ["moltbook", "home"],
     feed: (sort: "hot" | "new"): ["moltbook", "feed", string] => [
@@ -57,6 +63,7 @@ export const moltbookKeys = {
     myContent: (): ["moltbook", "myContent"] => ["moltbook", "myContent"],
 };
 
+/** Performs transform post. */
 function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
     return {
         id: (apiPost.post_id || apiPost.id) as string,
@@ -83,22 +90,27 @@ function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
     };
 }
 
+/** Provides moltbook home. */
 export function useMoltbookHome() {
     return useCacheEntry<MoltbookHome>("moltbook.home", 60_000);
 }
 
+/** Provides moltbook feed. */
 export function useMoltbookFeed(sort: "hot" | "new" = "hot") {
     return useCacheEntry<MoltbookFeedResponse>(`moltbook.feed.${sort}`, 60_000);
 }
 
+/** Provides moltbook profile. */
 export function useMoltbookProfile() {
     return useCacheEntry<MoltbookProfileCache>("moltbook.profile", 60_000);
 }
 
+/** Provides moltbook my content. */
 export function useMoltbookMyContent() {
     return useCacheEntry<MyContentResponse>("moltbook.my-content", 60_000);
 }
 
+/** Provides moltbook data. */
 export function useMoltbookData(sort: "hot" | "new" = "hot") {
     const home = useMoltbookHome();
     const feed = useMoltbookFeed(sort);

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost } from "./useApi";
+import { apiFetchRequired, apiPostRequired } from "./useApi";
 
+/** Represents cache envelope. */
 export interface CacheEnvelope<T> {
     key: string;
     source: string;
@@ -16,36 +17,42 @@ export interface CacheEnvelope<T> {
     meta: unknown;
 }
 
+/** Represents the cache heartbeat API response. */
 export interface CacheHeartbeatResponse {
     generatedAt: string;
     count: number;
     entries: CacheEnvelope<unknown>[];
 }
 
+/** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
     heartbeat: () => [...cacheKeys.all, "heartbeat"] as const,
     entry: (key: string) => [...cacheKeys.all, key] as const,
 };
 
+/** Provides cache heartbeat. */
 export function useCacheHeartbeat(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: cacheKeys.heartbeat(),
-        queryFn: () => apiFetch<CacheHeartbeatResponse>("/cache/heartbeat"),
+        queryFn: () => apiFetchRequired<CacheHeartbeatResponse>("/cache/heartbeat"),
         refetchInterval: refreshInterval,
         staleTime: 2_000,
     });
 }
 
+/** Provides cache entry. */
 export function useCacheEntry<T>(key: string, refreshInterval: number | false = false) {
     return useQuery({
         queryKey: cacheKeys.entry(key),
-        queryFn: () => apiFetch<CacheEnvelope<T>>(`/cache/${encodeURIComponent(key)}`),
+        queryFn: () =>
+            apiFetchRequired<CacheEnvelope<T>>(`/cache/${encodeURIComponent(key)}`),
         refetchInterval: refreshInterval,
         staleTime: 2_000,
     });
 }
 
+/** Provides refresh cache entry. */
 export function useRefreshCacheEntry() {
     const queryClient = useQueryClient();
 
@@ -58,7 +65,7 @@ export function useRefreshCacheEntry() {
 
             const results = await Promise.all(
                 keys.map((key) =>
-                    apiPost<{ ok: boolean; entry: CacheEnvelope<unknown> }>(
+                    apiPostRequired<{ ok: boolean; entry: CacheEnvelope<unknown> }>(
                         `/cache/${encodeURIComponent(key)}/refresh`
                     )
                 )
