@@ -9,6 +9,7 @@ import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
+/** Describes cron job list props. */
 interface CronJobListProps {
     jobs: CronJob[];
     selectedId: string;
@@ -16,6 +17,7 @@ interface CronJobListProps {
     onSelect: (id: string) => void;
 }
 
+/** Renders the cron job list UI. */
 export function CronJobList({
     jobs,
     selectedId,

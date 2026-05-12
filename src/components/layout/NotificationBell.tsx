@@ -13,8 +13,10 @@ import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
 
+/** Defines notification filter. */
 type NotificationFilter = "all" | "unread" | "warning";
 
+/** Renders the notification bell UI. */
 export function NotificationBell() {
     const { data: notifications } = useNotifications(AUTO_REFRESH_MS);
     const markNotificationRead = useMarkNotificationRead();

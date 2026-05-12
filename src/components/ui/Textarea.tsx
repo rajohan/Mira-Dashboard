@@ -4,6 +4,7 @@ import { forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 
+/** Describes textarea props. */
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
     label?: string;
     description?: string;
@@ -11,6 +12,7 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
     variant?: "default" | "code";
 }
 
+/** Renders the textarea UI. */
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     ({ className, label, description, error, variant = "default", ...props }, ref) => {
         return (

@@ -5,6 +5,7 @@ import { Button } from "../../ui/Button";
 import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
+/** Describes heartbeat section props. */
 interface HeartbeatSectionProps {
     every: number;
     target: string;
@@ -12,6 +13,7 @@ interface HeartbeatSectionProps {
     saving: boolean;
 }
 
+/** Renders the heartbeat section UI. */
 export function HeartbeatSection({
     every,
     target,

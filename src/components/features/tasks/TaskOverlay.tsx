@@ -2,6 +2,7 @@ import type { Task } from "../../../types/task";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
 
+/** Renders the task overlay UI. */
 export function TaskOverlay({ task }: { task: Task }) {
     const priority = getPriority(task.labels);
 

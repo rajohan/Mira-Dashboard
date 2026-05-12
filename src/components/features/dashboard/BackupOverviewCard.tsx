@@ -14,6 +14,7 @@ import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
 import { ConfirmModal } from "../../ui/ConfirmModal";
 
+/** Defines backup snapshot. */
 type BackupSnapshot = {
     id: string | null;
     path: string | null;
@@ -27,6 +28,7 @@ type BackupSnapshot = {
     retentionReason: string[];
 };
 
+/** Defines backup snapshot group. */
 type BackupSnapshotGroup = {
     path: string | null;
     latest: BackupSnapshot | null;
@@ -34,6 +36,7 @@ type BackupSnapshotGroup = {
     snapshotCount: number;
 };
 
+/** Defines backup cache data. */
 type BackupCacheData = {
     checkedAt?: string;
     tool?: string;
@@ -43,6 +46,7 @@ type BackupCacheData = {
     ok?: boolean;
 };
 
+/** Defines walg backup. */
 type WalgBackup = {
     backupName?: string | null;
     modified?: string | null;
@@ -53,6 +57,7 @@ type WalgBackup = {
     storageName?: string | null;
 };
 
+/** Defines walg cache data. */
 type WalgCacheData = {
     checkedAt?: string;
     tool?: string;
@@ -63,6 +68,7 @@ type WalgCacheData = {
     ok?: boolean;
 };
 
+/** Handles get variant. */
 function getVariant(status?: string, ok?: boolean) {
     if (status === "error") return "error" as const;
     if (ok === true) return "success" as const;
@@ -70,6 +76,7 @@ function getVariant(status?: string, ok?: boolean) {
     return "default" as const;
 }
 
+/** Handles format path. */
 function formatPath(path: string | null | undefined) {
     if (!path) return "Unknown source";
     if (path === "/source/docker") return "Docker";
@@ -78,6 +85,7 @@ function formatPath(path: string | null | undefined) {
     return path;
 }
 
+/** Renders the backup overview card UI. */
 export function BackupOverviewCard() {
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const { data, isLoading } = useCacheEntry<BackupCacheData>(
@@ -103,11 +111,13 @@ export function BackupOverviewCard() {
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
 
+    /** Handles handle run backup. */
     const handleRunBackup = async () => {
         await runBackup.mutateAsync();
         setIsConfirmOpen(false);
     };
 
+    /** Handles handle run walg backup. */
     const handleRunWalgBackup = async () => {
         await runWalgBackup.mutateAsync();
     };

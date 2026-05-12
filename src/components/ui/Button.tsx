@@ -3,11 +3,13 @@ import { type ButtonHTMLAttributes, forwardRef } from "react";
 
 import { cn } from "../../utils/cn";
 
+/** Describes button props. */
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: "primary" | "secondary" | "danger" | "ghost";
     size?: "sm" | "md" | "lg";
 }
 
+/** Renders the button UI. */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ({ className, variant = "primary", size = "md", children, ...props }, ref) => {
         return (

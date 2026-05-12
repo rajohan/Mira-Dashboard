@@ -1,6 +1,7 @@
 import { useAgentTaskHistory } from "../../../hooks/useAgents";
 import { formatDate } from "../../../utils/format";
 
+/** Renders the task history sidebar UI. */
 export function TaskHistorySidebar() {
     const { data } = useAgentTaskHistory(7);
     const tasks = data?.tasks || [];

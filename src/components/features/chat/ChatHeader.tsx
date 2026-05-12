@@ -6,12 +6,14 @@ import { formatSessionType } from "../../../utils/sessionUtils";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 
+/** Describes option. */
 interface Option {
     value: string;
     label: string;
     description?: string;
 }
 
+/** Describes diagnostic toggle props. */
 interface DiagnosticToggleProps {
     active: boolean;
     icon: LucideIcon;
@@ -20,6 +22,7 @@ interface DiagnosticToggleProps {
     onClick: () => void;
 }
 
+/** Renders the diagnostic toggle UI. */
 function DiagnosticToggle({
     active,
     icon: Icon,
@@ -48,6 +51,7 @@ function DiagnosticToggle({
     );
 }
 
+/** Describes chat header props. */
 interface ChatHeaderProps {
     selectedSession: Session | null;
     selectedSessionKey: string;
@@ -60,6 +64,7 @@ interface ChatHeaderProps {
     onSelectSession: (sessionKey: string) => void;
 }
 
+/** Handles format header status. */
 function formatHeaderStatus(selectedSession: Session | null): string {
     if (!selectedSession) {
         return "Choose a session to begin";
@@ -70,6 +75,7 @@ function formatHeaderStatus(selectedSession: Session | null): string {
     return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Thinking: ${thinkingLevel} · ${formatDuration(selectedSession.updatedAt)}`;
 }
 
+/** Renders the chat header UI. */
 export function ChatHeader({
     selectedSession,
     selectedSessionKey,

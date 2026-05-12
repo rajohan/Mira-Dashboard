@@ -6,6 +6,7 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 
+/** Handles format tool arguments. */
 function formatToolArguments(toolCall: ChatToolCallDisplay): string {
     if (toolCall.arguments === undefined) {
         return "";
@@ -22,6 +23,7 @@ function formatToolArguments(toolCall: ChatToolCallDisplay): string {
     }
 }
 
+/** Renders the detail block UI. */
 function DetailBlock({
     label,
     children,
@@ -50,6 +52,7 @@ function DetailBlock({
     );
 }
 
+/** Renders the chat message details UI. */
 export function ChatMessageDetails({
     message,
     visibility,
