@@ -146,6 +146,32 @@ describe("exec routes", () => {
         assert.match(rejected.body.error, /approved ops commands/u);
     });
 
+    it("allows approved shell mode commands for background jobs", async () => {
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: {
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            },
+        });
+
+        assert.equal(started.status, 200);
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 127);
+        assert.match(job.stderr, /not found/u);
+    });
+
+    it("rejects unapproved shell mode commands for background jobs", async () => {
+        const rejected = await requestJson<{ error: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: { command: "echo nope", shell: true },
+        });
+
+        assert.equal(rejected.status, 400);
+        assert.match(rejected.body.error, /approved ops commands/u);
+    });
+
     it("starts background jobs and exposes their final state", async () => {
         const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
             method: "POST",

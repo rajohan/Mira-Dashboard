@@ -219,6 +219,7 @@ describe("files routes", () => {
 
             assert.equal(denied.status, 403);
         } finally {
+            await rm(path.join(workspaceRoot, "outside-link"), { force: true });
             await rm(outsideDir, { recursive: true, force: true });
         }
     });

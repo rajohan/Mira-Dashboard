@@ -160,7 +160,17 @@ export default function filesRoutes(
         const filePath = decodeURIComponent(req.params[0] || "");
 
         try {
-            const workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+            let workspaceRoot: string;
+            try {
+                workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
+            }
+
             const candidatePath = path.resolve(workspaceRoot, filePath);
 
             if (
