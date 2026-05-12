@@ -197,6 +197,7 @@ export default function logsRoutes(app: express.Application): void {
 
             let content: string;
             try {
+                // lgtm[js/path-injection] filePath is canonicalized with realpathSync and checked to stay under LOGS_DIR.
                 content = fs.readFileSync(filePath, "utf8");
             } catch {
                 res.status(404).json({ error: "Log file not found" });

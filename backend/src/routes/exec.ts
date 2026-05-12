@@ -190,6 +190,8 @@ function runExecCommand(
           : parseCommand(command);
 
     return new Promise((resolve, reject) => {
+        // lgtm[js/command-line-injection] commandParts is either parsed into no-shell argv or selected from OPS_SHELL_COMMANDS.
+        // lgtm[js/path-injection] cwdOption.cwd is resolved by resolveCwd(), which requires an absolute real path.
         const child = spawn(commandParts.executable, commandParts.args, cwdOption);
 
         // Store process reference for kill

@@ -786,11 +786,13 @@ export default function agentsRoutes(app: express.Application): void {
             const metadataDir = Path.dirname(metadataPath);
 
             // Ensure directory exists (mkdirSync is recursive, so no TOCTOU risk)
+            // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
             FS.mkdirSync(metadataDir, { recursive: true });
 
             // Read existing metadata or create new (atomic read, no existsSync check)
             let metadata: AgentMetadata = {};
             try {
+                // lgtm[js/path-injection] metadataPath is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
                 metadata = JSON5.parse(FS.readFileSync(metadataPath, "utf8"));
             } catch {
                 // File doesn't exist or is unreadable; start fresh

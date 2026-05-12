@@ -166,6 +166,7 @@ export default function filesRoutes(
             // Open file first to avoid TOCTOU race between stat and read
             let fd: number | undefined;
             try {
+                // lgtm[js/path-injection] fullPath is canonicalized with realpathSync and checked to stay under WORKSPACE_ROOT.
                 fd = fs.openSync(fullPath, "r");
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "ENOENT") {
