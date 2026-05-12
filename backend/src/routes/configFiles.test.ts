@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -137,6 +137,21 @@ describe("config files routes", () => {
             "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts"
         );
         assert.equal(missing.status, 404);
+
+        const openclawConfig = path.join(openclawRoot, "openclaw.json");
+        await rm(openclawConfig, { force: true });
+        await symlink("openclaw.json", openclawConfig);
+        try {
+            const symlinkLoop = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(symlinkLoop.status, 404);
+            assert.equal(symlinkLoop.body.error, "File not found");
+        } finally {
+            await rm(openclawConfig, { force: true });
+            await writeFile(openclawConfig, '{"model":"codex"}\n');
+        }
     });
 
     it("detects binary and truncates large allowed config files", async () => {

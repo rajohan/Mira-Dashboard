@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -143,6 +143,28 @@ describe("logs routes", () => {
         assert.deepEqual(await nestedUnderFile.json(), {
             error: "Log file not found",
         });
+
+        const rootDirectory = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(".")}`
+        );
+        assert.equal(rootDirectory.status, 404);
+        assert.deepEqual(await rootDirectory.json(), {
+            error: "Log file not found",
+        });
+
+        const loopPath = path.join(logsDir, "loop.log");
+        await symlink("loop.log", loopPath);
+        try {
+            const symlinkLoop = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("loop.log")}`
+            );
+            assert.equal(symlinkLoop.status, 404);
+            assert.deepEqual(await symlinkLoop.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            await rm(loopPath, { force: true });
+        }
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {

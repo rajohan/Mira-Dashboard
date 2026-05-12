@@ -191,10 +191,12 @@ export default function logsRoutes(app: express.Application): void {
 
             const candidatePath = path.resolve(realRoot, logFile);
 
-            if (
-                candidatePath !== realRoot &&
-                !candidatePath.startsWith(realRoot + path.sep)
-            ) {
+            if (candidatePath === realRoot) {
+                res.status(404).json({ error: "Log file not found" });
+                return;
+            }
+
+            if (!candidatePath.startsWith(realRoot + path.sep)) {
                 res.status(403).json({ error: "Access denied" });
                 return;
             }
@@ -204,14 +206,19 @@ export default function logsRoutes(app: express.Application): void {
                 filePath = fs.realpathSync(candidatePath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR") {
+                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }
                 throw error;
             }
 
-            if (filePath !== realRoot && !filePath.startsWith(realRoot + path.sep)) {
+            if (filePath === realRoot) {
+                res.status(404).json({ error: "Log file not found" });
+                return;
+            }
+
+            if (!filePath.startsWith(realRoot + path.sep)) {
                 res.status(403).json({ error: "Access denied" });
                 return;
             }

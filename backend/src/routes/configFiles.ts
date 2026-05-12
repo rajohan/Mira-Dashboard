@@ -106,6 +106,16 @@ export default function configFilesRoutes(
             const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
 
             if (!fullPath) {
+                try {
+                    fs.realpathSync(path.resolve(OPENCLAW_ROOT, filePath));
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                }
+
                 res.status(403).json({
                     error: "Access denied: path outside allowed root",
                 });
@@ -116,7 +126,8 @@ export default function configFilesRoutes(
             try {
                 fd = fs.openSync(fullPath, "r");
             } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
                     res.status(404).json({ error: "File not found" });
                     return;
                 }

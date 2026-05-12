@@ -147,6 +147,18 @@ describe("files routes", () => {
         assert.equal(nestedUnderFile.status, 404);
         assert.equal(nestedUnderFile.body.error, "File not found");
 
+        await symlink("loop", path.join(workspaceRoot, "loop"));
+        try {
+            const symlinkLoop = await requestJson<{ error: string }>(
+                server,
+                "/api/files/loop"
+            );
+            assert.equal(symlinkLoop.status, 404);
+            assert.equal(symlinkLoop.body.error, "File not found");
+        } finally {
+            await rm(path.join(workspaceRoot, "loop"), { force: true });
+        }
+
         const denied = await requestJson<{ error: string }>(
             server,
             "/api/files/..%2Foutside.txt"
