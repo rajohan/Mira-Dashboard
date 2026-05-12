@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TaskAssigneeId } from "../constants/taskActors";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
-import { apiDelete, apiFetchRequired, apiPostRequired } from "./useApi";
+import { apiDelete, apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
 
 /** Defines task keys. */
 export const taskKeys = {
@@ -41,10 +41,7 @@ async function updateTask(
         > | null;
     }
 ): Promise<Task> {
-    return apiFetchRequired<Task>(`/tasks/${number}`, {
-        method: "PATCH",
-        body: JSON.stringify(updates),
-    });
+    return apiPatchRequired<Task>(`/tasks/${number}`, updates);
 }
 
 /** Performs move task. */
@@ -83,9 +80,9 @@ async function updateTaskUpdate(
     author: TaskAssigneeId,
     messageMd: string
 ): Promise<TaskUpdate> {
-    return apiFetchRequired<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ author, messageMd }),
+    return apiPatchRequired<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
+        author,
+        messageMd,
     });
 }
 

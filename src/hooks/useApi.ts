@@ -85,6 +85,11 @@ export async function apiPutRequired<T>(endpoint: string, body: unknown): Promis
     return requireApiResponse(await apiPut<T>(endpoint, body));
 }
 
+/** Sends a PATCH request to an API endpoint that must include a JSON body response. */
+export async function apiPatchRequired<T>(endpoint: string, body: unknown): Promise<T> {
+    return requireApiResponse(await apiPatch<T>(endpoint, body));
+}
+
 /** Sends a DELETE request to an API endpoint that must include a JSON body response. */
 export async function apiDeleteRequired<T>(endpoint: string): Promise<T> {
     return requireApiResponse(await apiDelete<T>(endpoint));
@@ -102,6 +107,14 @@ export function apiPost<T>(endpoint: string, body?: unknown): Promise<T | undefi
 export function apiPut<T>(endpoint: string, body: unknown): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
         method: "PUT",
+        body: JSON.stringify(body),
+    });
+}
+
+/** Performs API patch. */
+export function apiPatch<T>(endpoint: string, body: unknown): Promise<T | undefined> {
+    return apiFetch<T>(endpoint, {
+        method: "PATCH",
         body: JSON.stringify(body),
     });
 }
