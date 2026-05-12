@@ -209,6 +209,8 @@ export default function logsRoutes(app: express.Application): void {
 
             let file: fs.promises.FileHandle;
             try {
+                // codeql[js/path-injection] filePath is canonicalized with realpathSync and checked to stay under LOGS_DIR before this no-follow open.
+                // codeql[js/insecure-temporary-file] This opens an existing log read-only with O_NOFOLLOW; it never creates a temp file.
                 file = await fs.promises.open(
                     guardedPath(filePath),
                     fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
