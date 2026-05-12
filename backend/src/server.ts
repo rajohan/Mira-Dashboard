@@ -79,19 +79,21 @@ const healthHandler: express.RequestHandler = (_req, res) => {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-// Rate limiting: general API (60 req/min per IP)
+// Rate limiting: general API (600 req/min per IP). This intentionally stays
+// above normal dashboard polling (terminal jobs poll every 500ms) while still
+// bounding abusive request bursts.
 const apiLimiter = rateLimit({
     windowMs: 60_000,
-    max: 60,
+    max: 600,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many requests, please try again later" },
 });
 
-// Stricter limit for auth endpoints (10 req/min per IP)
+// Stricter limit for auth endpoints (20 req/min per IP)
 const authLimiter = rateLimit({
     windowMs: 60_000,
-    max: 10,
+    max: 20,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many authentication attempts, please try again later" },

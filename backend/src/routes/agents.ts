@@ -5,6 +5,7 @@ import Path from "path";
 
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import { safePathWithinRoot } from "../lib/safePath.js";
 
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
@@ -771,12 +772,16 @@ export default function agentsRoutes(app: express.Application): void {
                 return;
             }
 
-            const metadataPath = Path.join(
-                AGENTS_DIR,
-                agentId,
-                "sessions",
-                "metadata.json"
+            const metadataPath = safePathWithinRoot(
+                Path.join(agentId, "sessions", "metadata.json"),
+                AGENTS_DIR
             );
+
+            if (!metadataPath) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
+            }
+
             const metadataDir = Path.dirname(metadataPath);
 
             // Ensure directory exists (mkdirSync is recursive, so no TOCTOU risk)

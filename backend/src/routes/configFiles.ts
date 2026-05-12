@@ -106,26 +106,44 @@ export default function configFilesRoutes(
                 return;
             }
 
-            let stat: fs.Stats;
+            let fd: number | undefined;
             try {
-                stat = fs.statSync(fullPath);
-            } catch {
-                res.status(404).json({ error: "File not found" });
-                return;
+                fd = fs.openSync(fullPath, "r");
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    res.status(404).json({ error: "File not found" });
+                    return;
+                }
+                throw error;
             }
 
-            if (stat.isDirectory()) {
-                res.status(400).json({ error: "Path is a directory, not a file" });
-                return;
-            }
+            try {
+                const stat = fs.fstatSync(fd);
 
-            if (stat.size > MAX_FILE_SIZE) {
-                const fd = fs.openSync(fullPath, "r");
-                const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
-                fs.closeSync(fd);
+                if (stat.isDirectory()) {
+                    res.status(400).json({ error: "Path is a directory, not a file" });
+                    return;
+                }
 
-                const content = buffer.toString("utf8", 0, bytesRead);
+                if (stat.size > MAX_FILE_SIZE) {
+                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                    const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+                    const content = buffer.toString("utf8", 0, bytesRead);
+                    const isBinary = isBinaryFile(content);
+
+                    res.json({
+                        path: "config:" + filePath,
+                        relPath: filePath,
+                        content: isBinary ? "[Binary file]" : content,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                        isBinary: isBinary,
+                        truncated: true,
+                    } satisfies ConfigFileResponse);
+                    return;
+                }
+
+                const content = fs.readFileSync(fd, "utf8");
                 const isBinary = isBinaryFile(content);
 
                 res.json({
@@ -135,22 +153,11 @@ export default function configFilesRoutes(
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                     isBinary: isBinary,
-                    truncated: true,
                 } satisfies ConfigFileResponse);
-                return;
+            } finally {
+                fs.closeSync(fd);
             }
-
-            const content = fs.readFileSync(fullPath, "utf8");
-            const isBinary = isBinaryFile(content);
-
-            res.json({
-                path: "config:" + filePath,
-                relPath: filePath,
-                content: isBinary ? "[Binary file]" : content,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                isBinary: isBinary,
-            } satisfies ConfigFileResponse);
+            return;
         } catch (error) {
             console.error("[ConfigFiles] Read error:", (error as Error).message);
             res.status(500).json({ error: (error as Error).message });
@@ -187,7 +194,11 @@ export default function configFilesRoutes(
             try {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } catch {
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+
                 // File doesn't exist yet; ensure parent directory exists
                 const parentDir = path.dirname(fullPath);
                 fs.mkdirSync(parentDir, { recursive: true });

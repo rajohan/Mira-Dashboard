@@ -157,8 +157,12 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
 
             return identity;
         }
-    } catch {
-        // File doesn't exist or is invalid; generate new identity below
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && !(error instanceof SyntaxError)) {
+            throw error;
+        }
+        // Missing or invalid JSON identity file; generate new identity below.
     }
 
     const identity = generateIdentity();

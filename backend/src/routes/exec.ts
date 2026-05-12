@@ -9,6 +9,13 @@ interface ExecRequest {
     cwd?: string;
 }
 
+class ExecValidationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "ExecValidationError";
+    }
+}
+
 // Validate and sanitize exec request payload
 const MAX_COMMAND_LENGTH = 4096;
 const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
@@ -17,31 +24,33 @@ function validateExecRequest(payload: ExecRequest): ExecRequest {
     const { command, args, cwd } = payload;
 
     if (!command || typeof command !== "string") {
-        throw new Error("command must be a non-empty string");
+        throw new ExecValidationError("command must be a non-empty string");
     }
 
     if (command.length > MAX_COMMAND_LENGTH) {
-        throw new Error(`command exceeds maximum length of ${MAX_COMMAND_LENGTH}`);
+        throw new ExecValidationError(
+            `command exceeds maximum length of ${MAX_COMMAND_LENGTH}`
+        );
     }
 
     if (SHELL_METACHARACTERS_RE.test(command)) {
-        throw new Error("command contains disallowed control characters");
+        throw new ExecValidationError("command contains disallowed control characters");
     }
 
     if (args !== undefined && !Array.isArray(args)) {
-        throw new Error("args must be an array");
+        throw new ExecValidationError("args must be an array");
     }
 
     if (args) {
         for (const arg of args) {
             if (typeof arg !== "string") {
-                throw new TypeError("all args must be strings");
+                throw new ExecValidationError("all args must be strings");
             }
         }
     }
 
     if (cwd !== undefined && typeof cwd !== "string") {
-        throw new Error("cwd must be a string");
+        throw new ExecValidationError("cwd must be a string");
     }
 
     return { command, args, cwd };
@@ -102,10 +111,9 @@ function runExecCommand(
         // When args are provided, use them directly without shell to prevent
         // command-line injection. The no-args shell path is intentional for
         // interactive terminal use but is guarded by auth and input validation.
-        const child =
-            args && Array.isArray(args) && args.length > 0
-                ? spawn(command, args, cwdOption)
-                : spawn(command, [], { ...cwdOption, shell: true });
+        const child = Array.isArray(args)
+            ? spawn(command, args, cwdOption)
+            : spawn(command, [], { ...cwdOption, shell: true });
 
         // Store process reference for kill
         const job = jobs.get(jobId);
@@ -190,7 +198,9 @@ export default function execRoutes(
                 stderr: result.stderr.slice(-10_000),
             } satisfies ExecResponse);
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(error instanceof ExecValidationError ? 400 : 500).json({
+                error: (error as Error).message,
+            });
         }
     }) as RequestHandler);
 
@@ -199,7 +209,9 @@ export default function execRoutes(
         try {
             payload = validateExecRequest(req.body as ExecRequest);
         } catch (error) {
-            res.status(400).json({ error: (error as Error).message });
+            res.status(error instanceof ExecValidationError ? 400 : 500).json({
+                error: (error as Error).message,
+            });
             return;
         }
 

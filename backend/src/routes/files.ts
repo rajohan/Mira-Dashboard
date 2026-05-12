@@ -232,7 +232,11 @@ export default function filesRoutes(
             try {
                 const backupPath = fullPath + ".bak";
                 fs.copyFileSync(fullPath, backupPath);
-            } catch {
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+
                 // File doesn't exist yet; ensure parent directory exists
                 const parentDir = path.dirname(fullPath);
                 fs.mkdirSync(parentDir, { recursive: true });
