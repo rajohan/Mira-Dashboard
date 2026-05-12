@@ -46,7 +46,7 @@ function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
     return null;
 }
 
-/** Handles socket message interactions. */
+/** Responds to socket message events. */
 export function handleSocketMessage(raw: unknown): boolean | null {
     const validated = socketEnvelopeSchema.safeParse(raw);
     if (!validated.success) {

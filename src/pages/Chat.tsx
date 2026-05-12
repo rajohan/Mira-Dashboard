@@ -638,7 +638,7 @@ export function Chat() {
         );
     };
 
-    /** Handles messages scroll interactions. */
+    /** Responds to messages scroll events. */
     const handleMessagesScroll = () => {
         const container = messagesContainerReference.current;
         if (container) {
@@ -690,7 +690,7 @@ export function Chat() {
         },
     });
 
-    /** Handles dynamic row content load interactions. */
+    /** Responds to dynamic row content load events. */
     const handleDynamicRowContentLoad = () => {
         if (shouldStickToBottomReference.current) {
             scheduleBottomFollow();
@@ -754,7 +754,7 @@ export function Chat() {
         setDraft(value);
     };
 
-    /** Handles delete message interactions. */
+    /** Responds to delete message events. */
     const handleDeleteMessage = (messageKey: string) => {
         setPendingDeleteMessageKey(messageKey);
     };
@@ -774,7 +774,7 @@ export function Chat() {
         setPendingDeleteMessageKey(null);
     };
 
-    /** Handles files selected interactions. */
+    /** Responds to files selected events. */
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) {
             return;
@@ -879,7 +879,7 @@ export function Chat() {
         }
     };
 
-    /** Handles voice file selected interactions. */
+    /** Responds to voice file selected events. */
     const handleVoiceFileSelected = async (files: FileList | null) => {
         const file = files?.[0];
         if (!file) {
@@ -903,7 +903,7 @@ export function Chat() {
         }
     };
 
-    /** Handles toggle recording interactions. */
+    /** Responds to toggle recording events. */
     const handleToggleRecording = async () => {
         if (isRecording) {
             mediaRecorderReference.current?.stop();
@@ -988,7 +988,7 @@ export function Chat() {
         shouldStickToBottomReference,
     });
 
-    /** Handles send interactions. */
+    /** Responds to send events. */
     const handleSend = async () => {
         if (!selectedSessionKey || isSending || sendInFlightReference.current) {
             return;

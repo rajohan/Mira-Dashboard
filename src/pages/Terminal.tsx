@@ -61,7 +61,7 @@ export function Terminal() {
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
     // Track scroll position
-    /** Handles scroll interactions. */
+    /** Responds to scroll events. */
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
         setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
@@ -106,7 +106,7 @@ export function Terminal() {
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
-    /** Handles tab completion interactions. */
+    /** Responds to tab completion events. */
     async function handleTabCompletion() {
         if (!command.trim()) return;
 
@@ -126,7 +126,7 @@ export function Terminal() {
         }
     }
 
-    /** Handles submit interactions. */
+    /** Responds to submit events. */
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!command.trim() || startCommand.isPending) return;
@@ -253,7 +253,7 @@ export function Terminal() {
         }
     };
 
-    /** Handles key down interactions. */
+    /** Responds to key down events. */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         // Handle Tab for completion
         if (event.key === "Tab") {

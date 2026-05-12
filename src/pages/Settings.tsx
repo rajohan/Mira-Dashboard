@@ -97,7 +97,7 @@ export function Settings() {
 
     const loading = configLoading || skillsLoading;
 
-    /** Handles restart interactions. */
+    /** Responds to restart events. */
     async function handleRestart() {
         try {
             await restartGateway.mutateAsync();
@@ -108,7 +108,7 @@ export function Settings() {
         }
     }
 
-    /** Handles backup interactions. */
+    /** Responds to backup events. */
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
@@ -126,7 +126,7 @@ export function Settings() {
         }
     }
 
-    /** Handles skill toggle interactions. */
+    /** Responds to skill toggle events. */
     async function handleSkillToggle(skillName: string, enabled: boolean) {
         try {
             await toggleSkill.mutateAsync({ name: skillName, enabled });
@@ -135,7 +135,7 @@ export function Settings() {
         }
     }
 
-    /** Handles session save interactions. */
+    /** Responds to session save events. */
     async function handleSessionSave(idleMinutes: number) {
         setError(null);
         try {
@@ -148,7 +148,7 @@ export function Settings() {
         }
     }
 
-    /** Handles heartbeat save interactions. */
+    /** Responds to heartbeat save events. */
     async function handleHeartbeatSave(every: number, target: string) {
         setError(null);
         try {
@@ -184,7 +184,7 @@ export function Settings() {
         }
     }
 
-    /** Handles agent access save interactions. */
+    /** Responds to agent access save events. */
     async function handleAgentAccessSave(agents: AgentConfig[]) {
         setError(null);
         try {
@@ -199,7 +199,7 @@ export function Settings() {
         }
     }
 
-    /** Handles model save interactions. */
+    /** Responds to model save events. */
     async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
         setError(null);
         try {
@@ -212,7 +212,7 @@ export function Settings() {
         }
     }
 
-    /** Handles tool save interactions. */
+    /** Responds to tool save events. */
     async function handleToolSave(values: ToolSettings) {
         setError(null);
         try {
@@ -241,7 +241,7 @@ export function Settings() {
         }
     }
 
-    /** Handles channels save interactions. */
+    /** Responds to channels save events. */
     async function handleChannelsSave(channels: ChannelSummary[]) {
         setError(null);
         try {

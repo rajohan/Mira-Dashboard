@@ -113,7 +113,7 @@ export function Tasks() {
             });
     }
 
-    /** Handles drag start interactions. */
+    /** Responds to drag start events. */
     const handleDragStart = (event: DragStartEvent) => {
         setActiveId(event.active.id as string);
     };
@@ -133,7 +133,7 @@ export function Tasks() {
         return getColumnId(overTask);
     };
 
-    /** Handles drag over interactions. */
+    /** Responds to drag over events. */
     const handleDragOver = (event: DragOverEvent) => {
         const { over } = event;
         if (!over) {
@@ -146,7 +146,7 @@ export function Tasks() {
         }
     };
 
-    /** Handles drag end interactions. */
+    /** Responds to drag end events. */
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event;
         setActiveId(null);
@@ -175,12 +175,12 @@ export function Tasks() {
         }
     };
 
-    /** Handles task click interactions. */
+    /** Responds to task click events. */
     const handleTaskClick = (task: Task) => {
         setSelectedTask(task);
     };
 
-    /** Handles move task interactions. */
+    /** Responds to move task events. */
     const handleMoveTask = async (column: ColumnId) => {
         if (!selectedTask) return;
         const col = COLUMN_CONFIG.find((c) => c.id === column);
@@ -193,7 +193,7 @@ export function Tasks() {
         }
     };
 
-    /** Handles assign task interactions. */
+    /** Responds to assign task events. */
     const handleAssignTask = async (assignee: TaskAssigneeId) => {
         if (!selectedTask) return;
         const updated = await assignTask.mutateAsync({
@@ -203,7 +203,7 @@ export function Tasks() {
         setSelectedTask(updated);
     };
 
-    /** Handles delete task interactions. */
+    /** Responds to delete task events. */
     const handleDeleteTask = async () => {
         if (!selectedTask) return;
         setPendingDeleteTaskId(selectedTask.number);
@@ -217,7 +217,7 @@ export function Tasks() {
         setSelectedTask(null);
     };
 
-    /** Handles update task interactions. */
+    /** Responds to update task events. */
     const handleUpdateTask = async (updates: {
         title?: string;
         body?: string;
@@ -239,7 +239,7 @@ export function Tasks() {
         return updated;
     };
 
-    /** Handles add task update interactions. */
+    /** Responds to add task update events. */
     const handleAddTaskUpdate = async (messageMd: string) => {
         if (!selectedTask) return;
 
@@ -250,7 +250,7 @@ export function Tasks() {
         });
     };
 
-    /** Handles edit task update interactions. */
+    /** Responds to edit task update events. */
     const handleEditTaskUpdate = async (updateId: number, messageMd: string) => {
         if (!selectedTask) return;
 
@@ -262,7 +262,7 @@ export function Tasks() {
         });
     };
 
-    /** Handles delete task update interactions. */
+    /** Responds to delete task update events. */
     const handleDeleteTaskUpdate = async (updateId: number) => {
         setPendingDeleteUpdateId(updateId);
     };

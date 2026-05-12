@@ -61,7 +61,7 @@ export function Cron() {
         setIsEditMode(false);
     }, [currentJob]);
 
-    /** Handles toggle interactions. */
+    /** Responds to toggle events. */
     async function handleToggle(job: CronJob, enabled: boolean) {
         const id = getCronJobId(job);
         if (!id) {
@@ -71,7 +71,7 @@ export function Cron() {
         await toggleJob.mutateAsync({ id, enabled });
     }
 
-    /** Handles run now interactions. */
+    /** Responds to run now events. */
     async function handleRunNow(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {
@@ -85,7 +85,7 @@ export function Cron() {
         }));
     }
 
-    /** Handles save edits interactions. */
+    /** Responds to save edits events. */
     async function handleSaveEdits(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {

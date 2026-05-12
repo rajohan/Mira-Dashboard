@@ -54,7 +54,7 @@ export function useFileExplorerState() {
         }
     }, [fileContent]);
 
-    /** Handles toggle interactions. */
+    /** Responds to toggle events. */
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
@@ -107,14 +107,14 @@ export function useFileExplorerState() {
         }
     };
 
-    /** Handles select interactions. */
+    /** Responds to select events. */
     const handleSelect = (path: string) => {
         setSelectedPath(path);
         setHasChanges(false);
         setError(null);
     };
 
-    /** Handles content change interactions. */
+    /** Responds to content change events. */
     const handleContentChange = (value: string) => {
         setEditedContent(value);
         setHasChanges(value !== fileContent?.content);
@@ -127,7 +127,7 @@ export function useFileExplorerState() {
         ? validateJsonString(editedContent, jsonValidationMode)
         : { valid: true, error: null };
 
-    /** Handles save interactions. */
+    /** Responds to save events. */
     const handleSave = async () => {
         if (!selectedPath || !fileContent) return;
 
@@ -148,7 +148,7 @@ export function useFileExplorerState() {
         }
     };
 
-    /** Handles refresh interactions. */
+    /** Responds to refresh events. */
     const handleRefresh = () => {
         void refetchRoot();
         if (selectedPath) {

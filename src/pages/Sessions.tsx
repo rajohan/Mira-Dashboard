@@ -161,7 +161,7 @@ export function Sessions() {
         lastKnownFeedScrollTopReference.current = container.scrollTop;
     };
 
-    /** Handles feed scroll interactions. */
+    /** Responds to feed scroll events. */
     const handleFeedScroll = () => {
         const container = liveFeedContainerReference.current;
         if (container) {
@@ -238,7 +238,7 @@ export function Sessions() {
         })),
     ];
 
-    /** Handles delete confirm interactions. */
+    /** Responds to delete confirm events. */
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
 
