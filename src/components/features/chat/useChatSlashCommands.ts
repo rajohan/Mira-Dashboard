@@ -26,6 +26,7 @@ import {
     VERBOSE_CHOICES,
 } from "./slashCommands";
 
+/** Represents use chat slash commands paramilliseconds. */
 interface UseChatSlashCommandsParams {
     request: <T = unknown>(
         method: string,
@@ -49,6 +50,7 @@ interface UseChatSlashCommandsParams {
     shouldStickToBottomReference: { current: boolean };
 }
 
+/** Provides chat slash commands. */
 export function useChatSlashCommands({
     request,
     selectedSession,
@@ -66,10 +68,12 @@ export function useChatSlashCommands({
     setHistoryLoadVersion,
     shouldStickToBottomReference,
 }: UseChatSlashCommandsParams) {
+    /** Performs add system message. */
     const addSystemMessage = (text: string) => {
         setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
     };
 
+    /** Performs reload chat history. */
     const reloadChatHistory = async () => {
         if (!selectedSessionKey) {
             return;
@@ -111,10 +115,12 @@ export function useChatSlashCommands({
             return true;
         }
 
+        /** Performs patch session. */
         const patchSession = async (patch: Record<string, unknown>) => {
             await request("sessions.patch", { key: selectedSessionKey, ...patch });
         };
 
+        /** Performs run simple command. */
         const runSimpleCommand = async (action: () => Promise<void>) => {
             setDraft("");
             setSendError(null);

@@ -2,6 +2,7 @@ import { Code, Eye } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 
+/** Provides props for preview toggle. */
 interface PreviewToggleProps {
     preview: boolean;
     onToggle: (preview: boolean) => void;
@@ -9,6 +10,7 @@ interface PreviewToggleProps {
     editLabel?: string;
 }
 
+/** Renders the preview toggle UI. */
 export function PreviewToggle({
     preview,
     onToggle,

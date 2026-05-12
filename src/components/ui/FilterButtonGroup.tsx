@@ -1,10 +1,12 @@
 import { Button } from "./Button";
 
+/** Represents filter option. */
 interface FilterOption<T extends string> {
     value: T;
     label: string;
 }
 
+/** Provides props for filter button group. */
 interface FilterButtonGroupProps<T extends string> {
     options: readonly FilterOption<T>[];
     value: T;
@@ -12,6 +14,7 @@ interface FilterButtonGroupProps<T extends string> {
     className?: string;
 }
 
+/** Renders the filter button group UI. */
 export function FilterButtonGroup<T extends string>({
     options,
     value,

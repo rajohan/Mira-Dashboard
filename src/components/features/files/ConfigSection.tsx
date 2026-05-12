@@ -3,11 +3,13 @@ import { useState } from "react";
 
 import { CONFIG_TOP_FILES, CRON_DIR_FILES, HOOKS_DIR_FILES } from "./fileConstants";
 
+/** Provides props for config section. */
 interface ConfigSectionProps {
     selectedPath: string | null;
     onSelect: (path: string) => void;
 }
 
+/** Renders the config section UI. */
 export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
     const [cronDirExpanded, setCronDirExpanded] = useState(false);
     const [hooksDirExpanded, setHooksDirExpanded] = useState(false);

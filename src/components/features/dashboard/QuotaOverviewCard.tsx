@@ -5,10 +5,12 @@ import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
+/** Provides quota cache data rendered by the quota overview card. */
 interface QuotaOverviewCardProps {
     quotas: QuotasResponse | undefined;
 }
 
+/** Maps quota usage percentage to a visual severity level. */
 function getSeverity(
     percent: number | null | undefined
 ): "success" | "warning" | "error" {
@@ -17,6 +19,7 @@ function getSeverity(
     return "error";
 }
 
+/** Parses OpenAI reset timestamps and returns null when the value is unavailable or invalid. */
 function tryParseOpenAiReset(value: string): Date | null {
     const timeOnlyMatch = value.match(/^(\d{1,2}):(\d{2})$/);
     if (timeOnlyMatch) {
@@ -68,6 +71,7 @@ function tryParseOpenAiReset(value: string): Date | null {
     return null;
 }
 
+/** Formats quota reset metadata for display in the dashboard. */
 function formatResetValue(value: string | null | undefined): string {
     if (!value || value === "unknown") {
         return "unknown";
@@ -86,6 +90,7 @@ function formatResetValue(value: string | null | undefined): string {
     return value;
 }
 
+/** Renders the quota overview card UI. */
 export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
     if (!quotas) {
         return (

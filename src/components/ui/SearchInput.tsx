@@ -1,11 +1,13 @@
 import { Search } from "lucide-react";
 
+/** Provides props for search input. */
 interface SearchInputProps {
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
 }
 
+/** Renders the search input UI. */
 export function SearchInput({
     value,
     onChange,

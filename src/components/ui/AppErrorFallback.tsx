@@ -3,6 +3,7 @@ import type { FallbackProps } from "react-error-boundary";
 
 import { Button } from "./Button";
 
+/** Renders the app error fallback UI. */
 export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
     return (
         <div className="flex min-h-screen items-center justify-center p-6">
