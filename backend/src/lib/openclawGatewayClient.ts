@@ -9,12 +9,14 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
 
+/** Defines device identity. */
 export type DeviceIdentity = {
     deviceId: string;
     publicKeyPem: string;
     privateKeyPem: string;
 };
 
+/** Defines gateway hello ok. */
 export type GatewayHelloOk = {
     type?: string;
     protocol?: number;
@@ -23,6 +25,7 @@ export type GatewayHelloOk = {
     };
 };
 
+/** Defines gateway event. */
 export type GatewayEvent = {
     type?: string;
     event?: string;
@@ -31,6 +34,7 @@ export type GatewayEvent = {
     stateVersion?: number;
 };
 
+/** Defines gateway response. */
 type GatewayResponse = {
     type?: string;
     id?: string;
@@ -43,12 +47,14 @@ type GatewayResponse = {
     };
 };
 
+/** Defines pending request entry. */
 type PendingRequestEntry = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
 };
 
+/** Defines open claw gateway client options. */
 export type OpenClawGatewayClientOptions = {
     url?: string;
     token?: string;
@@ -69,12 +75,14 @@ export type OpenClawGatewayClientOptions = {
     onClose?: (code: number, reason: string) => void;
 };
 
+/** Defines open claw gateway client instance. */
 export type OpenClawGatewayClientInstance = {
     start: () => void;
     stop: () => void;
     request: (method: string, params?: unknown) => Promise<unknown>;
 };
 
+/** Handles base64 url encode. */
 function base64UrlEncode(buffer: Buffer): string {
     return buffer
         .toString("base64")
@@ -83,6 +91,7 @@ function base64UrlEncode(buffer: Buffer): string {
         .replace(/=+$/u, "");
 }
 
+/** Handles derive public key raw. */
 function derivePublicKeyRaw(publicKeyPem: string): Buffer {
     const spki = crypto.createPublicKey(publicKeyPem).export({
         type: "spki",
@@ -99,6 +108,7 @@ function derivePublicKeyRaw(publicKeyPem: string): Buffer {
     return spki;
 }
 
+/** Handles fingerprint public key. */
 function fingerprintPublicKey(publicKeyPem: string): string {
     return crypto
         .createHash("sha256")
@@ -106,15 +116,18 @@ function fingerprintPublicKey(publicKeyPem: string): string {
         .digest("hex");
 }
 
+/** Handles public key raw base64 url from pem. */
 function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
     return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
 }
 
+/** Handles sign device payload. */
 function signDevicePayload(privateKeyPem: string, payload: string): string {
     const key = crypto.createPrivateKey(privateKeyPem);
     return base64UrlEncode(crypto.sign(null, Buffer.from(payload, "utf8"), key));
 }
 
+/** Handles generate identity. */
 function generateIdentity(): DeviceIdentity {
     const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
@@ -127,6 +140,7 @@ function generateIdentity(): DeviceIdentity {
     };
 }
 
+/** Handles load or create device identity. */
 export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     fs.mkdirSync(Path.dirname(filePath), { recursive: true });
 
@@ -170,6 +184,7 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     return identity;
 }
 
+/** Handles normalize device metadata for auth. */
 function normalizeDeviceMetadataForAuth(value?: string): string {
     if (typeof value !== "string") {
         return "";
@@ -179,6 +194,7 @@ function normalizeDeviceMetadataForAuth(value?: string): string {
     return trimmed ? trimmed.replaceAll(/[A-Z]/gu, (char) => char.toLowerCase()) : "";
 }
 
+/** Handles build device auth payload v3. */
 function buildDeviceAuthPayloadV3(params: {
     deviceId: string;
     clientId: string;
@@ -206,6 +222,7 @@ function buildDeviceAuthPayloadV3(params: {
     ].join("|");
 }
 
+/** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private readonly opts: OpenClawGatewayClientOptions;
     private ws: WebSocket | null = null;

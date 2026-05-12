@@ -5,6 +5,7 @@ import os from "os";
 
 import gateway from "../gateway.js";
 
+/** Describes cpu metrics. */
 interface CpuMetrics {
     count: number;
     model: string;
@@ -12,6 +13,7 @@ interface CpuMetrics {
     loadPercent: number;
 }
 
+/** Describes memory metrics. */
 interface MemoryMetrics {
     total: number;
     used: number;
@@ -21,6 +23,7 @@ interface MemoryMetrics {
     usedGB: number;
 }
 
+/** Describes disk metrics. */
 interface DiskMetrics {
     total: number;
     used: number;
@@ -29,17 +32,20 @@ interface DiskMetrics {
     usedGB: number;
 }
 
+/** Describes system metrics. */
 interface SystemMetrics {
     uptime: number;
     platform: string;
     hostname: string;
 }
 
+/** Describes network metrics. */
 interface NetworkMetrics {
     downloadMbps: number;
     uploadMbps: number;
 }
 
+/** Describes system metrics response. */
 interface SystemMetricsResponse {
     cpu: CpuMetrics;
     memory: MemoryMetrics;
@@ -49,6 +55,7 @@ interface SystemMetricsResponse {
     timestamp: number;
 }
 
+/** Describes token metrics. */
 interface TokenMetrics {
     total: number;
     byModel: Record<string, number>;
@@ -61,6 +68,7 @@ interface TokenMetrics {
     }>;
 }
 
+/** Describes metrics response. */
 interface MetricsResponse extends SystemMetricsResponse {
     tokens: TokenMetrics;
 }
@@ -71,6 +79,7 @@ let previousNetworkSample: {
     uploadBytes: number;
 } | null = null;
 
+/** Handles get network metrics. */
 function getNetworkMetrics(): NetworkMetrics {
     let downloadBytes = 0;
     let uploadBytes = 0;
@@ -140,6 +149,7 @@ function getNetworkMetrics(): NetworkMetrics {
     };
 }
 
+/** Handles get system metrics. */
 function getSystemMetrics(): SystemMetricsResponse {
     // CPU
     const cpus = os.cpus();
@@ -204,6 +214,7 @@ function getSystemMetrics(): SystemMetricsResponse {
     };
 }
 
+/** Handles get token metrics. */
 function getTokenMetrics(): TokenMetrics {
     const sessions = gateway.getSessions();
     let totalTokens = 0;
@@ -242,6 +253,7 @@ function getTokenMetrics(): TokenMetrics {
     };
 }
 
+/** Handles metrics routes. */
 export default function metricsRoutes(app: express.Application): void {
     app.get("/api/metrics", (async (_req, res) => {
         try {

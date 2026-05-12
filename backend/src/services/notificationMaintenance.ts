@@ -3,6 +3,7 @@ import { db } from "../db.js";
 const READ_RETENTION_DAYS = 14;
 const MAX_READ_ITEMS = 300;
 
+/** Handles prune read notifications. */
 export function pruneReadNotifications(): void {
     const cutoff = new Date(
         Date.now() - READ_RETENTION_DAYS * 24 * 60 * 60 * 1000

@@ -2,6 +2,7 @@ import express, { type RequestHandler } from "express";
 
 import gateway from "../gateway.js";
 
+/** Describes cron job. */
 interface CronJob {
     id?: string;
     jobId?: string;
@@ -13,11 +14,13 @@ interface CronJob {
     [key: string]: unknown;
 }
 
+/** Describes cron list response. */
 interface CronListResponse {
     jobs?: CronJob[];
     items?: CronJob[];
 }
 
+/** Handles normalize jobs. */
 function normalizeJobs(payload: unknown): CronJob[] {
     if (!payload || typeof payload !== "object") {
         return [];
@@ -35,6 +38,7 @@ function normalizeJobs(payload: unknown): CronJob[] {
     return [];
 }
 
+/** Handles cron routes. */
 export default function cronRoutes(app: express.Application): void {
     app.get("/api/cron/jobs", (async (_req, res) => {
         try {

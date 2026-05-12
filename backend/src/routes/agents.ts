@@ -15,11 +15,13 @@ const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
+/** Describes agent metadata. */
 interface AgentMetadata {
     currentTask?: string;
     updatedAt?: string;
 }
 
+/** Describes agent config. */
 interface AgentConfig {
     id: string;
     default?: boolean;
@@ -32,6 +34,7 @@ interface AgentConfig {
     };
 }
 
+/** Describes agents config. */
 interface AgentsConfig {
     defaults: {
         model?: {
@@ -43,6 +46,7 @@ interface AgentsConfig {
     list: AgentConfig[];
 }
 
+/** Describes session info. */
 interface SessionInfo {
     key?: string;
     sessionId?: string;
@@ -52,6 +56,7 @@ interface SessionInfo {
     label?: string;
 }
 
+/** Describes agent status. */
 interface AgentStatus {
     id: string;
     status: "active" | "thinking" | "idle" | "offline";
@@ -63,6 +68,7 @@ interface AgentStatus {
     channel: string | null;
 }
 
+/** Describes agent task history item. */
 interface AgentTaskHistoryItem {
     id: number;
     agentId: string;
@@ -73,12 +79,14 @@ interface AgentTaskHistoryItem {
     lastActivityAt: string;
 }
 
+/** Describes gateway session summary. */
 interface GatewaySessionSummary {
     key: string;
     model: string;
     updatedAt?: number | null;
 }
 
+/** Handles to display model name. */
 function toDisplayModelName(model: string): string {
     if (!model) {
         return "unknown";
@@ -88,6 +96,7 @@ function toDisplayModelName(model: string): string {
     return slashIndex === -1 ? model : model.slice(slashIndex + 1);
 }
 
+/** Handles resolve configured model name. */
 function resolveConfiguredModelName(
     configuredModel: string | undefined,
     config: AgentsConfig
@@ -113,6 +122,7 @@ function resolveConfiguredModelName(
     return toDisplayModelName(configured);
 }
 
+/** Handles get gateway sessions for agents. */
 async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     const cached = gateway.getSessions().map((session) => ({
         key: session.key,
@@ -143,10 +153,12 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     return cached;
 }
 
+/** Handles now iso. */
 function nowIso(): string {
     return new Date().toISOString();
 }
 
+/** Handles close stale active tasks. */
 function closeStaleActiveTasks(): void {
     const cutoff = new Date(Date.now() - TASK_IDLE_TIMEOUT_MS).toISOString();
     db.prepare(
@@ -156,6 +168,7 @@ function closeStaleActiveTasks(): void {
     ).run(nowIso(), nowIso(), cutoff);
 }
 
+/** Handles get active history task. */
 function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
     const row = db
         .prepare(
@@ -192,6 +205,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
     };
 }
 
+/** Handles get latest completed tasks. */
 function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     const rows = db
         .prepare(
@@ -222,6 +236,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     }));
 }
 
+/** Handles parse agents config. */
 function parseAgentsConfig(): AgentsConfig | null {
     const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
 
@@ -248,6 +263,7 @@ function parseAgentsConfig(): AgentsConfig | null {
 }
 
 // Read agent metadata file for current task
+/** Handles get agent metadata. */
 function getAgentMetadata(agentId: string): AgentMetadata | null {
     const metadataPath = Path.join(AGENTS_DIR, agentId, "sessions", "metadata.json");
     try {
@@ -262,6 +278,7 @@ function getAgentMetadata(agentId: string): AgentMetadata | null {
 }
 
 // Get sessions from agent's sessions.json file
+/** Handles get agent sessions from files. */
 function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
     const sessionsFile = Path.join(AGENTS_DIR, agentId, "sessions", "sessions.json");
     try {
@@ -281,12 +298,14 @@ function getAgentSessionsFromFiles(agentId: string): SessionInfo[] {
 }
 
 // Get activity from a JSONL session file
+/** Describes activity info. */
 interface ActivityInfo {
     task: string | null; // High-level task (from last user message)
     activity: string | null; // Current activity (from last tool use)
     modTime: number;
 }
 
+/** Handles summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
     const normalizedTool = toolName.includes(".")
         ? toolName.split(".").pop() || toolName
@@ -379,6 +398,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     return normalizedTool;
 }
 
+/** Handles get latest activity from file. */
 function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
     const sessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
     if (!FS.existsSync(sessionsDir)) {
@@ -486,6 +506,7 @@ function getLatestActivityFromFile(agentId: string): ActivityInfo | null {
     }
 }
 
+/** Handles get session file mod time. */
 function getSessionFileModTime(agentId: string): number | null {
     // Check for session files in agents directory
     const agentDir = Path.join(AGENTS_DIR, agentId);
@@ -521,6 +542,7 @@ function getSessionFileModTime(agentId: string): number | null {
     }
 }
 
+/** Handles get channel from session key. */
 function getChannelFromSessionKey(sessionKey: string): string | null {
     const parts = sessionKey.split(":");
     if (parts[0] === "channel") {
@@ -529,6 +551,7 @@ function getChannelFromSessionKey(sessionKey: string): string | null {
     return null;
 }
 
+/** Handles determine status. */
 function determineStatus(lastModTime: number | null): "active" | "thinking" | "idle" {
     if (!lastModTime) return "idle";
 
@@ -543,6 +566,7 @@ function determineStatus(lastModTime: number | null): "active" | "thinking" | "i
     return "idle";
 }
 
+/** Handles find best session for agent. */
 function findBestSessionForAgent(
     agentId: string,
     sessions: GatewaySessionSummary[]
@@ -582,6 +606,7 @@ function findBestSessionForAgent(
     })[0];
 }
 
+/** Handles get agent status. */
 function getAgentStatus(agentId: string): AgentStatus {
     // Auto-close stale active tasks before reading current state
     closeStaleActiveTasks();
@@ -632,6 +657,7 @@ function getAgentStatus(agentId: string): AgentStatus {
     };
 }
 
+/** Handles agents routes. */
 export default function agentsRoutes(app: express.Application): void {
     app.use("/api/agents/:id/metadata", express.json());
 

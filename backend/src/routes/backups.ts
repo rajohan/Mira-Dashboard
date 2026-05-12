@@ -8,6 +8,7 @@ const N8N_DATABASE = "n8n";
 const DOPPLER_BIN = process.env.DOPPLER_BIN || "/usr/local/bin/doppler";
 const MAX_OUTPUT_CHARS = 100_000;
 
+/** Describes backup job. */
 interface BackupJob {
     id: string;
     type: "kopia" | "walg";
@@ -20,6 +21,7 @@ interface BackupJob {
     process?: ChildProcess;
 }
 
+/** Describes backup job response. */
 interface BackupJobResponse {
     job: BackupJob | null;
 }
@@ -28,6 +30,7 @@ const backupJobs = new Map<string, BackupJob>();
 let activeKopiaJobId: string | null = null;
 let activeWalgJobId: string | null = null;
 
+/** Handles trim output. */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -36,6 +39,7 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+/** Handles get current job. */
 function getCurrentJob(activeJobId: string | null, clear: () => void) {
     if (!activeJobId) {
         return null;
@@ -54,18 +58,21 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
     return job;
 }
 
+/** Handles get current kopia job. */
 function getCurrentKopiaJob() {
     return getCurrentJob(activeKopiaJobId, () => {
         activeKopiaJobId = null;
     });
 }
 
+/** Handles get current walg job. */
 function getCurrentWalgJob() {
     return getCurrentJob(activeWalgJobId, () => {
         activeWalgJobId = null;
     });
 }
 
+/** Handles map job. */
 function mapJob(job: BackupJob | null) {
     if (!job) {
         return null;
@@ -83,6 +90,7 @@ function mapJob(job: BackupJob | null) {
     };
 }
 
+/** Handles create backup env. */
 function createBackupEnv() {
     return {
         ...process.env,
@@ -94,6 +102,7 @@ function createBackupEnv() {
     };
 }
 
+/** Handles start backup job. */
 function startBackupJob(type: BackupJob["type"], command: string) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
@@ -154,6 +163,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     return job;
 }
 
+/** Handles start kopia backup job. */
 function startKopiaBackupJob() {
     return startBackupJob(
         "kopia",
@@ -161,6 +171,7 @@ function startKopiaBackupJob() {
     );
 }
 
+/** Handles start walg backup job. */
 function startWalgBackupJob() {
     return startBackupJob(
         "walg",
@@ -168,6 +179,7 @@ function startWalgBackupJob() {
     );
 }
 
+/** Handles backup routes. */
 export default function backupRoutes(
     app: express.Application,
     _express: typeof express

@@ -8,14 +8,17 @@ const ELEVENLABS_TTS_VOICE_ID =
     "q7O4dHCU5KzDbUYNsckR";
 const MAX_TTS_TEXT_LENGTH = 4_000;
 
+/** Describes tts request body. */
 interface TtsRequestBody {
     text?: unknown;
 }
 
+/** Handles normalize tts text. */
 function normalizeTtsText(value: unknown): string {
     return typeof value === "string" ? value.trim() : "";
 }
 
+/** Handles tts routes. */
 export default function ttsRoutes(app: express.Express, expressModule: typeof express) {
     app.post("/api/tts/speak", expressModule.json({ limit: "64kb" }), (async (
         request,

@@ -18,6 +18,7 @@ const DASHBOARD_OPENCLAW_HOME =
 
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || Path.join(os.homedir(), ".openclaw");
 
+/** Handles load or create dashboard device identity. */
 function loadOrCreateDashboardDeviceIdentity(): DeviceIdentity | undefined {
     const identityPath = Path.join(
         DASHBOARD_OPENCLAW_HOME,
@@ -42,6 +43,7 @@ import {
     unsubscribeFromLogs as logsUnsubscribe,
 } from "./routes/logs.js";
 
+/** Describes session. */
 interface Session {
     id: string;
     key: string;
@@ -73,6 +75,7 @@ interface Session {
     elevatedLevel?: string;
 }
 
+/** Describes gateway session. */
 interface GatewaySession {
     sessionId?: string;
     key?: string;
@@ -99,24 +102,28 @@ interface GatewaySession {
     elevatedLevel?: string;
 }
 
+/** Describes pending request. */
 interface PendingRequest {
     clientWs: WebSocket;
     clientId: string;
     method?: string;
 }
 
+/** Describes history message. */
 interface HistoryMessage {
     role?: string;
     content?: string | Array<{ type?: string; text?: string }>;
     timestamp?: string | number;
 }
 
+/** Describes chat history payload. */
 interface ChatHistoryPayload {
     sessionKey?: string;
     sessionId?: string;
     messages?: unknown[];
 }
 
+/** Describes chat image block record. */
 interface ChatImageBlockRecord {
     type?: string;
     text?: string;
@@ -130,6 +137,7 @@ interface ChatImageBlockRecord {
     omitted?: boolean;
 }
 
+/** Describes raw transcript image message. */
 interface RawTranscriptImageMessage {
     role: string;
     text: string;
@@ -145,6 +153,7 @@ let requestId = 1000;
 const pendingRequests = new Map<string, PendingRequest>();
 let currentToken: string | null = null;
 
+/** Handles transform session. */
 function transformSession(session: GatewaySession): Session {
     let type = "UNKNOWN";
     let agentType = "";
@@ -212,6 +221,7 @@ function transformSession(session: GatewaySession): Session {
     };
 }
 
+/** Handles broadcast. */
 function broadcast(msg: unknown): void {
     const data = JSON.stringify(msg);
     for (const ws of subscribers) {
@@ -223,17 +233,20 @@ function broadcast(msg: unknown): void {
     }
 }
 
+/** Handles as record. */
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : null;
 }
 
+/** Handles string field. */
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
     const value = record[key];
     return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+/** Handles session has run identifier. */
 function sessionHasRunIdentifier(session: Session, runId: string): boolean {
     return [
         session.id,
@@ -244,6 +257,7 @@ function sessionHasRunIdentifier(session: Session, runId: string): boolean {
     ].includes(runId);
 }
 
+/** Handles enrich runtime event payload. */
 function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
     if (event !== "agent" && event !== "session.tool") {
         return payload;
@@ -268,6 +282,7 @@ function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
         : payload;
 }
 
+/** Handles image block has omitted data. */
 function imageBlockHasOmittedData(block: Record<string, unknown>): boolean {
     if (block.type !== "image") {
         return false;
@@ -281,6 +296,7 @@ function imageBlockHasOmittedData(block: Record<string, unknown>): boolean {
     return block.omitted === true || source?.omitted === true || !source?.data;
 }
 
+/** Handles normalize message text. */
 function normalizeMessageText(content: unknown): string {
     if (typeof content === "string") {
         return content.trim();
@@ -304,6 +320,7 @@ function normalizeMessageText(content: unknown): string {
         .trim();
 }
 
+/** Handles normalize timestamp. */
 function normalizeTimestamp(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
@@ -317,6 +334,7 @@ function normalizeTimestamp(value: unknown): number | undefined {
     return undefined;
 }
 
+/** Handles get transcript path. */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
     if (!sessionId) {
         const session = sessionList.find((entry) => entry.key === sessionKey);
@@ -331,6 +349,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     return Path.join(OPENCLAW_HOME, "agents", agentId, "sessions", `${sessionId}.jsonl`);
 }
 
+/** Handles read raw transcript image messages. */
 function readRawTranscriptImageMessages(
     sessionKey: string,
     sessionId?: string
@@ -409,6 +428,7 @@ function readRawTranscriptImageMessages(
     return messages;
 }
 
+/** Handles hydrate omitted chat history images. */
 function hydrateOmittedChatHistoryImages(
     payload: unknown,
     requestedSessionKey?: string
@@ -488,6 +508,7 @@ function hydrateOmittedChatHistoryImages(
     return history;
 }
 
+/** Handles refresh sessions. */
 async function refreshSessions(): Promise<void> {
     if (!gatewayClient || !isGatewayConnected) {
         return;
@@ -501,6 +522,7 @@ async function refreshSessions(): Promise<void> {
     broadcast({ type: "sessions", sessions: sessionList });
 }
 
+/** Handles init. */
 function init(token: string): void {
     if (currentToken === token && gatewayClient) {
         return;
@@ -557,6 +579,7 @@ function init(token: string): void {
     gatewayClient.start();
 }
 
+/** Handles forward request. */
 async function forwardRequest(
     method: string,
     params: Record<string, unknown>,
@@ -622,6 +645,7 @@ async function forwardRequest(
     }
 }
 
+/** Handles handle client. */
 function handleClient(ws: WebSocket): void {
     subscribers.add(ws);
     ws.send(
@@ -710,6 +734,7 @@ function handleClient(ws: WebSocket): void {
     });
 }
 
+/** Handles get status. */
 function getStatus(): { gateway: string; sessions: number } {
     return {
         gateway: isGatewayConnected ? "connected" : "disconnected",
@@ -717,18 +742,22 @@ function getStatus(): { gateway: string; sessions: number } {
     };
 }
 
+/** Handles get sessions. */
 function getSessions(): Session[] {
     return sessionList;
 }
 
+/** Handles is connected. */
 function isConnected(): boolean {
     return isGatewayConnected;
 }
 
+/** Handles get gateway ws. */
 function getGatewayWs(): null {
     return null;
 }
 
+/** Handles send request async. */
 async function sendRequestAsync(
     method: string,
     params: Record<string, unknown>
@@ -740,6 +769,7 @@ async function sendRequestAsync(
     return gatewayClient.request(method, params);
 }
 
+/** Handles send session message. */
 async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
     await sendRequestAsync("chat.send", {
         sessionKey,
@@ -749,12 +779,14 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
     });
 }
 
+/** Handles abort session run. */
 async function abortSessionRun(sessionKey: string): Promise<void> {
     await sendRequestAsync("chat.abort", {
         sessionKey,
     });
 }
 
+/** Handles delete session. */
 async function deleteSession(sessionKey: string): Promise<unknown> {
     const result = await sendRequestAsync("sessions.delete", {
         key: sessionKey,
@@ -773,6 +805,7 @@ async function deleteSession(sessionKey: string): Promise<unknown> {
     return result;
 }
 
+/** Handles request. */
 async function request(
     method: string,
     params: Record<string, unknown>
@@ -780,6 +813,7 @@ async function request(
     return sendRequestAsync(method, params);
 }
 
+/** Handles get session history. */
 async function getSessionHistory(
     sessionKey: string,
     limit: number = 50,
@@ -817,6 +851,7 @@ async function getSessionHistory(
     };
 }
 
+/** Stores  testing. */
 export const __testing = {
     transformSession,
     enrichRuntimeEventPayload,
