@@ -14,13 +14,13 @@ interface ConfigGetResponse {
     hash?: string;
 }
 
-/** Returns config snapshot. */
+/** Fetches the current OpenClaw config snapshot and hash. */
 async function getConfigSnapshot(): Promise<ConfigGetResponse> {
     const response = (await gateway.request("config.get", {})) as ConfigGetResponse;
     return response;
 }
 
-/** Performs patch config. */
+/** Applies a partial OpenClaw config update using the latest config hash. */
 async function patchConfig(patch: Record<string, unknown>): Promise<unknown> {
     const snapshot = await getConfigSnapshot();
     if (!snapshot.hash) {
@@ -56,7 +56,7 @@ const OPENCLAW_PACKAGE_ROOT = path.resolve(
 const OPENCLAW_BIN =
     process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw");
 
-/** Performs read skill description. */
+/** Reads the first available skill description from SKILL.md. */
 function readSkillDescription(skillPath: string): string | undefined {
     try {
         const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
@@ -76,7 +76,7 @@ function readSkillDescription(skillPath: string): string | undefined {
     }
 }
 
-/** Performs collect skill directories. */
+/** Finds child directories that contain a SKILL.md file. */
 function collectSkillDirectories(root: string): string[] {
     try {
         return fs
@@ -89,7 +89,7 @@ function collectSkillDirectories(root: string): string[] {
     }
 }
 
-/** Performs collect extra skill directories. */
+/** Finds bundled extension skill directories under the OpenClaw package root. */
 function collectExtraSkillDirectories(): string[] {
     const extensionsRoot = path.join(OPENCLAW_PACKAGE_ROOT, "dist/extensions");
     try {
@@ -110,12 +110,12 @@ function getConfiguredSkillEntries(config: Record<string, unknown> | undefined) 
     return skills?.entries || {};
 }
 
-/** Returns skills. */
+/** Merges configured, workspace, builtin, and extension skills for display. */
 function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
 
-    /** Performs add skill. */
+    /** Adds one discovered skill to the response map with configured state. */
     const addSkill = (skillPath: string, source: SkillSource) => {
         const name = path.basename(skillPath);
         const entry = (entries[name] || {}) as {
