@@ -5,8 +5,9 @@ import {
     useQueryClient,
 } from "@tanstack/react-query";
 
-import { apiDelete, apiFetch, apiPost } from "./useApi";
+import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
+/** Represents docker container. */
 export interface DockerContainer {
     id: string;
     name: string;
@@ -43,6 +44,7 @@ export interface DockerContainer {
     } | null;
 }
 
+/** Represents docker container details. */
 export interface DockerContainerDetails extends DockerContainer {
     env: string[];
     labels: Record<string, string>;
@@ -54,6 +56,7 @@ export interface DockerContainerDetails extends DockerContainer {
     }>;
 }
 
+/** Represents docker image. */
 export interface DockerImage {
     id: string;
     repository: string;
@@ -66,6 +69,7 @@ export interface DockerImage {
     inUseBy: string[];
 }
 
+/** Represents docker volume. */
 export interface DockerVolume {
     name: string;
     driver: string;
@@ -76,6 +80,7 @@ export interface DockerVolume {
     usedBy: string[];
 }
 
+/** Represents docker exec job. */
 export interface DockerExecJob {
     jobId: string;
     containerId: string;
@@ -87,6 +92,7 @@ export interface DockerExecJob {
     endedAt: number | null;
 }
 
+/** Represents docker updater service. */
 export interface DockerUpdaterService {
     id: number;
     appSlug: string;
@@ -107,6 +113,7 @@ export interface DockerUpdaterService {
     metadata: Record<string, unknown>;
 }
 
+/** Represents docker updater event. */
 export interface DockerUpdaterEvent {
     id: number;
     managedServiceId: number;
@@ -122,6 +129,7 @@ export interface DockerUpdaterEvent {
     createdAt: string;
 }
 
+/** Represents docker updater summary. */
 export interface DockerUpdaterSummary {
     total: number;
     enabled: number;
@@ -131,6 +139,7 @@ export interface DockerUpdaterSummary {
     failed: number;
 }
 
+/** Represents docker manual update result. */
 export interface DockerManualUpdateResult {
     success: boolean;
     service: DockerUpdaterService;
@@ -159,6 +168,7 @@ export interface DockerManualUpdateResult {
     stderr: string;
 }
 
+/** Represents docker updater run step. */
 export interface DockerUpdaterRunStep {
     step: string;
     ok: boolean;
@@ -166,11 +176,13 @@ export interface DockerUpdaterRunStep {
     stderr: string;
 }
 
+/** Represents docker updater run result. */
 export interface DockerUpdaterRunResult {
     success: boolean;
     steps: DockerUpdaterRunStep[];
 }
 
+/** Defines docker keys. */
 export const dockerKeys = {
     containers: ["docker", "containers"] as const,
     container: (containerId: string) => ["docker", "container", containerId] as const,
@@ -183,54 +195,66 @@ export const dockerKeys = {
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
 };
 
+/** Fetches containers. */
 async function fetchContainers(): Promise<DockerContainer[]> {
-    const data = await apiFetch<{ containers: DockerContainer[] }>("/docker/containers");
+    const data = await apiFetchRequired<{ containers: DockerContainer[] }>(
+        "/docker/containers"
+    );
     return data.containers || [];
 }
 
+/** Fetches container. */
 async function fetchContainer(containerId: string): Promise<DockerContainerDetails> {
-    return apiFetch<DockerContainerDetails>(
+    return apiFetchRequired<DockerContainerDetails>(
         `/docker/containers/${encodeURIComponent(containerId)}`
     );
 }
 
+/** Fetches container logs. */
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
-    const data = await apiFetch<{ content: string }>(
+    const data = await apiFetchRequired<{ content: string }>(
         `/docker/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`
     );
     return data.content || "";
 }
 
+/** Fetches images. */
 async function fetchImages(): Promise<DockerImage[]> {
-    const data = await apiFetch<{ images: DockerImage[] }>("/docker/images");
+    const data = await apiFetchRequired<{ images: DockerImage[] }>("/docker/images");
     return data.images || [];
 }
 
+/** Fetches volumes. */
 async function fetchVolumes(): Promise<DockerVolume[]> {
-    const data = await apiFetch<{ volumes: DockerVolume[] }>("/docker/volumes");
+    const data = await apiFetchRequired<{ volumes: DockerVolume[] }>("/docker/volumes");
     return data.volumes || [];
 }
 
+/** Fetches docker exec job. */
 async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
-    return apiFetch<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
+    return apiFetchRequired<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
+/** Fetches docker updater services. */
 async function fetchDockerUpdaterServices(): Promise<{
     services: DockerUpdaterService[];
     summary: DockerUpdaterSummary;
 }> {
-    return apiFetch<{ services: DockerUpdaterService[]; summary: DockerUpdaterSummary }>(
-        "/docker/updater/services"
-    );
+    return apiFetchRequired<{
+        services: DockerUpdaterService[];
+        summary: DockerUpdaterSummary;
+    }>("/docker/updater/services");
 }
 
+/** Fetches docker updater events. */
 async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
-    const data = await apiFetch<{ events: DockerUpdaterEvent[] }>(
+    const data = await apiFetchRequired<{ events: DockerUpdaterEvent[] }>(
         `/docker/updater/events?limit=${limit}`
     );
     return data.events || [];
 }
 
+/** Provides docker containers. */
 export function useDockerContainers() {
     return useQuery({
         queryKey: dockerKeys.containers,
@@ -242,6 +266,7 @@ export function useDockerContainers() {
     });
 }
 
+/** Provides docker container. */
 export function useDockerContainer(containerId: string | null) {
     return useQuery({
         queryKey: dockerKeys.container(containerId || ""),
@@ -251,6 +276,7 @@ export function useDockerContainer(containerId: string | null) {
     });
 }
 
+/** Provides docker container logs. */
 export function useDockerContainerLogs(
     containerId: string | null,
     tail: number,
@@ -264,6 +290,7 @@ export function useDockerContainerLogs(
     });
 }
 
+/** Provides docker images. */
 export function useDockerImages() {
     return useQuery({
         queryKey: dockerKeys.images,
@@ -275,6 +302,7 @@ export function useDockerImages() {
     });
 }
 
+/** Provides docker volumes. */
 export function useDockerVolumes() {
     return useQuery({
         queryKey: dockerKeys.volumes,
@@ -286,6 +314,7 @@ export function useDockerVolumes() {
     });
 }
 
+/** Provides docker exec job. */
 export function useDockerExecJob(jobId: string | null) {
     return useQuery({
         queryKey: dockerKeys.execJob(jobId),
@@ -298,6 +327,7 @@ export function useDockerExecJob(jobId: string | null) {
     });
 }
 
+/** Provides docker updater services. */
 export function useDockerUpdaterServices() {
     return useQuery({
         queryKey: dockerKeys.updaterServices,
@@ -308,6 +338,7 @@ export function useDockerUpdaterServices() {
     });
 }
 
+/** Provides docker updater events. */
 export function useDockerUpdaterEvents(limit = 50) {
     return useQuery({
         queryKey: dockerKeys.updaterEvents(limit),
@@ -318,12 +349,13 @@ export function useDockerUpdaterEvents(limit = 50) {
     });
 }
 
+/** Provides docker action. */
 export function useDockerAction() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: ({ containerId, action }: { containerId: string; action: string }) =>
-            apiPost<{ output: string }>(
+            apiPostRequired<{ output: string }>(
                 `/docker/containers/${encodeURIComponent(containerId)}/action`,
                 {
                     action,
@@ -339,12 +371,13 @@ export function useDockerAction() {
     });
 }
 
+/** Provides docker manual update. */
 export function useDockerManualUpdate() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (serviceId: number) =>
-            apiPost<DockerManualUpdateResult>(
+            apiPostRequired<DockerManualUpdateResult>(
                 `/docker/updater/services/${encodeURIComponent(String(serviceId))}/update`
             ),
         onSuccess: async () => {
@@ -361,11 +394,12 @@ export function useDockerManualUpdate() {
     });
 }
 
+/** Provides run docker updater. */
 export function useRunDockerUpdater() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: () => apiPost<DockerUpdaterRunResult>("/docker/updater/run"),
+        mutationFn: () => apiPostRequired<DockerUpdaterRunResult>("/docker/updater/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
@@ -380,12 +414,13 @@ export function useRunDockerUpdater() {
     });
 }
 
+/** Provides delete docker image. */
 export function useDeleteDockerImage() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (imageId: string) =>
-            apiDelete<{ success: boolean }>(
+            apiDeleteRequired<{ success: boolean }>(
                 `/docker/images/${encodeURIComponent(imageId)}`
             ),
         onSuccess: async () => {
@@ -394,12 +429,13 @@ export function useDeleteDockerImage() {
     });
 }
 
+/** Provides delete docker volume. */
 export function useDeleteDockerVolume() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (volumeName: string) =>
-            apiDelete<{ success: boolean }>(
+            apiDeleteRequired<{ success: boolean }>(
                 `/docker/volumes/${encodeURIComponent(volumeName)}`
             ),
         onSuccess: async () => {
@@ -408,12 +444,15 @@ export function useDeleteDockerVolume() {
     });
 }
 
+/** Provides docker prune. */
 export function useDockerPrune() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (target: "images" | "volumes") =>
-            apiPost<{ success: boolean; output: string }>("/docker/prune", { target }),
+            apiPostRequired<{ success: boolean; output: string }>("/docker/prune", {
+                target,
+            }),
         onSuccess: async (_, target) => {
             if (target === "images") {
                 await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
@@ -426,12 +465,17 @@ export function useDockerPrune() {
     });
 }
 
+/** Performs start docker exec. */
 export function startDockerExec(containerId: string, command: string) {
-    return apiPost<{ jobId: string }>("/docker/exec/start", { containerId, command });
+    return apiPostRequired<{ jobId: string }>("/docker/exec/start", {
+        containerId,
+        command,
+    });
 }
 
+/** Performs stop docker exec. */
 export function stopDockerExec(jobId: string) {
-    return apiPost<{ success: boolean }>(
+    return apiPostRequired<{ success: boolean }>(
         `/docker/exec/${encodeURIComponent(jobId)}/stop`
     );
 }

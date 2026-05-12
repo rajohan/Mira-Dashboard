@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch, apiPost, apiPut } from "./useApi";
+import { apiFetchRequired, apiPost, apiPostRequired, apiPut } from "./useApi";
 
 // Types
+/** Defines skill source. */
 export type SkillSource = "workspace" | "builtin" | "extra";
 
+/** Represents skill. */
 export interface Skill {
     name: string;
     path: string;
@@ -13,6 +15,7 @@ export interface Skill {
     source?: SkillSource;
 }
 
+/** Represents agent config. */
 export interface AgentConfig {
     id: string;
     default?: boolean;
@@ -27,6 +30,7 @@ export interface AgentConfig {
     [key: string]: unknown;
 }
 
+/** Represents OpenClaw config. */
 export interface OpenClawConfig {
     __hash?: string;
     agents?: {
@@ -120,44 +124,52 @@ export interface OpenClawConfig {
 }
 
 // Query keys
+/** Defines config keys. */
 export const configKeys = {
     config: (): ["config"] => ["config"],
     skills: (): ["skills"] => ["skills"],
 };
 
 // Fetchers
+/** Fetches config. */
 async function fetchConfig(): Promise<OpenClawConfig> {
-    return apiFetch<OpenClawConfig>("/config");
+    return apiFetchRequired<OpenClawConfig>("/config");
 }
 
+/** Fetches skills. */
 async function fetchSkills(): Promise<Skill[]> {
-    const data = await apiFetch<{ skills: Skill[] }>("/skills");
+    const data = await apiFetchRequired<{ skills: Skill[] }>("/skills");
     return data.skills;
 }
 
+/** Performs update config. */
 async function updateConfig(config: OpenClawConfig): Promise<void> {
     await apiPut("/config", config);
 }
 
+/** Performs toggle skill. */
 async function toggleSkill(name: string, enabled: boolean): Promise<void> {
     await apiPost(`/skills/${name}`, { enabled });
 }
 
+/** Performs restart gateway. */
 async function restartGateway(): Promise<void> {
     await apiPost("/restart");
 }
 
+/** Creates backup. */
 async function createBackup(): Promise<{
     createdAt: string;
     hash?: string;
     config: OpenClawConfig;
 }> {
-    return apiPost<{ createdAt: string; hash?: string; config: OpenClawConfig }>(
+    return apiPostRequired<{ createdAt: string; hash?: string; config: OpenClawConfig }>(
         "/backup"
     );
 }
 
 // Hooks
+/** Provides config. */
 export function useConfig() {
     return useQuery({
         queryKey: ["config"],
@@ -166,6 +178,7 @@ export function useConfig() {
     });
 }
 
+/** Provides skills. */
 export function useSkills() {
     return useQuery({
         queryKey: ["skills"],
@@ -174,6 +187,7 @@ export function useSkills() {
     });
 }
 
+/** Provides update config. */
 export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
@@ -185,6 +199,7 @@ export function useUpdateConfig() {
     });
 }
 
+/** Provides toggle skill. */
 export function useToggleSkill() {
     const queryClient = useQueryClient();
 
@@ -197,12 +212,14 @@ export function useToggleSkill() {
     });
 }
 
+/** Provides restart gateway. */
 export function useRestartGateway() {
     return useMutation({
         mutationFn: restartGateway,
     });
 }
 
+/** Provides create backup. */
 export function useCreateBackup() {
     return useMutation({
         mutationFn: createBackup,

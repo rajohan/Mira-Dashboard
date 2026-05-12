@@ -16,6 +16,7 @@ import { getCronJobId, sortCronJobs } from "../utils/cronUtils";
 import { formatDate } from "../utils/format";
 import { validateJsonString } from "../utils/json";
 
+/** Renders the cron UI. */
 export function Cron() {
     const { data: jobs = [], isLoading, error, refetch } = useCronJobs();
     const toggleJob = useToggleCronJob();
@@ -60,6 +61,7 @@ export function Cron() {
         setIsEditMode(false);
     }, [currentJob]);
 
+    /** Responds to toggle events. */
     async function handleToggle(job: CronJob, enabled: boolean) {
         const id = getCronJobId(job);
         if (!id) {
@@ -69,6 +71,7 @@ export function Cron() {
         await toggleJob.mutateAsync({ id, enabled });
     }
 
+    /** Responds to run now events. */
     async function handleRunNow(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {
@@ -82,6 +85,7 @@ export function Cron() {
         }));
     }
 
+    /** Responds to save edits events. */
     async function handleSaveEdits(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {

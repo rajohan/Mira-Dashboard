@@ -28,11 +28,13 @@ import {
 } from "../hooks";
 import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
 
+/** Performs patch success. */
 function patchSuccess(setSuccess: (value: string | null) => void, message: string) {
     setSuccess(message);
     setTimeout(() => setSuccess(null), 3000);
 }
 
+/** Performs configured channels. */
 function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[] {
     const channels = (config?.channels || {}) as Record<string, Record<string, unknown>>;
     return Object.entries(channels)
@@ -55,6 +57,7 @@ function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** Performs number from duration. */
 function numberFromDuration(value: unknown, fallback: number): number {
     if (typeof value === "number") return value;
     if (typeof value !== "string") return fallback;
@@ -66,6 +69,7 @@ function numberFromDuration(value: unknown, fallback: number): number {
     return amount * (factors[unit] || 1);
 }
 
+/** Represents system host cache. */
 interface SystemHostCache {
     version?: {
         current?: string;
@@ -74,6 +78,7 @@ interface SystemHostCache {
     };
 }
 
+/** Renders the settings UI. */
 export function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -92,6 +97,7 @@ export function Settings() {
 
     const loading = configLoading || skillsLoading;
 
+    /** Responds to restart events. */
     async function handleRestart() {
         try {
             await restartGateway.mutateAsync();
@@ -102,6 +108,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to backup events. */
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
@@ -119,6 +126,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to skill toggle events. */
     async function handleSkillToggle(skillName: string, enabled: boolean) {
         try {
             await toggleSkill.mutateAsync({ name: skillName, enabled });
@@ -127,6 +135,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to session save events. */
     async function handleSessionSave(idleMinutes: number) {
         setError(null);
         try {
@@ -139,6 +148,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to heartbeat save events. */
     async function handleHeartbeatSave(every: number, target: string) {
         setError(null);
         try {
@@ -174,6 +184,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to agent access save events. */
     async function handleAgentAccessSave(agents: AgentConfig[]) {
         setError(null);
         try {
@@ -188,6 +199,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to model save events. */
     async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
         setError(null);
         try {
@@ -200,6 +212,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to tool save events. */
     async function handleToolSave(values: ToolSettings) {
         setError(null);
         try {
@@ -228,6 +241,7 @@ export function Settings() {
         }
     }
 
+    /** Responds to channels save events. */
     async function handleChannelsSave(channels: ChannelSummary[]) {
         setError(null);
         try {

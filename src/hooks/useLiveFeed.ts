@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { type Session } from "../types/session";
-import { apiFetch } from "./useApi";
+import { apiFetchRequired } from "./useApi";
 
+/** Represents the session history API response. */
 interface SessionHistoryResponse {
     messages: Array<{ role: string; content: string; timestamp?: string }>;
 }
 
+/** Represents feed item. */
 export interface FeedItem {
     id: string;
     sessionKey: string;
@@ -17,12 +19,14 @@ export interface FeedItem {
     timestamp: number;
 }
 
+/** Defines live feed keys. */
 export const liveFeedKeys = {
     all: ["live-feed"] as const,
     list: (sessionSignature: string, updatedSignature: string) =>
         [...liveFeedKeys.all, sessionSignature, updatedSignature] as const,
 };
 
+/** Returns whether feed session. */
 function isFeedSession(session: unknown): session is Session {
     return (
         !!session &&
@@ -32,6 +36,7 @@ function isFeedSession(session: unknown): session is Session {
     );
 }
 
+/** Provides live feed. */
 export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
     const feedSessionCandidates = Array.isArray(sessions)
         ? sessions.filter(isFeedSession).slice(0, 20)
@@ -47,7 +52,7 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
         queryFn: async () => {
             const historyBySession = await Promise.all(
                 feedSessionCandidates.map(async (session) => {
-                    const history = await apiFetch<SessionHistoryResponse>(
+                    const history = await apiFetchRequired<SessionHistoryResponse>(
                         `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
                     );
 

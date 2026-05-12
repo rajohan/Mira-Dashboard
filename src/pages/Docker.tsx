@@ -40,6 +40,7 @@ import {
     useDockerVolumes,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
+/** Renders the docker UI. */
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -108,10 +109,12 @@ export function Docker() {
         (service) => service.updateAvailable
     );
 
+    /** Formats an action error for display. */
     function formatActionError(error: unknown): string {
         return error instanceof Error ? error.message : String(error);
     }
 
+    /** Displays action output and scrolls it into view. */
     function showActionOutput(output: string) {
         setActionOutput(output);
         requestAnimationFrame(() => {
@@ -122,6 +125,7 @@ export function Docker() {
         });
     }
 
+    /** Runs a container action and shows the resulting output. */
     async function handleContainerAction(
         containerId: string,
         action: "start" | "stop" | "restart" | "update"
@@ -137,6 +141,7 @@ export function Docker() {
         }
     }
 
+    /** Restarts a Docker stack or one service within the stack. */
     async function handleStackRestart(service?: string) {
         showActionOutput(
             service ? `Restarting ${service}...` : "Restarting Docker stack..."
@@ -161,6 +166,7 @@ export function Docker() {
         }
     }
 
+    /** Triggers a manual update for the selected service. */
     async function handleManualUpdate(serviceId: number) {
         showActionOutput("Running manual Docker update...");
         try {
@@ -176,6 +182,7 @@ export function Docker() {
         }
     }
 
+    /** Runs the selected Docker prune operation after confirmation. */
     async function handlePrune(target: "images" | "volumes") {
         setPruningTarget(target);
         showActionOutput(`Removing unused Docker ${target}...`);
@@ -191,6 +198,7 @@ export function Docker() {
         }
     }
 
+    /** Deletes the selected Docker image or volume after confirmation. */
     async function handleDangerousDelete() {
         if (!dangerousDelete || deleteImage.isPending || deleteVolume.isPending) {
             return;
@@ -211,6 +219,7 @@ export function Docker() {
         }
     }
 
+    /** Runs the Docker updater workflow and displays the output. */
     async function handleRunDockerUpdater() {
         showActionOutput("Running Docker updater...");
         try {
@@ -221,6 +230,7 @@ export function Docker() {
         }
     }
 
+    /** Starts an interactive Docker console job for the selected container. */
     async function handleStartConsole(containerId: string) {
         const result = await startDockerExec(containerId, consoleCommand);
         setConsoleJobId(result.jobId);
