@@ -36,7 +36,7 @@ export const REASONING_CHOICES = ["off", "on", "stream"];
 /** Defines elevated choices. */
 export const ELEVATED_CHOICES = ["off", "on", "ask", "full"];
 /** Defines usage choices. */
-export const USAGE_CHOICES = ["off", "tokens", "on", "full"];
+export const USAGE_CHOICES = ["off", "tokens", "full", "cost"];
 
 /** Defines slash commands. */
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [

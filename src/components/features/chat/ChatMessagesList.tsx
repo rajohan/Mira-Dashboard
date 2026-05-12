@@ -8,7 +8,7 @@ import {
     Trash2,
     Volume2,
 } from "lucide-react";
-import { type RefObject, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -51,11 +51,18 @@ function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     return <Paperclip className="h-4 w-4" />;
 }
 
-/** Performs base64 to text. */
-function base64ToText(base64: string): string {
-    const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
-    return new TextDecoder().decode(bytes);
+/** Decodes base64 text attachments without throwing during rendering. */
+function base64ToText(base64: string): string | undefined {
+    try {
+        const binary = window.atob(base64);
+        const bytes = Uint8Array.from(
+            binary,
+            (character) => character.codePointAt(0) ?? 0
+        );
+        return new TextDecoder().decode(bytes);
+    } catch {
+        return undefined;
+    }
 }
 
 /** Performs preview from attachment. */
@@ -262,7 +269,9 @@ export function ChatMessagesList({
         setPlayingMessageKey(null);
     };
 
-    /** Performs speak message. */
+    useEffect(() => stopAudio, []);
+
+    /** Speaks or stops the selected chat message. */
     const speakMessage = async (messageKey: string, text: string) => {
         if (playingMessageKey === messageKey) {
             stopAudio();

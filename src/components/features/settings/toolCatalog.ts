@@ -22,10 +22,10 @@ import {
     Wrench,
 } from "lucide-react";
 
-/** Defines tool risk. */
+/** Defines the risk level for a tool. */
 export type ToolRisk = "read" | "standard" | "elevated" | "critical";
 
-/** Represents tool catalog item. */
+/** Represents a tool catalog item shown in settings. */
 export interface ToolCatalogItem {
     id: string;
     label: string;
@@ -34,7 +34,7 @@ export interface ToolCatalogItem {
     icon: LucideIcon;
 }
 
-/** Defines tool catalog. */
+/** Defines the available tool catalog for settings. */
 export const TOOL_CATALOG: ToolCatalogItem[] = [
     {
         id: "web_search",
@@ -192,7 +192,7 @@ export const TOOL_CATALOG: ToolCatalogItem[] = [
     },
 ];
 
-/** Defines tool risk labels. */
+/** Maps tool risk levels to human-readable labels. */
 export const TOOL_RISK_LABELS: Record<ToolRisk, string> = {
     read: "Read-only",
     standard: "Standard",
