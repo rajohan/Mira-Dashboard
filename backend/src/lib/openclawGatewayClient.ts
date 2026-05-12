@@ -9,6 +9,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const MIN_TICK_INTERVAL_MS = 1_000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
+const TICK_WATCH_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
 
 /** Defines device identity. */
@@ -385,6 +386,8 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
     private startTickWatch(): void {
         this.stopTickWatch();
+        // Keep the timer cadence fixed; Gateway policy only controls the clamped
+        // silence threshold below, not how frequently this process wakes up.
         this.tickTimer = setInterval(() => {
             if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
                 return;
@@ -396,7 +399,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 this.opts.onConnectError?.(new Error("gateway tick timeout"));
                 this.ws.close(1011, "tick timeout");
             }
-        }, this.tickIntervalMs);
+        }, TICK_WATCH_POLL_INTERVAL_MS);
     }
 
     private stopTickWatch(): void {
