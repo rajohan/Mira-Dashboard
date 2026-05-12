@@ -3,7 +3,12 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
-import { guardedPath, readTextGuarded } from "../lib/guardedOps.js";
+import {
+    guardedPath,
+    openGuarded,
+    readFromOpenFile,
+    readTextGuarded,
+} from "../lib/guardedOps.js";
 
 const LOGS_DIR = "/tmp/openclaw";
 const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
@@ -207,13 +212,23 @@ export default function logsRoutes(app: express.Application): void {
                 return;
             }
 
-            let content: string;
+            let fd: number;
             try {
-                // lgtm[js/path-injection] filePath is canonicalized with realpathSync and checked to stay under LOGS_DIR.
-                content = readTextGuarded(guardedPath(filePath));
+                fd = openGuarded(
+                    guardedPath(filePath),
+                    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+                );
             } catch {
                 res.status(404).json({ error: "Log file not found" });
                 return;
+            }
+
+            let content: string;
+            try {
+                const stat = fs.fstatSync(fd);
+                content = readFromOpenFile(fd, stat.size).toString("utf8");
+            } finally {
+                fs.closeSync(fd);
             }
 
             if (lines) {

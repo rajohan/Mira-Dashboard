@@ -7,6 +7,7 @@ import {
     guardedPath,
     mkdirGuarded,
     openGuarded,
+    readFromOpenFile,
     statGuarded,
     writeTextGuarded,
 } from "../lib/guardedOps.js";
@@ -68,19 +69,6 @@ function getImageMimeType(filename: string): string {
         bmp: "image/bmp",
     };
     return mimeTypes[ext || ""] || "application/octet-stream";
-}
-
-function readFromOpenFile(fd: number, byteLength: number): Buffer {
-    const buffer = Buffer.alloc(byteLength);
-    let offset = 0;
-
-    while (offset < byteLength) {
-        const bytesRead = fs.readSync(fd, buffer, offset, byteLength - offset, offset);
-        if (bytesRead === 0) break;
-        offset += bytesRead;
-    }
-
-    return offset === byteLength ? buffer : buffer.subarray(0, offset);
 }
 
 function shouldHideFile(name: string): boolean {

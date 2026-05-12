@@ -8,8 +8,8 @@ import gateway from "../gateway.js";
 import {
     guardedPath,
     mkdirGuarded,
-    readJson5Guarded,
-    writeTextGuarded,
+    readTextNoFollowGuarded,
+    writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
 
@@ -792,15 +792,26 @@ export default function agentsRoutes(app: express.Application): void {
 
             const metadataDir = Path.dirname(metadataPath);
 
-            // Ensure directory exists (mkdirSync is recursive, so no TOCTOU risk)
             // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
             mkdirGuarded(guardedPath(metadataDir), { recursive: true });
+
+            const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+            const realMetadataDir = FS.realpathSync(metadataDir);
+            if (
+                realMetadataDir !== realAgentsDir &&
+                !realMetadataDir.startsWith(realAgentsDir + Path.sep)
+            ) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
+            }
+
+            const safeMetadataPath = Path.join(realMetadataDir, "metadata.json");
 
             // Read existing metadata or create new (atomic read, no existsSync check)
             let metadata: AgentMetadata = {};
             try {
-                // lgtm[js/path-injection] metadataPath is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
-                metadata = JSON5.parse(readJson5Guarded(guardedPath(metadataPath)));
+                // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
+                metadata = JSON5.parse(readTextNoFollowGuarded(guardedPath(safeMetadataPath)));
             } catch {
                 // File doesn't exist or is unreadable; start fresh
             }
@@ -841,9 +852,15 @@ export default function agentsRoutes(app: express.Application): void {
 
             metadata.updatedAt = ts;
 
-            // Write back
-            await writeTextGuarded(
-                guardedPath(metadataPath),
+            const latestMetadataDir = FS.realpathSync(metadataDir);
+            if (latestMetadataDir !== realMetadataDir) {
+                res.status(400).json({ error: "Invalid agent metadata path" });
+                return;
+            }
+
+            // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
+            await writeTextNoFollowGuarded(
+                guardedPath(Path.join(latestMetadataDir, "metadata.json")),
                 JSON.stringify(metadata, null, 2)
             );
             res.json(metadata);
