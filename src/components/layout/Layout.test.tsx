@@ -106,6 +106,42 @@ describe("Layout", () => {
         expect(tasksLink!.className).toContain("bg-accent-500");
     });
 
+    it("shows pull request count badges for active and inactive PR routes", async () => {
+        hooks.usePullRequests.mockReturnValue({ data: [{ number: 1 }, { number: 2 }] });
+        hooks.useLocation.mockReturnValue({ pathname: "/tasks" });
+
+        const { rerender } = render(
+            <Layout>
+                <p>Content</p>
+            </Layout>
+        );
+
+        expect(await screen.findByText("2")).toHaveClass("bg-accent-500/20");
+
+        hooks.useLocation.mockReturnValue({ pathname: "/pull-requests" });
+        rerender(
+            <Layout>
+                <p>Content</p>
+            </Layout>
+        );
+
+        expect(screen.getByText("2")).toHaveClass("bg-white/20");
+    });
+
+    it("falls back to the dashboard title for unknown routes", async () => {
+        hooks.useLocation.mockReturnValue({ pathname: "/unknown" });
+
+        render(
+            <Layout>
+                <p>Content</p>
+            </Layout>
+        );
+
+        expect(
+            await screen.findByRole("heading", { name: "Mira Dashboard" })
+        ).toBeInTheDocument();
+    });
+
     it("shows OpenClaw version from system.host cache", async () => {
         hooks.useCacheEntry.mockReturnValue({
             data: { data: { version: { current: "2026.5.4" } } },
@@ -144,10 +180,18 @@ describe("Layout", () => {
         // Open sidebar via hamburger
         await user.click(screen.getByRole("button", { name: "Open navigation menu" }));
 
-        // Close via X button inside sidebar (use first match)
-        const closeButtons = screen.getAllByRole("button", {
+        // Close via X button inside sidebar.
+        let closeButtons = screen.getAllByRole("button", {
             name: "Close navigation menu",
         });
         await user.click(closeButtons[0]);
+
+        await user.click(screen.getByRole("button", { name: "Open navigation menu" }));
+
+        // Close via overlay on mobile.
+        closeButtons = screen.getAllByRole("button", {
+            name: "Close navigation menu",
+        });
+        await user.click(closeButtons.at(-1)!);
     });
 });

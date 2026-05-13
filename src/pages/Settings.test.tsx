@@ -303,6 +303,10 @@ describe("Settings page", () => {
 
         await user.click(screen.getByRole("button", { name: "Restart" }));
         expect(screen.getByTestId("modal")).toHaveTextContent("Restart Gateway");
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Restart" }));
         await user.click(screen.getAllByRole("button", { name: "Restart" }).at(-1)!);
         expect(hooks.restartGateway).toHaveBeenCalledTimes(1);
     });
@@ -350,5 +354,24 @@ describe("Settings page", () => {
         await waitFor(() => {
             expect(screen.queryByText("Patch failed")).not.toBeInTheDocument();
         });
+    });
+
+    it("shows fallback and section-specific save errors", async () => {
+        const user = userEvent.setup();
+        hooks.updateConfig
+            .mockRejectedValueOnce("model failed")
+            .mockRejectedValueOnce(new Error("Tool patch failed"))
+            .mockRejectedValueOnce(new Error("Channel patch failed"));
+
+        render(<Settings />);
+
+        await user.click(screen.getByRole("button", { name: "Save model" }));
+        expect(await screen.findByText("Failed to save")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Save tools" }));
+        expect(await screen.findByText("Tool patch failed")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Save channels" }));
+        expect(await screen.findByText("Channel patch failed")).toBeInTheDocument();
     });
 });

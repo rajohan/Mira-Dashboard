@@ -66,6 +66,8 @@ describe("quota notifications", () => {
 
     beforeEach(() => {
         db.exec("BEGIN TRANSACTION");
+        db.exec("DELETE FROM notifications WHERE source = 'quota'");
+        db.exec("DELETE FROM quota_alert_state");
         process.env.FAKE_OPENROUTER_PERCENT = "91";
         delete process.env.FAKE_QUOTAS_JSON;
     });

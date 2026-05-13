@@ -10,7 +10,7 @@ interface LogLineProps {
 export function LogLine({ log }: LogLineProps) {
     const level = typeof log.level === "string" ? log.level : "";
     const subsystem = typeof log.subsystem === "string" ? log.subsystem : "";
-    const message = typeof log.msg === "string" ? log.msg : String(log.raw || "");
+    const message = typeof log.msg === "string" ? log.msg : String(log.raw ?? "");
 
     return (
         <div className="hover:bg-primary-800/50 flex flex-wrap items-start gap-x-2 gap-y-1 px-2 py-1 sm:flex-nowrap sm:px-4 sm:py-0.5">
@@ -23,7 +23,7 @@ export function LogLine({ log }: LogLineProps) {
                 <span
                     className={`flex-shrink-0 rounded px-1 py-0.5 text-xs ${getLevelColor(level)}`}
                 >
-                    {level.toUpperCase().slice(0, 5) || level}
+                    {level.toUpperCase().slice(0, 5)}
                 </span>
             )}
             {subsystem && (

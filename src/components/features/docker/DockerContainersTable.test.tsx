@@ -241,6 +241,8 @@ describe("DockerContainersTable", () => {
         expect(onDetails).toHaveBeenNthCalledWith(2, "paused");
 
         await user.click(screen.getByRole("button", { name: "State" }));
+        await user.click(screen.getByRole("button", { name: "State" }));
+        await user.click(screen.getByRole("button", { name: "Health" }));
         await user.click(screen.getByRole("button", { name: "CPU" }));
         await user.click(screen.getByRole("button", { name: "Memory" }));
 

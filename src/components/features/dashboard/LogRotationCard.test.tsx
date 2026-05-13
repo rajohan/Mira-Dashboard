@@ -64,6 +64,19 @@ describe("LogRotationCard", () => {
         expect(realRunMutate).toHaveBeenCalledTimes(1);
     });
 
+    it("shows empty last-run state when status is loaded", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByText("No recorded run yet")).toBeInTheDocument();
+    });
+
     it("shows pending and empty states", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: true });
         hooks.useRunLogRotationDryRun.mockReturnValue({

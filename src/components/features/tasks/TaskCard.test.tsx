@@ -47,6 +47,15 @@ describe("TaskCard", () => {
         expect(onClick).toHaveBeenCalledTimes(1);
     });
 
+    it("stops card clicks from the drag handle", async () => {
+        const onClick = vi.fn();
+        render(<TaskCard task={makeTask()} onClick={onClick} />);
+
+        await userEvent.click(screen.getByRole("button"));
+
+        expect(onClick).not.toHaveBeenCalled();
+    });
+
     it("shows recurring marker, fallback avatar, and dragging styling", () => {
         render(
             <TaskCard

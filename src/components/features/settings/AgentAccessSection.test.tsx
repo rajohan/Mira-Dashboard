@@ -56,7 +56,9 @@ describe("AgentAccessSection", () => {
         expect(screen.getByText("Web Fetch")).toBeInTheDocument();
         expect(screen.queryByText("Shell Commands")).not.toBeInTheDocument();
 
-        await user.click(screen.getAllByRole("switch")[1]);
+        const webSwitches = screen.getAllByRole("switch");
+        await user.click(webSwitches[0]!);
+        await user.click(webSwitches[1]!);
         await user.click(screen.getByRole("button", { name: "Save access control" }));
 
         expect(onSave).toHaveBeenLastCalledWith([
@@ -64,7 +66,7 @@ describe("AgentAccessSection", () => {
             {
                 id: "researcher",
                 name: "Researcher",
-                tools: { allow: ["web_fetch", "web_search"], deny: [] },
+                tools: { allow: [], deny: [] },
             },
         ]);
 

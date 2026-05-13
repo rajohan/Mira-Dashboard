@@ -117,6 +117,32 @@ describe("Login page", () => {
         expect(await screen.findByText("Failed to load auth state")).toBeInTheDocument();
     });
 
+    it("falls back when authentication error JSON cannot be parsed", async () => {
+        const user = userEvent.setup();
+        mocks.fetch
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            )
+            .mockResolvedValueOnce({
+                ok: false,
+                json: async () => {
+                    throw new Error("bad json");
+                },
+            })
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            );
+
+        render(<Login />);
+
+        await screen.findByText("Log in with your dashboard username and password");
+        await user.type(screen.getByPlaceholderText("Enter your username"), "raymond");
+        await user.type(screen.getByPlaceholderText("Enter your password"), "wrong");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        expect(await screen.findByText("Authentication failed")).toBeInTheDocument();
+    });
+
     it("shows authentication errors and refreshes bootstrap state", async () => {
         const user = userEvent.setup();
         mocks.fetch

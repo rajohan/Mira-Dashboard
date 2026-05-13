@@ -24,6 +24,24 @@ describe("GitOverviewCard", () => {
         expect(screen.getByText("Git cache unavailable.")).toBeInTheDocument();
     });
 
+    it("shows green dirty repo count when every repo is clean", () => {
+        hooks.useCacheEntry.mockReturnValue({
+            data: {
+                data: {
+                    checkedAt: "2026-05-10T10:00:00.000Z",
+                    dirtyRepos: [],
+                    repos: [],
+                },
+            },
+            isError: false,
+            isLoading: false,
+        });
+
+        render(<GitOverviewCard />);
+
+        expect(screen.getAllByText("0")[1]).toHaveClass("text-green-300");
+    });
+
     it("summarizes tracked git repos and dirty status", () => {
         hooks.useCacheEntry.mockReturnValue({
             data: {

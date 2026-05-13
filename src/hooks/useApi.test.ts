@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { authStore } from "../stores/authStore";
-import { apiDelete, apiFetch, apiPost, apiPut, UnauthorizedError } from "./useApi";
+import {
+    apiDelete,
+    apiDeleteRequired,
+    apiFetch,
+    apiFetchRequired,
+    apiPatchRequired,
+    apiPost,
+    apiPostRequired,
+    apiPut,
+    apiPutRequired,
+    requireApiResponse,
+    UnauthorizedError,
+} from "./useApi";
 
 function mockFetch(response: Partial<Response> & { json?: () => Promise<unknown> }) {
     const fetchMock = vi.fn().mockResolvedValue(response);
@@ -41,6 +53,75 @@ describe("apiFetch", () => {
             "/api/tasks/1",
             expect.objectContaining({ method: "DELETE" })
         );
+    });
+
+    it("parses text responses and returns undefined for empty bodies", async () => {
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ ok: true }),
+        } as Partial<Response>);
+
+        await expect(apiFetch("/text-json")).resolves.toEqual({ ok: true });
+
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => "   ",
+        } as Partial<Response>);
+
+        await expect(apiFetch("/empty-text")).resolves.toBeUndefined();
+    });
+
+    it("returns undefined for no-content responses", async () => {
+        mockFetch({ ok: true, status: 204, text: async () => "" } as Partial<Response>);
+
+        await expect(apiFetch("/empty")).resolves.toBeUndefined();
+    });
+
+    it("requires response bodies for required helpers", async () => {
+        const emptyResponse = new Map<string, unknown>().get("missing");
+        expect(requireApiResponse({ ok: true })).toEqual({ ok: true });
+        expect(() => requireApiResponse(emptyResponse)).toThrow(
+            "API response body was empty"
+        );
+
+        mockFetch({ ok: true, status: 204, text: async () => "" } as Partial<Response>);
+        await expect(apiFetchRequired("/empty")).rejects.toThrow(
+            "API response body was empty"
+        );
+
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => '{"ok":true}',
+        } as Partial<Response>);
+        await expect(apiPostRequired("/post")).resolves.toEqual({ ok: true });
+
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => '{"ok":true}',
+        } as Partial<Response>);
+        await expect(apiPutRequired("/put", { ok: true })).resolves.toEqual({
+            ok: true,
+        });
+
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => '{"ok":true}',
+        } as Partial<Response>);
+        await expect(apiPatchRequired("/patch", { ok: true })).resolves.toEqual({
+            ok: true,
+        });
+
+        mockFetch({
+            ok: true,
+            status: 200,
+            text: async () => '{"ok":true}',
+        } as Partial<Response>);
+        await expect(apiDeleteRequired("/delete")).resolves.toEqual({ ok: true });
     });
 
     it("throws API error messages", async () => {

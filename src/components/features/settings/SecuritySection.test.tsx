@@ -5,6 +5,26 @@ import { describe, expect, it } from "vitest";
 import { SecuritySection } from "./SecuritySection";
 
 describe("SecuritySection", () => {
+    it("renders default security fallback values", async () => {
+        render(
+            <SecuritySection
+                authProfiles={0}
+                commandRestartEnabled={false}
+                elevatedEnabled
+                execAsk="off"
+                execSecurity="deny"
+                ownerAllowFrom=""
+                redactionMode=""
+            />
+        );
+
+        await userEvent.click(screen.getByRole("button", { name: /Security/u }));
+
+        expect(screen.getByText("None")).toBeInTheDocument();
+        expect(screen.getByText("default")).toBeInTheDocument();
+        expect(screen.getByText("deny")).toBeInTheDocument();
+    });
+
     it("renders read-only security settings", async () => {
         render(
             <SecuritySection

@@ -19,9 +19,10 @@ const skills: Skill[] = [
         source: "workspace",
     },
     {
+        description: undefined,
         enabled: false,
         name: "custom-skill",
-        source: "extra",
+        source: undefined,
     },
 ];
 
@@ -34,9 +35,16 @@ describe("SkillsSection", () => {
         expect(screen.getByText("1/3 enabled")).toBeInTheDocument();
         expect(screen.getByText("Browser automation helpers")).toBeInTheDocument();
 
+        await userEvent.click(screen.getByRole("button", { name: "enabled" }));
+        expect(screen.getByText("browser-automation")).toBeInTheDocument();
+        expect(screen.queryByText("task-tracking")).not.toBeInTheDocument();
+
         await userEvent.click(screen.getByRole("button", { name: "disabled" }));
         expect(screen.queryByText("browser-automation")).not.toBeInTheDocument();
         expect(screen.getByText("task-tracking")).toBeInTheDocument();
+
+        expect(screen.getByText("custom-skill")).toBeInTheDocument();
+        expect(screen.getAllByText("Extra").length).toBeGreaterThan(0);
 
         await userEvent.click(screen.getByRole("button", { name: /Workspace/u }));
         expect(screen.queryByText("custom-skill")).not.toBeInTheDocument();

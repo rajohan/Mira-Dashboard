@@ -138,6 +138,23 @@ describe("TaskDetailModal", () => {
         expect(props.onDelete).toHaveBeenCalledTimes(1);
     });
 
+    it("handles remaining move, assign, and edit cancel controls", async () => {
+        const user = userEvent.setup();
+        const props = renderModal({
+            task: makeTask({ assignees: [], labels: [{ name: "todo" }] }),
+        });
+
+        await user.click(screen.getByRole("button", { name: "Move to In Progress" }));
+        await user.click(screen.getByRole("button", { name: "Move to Blocked" }));
+        await user.click(screen.getByRole("button", { name: "Assign to Raymond" }));
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        await user.click(screen.getByRole("button", { name: "Cancel Edit" }));
+
+        expect(props.onMove).toHaveBeenNthCalledWith(1, "in-progress");
+        expect(props.onMove).toHaveBeenNthCalledWith(2, "blocked");
+        expect(props.onAssign).toHaveBeenCalledWith("rajohan");
+    });
+
     it("saves task edits and clears automation when cron id is blank", async () => {
         const user = userEvent.setup();
         const onUpdate = vi.fn().mockResolvedValue(makeTask());

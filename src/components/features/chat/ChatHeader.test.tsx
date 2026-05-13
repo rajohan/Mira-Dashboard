@@ -93,4 +93,23 @@ describe("ChatHeader", () => {
         expect(onSelectSession).toHaveBeenNthCalledWith(1, "scratch");
         expect(onSelectSession).toHaveBeenNthCalledWith(2, "agent:coder:main");
     });
+
+    it("renders unknown model and default thinking fallbacks", () => {
+        render(
+            <ChatHeader
+                selectedSession={{ ...session, model: "", thinkingLevel: undefined }}
+                selectedSessionKey="agent:main:main"
+                sessionOptions={[{ label: "Main", value: "agent:main:main" }]}
+                agentOptions={[]}
+                showThinking
+                showTools
+                onToggleThinking={vi.fn()}
+                onToggleTools={vi.fn()}
+                onSelectSession={vi.fn()}
+            />
+        );
+
+        expect(screen.getByText(/Unknown/u)).toBeInTheDocument();
+        expect(screen.getByText(/Thinking: default/u)).toBeInTheDocument();
+    });
 });

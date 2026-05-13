@@ -33,6 +33,19 @@ describe("terminal hooks", () => {
                     startedAt: 1,
                     endedAt: 2,
                 }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    jobId: "",
+                    status: "running",
+                    code: null,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: 1,
+                    endedAt: null,
+                }),
             });
         vi.stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
@@ -58,6 +71,10 @@ describe("terminal hooks", () => {
             wrapper,
         });
         expect(disabledJob.current.fetchStatus).toBe("idle");
+        await act(async () => {
+            await disabledJob.current.refetch();
+        });
+        expect(fetchMock).toHaveBeenLastCalledWith("/api/exec/", expect.any(Object));
     });
 
     it("manages command history", () => {

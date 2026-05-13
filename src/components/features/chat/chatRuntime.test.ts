@@ -43,6 +43,7 @@ describe("chat runtime helpers", () => {
         ]);
 
         expect(isSameSessionKey("agent:main:main", "MAIN")).toBe(true);
+        expect(isSameSessionKey("main", "agent:main:MAIN")).toBe(true);
         expect(isSameSessionKey("agent:main:main", "agent:main:MAIN")).toBe(true);
         expect(isSameSessionKey("agent:main:main", "agent:ops:main")).toBe(false);
         expect(isSameSessionKey(undefined, "main")).toBe(false);

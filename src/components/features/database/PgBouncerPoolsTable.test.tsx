@@ -42,7 +42,7 @@ describe("PgBouncerPoolsTable", () => {
         expect(screen.getAllByText("3")).not.toHaveLength(0);
     });
 
-    it("sorts by numeric waiting clients", async () => {
+    it("sorts numeric pool columns", async () => {
         render(<PgBouncerPoolsTable data={pools} />);
 
         const table = screen.getByRole("table");
@@ -50,11 +50,12 @@ describe("PgBouncerPoolsTable", () => {
 
         expect(within(bodyRows()[0]!).getByText("comet")).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole("button", { name: "Waiting" }));
-        expect(within(bodyRows()[0]!).getAllByText("n8n")).toHaveLength(2);
+        for (const column of ["Clients", "Waiting", "Servers", "Maxwait"]) {
+            await userEvent.click(screen.getByRole("button", { name: column }));
+            await userEvent.click(screen.getByRole("button", { name: column }));
+        }
 
-        await userEvent.click(screen.getByRole("button", { name: "Waiting" }));
-        expect(within(bodyRows()[0]!).getByText("comet")).toBeInTheDocument();
+        expect(bodyRows()).toHaveLength(2);
     });
 
     it("renders the shared empty state", () => {

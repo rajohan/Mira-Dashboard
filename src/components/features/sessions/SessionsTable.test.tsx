@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -95,6 +95,24 @@ describe("SessionsTable", () => {
         expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
         expect(handlers.onSelectSession).not.toHaveBeenCalled();
+    });
+
+    it("sorts and handles desktop table row/actions", async () => {
+        const user = userEvent.setup();
+        const handlers = renderTable();
+        const table = screen.getByRole("table");
+
+        await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
+        await user.click(within(table).getAllByRole("row")[1]!);
+
+        const tableActionButton = within(table)
+            .getAllByRole("button")
+            .find((button) => button.getAttribute("aria-haspopup") === "menu")!;
+        await user.click(tableActionButton);
+        await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
+
+        expect(handlers.onSelectSession).toHaveBeenCalled();
+        expect(handlers.onCompact).toHaveBeenCalled();
     });
 
     it("handles keyboard selection and fallback labels", () => {

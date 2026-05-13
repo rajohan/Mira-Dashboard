@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -120,6 +120,14 @@ describe("BackupOverviewCard", () => {
 
         await user.click(screen.getByRole("button", { name: /Run filesystem backup/u }));
         expect(screen.getByText(/Start a Kopia backup now\?/u)).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        await waitFor(() => {
+            expect(
+                screen.queryByText(/Start a Kopia backup now\?/u)
+            ).not.toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /Run filesystem backup/u }));
         await user.click(screen.getByRole("button", { name: "Run backup" }));
 
         expect(hooks.runKopiaBackup).toHaveBeenCalledTimes(1);

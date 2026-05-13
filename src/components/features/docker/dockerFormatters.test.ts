@@ -23,6 +23,7 @@ describe("docker formatters", () => {
         const missingMemory: string | undefined = undefined;
         expect(formatDockerMemory(missingMemory)).toBe("—");
         expect(formatDockerMemory("bad value")).toBe("bad value");
+        expect(formatDockerMemory("1 XB / 2 MB")).toBe("1 XB / 2 MB");
         expect(formatDockerMemory("512KiB / 2MiB")).toBe("512 KB / 2.0 MB");
         expect(formatDockerMemory("1.5 GiB / 10 GB")).toBe("1.5 GB / 10 GB");
         expect(formatDockerMemory("0 B / 2 MiB")).toBe("0 B / 2 MiB");

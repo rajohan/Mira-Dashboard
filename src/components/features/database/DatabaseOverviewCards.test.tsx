@@ -22,6 +22,19 @@ const overview: DatabaseOverviewResponse["overview"] = {
 };
 
 describe("DatabaseOverviewCards", () => {
+    it("renders zero fallbacks for missing active/idle connection counts", () => {
+        render(
+            <DatabaseOverviewCards
+                overview={{
+                    ...overview,
+                    connections: { active: 0, idle: 0 },
+                }}
+            />
+        );
+
+        expect(screen.getByText("active 0 · idle 0")).toBeInTheDocument();
+    });
+
     it("renders formatted database overview metrics", () => {
         render(<DatabaseOverviewCards overview={overview} />);
 

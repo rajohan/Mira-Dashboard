@@ -102,7 +102,7 @@ describe("NotificationBell", () => {
 
     it("renders empty filtered state and disables bulk actions without notifications", async () => {
         const user = userEvent.setup();
-        hooks.useNotifications.mockReturnValue({ data: { items: [], unreadCount: 0 } });
+        hooks.useNotifications.mockReturnValue({ data: undefined });
 
         render(<NotificationBell />);
 

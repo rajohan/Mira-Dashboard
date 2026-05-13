@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
@@ -58,7 +59,7 @@ const stats: DatabaseOverviewResponse["pgbouncerStats"] = [
 ];
 
 describe("DatabasesTable", () => {
-    it("merges database, pool, and stats rows", () => {
+    it("merges database, pool, stats rows, and sorts numeric columns", async () => {
         const { container } = render(
             <DatabasesTable databases={databases} pools={pools} stats={stats} />
         );
@@ -71,5 +72,13 @@ describe("DatabasesTable", () => {
         expect(container).toHaveTextContent("Clients: 4");
         expect(container).toHaveTextContent("Waiting: 1");
         expect(container).toHaveTextContent("Clients: —");
+
+        const table = screen.getByRole("table");
+        const bodyRows = () => within(table).getAllByRole("row").slice(1);
+        for (const column of ["Size", "Connections", "Cache hit"]) {
+            await userEvent.click(screen.getByRole("button", { name: column }));
+            await userEvent.click(screen.getByRole("button", { name: column }));
+        }
+        expect(bodyRows()).toHaveLength(2);
     });
 });
