@@ -82,15 +82,20 @@ vi.mock("../components/ui/Modal", () => ({
     Modal: ({
         children,
         isOpen,
+        onClose,
         title,
     }: {
         children: React.ReactNode;
         isOpen: boolean;
+        onClose: () => void;
         title: string;
     }) =>
         isOpen ? (
             <section data-testid="modal">
                 <h2>{title}</h2>
+                <button type="button" onClick={onClose}>
+                    Close {title}
+                </button>
                 {children}
             </section>
         ) : null,
@@ -506,6 +511,60 @@ describe("Docker page", () => {
         expect(docker.stopExec).toHaveBeenCalledWith("job-1");
     });
 
+    it("renders updater loading and empty branches", () => {
+        mockDocker({
+            updaterEvents: { data: [], isLoading: true },
+            updaterServices: {
+                data: { services: [], summary: undefined },
+                isLoading: true,
+            },
+        });
+
+        const { rerender } = render(<Docker />);
+        expect(screen.getByText("Loading updater services...")).toBeInTheDocument();
+        expect(screen.getByText("Loading updater history...")).toBeInTheDocument();
+
+        mockDocker({
+            updaterEvents: { data: [], isLoading: false },
+            updaterServices: {
+                data: { services: [], summary: undefined },
+                isLoading: false,
+            },
+        });
+        rerender(<Docker />);
+        expect(
+            screen.getByText("No pending updater candidates right now.")
+        ).toBeInTheDocument();
+        expect(screen.getByText("No updater events yet.")).toBeInTheDocument();
+        expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    });
+
+    it("renders fallback details, logs, and console states", async () => {
+        const user = userEvent.setup();
+        mockDocker({
+            container: { data: null, isLoading: true },
+        });
+
+        const { rerender } = render(<Docker />);
+        await user.click(screen.getByRole("button", { name: "Details web" }));
+        expect(screen.getByText("Loading container details...")).toBeInTheDocument();
+
+        mockDocker({
+            container: { data: null, isLoading: false },
+        });
+        rerender(<Docker />);
+        expect(screen.getByText("Failed to load container details.")).toBeInTheDocument();
+
+        docker.useDockerContainerLogs.mockReturnValue({
+            data: "",
+            isFetching: true,
+            refetch: vi.fn(),
+        });
+        rerender(<Docker />);
+        await user.click(screen.getByRole("button", { name: "Logs web" }));
+        expect(screen.getByText("No logs")).toBeInTheDocument();
+    });
+
     it("reports action failures", async () => {
         const user = userEvent.setup();
         docker.action.mockRejectedValueOnce(new Error("restart failed"));
@@ -517,5 +576,166 @@ describe("Docker page", () => {
             await screen.findByText(/Failed to restart container/)
         ).toBeInTheDocument();
         expect(screen.getByText(/restart failed/)).toBeInTheDocument();
+    });
+
+    it("covers fallback action output, persisted updater data, and modal close handlers", async () => {
+        const user = userEvent.setup();
+        docker.action.mockResolvedValueOnce({ output: "" });
+        docker.manualUpdate.mockResolvedValueOnce({ stderr: "manual warning" });
+        docker.prune.mockResolvedValueOnce({});
+        docker.useRunDockerUpdater.mockReturnValue({
+            data: { last: true },
+            isPending: true,
+            mutateAsync: docker.runUpdater,
+        });
+
+        render(<Docker />);
+
+        expect(screen.getByText(/"last": true/)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
+
+        await user.click(screen.getByRole("button", { name: "Restart web" }));
+        expect(await screen.findByText("restart completed.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Dismiss" }));
+        expect(screen.queryByText("restart completed.")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(await screen.findByText(/updated=0 failed=0/)).toBeInTheDocument();
+        expect(screen.getByText(/manual warning/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Prune images" }));
+        expect(
+            await screen.findByText("Unused Docker images removed.")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Details web" }));
+        await user.click(screen.getByRole("button", { name: "Close web" }));
+        expect(screen.queryByText("Runtime")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Logs web" }));
+        await user.click(screen.getByRole("button", { name: "Close web logs" }));
+        expect(screen.queryByText("container log line")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Console web" }));
+        await user.click(screen.getByRole("button", { name: "Close web console" }));
+        expect(
+            screen.queryByPlaceholderText("Command to run inside container")
+        ).not.toBeInTheDocument();
+    });
+
+    it("covers default data, unknown errors, pending confirmation guards, and sparse details", async () => {
+        const user = userEvent.setup();
+        const sparseContainer = {
+            ...containers[0],
+            createdAt: null,
+            mounts: [
+                {
+                    destination: "/readonly",
+                    mode: "",
+                    readOnly: true,
+                    source: "/host",
+                    type: "volume",
+                },
+            ],
+            networks: [
+                {
+                    gateway: "",
+                    ipAddress: "",
+                    macAddress: "",
+                    name: "empty-net",
+                },
+            ],
+            startedAt: null,
+            stats: {},
+        };
+        mockDocker({
+            container: { data: sparseContainer, isLoading: false },
+            containers: {
+                data: undefined,
+                error: "plain error",
+                isError: true,
+                isLoading: false,
+            },
+            images: { data: undefined, isLoading: false },
+            updaterEvents: { data: undefined, isLoading: false },
+            updaterServices: { data: undefined, isLoading: false },
+            volumes: { data: undefined, isLoading: false },
+        });
+
+        const { rerender } = render(<Docker />);
+        expect(screen.getByText("Unknown container query error")).toBeInTheDocument();
+        expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+
+        mockDocker({
+            container: { data: sparseContainer, isLoading: false },
+        });
+        docker.useDeleteDockerImage.mockReturnValue({
+            isPending: true,
+            mutateAsync: docker.deleteImage,
+        });
+        docker.useDockerManualUpdate.mockReturnValue({
+            isPending: true,
+            mutateAsync: docker.manualUpdate,
+        });
+        rerender(<Docker />);
+
+        await user.click(screen.getByRole("button", { name: "Details web" }));
+        expect(screen.getByText("empty-net")).toBeInTheDocument();
+        expect(screen.getByText(/volume · default · ro/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Delete image nginx" }));
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.getByTestId("confirm-modal")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(docker.deleteImage).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.getByTestId("confirm-modal")).toBeInTheDocument();
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(docker.manualUpdate).not.toHaveBeenCalled();
+    });
+
+    it("reports stack, updater, manual update, prune, and delete failures", async () => {
+        const user = userEvent.setup();
+        vi.mocked(fetch).mockResolvedValueOnce({
+            json: async () => ({ error: "compose failed" }),
+            ok: false,
+        } as Response);
+        docker.runUpdater.mockRejectedValueOnce("updater boom");
+        docker.manualUpdate.mockRejectedValueOnce(new Error("manual failed"));
+        docker.prune.mockRejectedValueOnce(new Error("prune failed"));
+        docker.deleteImage.mockRejectedValueOnce(new Error("delete failed"));
+
+        render(<Docker />);
+
+        await user.click(screen.getByRole("button", { name: "Restart stack" }));
+        expect(
+            await screen.findByText(/Failed to restart Docker stack/)
+        ).toBeInTheDocument();
+        expect(screen.getByText(/compose failed/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Run updater now" }));
+        expect(await screen.findByText(/Docker updater failed/)).toBeInTheDocument();
+        expect(screen.getByText(/updater boom/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(await screen.findByText(/Manual update failed/)).toBeInTheDocument();
+        expect(screen.getByText(/manual failed/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Prune volumes" }));
+        expect(
+            await screen.findByText(/Failed to remove unused Docker volumes/)
+        ).toBeInTheDocument();
+        expect(screen.getByText(/prune failed/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Delete image nginx" }));
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(
+            await screen.findByText(/Failed to delete Docker image/)
+        ).toBeInTheDocument();
+        expect(screen.getByText(/delete failed/)).toBeInTheDocument();
     });
 });

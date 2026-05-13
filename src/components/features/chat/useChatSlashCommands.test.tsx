@@ -44,6 +44,7 @@ function renderSlashCommands(
     overrides: {
         attachments?: ChatSendAttachment[];
         request?: ReturnType<typeof vi.fn>;
+        chatModelOptions?: Array<{ id?: string; label?: string; name?: string }>;
         selectedSession?: Session | null;
         selectedSessionKey?: string;
     } = {}
@@ -72,12 +73,14 @@ function renderSlashCommands(
         const shouldStickToBottomReference = useRef(false);
         const runCommand = useChatSlashCommands({
             attachments: overrides.attachments || [],
-            chatModelOptions: [
+            chatModelOptions: overrides.chatModelOptions || [
                 { id: "codex", label: "Codex" },
                 { id: "kimi", label: "Kimi" },
             ],
             request: request as unknown as ChatRequest,
-            selectedSession: overrides.selectedSession ?? makeSession(),
+            selectedSession: Object.hasOwn(overrides, "selectedSession")
+                ? (overrides.selectedSession ?? null)
+                : makeSession(),
             selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
             setDraft,
             setHistoryLoadVersion,
@@ -226,6 +229,110 @@ describe("useChatSlashCommands", () => {
         expect(systemText).toContain("Session usage:");
     });
 
+    it("covers fallback status/model text and unwired slash commands", async () => {
+        const { request, result } = renderSlashCommands({
+            chatModelOptions: [
+                { label: "Label-only" },
+                { name: "Name-only" },
+                {},
+                ...Array.from({ length: 12 }, (_, index) => ({ id: `model-${index}` })),
+            ],
+            selectedSession: makeSession({
+                displayLabel: "",
+                elevatedLevel: "",
+                fastMode: false,
+                key: "session-a",
+                model: "",
+                reasoningLevel: "",
+                status: "",
+                thinkingLevel: "",
+                verboseLevel: "",
+            }),
+        });
+
+        await act(async () => {
+            await result.current.runCommand("/commands");
+            await result.current.runCommand("/models");
+            await result.current.runCommand("/model");
+            await result.current.runCommand("/status");
+            await result.current.runCommand("/fast off");
+            await result.current.runCommand("/unknown");
+        });
+
+        expect(request).toHaveBeenCalledWith("sessions.patch", {
+            fastMode: false,
+            key: "session-a",
+        });
+        const systemText = result.current.messages
+            .map((message) => message.text)
+            .join("\n");
+        expect(systemText).toContain("Label-only");
+        expect(systemText).toContain("Name-only");
+        expect(systemText).toContain("+2 more");
+        expect(systemText).toContain("Session: session-a");
+        expect(systemText).toContain("Status: unknown");
+        expect(systemText).toContain("Model: default");
+        expect(systemText).toContain("Fast mode disabled.");
+        expect(result.current.sendError).toContain("/unknown is visible in autocomplete");
+    });
+
+    it("covers fallback runtime status values and command errors", async () => {
+        const request = vi
+            .fn()
+            .mockResolvedValueOnce({})
+            .mockRejectedValueOnce("patch failed");
+        const { result } = renderSlashCommands({
+            request,
+            selectedSession: null,
+            selectedSessionKey: "",
+        });
+        (window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(true);
+
+        await act(async () => {
+            await result.current.runCommand("/reset");
+            await result.current.runCommand("/model kimi");
+        });
+
+        expect(request).toHaveBeenCalledWith("sessions.reset", { key: "" });
+        expect(result.current.sendError).toBe("Failed to run /model");
+
+        await act(async () => {
+            await result.current.runCommand("/think");
+            await result.current.runCommand("/verbose");
+            await result.current.runCommand("/fast");
+            await result.current.runCommand("/reasoning");
+            await result.current.runCommand("/elevated");
+        });
+        const systemText = result.current.messages
+            .map((message) => message.text)
+            .join("\n");
+        expect(systemText).toContain("Current thinking level: default");
+        expect(systemText).toContain("Current verbose mode: off");
+        expect(systemText).toContain("Current fast mode: off");
+        expect(systemText).toContain("Current reasoning visibility: off");
+        expect(systemText).toContain("Current elevated mode: off");
+    });
+
+    it("handles missing selected sessions and empty model lists", async () => {
+        const { request, result } = renderSlashCommands({
+            chatModelOptions: [],
+            selectedSession: null,
+            selectedSessionKey: "",
+        });
+
+        await act(async () => {
+            await result.current.runCommand("/status");
+            await result.current.runCommand("/models");
+        });
+
+        expect(request).not.toHaveBeenCalled();
+        expect(result.current.messages.map((message) => message.text)).toEqual([
+            "hello",
+            "No selected session.",
+            "No configured models returned by the gateway.",
+        ]);
+    });
+
     it("clears local chat view and stops active runs", async () => {
         const { request, result } = renderSlashCommands();
 
@@ -293,7 +400,9 @@ describe("useChatSlashCommands", () => {
         const request = vi
             .fn()
             .mockResolvedValueOnce({ compacted: false, reason: "too small" })
-            .mockRejectedValueOnce(new Error("compact failed"));
+            .mockResolvedValueOnce({ compacted: false })
+            .mockResolvedValueOnce({ compacted: true })
+            .mockRejectedValueOnce("compact failed");
         const { result } = renderSlashCommands({ request });
 
         await act(async () => {
@@ -308,8 +417,15 @@ describe("useChatSlashCommands", () => {
 
         await act(async () => {
             await result.current.runCommand("/compact");
+            await result.current.runCommand("/compact");
+            await result.current.runCommand("/compact");
         });
-        expect(result.current.sendError).toBe("compact failed");
+        expect(result.current.sendError).toBe("Failed to run /compact");
         expect(result.current.isSending).toBe(false);
+        const systemText = result.current.messages
+            .map((message) => message.text)
+            .join("\n");
+        expect(systemText).toContain("Compaction skipped.");
+        expect(systemText).toContain("Context compacted successfully.");
     });
 });

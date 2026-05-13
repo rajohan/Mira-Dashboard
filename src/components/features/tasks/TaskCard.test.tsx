@@ -14,6 +14,7 @@ vi.mock("@dnd-kit/sortable", () => ({
     }),
 }));
 
+/** Creates a task fixture for card rendering tests. */
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
         number: 42,

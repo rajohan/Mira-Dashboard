@@ -4,10 +4,22 @@ import path from "node:path";
 
 const DEFAULT_COVERAGE_DIR = "coverage/chunks";
 const DEFAULT_THRESHOLDS = {
-    branches: 78,
-    functions: 90,
-    lines: 89,
+    branches: 87,
+    functions: 96,
+    lines: 95,
+    statements: 95,
 };
+
+/** Parses and validates one numeric coverage threshold flag. */
+function parseThreshold(metricName, rawValue) {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+        throw new Error(
+            `Invalid --${metricName} value: "${rawValue}". Expected a number between 0 and 100.`
+        );
+    }
+    return value;
+}
 
 /** Parses CLI flags for coverage threshold checks. */
 function parseArgs(args) {
@@ -20,11 +32,25 @@ function parseArgs(args) {
         if (arg.startsWith("--coverage-dir=")) {
             options.coverageDir = arg.slice("--coverage-dir=".length);
         } else if (arg.startsWith("--branches=")) {
-            options.thresholds.branches = Number(arg.slice("--branches=".length));
+            options.thresholds.branches = parseThreshold(
+                "branches",
+                arg.slice("--branches=".length)
+            );
         } else if (arg.startsWith("--functions=")) {
-            options.thresholds.functions = Number(arg.slice("--functions=".length));
+            options.thresholds.functions = parseThreshold(
+                "functions",
+                arg.slice("--functions=".length)
+            );
         } else if (arg.startsWith("--lines=")) {
-            options.thresholds.lines = Number(arg.slice("--lines=".length));
+            options.thresholds.lines = parseThreshold(
+                "lines",
+                arg.slice("--lines=".length)
+            );
+        } else if (arg.startsWith("--statements=")) {
+            options.thresholds.statements = parseThreshold(
+                "statements",
+                arg.slice("--statements=".length)
+            );
         }
     }
 
@@ -116,12 +142,14 @@ function summarizeCoverage(coverageByFile) {
         branches: { covered: 0, total: 0 },
         functions: { covered: 0, total: 0 },
         lines: { covered: 0, total: 0 },
+        statements: { covered: 0, total: 0 },
     };
 
     for (const fileCoverage of coverageByFile.values()) {
         totals.branches.total += fileCoverage.branches.size;
         totals.functions.total += fileCoverage.functions.size;
         totals.lines.total += fileCoverage.lines.size;
+        totals.statements.total += fileCoverage.lines.size;
 
         totals.branches.covered += [...fileCoverage.branches.values()].filter(
             (hits) => hits > 0
@@ -129,9 +157,11 @@ function summarizeCoverage(coverageByFile) {
         totals.functions.covered += [...fileCoverage.functions.values()].filter(
             (hits) => hits > 0
         ).length;
-        totals.lines.covered += [...fileCoverage.lines.values()].filter(
+        const coveredLines = [...fileCoverage.lines.values()].filter(
             (hits) => hits > 0
         ).length;
+        totals.lines.covered += coveredLines;
+        totals.statements.covered += coveredLines;
     }
 
     return totals;
@@ -151,7 +181,7 @@ function formatMetric(name, metric, threshold) {
 function checkThresholds(summary, thresholds) {
     const failures = [];
 
-    for (const metricName of ["lines", "functions", "branches"]) {
+    for (const metricName of ["lines", "functions", "branches", "statements"]) {
         const actual = percentage(summary[metricName]);
         const required = thresholds[metricName];
         if (actual < required) {
@@ -183,6 +213,7 @@ console.log(`Merged ${lcovFiles.length} LCOV reports from ${coverageDir}.`);
 console.log(formatMetric("Lines", summary.lines, thresholds.lines));
 console.log(formatMetric("Functions", summary.functions, thresholds.functions));
 console.log(formatMetric("Branches", summary.branches, thresholds.branches));
+console.log(formatMetric("Statements", summary.statements, thresholds.statements));
 
 const failures = checkThresholds(summary, thresholds);
 

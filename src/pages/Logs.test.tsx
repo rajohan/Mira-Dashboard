@@ -2,11 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Logs } from "./Logs";
+import { compareLogFileNamesDescending, isNamedLogFile, Logs } from "./Logs";
 
 const mocks = vi.hoisted(() => ({
     createObjectUrl: vi.fn(() => "blob:logs"),
-    liveLogs: [] as Array<{ id: string; level: string; msg: string; raw: string }>,
+    liveLogs: [] as Array<{
+        id: string;
+        level?: unknown;
+        msg?: unknown;
+        raw?: unknown;
+    }>,
+    logsReady: true,
     measureElement: vi.fn(),
     refetchContent: vi.fn(),
     request: vi.fn(),
@@ -20,21 +26,43 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-    useLiveQuery: () => ({ data: mocks.liveLogs }),
+    useLiveQuery: (select: (query: { from: () => typeof mocks.liveLogs }) => unknown) => {
+        select({ from: () => mocks.liveLogs });
+        return { data: mocks.liveLogs };
+    },
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-    useVirtualizer: ({ count }: { count: number }) => ({
-        getTotalSize: () => count * 22,
-        getVirtualItems: () =>
-            Array.from({ length: count }, (_, index) => ({
-                index,
-                key: `row-${index}`,
-                start: index * 22,
-            })),
-        measureElement: mocks.measureElement,
-        scrollToIndex: mocks.scrollToIndex,
-    }),
+    useVirtualizer: ({
+        count,
+        estimateSize,
+        getItemKey,
+        getScrollElement,
+        measureElement,
+    }: {
+        count: number;
+        estimateSize: () => number;
+        getItemKey: (index: number) => string | number;
+        getScrollElement: () => Element | null;
+        measureElement: (element: Element) => number;
+    }) => {
+        getScrollElement();
+        estimateSize();
+        getItemKey(0);
+        getItemKey(count + 1);
+        measureElement({ getBoundingClientRect: () => ({ height: 22.2 }) } as Element);
+        return {
+            getTotalSize: () => count * 22,
+            getVirtualItems: () =>
+                Array.from({ length: count + (count > 0 ? 1 : 0) }, (_, index) => ({
+                    index,
+                    key: `row-${index}`,
+                    start: index * 22,
+                })),
+            measureElement: mocks.measureElement,
+            scrollToIndex: mocks.scrollToIndex,
+        };
+    },
 }));
 
 vi.mock("../collections/logs", () => ({
@@ -43,7 +71,7 @@ vi.mock("../collections/logs", () => ({
             yield ["existing-1", {}];
             yield ["existing-2", {}];
         },
-        isReady: () => true,
+        isReady: () => mocks.logsReady,
         utils: {
             writeDelete: mocks.writeDelete,
             writeInsert: mocks.writeInsert,
@@ -106,6 +134,7 @@ vi.mock("../components/ui/Select", () => ({
 }));
 
 function mockLogs(overrides = {}) {
+    mocks.logsReady = true;
     mocks.liveLogs = [
         {
             id: "1",
@@ -141,10 +170,25 @@ function mockLogs(overrides = {}) {
     }
 }
 
+describe("Logs helpers", () => {
+    it("recognizes named log files and sorts names descending", () => {
+        expect(isNamedLogFile({ name: "openclaw.log" })).toBe(true);
+        expect(isNamedLogFile({ name: "   " })).toBe(false);
+        expect(isNamedLogFile(null)).toBe(false);
+        expect(isNamedLogFile({ name: 123 })).toBe(false);
+        expect(
+            [{ name: "a.log" }, { name: "c.log" }, { name: undefined }].sort(
+                compareLogFileNamesDescending
+            )
+        ).toEqual([{ name: "c.log" }, { name: "a.log" }, { name: undefined }]);
+    });
+});
+
 describe("Logs page", () => {
     beforeEach(() => {
         mocks.measureElement.mockReset();
         mocks.refetchContent.mockResolvedValue({ data: "INFO loaded\nERROR failed" });
+        mocks.request.mockReset();
         mocks.request.mockResolvedValue(Promise.resolve());
         mocks.scrollToIndex.mockReset();
         mocks.useLogContent.mockReset();
@@ -276,6 +320,62 @@ describe("Logs page", () => {
         expect(
             screen.queryByRole("button", { name: "↓ Follow" })
         ).not.toBeInTheDocument();
+    });
+
+    it("retains previous log files and handles non-array data", () => {
+        const { rerender } = render(<Logs />);
+        expect(screen.getAllByLabelText("select")[0]).toHaveValue(
+            "openclaw-2099-01-02.log"
+        );
+
+        mockLogs({ logFiles: { data: [] } });
+        rerender(<Logs />);
+        expect(screen.getAllByLabelText("select")[0]).toHaveValue(
+            "openclaw-2099-01-02.log"
+        );
+
+        mockLogs({ liveLogs: null, logFiles: { data: null } });
+        rerender(<Logs />);
+        expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+    });
+
+    it("handles socket and load-content edge cases", async () => {
+        const user = userEvent.setup();
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        mockLogs({
+            socket: { connectionId: 1, isConnected: false, request: mocks.request },
+        });
+        const { rerender } = render(<Logs />);
+        expect(mocks.request).not.toHaveBeenCalled();
+
+        mocks.request.mockRejectedValueOnce(new Error("subscribe failed"));
+        mockLogs();
+        rerender(<Logs />);
+        await waitFor(() => expect(consoleError).toHaveBeenCalled());
+
+        mocks.logsReady = false;
+        mocks.refetchContent.mockResolvedValueOnce({ data: "INFO skipped" });
+        await user.click(screen.getByRole("button", { name: "Reload" }));
+        await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalled());
+        expect(mocks.writeInsert).not.toHaveBeenCalledWith(
+            expect.objectContaining({ raw: "INFO skipped" })
+        );
+    });
+
+    it("renders loading and fallback log values", async () => {
+        const user = userEvent.setup();
+        mockLogs({
+            liveLogs: [{ id: "3", level: null, msg: "fallback msg" }],
+            logContent: { isFetching: true, refetch: mocks.refetchContent },
+        });
+
+        render(<Logs />);
+
+        expect(screen.getByText("Loading...")).toBeInTheDocument();
+        expect(screen.getByText("fallback msg")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Export" }));
+        expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
     });
 
     it("renders waiting state and disabled actions with no logs", () => {

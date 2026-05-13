@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -177,13 +177,15 @@ describe("TaskDetailModal", () => {
         });
 
         await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
-        await user.clear(screen.getByLabelText("Title"));
-        await user.type(screen.getByLabelText("Title"), "  Refined task title  ");
-        const description = screen.getByDisplayValue(
-            "Keep work reviewable and **do not deploy** without approval."
+        fireEvent.change(screen.getByLabelText("Title"), {
+            target: { value: "  Refined task title  " },
+        });
+        fireEvent.change(
+            screen.getByDisplayValue(
+                "Keep work reviewable and **do not deploy** without approval."
+            ),
+            { target: { value: "Updated body" } }
         );
-        await user.clear(description);
-        await user.type(description, "Updated body");
         await user.click(screen.getByRole("button", { name: "low" }));
         await user.clear(screen.getByLabelText("Cron job ID"));
         await user.click(screen.getByRole("button", { name: "Save Changes" }));

@@ -51,7 +51,7 @@ const NON_WORK_TOOL_NAMES = new Set([
 ]);
 
 /** Performs compact status text. */
-function compactStatusText(value: string): string {
+export function compactStatusText(value: string): string {
     const normalized = value.replaceAll(/\s+/g, " ").trim();
     return normalized.length > 120
         ? `${normalized.slice(0, 119).trimEnd()}…`
@@ -59,12 +59,12 @@ function compactStatusText(value: string): string {
 }
 
 /** Performs string value. */
-function stringValue(value: unknown): string | undefined {
+export function stringValue(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 /** Formats tool name for display. */
-function formatToolName(value: string): string {
+export function formatToolName(value: string): string {
     const withoutNamespace = value.startsWith("functions.")
         ? value.slice("functions.".length)
         : value;
@@ -80,7 +80,7 @@ function formatToolName(value: string): string {
 }
 
 /** Performs detail from args. */
-function detailFromArgs(value: unknown): string | undefined {
+export function detailFromArgs(value: unknown): string | undefined {
     if (!isRecord(value)) {
         return stringValue(value);
     }
@@ -108,12 +108,12 @@ function detailFromArgs(value: unknown): string | undefined {
 }
 
 /** Normalizes runtime stream. */
-function normalizeRuntimeStream(value: string): string {
+export function normalizeRuntimeStream(value: string): string {
     return value === "command_output" ? "command-output" : value;
 }
 
 /** Performs runtime progress text. */
-function runtimeProgressText(
+export function runtimeProgressText(
     eventName: string,
     stream: string,
     phase: string,
@@ -207,9 +207,9 @@ function runtimeProgressText(
 }
 
 /** Returns whether new run for stream. */
-function isNewRunForStream(
+export function isNewRunForStream(
     existing: { runId?: string; aliases?: string[] } | undefined,
-    incomingRunId: string | undefined
+    incomingRunId?: string
 ): boolean {
     return Boolean(
         existing &&
@@ -220,11 +220,11 @@ function isNewRunForStream(
 }
 
 /** Returns whether runtime work event. */
-function isRuntimeWorkEvent(
+export function isRuntimeWorkEvent(
     eventName: string,
     stream: string,
     phase: string,
-    statusText: string | undefined
+    statusText?: string
 ): boolean {
     return (
         Boolean(statusText) ||

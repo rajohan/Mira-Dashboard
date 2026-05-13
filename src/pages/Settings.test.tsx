@@ -2,7 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Settings } from "./Settings";
+import {
+    configuredChannels,
+    numberFromDuration,
+    patchSuccess,
+    Settings,
+} from "./Settings";
 
 const hooks = vi.hoisted(() => ({
     createBackup: vi.fn(),
@@ -231,6 +236,59 @@ function mockSettings(overrides = {}) {
     }
 }
 
+describe("Settings helpers", () => {
+    it("derives channels and durations from config variants", () => {
+        expect(configuredChannels()).toEqual([]);
+        expect(
+            configuredChannels({
+                channels: {
+                    signal: { allowFrom: ["raymond"], dmPolicy: "allow" },
+                    discord: { botId: "bot-1", enabled: true, groupPolicy: "mention" },
+                    webchat: { enabled: false },
+                },
+            } as never)
+        ).toEqual([
+            {
+                details: "bot-1",
+                enabled: true,
+                id: "discord",
+                policy: "group: mention",
+            },
+            {
+                details: "1 allowed senders",
+                enabled: false,
+                id: "signal",
+                policy: "dm: allow",
+            },
+            {
+                details: undefined,
+                enabled: false,
+                id: "webchat",
+                policy: undefined,
+            },
+        ]);
+
+        expect(numberFromDuration(42, 5)).toBe(42);
+        expect(numberFromDuration(null, 5)).toBe(5);
+        expect(numberFromDuration("bad", 5)).toBe(5);
+        expect(numberFromDuration("2h", 5)).toBe(7200);
+        expect(numberFromDuration("3d", 5)).toBe(259200);
+        expect(numberFromDuration("15", 5)).toBe(15);
+    });
+
+    it("clears success messages after the timeout", () => {
+        vi.useFakeTimers();
+        const setSuccess = vi.fn();
+
+        patchSuccess(setSuccess, "Saved");
+        expect(setSuccess).toHaveBeenCalledWith("Saved");
+
+        vi.advanceTimersByTime(3000);
+        expect(setSuccess).toHaveBeenLastCalledWith(null);
+        vi.useRealTimers();
+    });
+});
+
 describe("Settings page", () => {
     beforeEach(() => {
         hooks.createBackup.mockResolvedValue({ ok: true });
@@ -356,14 +414,72 @@ describe("Settings page", () => {
         });
     });
 
-    it("shows fallback and section-specific save errors", async () => {
+    it("renders fallback config and pending labels", () => {
+        mockSettings({
+            config: {
+                data: {
+                    agents: { defaultModel: "fallback-model", fallbacks: ["glm"] },
+                    heartbeat: { every: "90s", target: "" },
+                    session: { reset: {} },
+                    tools: {
+                        exec: { mode: "allowlist" },
+                        web: { fetch: { enabled: false }, search: { enabled: false } },
+                    },
+                    wizard: {
+                        lastRunAt: "2026-05-01T00:00:00.000Z",
+                        lastRunVersion: "2026.5.1",
+                    },
+                },
+                isLoading: false,
+            },
+            systemHost: { data: { data: { version: {} } } },
+        });
+        hooks.useCreateBackup.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.createBackup,
+        });
+        hooks.useRestartGateway.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.restartGateway,
+        });
+
+        render(<Settings />);
+
+        expect(screen.getByTestId("model-section")).toHaveTextContent(
+            "model: fallback-model"
+        );
+        expect(screen.getByTestId("heartbeat-section")).toHaveTextContent(
+            "heartbeat: 90:"
+        );
+        expect(screen.getByTestId("security-section")).toHaveTextContent(
+            "security: allowlist"
+        );
+        expect(screen.getByText("2026.5.1")).toBeInTheDocument();
+        expect(screen.getByText("Unknown")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Backing up/u })).toBeDisabled();
+    });
+
+    it("shows backup, restart, skill, and section-specific errors", async () => {
         const user = userEvent.setup();
+        hooks.createBackup.mockRejectedValueOnce("backup failed");
+        hooks.restartGateway.mockRejectedValueOnce("restart failed");
+        hooks.toggleSkill.mockRejectedValueOnce("skill failed");
         hooks.updateConfig
             .mockRejectedValueOnce("model failed")
             .mockRejectedValueOnce(new Error("Tool patch failed"))
             .mockRejectedValueOnce(new Error("Channel patch failed"));
 
         render(<Settings />);
+
+        await user.click(screen.getByRole("button", { name: "Backup" }));
+        expect(await screen.findByText("Failed to backup")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Restart" }));
+        await user.click(screen.getAllByRole("button", { name: "Restart" }).at(-1)!);
+        expect(await screen.findByText("Failed to restart")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Toggle skill" }));
+        expect(await screen.findByText("Failed to update skill")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Save model" }));
         expect(await screen.findByText("Failed to save")).toBeInTheDocument();

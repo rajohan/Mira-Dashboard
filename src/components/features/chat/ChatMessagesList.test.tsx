@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ChatMessagesList } from "./ChatMessagesList";
+import {
+    AttachmentIcon,
+    base64ToText,
+    ChatMessagesList,
+    previewFromAttachment,
+} from "./ChatMessagesList";
 import type { ChatRow } from "./chatTypes";
 
 vi.mock("./ChatMarkdown", () => ({
@@ -29,15 +34,19 @@ vi.mock("./ChatMessageDetails", () => ({
     ),
 }));
 
-function makeVirtualizer(rowCount: number) {
+function makeVirtualizer(
+    rowCount: number,
+    options: { includeMissing?: boolean; padded?: boolean } = {}
+) {
+    const itemCount = rowCount + (options.includeMissing ? 1 : 0);
     return {
-        getTotalSize: () => rowCount * 100,
+        getTotalSize: () => rowCount * 100 + (options.padded ? 75 : 0),
         getVirtualItems: () =>
-            Array.from({ length: rowCount }, (_, index) => ({
+            Array.from({ length: itemCount }, (_, index) => ({
                 end: (index + 1) * 100,
                 index,
                 key: `row-${index}`,
-                start: index * 100,
+                start: index * 100 + (options.padded ? 25 : 0),
             })),
         measureElement: vi.fn(),
     } as never;
@@ -119,6 +128,41 @@ function renderMessages(
     return { props, ...render(<ChatMessagesList {...props} />) };
 }
 
+describe("ChatMessagesList helpers", () => {
+    it("builds attachment previews and icons defensively", () => {
+        const { rerender } = render(
+            <AttachmentIcon
+                attachment={{ fileName: "photo.png", id: "image", kind: "image" }}
+            />
+        );
+        rerender(
+            <AttachmentIcon
+                attachment={{ fileName: "archive.zip", id: "file", kind: "file" }}
+            />
+        );
+
+        expect(base64ToText(btoa("hello"))).toBe("hello");
+        expect(base64ToText("not valid base64 🚫")).toBeUndefined();
+        expect(
+            previewFromAttachment({ fileName: "empty.txt", id: "empty", kind: "text" })
+        ).toBeNull();
+        expect(
+            previewFromAttachment({
+                contentBase64: btoa("notes"),
+                fileName: "notes.txt",
+                id: "notes",
+                kind: "text",
+            })
+        ).toEqual(
+            expect.objectContaining({
+                mimeType: "application/octet-stream",
+                text: "notes",
+                title: "notes.txt",
+            })
+        );
+    });
+});
+
 describe("ChatMessagesList", () => {
     beforeEach(() => {
         vi.stubGlobal(
@@ -187,8 +231,56 @@ describe("ChatMessagesList", () => {
         const onDeleteMessage = vi.fn();
         const onDynamicContentLoad = vi.fn();
         const onPreview = vi.fn();
+        const rows = makeRows();
+        rows[1]!.message.attachments?.push(
+            {
+                dataUrl: "data:image/png;base64,aW1hZ2U=",
+                fileName: "inline.png",
+                id: "image-attachment",
+                kind: "image",
+                mimeType: "image/png",
+            },
+            {
+                fileName: "archive.zip",
+                id: "file-2",
+                kind: "file",
+                mimeType: "application/zip",
+            }
+        );
+        rows[1]!.message.images?.push(
+            {
+                source: { data: btoa("source image"), media_type: "image/jpeg" },
+                type: "image",
+            },
+            { type: "image" }
+        );
+        rows.push(
+            {
+                key: "assistant-empty",
+                kind: "message",
+                message: { content: "", role: "assistant", text: "   " },
+            },
+            {
+                key: "tool-1",
+                kind: "message",
+                message: {
+                    content: "tool",
+                    role: "tool_result",
+                    text: "hidden tool text",
+                },
+            }
+        );
 
-        renderMessages({ onDeleteMessage, onDynamicContentLoad, onPreview });
+        renderMessages({
+            chatRows: rows,
+            messagesVirtualizer: makeVirtualizer(rows.length, {
+                includeMissing: true,
+                padded: true,
+            }),
+            onDeleteMessage,
+            onDynamicContentLoad,
+            onPreview,
+        });
 
         expect(screen.getByText("Hello Mira")).toBeInTheDocument();
         expect(screen.getByText("Hi Raymond")).toBeInTheDocument();
@@ -210,10 +302,17 @@ describe("ChatMessagesList", () => {
             })
         );
 
-        await user.click(screen.getByRole("button", { name: "Chat attachment" }));
+        await user.click(screen.getAllByRole("button", { name: "Chat attachment" })[0]!);
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "image", title: "Chat image" })
         );
+
+        await user.click(screen.getByRole("button", { name: "inline.png" }));
+        expect(onPreview).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: "image", title: "inline.png" })
+        );
+        expect(screen.getByText("archive.zip")).toBeInTheDocument();
+        expect(screen.queryByText("hidden tool text")).not.toBeInTheDocument();
     });
 
     it("uses the TTS endpoint for assistant messages and reports errors", async () => {
@@ -248,6 +347,6 @@ describe("ChatMessagesList", () => {
 });
 
 function fireImageLoad(alt: string) {
-    const image = screen.getByAltText(alt);
+    const image = screen.getAllByAltText(alt)[0]!;
     image.dispatchEvent(new Event("load", { bubbles: true }));
 }

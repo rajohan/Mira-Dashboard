@@ -60,7 +60,7 @@ function deletedMessagesStorageKey(sessionKey: string): string {
 }
 
 /** Performs read deleted message keys. */
-function readDeletedMessageKeys(sessionKey: string): Set<string> {
+export function readDeletedMessageKeys(sessionKey: string): Set<string> {
     if (!sessionKey || typeof window === "undefined") {
         return new Set();
     }
@@ -79,7 +79,7 @@ function readDeletedMessageKeys(sessionKey: string): Set<string> {
 }
 
 /** Performs write deleted message keys. */
-function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): void {
+export function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): void {
     if (!sessionKey) {
         return;
     }
@@ -101,7 +101,7 @@ interface StoredChatDiagnosticVisibility {
 }
 
 /** Performs session timestamp milliseconds. */
-function sessionTimestampMs(value: unknown): number | null {
+export function sessionTimestampMs(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
     }
@@ -115,9 +115,9 @@ function sessionTimestampMs(value: unknown): number | null {
 }
 
 /** Performs history has newer assistant message. */
-function historyHasNewerAssistantMessage(
+export function historyHasNewerAssistantMessage(
     messages: ChatHistoryMessage[],
-    updatedAt: string | undefined
+    updatedAt?: string
 ): boolean {
     const streamUpdatedAt = sessionTimestampMs(updatedAt);
 
@@ -136,7 +136,7 @@ function historyHasNewerAssistantMessage(
 }
 
 /** Performs read stored chat diagnostic visibility. */
-function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
+export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
         return { thinking: false, tools: false };
     }
@@ -158,7 +158,7 @@ function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
 }
 
 /** Performs write stored chat diagnostic visibility. */
-function writeStoredChatDiagnosticVisibility(
+export function writeStoredChatDiagnosticVisibility(
     visibility: StoredChatDiagnosticVisibility
 ): void {
     try {
@@ -172,7 +172,7 @@ function writeStoredChatDiagnosticVisibility(
 }
 
 /** Performs supported audio recording mime type. */
-function supportedAudioRecordingMimeType(): string | undefined {
+export function supportedAudioRecordingMimeType(): string | undefined {
     if (window.MediaRecorder === undefined) {
         return undefined;
     }

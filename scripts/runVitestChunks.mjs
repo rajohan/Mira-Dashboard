@@ -97,7 +97,8 @@ for (const [index, files] of chunks.entries()) {
             `--coverage.reportsDirectory=coverage/chunks/chunk-${index + 1}`,
             "--coverage.thresholds.lines=0",
             "--coverage.thresholds.functions=0",
-            "--coverage.thresholds.branches=0"
+            "--coverage.thresholds.branches=0",
+            "--coverage.thresholds.statements=0"
         );
     }
 

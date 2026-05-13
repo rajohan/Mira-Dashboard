@@ -29,13 +29,16 @@ import {
 import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
 
 /** Performs patch success. */
-function patchSuccess(setSuccess: (value: string | null) => void, message: string) {
+export function patchSuccess(
+    setSuccess: (value: string | null) => void,
+    message: string
+) {
     setSuccess(message);
     setTimeout(() => setSuccess(null), 3000);
 }
 
 /** Performs configured channels. */
-function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[] {
+export function configuredChannels(config?: OpenClawConfig): ChannelSummary[] {
     const channels = (config?.channels || {}) as Record<string, Record<string, unknown>>;
     return Object.entries(channels)
         .map(([id, value]) => ({
@@ -58,7 +61,7 @@ function configuredChannels(config: OpenClawConfig | undefined): ChannelSummary[
 }
 
 /** Performs number from duration. */
-function numberFromDuration(value: unknown, fallback: number): number {
+export function numberFromDuration(value: unknown, fallback: number): number {
     if (typeof value === "number") return value;
     if (typeof value !== "string") return fallback;
     const match = value.match(/^(\d+)([smhd])?$/i);
