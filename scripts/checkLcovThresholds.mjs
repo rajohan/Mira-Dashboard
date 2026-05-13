@@ -45,6 +45,8 @@ function parseArgs(args) {
                 "lines",
                 arg.slice("--lines=".length)
             );
+        } else if (arg.startsWith("--")) {
+            throw new Error(`Unknown argument: ${arg}`);
         }
     }
 
