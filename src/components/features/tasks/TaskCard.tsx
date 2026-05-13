@@ -44,6 +44,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
         >
             <button
                 {...listeners}
+                aria-label={`Drag task #${task.number}`}
                 className="text-primary-500 hover:text-primary-300 md:text-primary-600 absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab transition-opacity md:opacity-0 md:group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >

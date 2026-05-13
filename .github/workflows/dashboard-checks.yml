@@ -18,6 +18,8 @@ jobs:
         name: frontend-checks
         runs-on: ubuntu-latest
         timeout-minutes: 15
+        env:
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         steps:
             - name: Checkout
               uses: actions/checkout@v6
@@ -51,8 +53,9 @@ jobs:
 
             - name: Upload frontend coverage to Codecov
               uses: codecov/codecov-action@v5
+              if: ${{ env.CODECOV_TOKEN != '' }}
               with:
-                  token: ${{ secrets.CODECOV_TOKEN }}
+                  token: ${{ env.CODECOV_TOKEN }}
                   files: coverage/chunks/*/lcov.info
                   flags: frontend
                   name: frontend

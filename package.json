@@ -15,7 +15,7 @@
         "test:e2e:ui": "playwright test --ui",
         "test": "node scripts/runVitestChunks.mjs",
         "test:vitest": "vitest run",
-        "test:coverage": "node scripts/runVitestChunks.mjs --coverage --coverage.reporter=lcovonly --coverage.reporter=text-summary --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0",
+        "test:coverage": "node scripts/runVitestChunks.mjs --coverage --coverage.reporter=lcovonly --coverage.reporter=text-summary && node scripts/checkLcovThresholds.mjs --lines=89 --functions=90 --branches=78",
         "test:coverage:vitest": "vitest run --coverage"
     },
     "dependencies": {

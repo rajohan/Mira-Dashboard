@@ -22,6 +22,7 @@ for (const arg of process.argv.slice(2)) {
     }
 }
 
+/** Collects frontend test files recursively from a directory. */
 function collectTests(directory) {
     if (!existsSync(directory)) return [];
 
@@ -45,6 +46,7 @@ function collectTests(directory) {
     return files;
 }
 
+/** Splits test files into stable chunks for smaller Vitest processes. */
 function chunk(files) {
     const chunks = [];
     for (let index = 0; index < files.length; index += chunkSize) {
@@ -53,6 +55,7 @@ function chunk(files) {
     return chunks;
 }
 
+/** Detects whether the current Vitest invocation should emit coverage. */
 function hasCoverageEnabled(args) {
     return args.some(
         (arg) =>
@@ -81,7 +84,7 @@ console.log(
     `Running ${testFiles.length} frontend test files in ${chunks.length} chunks (chunk size ${chunkSize}).`
 );
 
-const vitestBin = path.join(ROOT, "node_modules", ".bin", "vitest");
+const vitestEntrypoint = path.join(ROOT, "node_modules", "vitest", "vitest.mjs");
 const start = Date.now();
 
 for (const [index, files] of chunks.entries()) {
@@ -89,14 +92,21 @@ for (const [index, files] of chunks.entries()) {
     const chunkArgs = [...passthroughArgs];
 
     if (coverageEnabled) {
-        chunkArgs.push(`--coverage.reportsDirectory=coverage/chunks/chunk-${index + 1}`);
+        // Per-chunk coverage is partial, so merged LCOV thresholds are checked after all chunks.
+        chunkArgs.push(
+            `--coverage.reportsDirectory=coverage/chunks/chunk-${index + 1}`,
+            "--coverage.thresholds.lines=0",
+            "--coverage.thresholds.functions=0",
+            "--coverage.thresholds.branches=0"
+        );
     }
 
     console.log(`\n[vitest chunk ${label}] ${files[0]} … ${files.at(-1)}`);
 
     const result = spawnSync(
-        vitestBin,
+        process.execPath,
         [
+            vitestEntrypoint,
             "run",
             ...files,
             "--pool=forks",

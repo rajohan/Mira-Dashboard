@@ -53,6 +53,9 @@ describe("LogLine", () => {
             />
         );
 
-        expect(container).toHaveTextContent("");
+        const message = container.querySelector("span.text-primary-200");
+
+        expect(message).toBeTruthy();
+        expect(message?.textContent).toBe("");
     });
 });

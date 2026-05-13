@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { GitOverviewCard } from "./GitOverviewCard";
@@ -39,7 +39,8 @@ describe("GitOverviewCard", () => {
 
         render(<GitOverviewCard />);
 
-        expect(screen.getAllByText("0")[1]).toHaveClass("text-green-300");
+        const dirtyRepoRow = screen.getByText("Dirty repos").parentElement!;
+        expect(within(dirtyRepoRow).getByText("0")).toHaveClass("text-green-300");
     });
 
     it("summarizes tracked git repos and dirty status", () => {

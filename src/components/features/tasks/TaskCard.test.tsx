@@ -51,7 +51,7 @@ describe("TaskCard", () => {
         const onClick = vi.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
 
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Drag task #42" }));
 
         expect(onClick).not.toHaveBeenCalled();
     });
