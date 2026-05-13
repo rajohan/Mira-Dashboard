@@ -7,6 +7,7 @@ const DEFAULT_THRESHOLDS = {
     branches: 87,
     functions: 96,
     lines: 95,
+    statements: 95,
 };
 
 /** Parses and validates one numeric coverage threshold flag. */
@@ -45,6 +46,11 @@ function parseArgs(args) {
                 "lines",
                 arg.slice("--lines=".length)
             );
+        } else if (arg.startsWith("--statements=")) {
+            options.thresholds.statements = parseThreshold(
+                "statements",
+                arg.slice("--statements=".length)
+            );
         } else if (arg.startsWith("--")) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -53,8 +59,8 @@ function parseArgs(args) {
     return options;
 }
 
-/** Finds LCOV report files below the coverage directory. */
-function collectLcovFiles(directory) {
+/** Finds named coverage report files below the coverage directory. */
+function collectCoverageFiles(directory, fileName) {
     if (!existsSync(directory)) return [];
 
     const entries = readdirSync(directory, { withFileTypes: true });
@@ -63,8 +69,8 @@ function collectLcovFiles(directory) {
     for (const entry of entries) {
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-            files.push(...collectLcovFiles(fullPath));
-        } else if (entry.isFile() && entry.name === "lcov.info") {
+            files.push(...collectCoverageFiles(fullPath, fileName));
+        } else if (entry.isFile() && entry.name === fileName) {
             files.push(fullPath);
         }
     }
@@ -78,6 +84,7 @@ function createFileCoverage() {
         branches: new Map(),
         functions: new Map(),
         lines: new Map(),
+        statements: new Map(),
     };
 }
 
@@ -104,6 +111,24 @@ function mergeFunction(fileCoverage, functionKey, hits) {
 function mergeBranch(fileCoverage, branchKey, hits) {
     const previous = fileCoverage.branches.get(branchKey) ?? 0;
     fileCoverage.branches.set(branchKey, Math.max(previous, hits));
+}
+
+/** Records the highest observed statement hit count for a file. */
+function mergeStatement(fileCoverage, statementKey, hits) {
+    const previous = fileCoverage.statements.get(statementKey) ?? 0;
+    fileCoverage.statements.set(statementKey, Math.max(previous, hits));
+}
+
+/** Builds a stable statement key from Istanbul's statement location. */
+function statementKey(statementId, location) {
+    if (!location?.start || !location?.end) return statementId;
+    const locationKey = [
+        location.start.line,
+        location.start.column,
+        location.end.line,
+        location.end.column,
+    ].join(":");
+    return `${statementId}:${locationKey}`;
 }
 
 /** Merges one LCOV report into the aggregate coverage map. */
@@ -155,18 +180,38 @@ function mergeLcovFile(coverageByFile, lcovFile) {
     }
 }
 
+/** Merges one Istanbul JSON report into the aggregate coverage map. */
+function mergeJsonCoverageFile(coverageByFile, coverageJsonFile) {
+    const report = JSON.parse(readFileSync(coverageJsonFile, "utf8"));
+
+    for (const [sourceFile, coverage] of Object.entries(report)) {
+        const currentCoverage = coverageByFile.get(sourceFile) ?? createFileCoverage();
+        coverageByFile.set(sourceFile, currentCoverage);
+
+        for (const [statementId, hits] of Object.entries(coverage.s ?? {})) {
+            mergeStatement(
+                currentCoverage,
+                statementKey(statementId, coverage.statementMap?.[statementId]),
+                Number(hits)
+            );
+        }
+    }
+}
+
 /** Calculates totals and percentages from merged coverage records. */
 function summarizeCoverage(coverageByFile) {
     const totals = {
         branches: { covered: 0, total: 0 },
         functions: { covered: 0, total: 0 },
         lines: { covered: 0, total: 0 },
+        statements: { covered: 0, total: 0 },
     };
 
     for (const fileCoverage of coverageByFile.values()) {
         totals.branches.total += fileCoverage.branches.size;
         totals.functions.total += fileCoverage.functions.size;
         totals.lines.total += fileCoverage.lines.size;
+        totals.statements.total += fileCoverage.statements.size;
 
         totals.branches.covered += [...fileCoverage.branches.values()].filter(
             (hits) => hits > 0
@@ -174,10 +219,12 @@ function summarizeCoverage(coverageByFile) {
         totals.functions.covered += [...fileCoverage.functions.values()].filter(
             (hits) => hits > 0
         ).length;
-        const coveredLines = [...fileCoverage.lines.values()].filter(
+        totals.lines.covered += [...fileCoverage.lines.values()].filter(
             (hits) => hits > 0
         ).length;
-        totals.lines.covered += coveredLines;
+        totals.statements.covered += [...fileCoverage.statements.values()].filter(
+            (hits) => hits > 0
+        ).length;
     }
 
     return totals;
@@ -193,11 +240,11 @@ function formatMetric(name, metric, threshold) {
     return `${name.padEnd(9)} ${percentage(metric).toFixed(2)}% (${metric.covered}/${metric.total}) threshold ${threshold}%`;
 }
 
-/** Checks merged LCOV coverage against the configured thresholds. */
+/** Checks merged coverage against the configured thresholds. */
 function checkThresholds(summary, thresholds) {
     const failures = [];
 
-    for (const metricName of ["lines", "functions", "branches"]) {
+    for (const metricName of ["lines", "functions", "branches", "statements"]) {
         const actual = percentage(summary[metricName]);
         const required = thresholds[metricName];
         if (actual < required) {
@@ -210,10 +257,16 @@ function checkThresholds(summary, thresholds) {
 
 const { coverageDir, thresholds } = parseArgs(process.argv.slice(2));
 const coveragePath = path.resolve(process.cwd(), coverageDir);
-const lcovFiles = collectLcovFiles(coveragePath);
+const lcovFiles = collectCoverageFiles(coveragePath, "lcov.info");
+const jsonCoverageFiles = collectCoverageFiles(coveragePath, "coverage-final.json");
 
 if (lcovFiles.length === 0) {
     console.error(`No LCOV files found below ${coveragePath}.`);
+    process.exit(1);
+}
+
+if (jsonCoverageFiles.length === 0) {
+    console.error(`No coverage-final.json files found below ${coveragePath}.`);
     process.exit(1);
 }
 
@@ -223,12 +276,19 @@ for (const lcovFile of lcovFiles) {
     mergeLcovFile(coverageByFile, lcovFile);
 }
 
+for (const jsonCoverageFile of jsonCoverageFiles) {
+    mergeJsonCoverageFile(coverageByFile, jsonCoverageFile);
+}
+
 const summary = summarizeCoverage(coverageByFile);
 
-console.log(`Merged ${lcovFiles.length} LCOV reports from ${coverageDir}.`);
+console.log(
+    `Merged ${lcovFiles.length} LCOV reports and ${jsonCoverageFiles.length} JSON reports from ${coverageDir}.`
+);
 console.log(formatMetric("Lines", summary.lines, thresholds.lines));
 console.log(formatMetric("Functions", summary.functions, thresholds.functions));
 console.log(formatMetric("Branches", summary.branches, thresholds.branches));
+console.log(formatMetric("Statements", summary.statements, thresholds.statements));
 
 const failures = checkThresholds(summary, thresholds);
 

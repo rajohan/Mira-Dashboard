@@ -133,5 +133,5 @@ const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
 console.log(`\nAll frontend test chunks passed in ${elapsedSeconds}s.`);
 
 if (coverageEnabled) {
-    console.log("Coverage LCOV files written to coverage/chunks/chunk-*/lcov.info.");
+    console.log("Coverage reports written to coverage/chunks/chunk-*/.");
 }
