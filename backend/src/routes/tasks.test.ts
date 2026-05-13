@@ -165,6 +165,24 @@ describe("tasks routes", () => {
             source: "stored",
         });
 
+        const fetched = await requestJson<FrontendTask>(
+            server,
+            `/api/tasks/${created.body.number}`
+        );
+
+        assert.equal(fetched.status, 200);
+        assert.equal(fetched.body.number, created.body.number);
+        assert.equal(fetched.body.title, `${titlePrefix}lifecycle`);
+        assert.deepEqual(fetched.body.automation, created.body.automation);
+
+        const invalidFetch = await requestJson<{ error: string }>(
+            server,
+            "/api/tasks/not-a-number"
+        );
+
+        assert.equal(invalidFetch.status, 400);
+        assert.equal(invalidFetch.body.error, "Invalid id");
+
         const patched = await requestJson<FrontendTask>(
             server,
             `/api/tasks/${created.body.number}`,
@@ -221,6 +239,13 @@ describe("tasks routes", () => {
 
         assert.equal(deleted.status, 200);
         assert.deepEqual(deleted.body, { ok: true });
+
+        const missingFetch = await requestJson<{ error: string }>(
+            server,
+            `/api/tasks/${created.body.number}`
+        );
+        assert.equal(missingFetch.status, 404);
+        assert.equal(missingFetch.body.error, "Task not found");
 
         const missing = await requestJson<{ error: string }>(
             server,
