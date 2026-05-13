@@ -8,22 +8,22 @@ const hooks = vi.hoisted(() => ({
     approve: vi.fn(),
     deploy: vi.fn(),
     productionCheckout: {
-        branch: "master",
-        expectedBranch: "master",
+        branch: "main",
+        expectedBranch: "main",
         expectedRoot: "/home/ubuntu/projects/mira-dashboard",
         head: "abc123",
         isClean: true,
         isProductionRoot: true,
         isSafeForDeploy: true,
         root: "/home/ubuntu/projects/mira-dashboard",
-        upstream: "origin/master",
+        upstream: "origin/main",
         worktreeRoot: "/home/ubuntu/projects/mira-dashboard-worktrees",
     },
     pullRequests: [
         {
             additions: 10,
             author: { login: "mira-2026" },
-            baseRefName: "master",
+            baseRefName: "main",
             body: "Adds tests",
             changedFiles: 2,
             deletions: 1,
@@ -205,7 +205,7 @@ describe("PullRequests page", () => {
         expect(screen.getByText("No open PRs waiting")).toBeInTheDocument();
     });
 
-    it("confirms merge, merge deploy, reject, and master deploy actions", async () => {
+    it("confirms merge, merge deploy, reject, and main deploy actions", async () => {
         const user = userEvent.setup();
 
         render(<PullRequests />);
@@ -236,9 +236,9 @@ describe("PullRequests page", () => {
         expect(hooks.reject).toHaveBeenCalledWith({ number: 10 });
         expect(screen.getByText(/PR rejected/)).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Deploy latest master" }));
+        await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent(
-            "Deploy latest master"
+            "Deploy latest main"
         );
         await user.click(
             screen.getByTestId("confirm-modal").querySelector("button:last-child")!
@@ -262,9 +262,7 @@ describe("PullRequests page", () => {
         render(<PullRequests />);
 
         expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
-        expect(
-            screen.getByRole("button", { name: "Deploy latest master" })
-        ).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Deploy latest main" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
@@ -328,7 +326,7 @@ describe("PullRequests page", () => {
 
         render(<PullRequests />);
 
-        expect(screen.getByText("Will switch to master")).toBeInTheDocument();
+        expect(screen.getByText("Will switch to main")).toBeInTheDocument();
         expect(
             screen.getByText(/will switch the production checkout from feature-branch/)
         ).toBeInTheDocument();

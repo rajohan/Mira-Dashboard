@@ -36,7 +36,7 @@ const pr = {
   body: "Coverage batch",
   url: "https://github.com/rajohan/Mira-Dashboard/pull/10",
   headRefName: "add-playwright-smoke-tests",
-  baseRefName: "master",
+  baseRefName: "main",
   author: { login: "mira-2026" },
   createdAt: "2026-05-10T00:00:00Z",
   updatedAt: "2026-05-11T00:00:00Z",
@@ -75,7 +75,7 @@ if (args.join(" ") === "rev-parse --show-toplevel") {
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --abbrev-ref HEAD") {
-  process.stdout.write("master\n");
+  process.stdout.write("main\n");
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --short HEAD") {
@@ -86,7 +86,7 @@ if (args.join(" ") === "status --short") {
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
-  process.stdout.write("origin/master\n");
+  process.stdout.write("origin/main\n");
   process.exit(0);
 }
 if (args.join(" ") === "worktree list --porcelain") {
@@ -224,7 +224,7 @@ describe("pull request routes", () => {
                 body: "Coverage batch",
                 url: "https://github.com/rajohan/Mira-Dashboard/pull/10",
                 headRefName: "add-playwright-smoke-tests",
-                baseRefName: "master",
+                baseRefName: "main",
                 author: { login: "mira-2026" },
                 createdAt: "2026-05-10T00:00:00Z",
                 updatedAt: "2026-05-11T00:00:00Z",
@@ -275,10 +275,10 @@ describe("pull request routes", () => {
             root: tempDir,
             expectedRoot: tempDir,
             worktreeRoot: path.join(tempDir, "worktrees"),
-            branch: "master",
-            expectedBranch: "master",
+            branch: "main",
+            expectedBranch: "main",
             head: "abc1234",
-            upstream: "origin/master",
+            upstream: "origin/main",
             isClean: true,
             isProductionRoot: true,
             isSafeForDeploy: true,
