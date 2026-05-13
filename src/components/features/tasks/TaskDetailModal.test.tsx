@@ -153,6 +153,7 @@ describe("TaskDetailModal", () => {
         expect(props.onMove).toHaveBeenNthCalledWith(1, "in-progress");
         expect(props.onMove).toHaveBeenNthCalledWith(2, "blocked");
         expect(props.onAssign).toHaveBeenCalledWith("rajohan");
+        expect(props.onUpdate).not.toHaveBeenCalled();
     });
 
     it("saves task edits and clears automation when cron id is blank", async () => {

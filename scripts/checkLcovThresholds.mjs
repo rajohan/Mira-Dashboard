@@ -7,7 +7,6 @@ const DEFAULT_THRESHOLDS = {
     branches: 87,
     functions: 96,
     lines: 95,
-    statements: 95,
 };
 
 /** Parses and validates one numeric coverage threshold flag. */
@@ -45,11 +44,6 @@ function parseArgs(args) {
             options.thresholds.lines = parseThreshold(
                 "lines",
                 arg.slice("--lines=".length)
-            );
-        } else if (arg.startsWith("--statements=")) {
-            options.thresholds.statements = parseThreshold(
-                "statements",
-                arg.slice("--statements=".length)
             );
         }
     }
@@ -99,9 +93,9 @@ function mergeLine(fileCoverage, lineNumber, hits) {
 }
 
 /** Records the highest observed function hit count for a file. */
-function mergeFunction(fileCoverage, functionName, hits) {
-    const previous = fileCoverage.functions.get(functionName) ?? 0;
-    fileCoverage.functions.set(functionName, Math.max(previous, hits));
+function mergeFunction(fileCoverage, functionKey, hits) {
+    const previous = fileCoverage.functions.get(functionKey) ?? 0;
+    fileCoverage.functions.set(functionKey, Math.max(previous, hits));
 }
 
 /** Records the highest observed branch hit count for a file. */
@@ -113,18 +107,38 @@ function mergeBranch(fileCoverage, branchKey, hits) {
 /** Merges one LCOV report into the aggregate coverage map. */
 function mergeLcovFile(coverageByFile, lcovFile) {
     let currentCoverage = null;
+    let functionDefinitions = new Map();
+    let functionHitsByName = new Map();
+
+    const resetRecordState = () => {
+        functionDefinitions = new Map();
+        functionHitsByName = new Map();
+    };
+
+    const functionKeyForHit = (functionName) => {
+        const hitIndex = functionHitsByName.get(functionName) ?? 0;
+        functionHitsByName.set(functionName, hitIndex + 1);
+        const definitions = functionDefinitions.get(functionName) ?? [];
+        return definitions[hitIndex] ?? `unknown:${hitIndex}:${functionName}`;
+    };
 
     for (const line of readFileSync(lcovFile, "utf8").split(/\r?\n/u)) {
         if (line.startsWith("SF:")) {
+            resetRecordState();
             const currentFile = line.slice(3);
             currentCoverage = coverageByFile.get(currentFile) ?? createFileCoverage();
             coverageByFile.set(currentFile, currentCoverage);
         } else if (line.startsWith("DA:") && currentCoverage) {
             const [lineNumber, hits] = line.slice(3).split(",");
             mergeLine(currentCoverage, lineNumber, Number(hits));
+        } else if (line.startsWith("FN:") && currentCoverage) {
+            const [lineNumber, functionName] = line.slice(3).split(",");
+            const definitions = functionDefinitions.get(functionName) ?? [];
+            definitions.push(`${lineNumber}:${definitions.length}:${functionName}`);
+            functionDefinitions.set(functionName, definitions);
         } else if (line.startsWith("FNDA:") && currentCoverage) {
             const [hits, functionName] = line.slice(5).split(",");
-            mergeFunction(currentCoverage, functionName, Number(hits));
+            mergeFunction(currentCoverage, functionKeyForHit(functionName), Number(hits));
         } else if (line.startsWith("BRDA:") && currentCoverage) {
             const [lineNumber, block, branch, taken] = line.slice(5).split(",");
             mergeBranch(
@@ -132,6 +146,9 @@ function mergeLcovFile(coverageByFile, lcovFile) {
                 `${lineNumber}:${block}:${branch}`,
                 parseTaken(taken)
             );
+        } else if (line === "end_of_record") {
+            currentCoverage = null;
+            resetRecordState();
         }
     }
 }
@@ -142,14 +159,12 @@ function summarizeCoverage(coverageByFile) {
         branches: { covered: 0, total: 0 },
         functions: { covered: 0, total: 0 },
         lines: { covered: 0, total: 0 },
-        statements: { covered: 0, total: 0 },
     };
 
     for (const fileCoverage of coverageByFile.values()) {
         totals.branches.total += fileCoverage.branches.size;
         totals.functions.total += fileCoverage.functions.size;
         totals.lines.total += fileCoverage.lines.size;
-        totals.statements.total += fileCoverage.lines.size;
 
         totals.branches.covered += [...fileCoverage.branches.values()].filter(
             (hits) => hits > 0
@@ -161,7 +176,6 @@ function summarizeCoverage(coverageByFile) {
             (hits) => hits > 0
         ).length;
         totals.lines.covered += coveredLines;
-        totals.statements.covered += coveredLines;
     }
 
     return totals;
@@ -181,7 +195,7 @@ function formatMetric(name, metric, threshold) {
 function checkThresholds(summary, thresholds) {
     const failures = [];
 
-    for (const metricName of ["lines", "functions", "branches", "statements"]) {
+    for (const metricName of ["lines", "functions", "branches"]) {
         const actual = percentage(summary[metricName]);
         const required = thresholds[metricName];
         if (actual < required) {
@@ -213,7 +227,6 @@ console.log(`Merged ${lcovFiles.length} LCOV reports from ${coverageDir}.`);
 console.log(formatMetric("Lines", summary.lines, thresholds.lines));
 console.log(formatMetric("Functions", summary.functions, thresholds.functions));
 console.log(formatMetric("Branches", summary.branches, thresholds.branches));
-console.log(formatMetric("Statements", summary.statements, thresholds.statements));
 
 const failures = checkThresholds(summary, thresholds);
 

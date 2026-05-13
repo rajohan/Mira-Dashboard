@@ -161,31 +161,34 @@ describe("chat utils", () => {
 
     it("rejects unreadable file results", async () => {
         const OriginalFileReader = globalThis.FileReader;
-        class NonStringFileReader extends EventTarget {
-            result: ArrayBuffer | null = new ArrayBuffer(0);
-            error: Error | null = null;
-            readAsDataURL() {
-                this.dispatchEvent(new Event("load"));
+        try {
+            class NonStringFileReader extends EventTarget {
+                result: ArrayBuffer | null = new ArrayBuffer(0);
+                error: Error | null = null;
+                readAsDataURL() {
+                    this.dispatchEvent(new Event("load"));
+                }
             }
-        }
-        class ErrorFileReader extends EventTarget {
-            result: string | null = null;
-            error: Error | null = new Error("reader failed");
-            readAsDataURL() {
-                this.dispatchEvent(new Event("error"));
+            class ErrorFileReader extends EventTarget {
+                result: string | null = null;
+                error: Error | null = new Error("reader failed");
+                readAsDataURL() {
+                    this.dispatchEvent(new Event("error"));
+                }
             }
+
+            vi.stubGlobal("FileReader", NonStringFileReader);
+            await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
+                "Could not read bad.bin"
+            );
+
+            vi.stubGlobal("FileReader", ErrorFileReader);
+            await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
+                "reader failed"
+            );
+        } finally {
+            vi.stubGlobal("FileReader", OriginalFileReader);
         }
-
-        vi.stubGlobal("FileReader", NonStringFileReader);
-        await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
-            "Could not read bad.bin"
-        );
-
-        vi.stubGlobal("FileReader", ErrorFileReader);
-        await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
-            "reader failed"
-        );
-        vi.stubGlobal("FileReader", OriginalFileReader);
     });
 
     it("reads file metadata and file contents for attachments", async () => {

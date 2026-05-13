@@ -278,14 +278,17 @@ describe("Settings helpers", () => {
 
     it("clears success messages after the timeout", () => {
         vi.useFakeTimers();
-        const setSuccess = vi.fn();
+        try {
+            const setSuccess = vi.fn();
 
-        patchSuccess(setSuccess, "Saved");
-        expect(setSuccess).toHaveBeenCalledWith("Saved");
+            patchSuccess(setSuccess, "Saved");
+            expect(setSuccess).toHaveBeenCalledWith("Saved");
 
-        vi.advanceTimersByTime(3000);
-        expect(setSuccess).toHaveBeenLastCalledWith(null);
-        vi.useRealTimers();
+            vi.advanceTimersByTime(3000);
+            expect(setSuccess).toHaveBeenLastCalledWith(null);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 

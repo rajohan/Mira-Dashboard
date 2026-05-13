@@ -1,5 +1,5 @@
 import { Download, Loader2, RefreshCw, Server } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
     AgentAccessSection,
@@ -31,10 +31,16 @@ import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
 /** Performs patch success. */
 export function patchSuccess(
     setSuccess: (value: string | null) => void,
-    message: string
+    message: string,
+    timerRef?: { current: ReturnType<typeof setTimeout> | null }
 ) {
+    if (timerRef?.current) clearTimeout(timerRef.current);
     setSuccess(message);
-    setTimeout(() => setSuccess(null), 3000);
+    const timeoutId = setTimeout(() => {
+        setSuccess(null);
+        if (timerRef) timerRef.current = null;
+    }, 3000);
+    if (timerRef) timerRef.current = timeoutId;
 }
 
 /** Performs configured channels. */
@@ -86,6 +92,7 @@ export function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [showRestartModal, setShowRestartModal] = useState(false);
+    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Queries
     const { data: config, isLoading: configLoading } = useConfig();
@@ -99,6 +106,12 @@ export function Settings() {
     const createBackup = useCreateBackup();
 
     const loading = configLoading || skillsLoading;
+
+    useEffect(() => {
+        return () => {
+            if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        };
+    }, []);
 
     /** Responds to restart events. */
     async function handleRestart() {
@@ -145,7 +158,7 @@ export function Settings() {
             await updateConfig.mutateAsync({
                 session: { reset: { idleMinutes } },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Session settings saved");
+            patchSuccess(setSuccess, "Session settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -181,7 +194,7 @@ export function Settings() {
                 : { heartbeat: { every, target: target || undefined } };
 
             await updateConfig.mutateAsync(patch as OpenClawConfig);
-            patchSuccess(setSuccess, "Heartbeat settings saved");
+            patchSuccess(setSuccess, "Heartbeat settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -196,7 +209,7 @@ export function Settings() {
                     list: agents,
                 },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Agent access settings saved");
+            patchSuccess(setSuccess, "Agent access settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -209,7 +222,7 @@ export function Settings() {
             await updateConfig.mutateAsync({
                 agents: { defaults: { model: values } },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Model settings saved");
+            patchSuccess(setSuccess, "Model settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -238,7 +251,7 @@ export function Settings() {
                     sessions: { visibility: values.sessionsVisibility || undefined },
                 },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Tool settings saved");
+            patchSuccess(setSuccess, "Tool settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }
@@ -253,7 +266,7 @@ export function Settings() {
                     channels.map((channel) => [channel.id, { enabled: channel.enabled }])
                 ),
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Channel settings saved");
+            patchSuccess(setSuccess, "Channel settings saved", successTimerRef);
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to save");
         }

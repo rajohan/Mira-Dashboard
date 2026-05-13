@@ -32,8 +32,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-db", () => ({
     useLiveQuery: (select: (query: { from: () => typeof mocks.sessions }) => unknown) => {
-        select({ from: () => mocks.sessions });
-        return { data: mocks.sessions };
+        const data = select({ from: () => mocks.sessions });
+        return { data };
     },
 }));
 
@@ -51,11 +51,15 @@ vi.mock("@tanstack/react-virtual", () => ({
         getScrollElement: () => Element | null;
         measureElement: (element: Element) => number;
     }) => {
-        getItemKey(0);
-        getItemKey(count + 1);
+        if (count > 0) {
+            getItemKey(0);
+            estimateSize(0);
+        }
+        if (count > 1) {
+            getItemKey(1);
+            estimateSize(1);
+        }
         getScrollElement();
-        estimateSize(0);
-        estimateSize(1);
         measureElement({ getBoundingClientRect: () => ({ height: 123 }) } as Element);
         return {
             getTotalSize: () => count * 100,

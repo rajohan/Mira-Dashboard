@@ -27,8 +27,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-db", () => ({
     useLiveQuery: (select: (query: { from: () => typeof mocks.liveLogs }) => unknown) => {
-        select({ from: () => mocks.liveLogs });
-        return { data: mocks.liveLogs };
+        const data = select({ from: () => mocks.liveLogs });
+        return { data };
     },
 }));
 
@@ -48,8 +48,8 @@ vi.mock("@tanstack/react-virtual", () => ({
     }) => {
         getScrollElement();
         estimateSize();
-        getItemKey(0);
-        getItemKey(count + 1);
+        if (count > 0) getItemKey(0);
+        if (count > 1) getItemKey(1);
         measureElement({ getBoundingClientRect: () => ({ height: 22.2 }) } as Element);
         return {
             getTotalSize: () => count * 22,
@@ -343,24 +343,28 @@ describe("Logs page", () => {
         const user = userEvent.setup();
         const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        mockLogs({
-            socket: { connectionId: 1, isConnected: false, request: mocks.request },
-        });
-        const { rerender } = render(<Logs />);
-        expect(mocks.request).not.toHaveBeenCalled();
+        try {
+            mockLogs({
+                socket: { connectionId: 1, isConnected: false, request: mocks.request },
+            });
+            const { rerender } = render(<Logs />);
+            expect(mocks.request).not.toHaveBeenCalled();
 
-        mocks.request.mockRejectedValueOnce(new Error("subscribe failed"));
-        mockLogs();
-        rerender(<Logs />);
-        await waitFor(() => expect(consoleError).toHaveBeenCalled());
+            mocks.request.mockRejectedValueOnce(new Error("subscribe failed"));
+            mockLogs();
+            rerender(<Logs />);
+            await waitFor(() => expect(consoleError).toHaveBeenCalled());
 
-        mocks.logsReady = false;
-        mocks.refetchContent.mockResolvedValueOnce({ data: "INFO skipped" });
-        await user.click(screen.getByRole("button", { name: "Reload" }));
-        await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalled());
-        expect(mocks.writeInsert).not.toHaveBeenCalledWith(
-            expect.objectContaining({ raw: "INFO skipped" })
-        );
+            mocks.logsReady = false;
+            mocks.refetchContent.mockResolvedValueOnce({ data: "INFO skipped" });
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalled());
+            expect(mocks.writeInsert).not.toHaveBeenCalledWith(
+                expect.objectContaining({ raw: "INFO skipped" })
+            );
+        } finally {
+            consoleError.mockRestore();
+        }
     });
 
     it("renders loading and fallback log values", async () => {
