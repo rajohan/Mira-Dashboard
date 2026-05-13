@@ -80,7 +80,7 @@ Use the smallest meaningful gate for the change you are making. For docs-only ch
 
 ## Production checkout and PR worktrees
 
-`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `master`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
+`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `main`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
 
 Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard-worktrees`, for example:
 
@@ -90,7 +90,7 @@ git -C /home/ubuntu/projects/mira-dashboard fetch --prune origin
 git -C /home/ubuntu/projects/mira-dashboard worktree add \
   -b mira/<short-slug> \
   /home/ubuntu/projects/mira-dashboard-worktrees/<short-slug> \
-  master
+  main
 ```
 
 Run lint/build verification inside the worktree, not the production checkout. This prevents unapproved PR branches from writing live `dist/` or `backend/dist` artifacts.

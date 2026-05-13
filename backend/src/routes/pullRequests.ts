@@ -16,7 +16,7 @@ const DASHBOARD_WORKTREE_ROOT =
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
-const DEFAULT_BASE = "master";
+const DEFAULT_BASE = "main";
 const DASHBOARD_PR_AUTHORS = [MIRA_AUTHOR, DEPENDABOT_AUTHOR];
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
@@ -481,7 +481,7 @@ async function ensureProductionReadyForDeploy(): Promise<void> {
     }
 }
 
-/** Performs sync master. */
+/** Performs sync main. */
 async function syncMaster(): Promise<void> {
     await ensureProductionCheckout();
     await runCommand("git", ["fetch", "--prune", "origin"], { timeoutMs: 120_000 });

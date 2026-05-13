@@ -14,7 +14,7 @@ body:
       attributes:
           label: Summary
           description: What operation is needed?
-          placeholder: Deploy latest dashboard master and restart mira-dashboard.service...
+          placeholder: Deploy latest dashboard main and restart mira-dashboard.service...
       validations:
           required: true
     - type: dropdown
@@ -33,7 +33,7 @@ body:
           label: Plan
           description: Commands, dashboard actions, rollout order, or rollback notes.
           placeholder: |
-              1. Pull latest master
+              1. Pull latest main
               2. Build frontend/backend
               3. Restart service
               4. Verify /api/health
