@@ -112,18 +112,18 @@ describe("TaskDetailModal", () => {
         await user.click(screen.getByRole("button", { name: "Move to New" }));
         await user.click(screen.getByRole("button", { name: "Mark Done" }));
         await user.click(screen.getByRole("button", { name: "Assign to Mira" }));
-        await user.type(
-            screen.getByPlaceholderText("Markdown supported"),
-            "  New progress note  "
-        );
+        fireEvent.change(screen.getByPlaceholderText("Markdown supported"), {
+            target: { value: "  New progress note  " },
+        });
         await user.click(screen.getByRole("button", { name: "Add Update" }));
 
         const updateCard = screen
             .getByText("Added component coverage.")
             .closest("div")!.parentElement!;
         await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
-        await user.clear(within(updateCard).getByRole("textbox"));
-        await user.type(within(updateCard).getByRole("textbox"), "  Edited progress  ");
+        fireEvent.change(within(updateCard).getByRole("textbox"), {
+            target: { value: "  Edited progress  " },
+        });
         await user.click(within(updateCard).getByRole("button", { name: "Save" }));
         await user.click(within(updateCard).getByRole("button", { name: "Delete" }));
 
@@ -154,6 +154,96 @@ describe("TaskDetailModal", () => {
         expect(props.onMove).toHaveBeenNthCalledWith(2, "blocked");
         expect(props.onAssign).toHaveBeenCalledWith("rajohan");
         expect(props.onUpdate).not.toHaveBeenCalled();
+    });
+
+    it("renders closed tasks and scheduled/disabled automation fallbacks", async () => {
+        renderModal({
+            task: makeTask({
+                assignees: [{ name: "external-user" }],
+                body: "",
+                labels: [{ name: "done" }, { name: "low" }],
+                state: "CLOSED",
+                automation: {
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "job-disabled",
+                    enabled: false,
+                    lastDurationMs: -1,
+                    source: "stored",
+                },
+            }),
+            updates: [],
+        });
+
+        expect(await screen.findByText("DONE")).toBeInTheDocument();
+        expect(screen.getByText("LOW")).toBeInTheDocument();
+        expect(screen.getByText(/@external-user/)).toBeInTheDocument();
+        expect(screen.getByText("DISABLED")).toBeInTheDocument();
+        expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(4);
+        expect(screen.getByText("Stored metadata")).toBeInTheDocument();
+        expect(screen.getByText("No updates yet.")).toBeInTheDocument();
+    });
+
+    it("renders scheduled automation duration fallbacks", async () => {
+        renderModal({
+            task: makeTask({
+                automation: {
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "job-scheduled",
+                    enabled: true,
+                    lastDurationMs: 3_661_000,
+                },
+            }),
+            updates: [],
+        });
+
+        expect(await screen.findByText("SCHEDULED")).toBeInTheDocument();
+        expect(screen.getByText("1h 1m")).toBeInTheDocument();
+    });
+
+    it("ignores blank progress edits and saves automation metadata", async () => {
+        const user = userEvent.setup();
+        const onAddUpdate = vi.fn(async () => {});
+        const onEditUpdate = vi.fn(async () => {});
+        const onUpdate = vi.fn().mockResolvedValue(makeTask());
+        renderModal({ onAddUpdate, onEditUpdate, onUpdate });
+
+        await user.click(screen.getByRole("button", { name: "Add Update" }));
+        expect(onAddUpdate).not.toHaveBeenCalled();
+
+        const updateCard = screen
+            .getByText("Added component coverage.")
+            .closest("div")!.parentElement!;
+        await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
+        await user.clear(within(updateCard).getByRole("textbox"));
+        await user.type(within(updateCard).getByRole("textbox"), "   ");
+        await user.click(within(updateCard).getByRole("button", { name: "Save" }));
+        expect(onEditUpdate).not.toHaveBeenCalled();
+
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        fireEvent.change(screen.getByLabelText("Cron job ID"), {
+            target: { value: " job-new " },
+        });
+        fireEvent.change(screen.getByLabelText("Schedule summary"), {
+            target: { value: " Daily " },
+        });
+        fireEvent.change(screen.getByLabelText("Session target"), {
+            target: { value: " session:new " },
+        });
+        await user.click(screen.getByRole("button", { name: "high" }));
+        await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+        expect(onUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                automation: expect.objectContaining({
+                    cronJobId: "job-new",
+                    scheduleSummary: "Daily",
+                    sessionTarget: "session:new",
+                }),
+                labels: ["in-progress", "priority-high"],
+            })
+        );
     });
 
     it("saves task edits and clears automation when cron id is blank", async () => {

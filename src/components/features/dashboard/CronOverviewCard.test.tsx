@@ -59,4 +59,27 @@ describe("CronOverviewCard", () => {
         expect(container).toHaveTextContent("Next run—");
         expect(screen.getByText("UNKNOWN")).toBeInTheDocument();
     });
+
+    it("sorts zero-valued cron timestamps without falling back incorrectly", () => {
+        hooks.useCronJobs.mockReturnValue({
+            data: [
+                {
+                    name: "Epoch last run",
+                    enabled: true,
+                    state: { lastRunAtMs: 0, lastRunStatus: "error" },
+                },
+                {
+                    name: "Epoch next run",
+                    enabled: true,
+                    state: { nextRunAtMs: 0 },
+                },
+            ] satisfies CronJob[],
+        });
+
+        const { container } = render(<CronOverviewCard />);
+
+        expect(container).toHaveTextContent("Epoch last run");
+        expect(container).toHaveTextContent("Epoch next run");
+        expect(screen.getByText("ERROR")).toBeInTheDocument();
+    });
 });

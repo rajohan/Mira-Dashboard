@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -304,6 +304,7 @@ function mockTaskHooks(overrides = {}) {
 
 describe("Tasks page", () => {
     beforeEach(() => {
+        vi.clearAllMocks();
         dndMocks.handlers = null;
         hooks.assignTask.mockResolvedValue(task({ number: 1, title: "Assigned" }));
         hooks.createTask.mockResolvedValue(task({ number: 3, title: "New task" }));
@@ -374,6 +375,127 @@ describe("Tasks page", () => {
         expect(screen.getByTestId("column-done")).toHaveTextContent("done (0)");
     });
 
+    it("filters by automation metadata and assignee name", async () => {
+        const user = userEvent.setup();
+        mockTaskHooks({
+            data: [
+                task({
+                    assignees: [{ name: "rajohan" }],
+                    automation: { cronJobId: "cron-nightly", jobName: "Nightly backup" },
+                    labels: [{ name: "todo" }, { name: "priority-low" }],
+                    number: 42,
+                    title: "Automated backup",
+                }),
+            ],
+        });
+
+        render(<Tasks />);
+
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "nightly");
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
+
+        await user.clear(screen.getByPlaceholderText("Search tasks..."));
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "42");
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
+
+        await user.click(screen.getByRole("button", { name: "Raymond" }));
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
+    });
+
+    it("sorts active tasks by priority then updated time, and done tasks by latest", () => {
+        mockTaskHooks({
+            data: [
+                task({
+                    labels: [{ name: "todo" }, { name: "priority-low" }],
+                    number: 1,
+                    title: "Low newest",
+                    updatedAt: "2026-05-11T03:00:00.000Z",
+                }),
+                task({
+                    labels: [{ name: "todo" }, { name: "priority-high" }],
+                    number: 2,
+                    title: "High oldest",
+                    updatedAt: "2026-05-11T01:00:00.000Z",
+                }),
+                task({
+                    labels: [{ name: "todo" }, { name: "priority-high" }],
+                    number: 3,
+                    title: "High newest",
+                    updatedAt: "2026-05-11T02:00:00.000Z",
+                }),
+                task({
+                    labels: [{ name: "done" }, { name: "priority-high" }],
+                    number: 4,
+                    title: "Done older high",
+                    updatedAt: "2026-05-11T01:00:00.000Z",
+                }),
+                task({
+                    labels: [{ name: "done" }, { name: "priority-low" }],
+                    number: 5,
+                    title: "Done newer low",
+                    updatedAt: "2026-05-11T02:00:00.000Z",
+                }),
+            ],
+        });
+
+        render(<Tasks />);
+
+        expect(
+            within(screen.getByTestId("column-todo"))
+                .getAllByRole("button")
+                .map((button) => button.textContent)
+        ).toEqual(["High newest", "High oldest", "Low newest"]);
+        expect(
+            within(screen.getByTestId("column-done"))
+                .getAllByRole("button")
+                .map((button) => button.textContent)
+        ).toEqual(["Done newer low", "Done older high"]);
+    });
+
+    it("sorts equal timestamps by task number", () => {
+        mockTaskHooks({
+            data: [
+                task({ number: 1, title: "Todo one" }),
+                task({ number: 3, title: "Todo three" }),
+                task({
+                    labels: [{ name: "done" }],
+                    number: 2,
+                    title: "Done two",
+                }),
+                task({
+                    labels: [{ name: "done" }],
+                    number: 4,
+                    title: "Done four",
+                }),
+            ],
+        });
+
+        render(<Tasks />);
+
+        expect(
+            within(screen.getByTestId("column-todo"))
+                .getAllByRole("button")
+                .map((button) => button.textContent)
+        ).toEqual(["Todo three", "Todo one"]);
+        expect(
+            within(screen.getByTestId("column-done"))
+                .getAllByRole("button")
+                .map((button) => button.textContent)
+        ).toEqual(["Done four", "Done two"]);
+    });
+
+    it("closes the new-task modal without creating a task", async () => {
+        const user = userEvent.setup();
+
+        render(<Tasks />);
+
+        await user.click(screen.getByRole("button", { name: "New Task" }));
+        await user.click(screen.getByRole("button", { name: "Close new task" }));
+
+        expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
+        expect(hooks.createTask).not.toHaveBeenCalled();
+    });
+
     it("creates a new task", async () => {
         const user = userEvent.setup();
 
@@ -430,6 +552,49 @@ describe("Tasks page", () => {
         expect(screen.queryByTestId("task-overlay")).not.toBeInTheDocument();
     });
 
+    it("handles drag/drop edge cases without leaking state", async () => {
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            render(<Tasks />);
+
+            expect(dndMocks.handlers).not.toBeNull();
+            const handlers = dndMocks.handlers!;
+
+            act(() => {
+                handlers.onDragStart({ active: { id: "missing" } });
+            });
+            expect(screen.queryByTestId("task-overlay")).not.toBeInTheDocument();
+
+            act(() => {
+                handlers.onDragOver({ over: null });
+                handlers.onDragOver({ over: { id: "missing" } });
+                handlers.onDragOver({ over: { id: "1" } });
+            });
+            expect(screen.getByTestId("column-todo")).toHaveTextContent("over");
+
+            await act(async () => {
+                await handlers.onDragEnd({ active: { id: "1" }, over: null });
+                await handlers.onDragEnd({ active: { id: "1" }, over: { id: "1" } });
+                await handlers.onDragEnd({
+                    active: { id: "missing" },
+                    over: { id: "done" },
+                });
+            });
+            expect(hooks.moveTask).not.toHaveBeenCalled();
+
+            hooks.moveTask.mockRejectedValueOnce(new Error("move failed"));
+            await act(async () => {
+                await handlers.onDragEnd({ active: { id: "1" }, over: { id: "done" } });
+            });
+            expect(consoleError).toHaveBeenCalledWith(
+                "Failed to move task:",
+                expect.any(Error)
+            );
+        } finally {
+            consoleError.mockRestore();
+        }
+    });
+
     it("opens task details and performs task/update actions", async () => {
         const user = userEvent.setup();
 
@@ -477,5 +642,24 @@ describe("Tasks page", () => {
             updateId: 10,
         });
         expect(hooks.deleteTask).toHaveBeenCalledWith({ number: 1 });
+    });
+
+    it("cancels task and progress-update deletion confirmations", async () => {
+        const user = userEvent.setup();
+
+        render(<Tasks />);
+
+        await user.click(screen.getByRole("button", { name: "Build tests" }));
+        await user.click(screen.getByRole("button", { name: "Delete progress" }));
+        await user.click(
+            screen.getByRole("button", { name: "Cancel Delete progress update" })
+        );
+        await user.click(screen.getByRole("button", { name: "Delete task" }));
+        await user.click(screen.getByRole("button", { name: "Cancel Delete task" }));
+        await user.click(screen.getByRole("button", { name: "Close detail" }));
+
+        expect(hooks.deleteTaskUpdate).not.toHaveBeenCalled();
+        expect(hooks.deleteTask).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("task-detail")).not.toBeInTheDocument();
     });
 });

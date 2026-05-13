@@ -99,6 +99,44 @@ describe("ChatComposer", () => {
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help ");
     });
 
+    it("previews image attachments and removes attachments from the keyboard", async () => {
+        const user = userEvent.setup();
+        const onPreview = vi.fn();
+        const onRemoveAttachment = vi.fn();
+        const imageAttachment: ChatSendAttachment = {
+            contentBase64: btoa("image-bytes"),
+            dataUrl: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+            file: new File(["image-bytes"], "photo.png", { type: "image/png" }),
+            fileName: "photo.png",
+            id: "att-image",
+            kind: "image",
+            mimeType: "image/png",
+            sizeBytes: 11,
+        };
+
+        renderComposer({
+            attachments: [imageAttachment],
+            onPreview,
+            onRemoveAttachment,
+        });
+
+        await user.click(screen.getByRole("button", { name: /^photo\.png 11 B$/ }));
+        expect(onPreview).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: "image",
+                text: undefined,
+                title: "photo.png",
+                url: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+            })
+        );
+
+        screen.getByRole("button", { name: "Remove photo.png" }).focus();
+        await user.keyboard("{Enter}");
+        await user.keyboard(" ");
+        expect(onRemoveAttachment).toHaveBeenCalledTimes(2);
+        expect(onRemoveAttachment).toHaveBeenCalledWith("att-image");
+    });
+
     it("previews and removes attachments", async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();
@@ -122,6 +160,29 @@ describe("ChatComposer", () => {
 
         await user.click(screen.getByRole("button", { name: "Remove notes.txt" }));
         expect(onRemoveAttachment).toHaveBeenCalledWith("att-1");
+    });
+
+    it("closes the emoji picker from close, escape, and outside pointer", async () => {
+        const user = userEvent.setup();
+        renderComposer();
+
+        await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        fireEvent.pointerDown(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            )
+        );
+        expect(screen.getByText("Emoji")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Close emoji picker" }));
+        expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        fireEvent.pointerDown(document.body);
+        expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
     });
 
     it("opens the emoji picker and inserts an emoji at the cursor", async () => {
@@ -159,6 +220,54 @@ describe("ChatComposer", () => {
 
         await user.click(screen.getByRole("button", { name: /Voice/ }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
+    });
+
+    it("reflects sending, recording, transcribing, composing, and attachment limits", () => {
+        const fullAttachments = Array.from({ length: 10 }, (_, index) => ({
+            ...textAttachment,
+            fileName: `notes-${index}.txt`,
+            id: `att-${index}`,
+        }));
+
+        const { props, rerender } = renderComposer({
+            attachments: fullAttachments,
+            canSend: false,
+            isSending: true,
+        });
+
+        expect(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            )
+        ).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Voice/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Attach/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...props}
+                attachments={[]}
+                canSend={true}
+                isRecording={true}
+                isSending={false}
+            />
+        );
+        expect(screen.getByRole("button", { name: /Stop/ })).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Attach/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...props}
+                attachments={[]}
+                canSend={true}
+                isSending={false}
+                isTranscribing={true}
+            />
+        );
+        expect(screen.getByRole("button", { name: /STT…/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
     });
 
     it("disables controls without a selected connected session", () => {

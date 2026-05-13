@@ -174,4 +174,45 @@ describe("Dashboard page", () => {
         expect(screen.getByTestId("metric-disk")).toHaveTextContent("Loading...");
         expect(screen.getByTestId("quota-card")).toHaveTextContent("empty");
     });
+
+    it.each([
+        "thunderstorm",
+        "snow and sleet",
+        "freezing drizzle",
+        "rain showers",
+        "mist and fog haze",
+        "sunny clear",
+        "partly cloudy",
+    ])("selects weather icon for %s", (description) => {
+        mockDashboardData({
+            weather: {
+                data: {
+                    description,
+                    feelsLikeC: Number.NaN,
+                    forecast: [
+                        {
+                            date: "2026-05-13",
+                            description,
+                            maxTempC: null,
+                            minTempC: undefined,
+                        },
+                    ],
+                    humidityPercent: undefined,
+                    location: "Spydeberg",
+                    temperatureC: Number.NaN,
+                    windKph: undefined,
+                },
+                isError: false,
+                isLoading: false,
+            },
+        });
+
+        render(<Dashboard />);
+
+        expect(screen.getAllByText("--°C")[0]).toBeInTheDocument();
+        expect(screen.getByText(description)).toBeInTheDocument();
+        expect(screen.getByText("Feels --°")).toBeInTheDocument();
+        expect(screen.getByText("--%")).toBeInTheDocument();
+        expect(screen.getByText("-- km/h")).toBeInTheDocument();
+    });
 });

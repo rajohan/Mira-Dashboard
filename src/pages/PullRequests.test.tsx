@@ -133,6 +133,7 @@ function mockPullRequests(overrides = {}) {
 
 describe("PullRequests page", () => {
     beforeEach(() => {
+        vi.clearAllMocks();
         hooks.approve.mockResolvedValue({
             cleanup: { message: "Worktree cleaned" },
             deployment: { note: "Deploy scheduled" },
@@ -370,6 +371,133 @@ describe("PullRequests page", () => {
         });
         rerender(<PullRequests />);
         expect(screen.getByText("Checkout unavailable")).toBeInTheDocument();
+    });
+
+    it("renders external PR author and fallback metadata states", () => {
+        mockPullRequests({
+            deployments: {
+                data: [
+                    {
+                        commit: "",
+                        id: "deploy-ok",
+                        note: "",
+                        status: "ok",
+                        updatedAt: "2026-05-11T00:01:00.000Z",
+                    },
+                    {
+                        commit: "badc0de",
+                        id: "deploy-failed",
+                        note: "Deploy failed",
+                        status: "failed",
+                        updatedAt: "2026-05-11T00:02:00.000Z",
+                    },
+                    {
+                        commit: "running",
+                        id: "deploy-running",
+                        note: "Running deploy",
+                        status: "running",
+                        updatedAt: "2026-05-11T00:03:00.000Z",
+                    },
+                ],
+            },
+            pullRequests: {
+                data: [
+                    {
+                        additions: null,
+                        author: { login: "app/dependabot" },
+                        baseRefName: "main",
+                        body: "Line one\nLine two",
+                        changedFiles: null,
+                        deletions: null,
+                        headRefName: "deps/react",
+                        mergeStateStatus: "UNSTABLE",
+                        mergeable: "DIRTY",
+                        number: 20,
+                        statusCheckRollup: [null, "bad", { status: "QUEUED" }],
+                        title: "Bump React",
+                        updatedAt: "2026-05-11T00:00:00.000Z",
+                        url: "https://github.com/rajohan/Mira-Dashboard/pull/20",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        author: null,
+                        mergeStateStatus: "MYSTERY",
+                        mergeable: undefined,
+                        number: 21,
+                        statusCheckRollup: undefined,
+                        title: "External unknown author",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Dependency / external PRs")).toBeInTheDocument();
+        expect(screen.getByText("Dependabot")).toBeInTheDocument();
+        expect(screen.getByText("Unknown author")).toBeInTheDocument();
+        expect(screen.getByText("DIRTY")).toBeInTheDocument();
+        expect(screen.getByText("UNSTABLE")).toBeInTheDocument();
+        expect(screen.getByText("mergeable unknown")).toBeInTheDocument();
+        expect(screen.getByText("MYSTERY")).toBeInTheDocument();
+        expect(screen.getByText("Checks running")).toBeInTheDocument();
+        expect(screen.getByText("deploy-ok")).toBeInTheDocument();
+        expect(screen.getByText("failed")).toBeInTheDocument();
+        expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("handles confirmation cancellation and non-Error mutation failures", async () => {
+        const user = userEvent.setup();
+        hooks.reject.mockRejectedValueOnce("nope");
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Merge only" }));
+        await user.click(screen.getByRole("button", { name: "Cancel action" }));
+        expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
+        expect(hooks.approve).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Reject" }));
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+        expect(await screen.findByText("Action failed")).toBeInTheDocument();
+    });
+
+    it("uses action result fallbacks when cleanup or deploy notes are absent", async () => {
+        const user = userEvent.setup();
+        hooks.approve.mockResolvedValueOnce({ message: "Merged without cleanup" });
+        hooks.approve.mockResolvedValueOnce({
+            cleanup: undefined,
+            deployment: undefined,
+            message: "Merged and deployed fallback",
+        });
+        hooks.deploy.mockResolvedValueOnce({ deployment: {} });
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Merge only" }));
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+        expect(await screen.findByText("Merged without cleanup")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Merge + deploy" }));
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+        expect(
+            await screen.findByText("Merged and deployed fallback")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+        expect(await screen.findByText("Deploy scheduled")).toBeInTheDocument();
     });
 
     it("keeps the confirmation modal open while mutations are pending", async () => {

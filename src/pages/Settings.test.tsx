@@ -462,6 +462,27 @@ describe("Settings page", () => {
         expect(screen.getByRole("button", { name: /Backing up/u })).toBeDisabled();
     });
 
+    it("saves heartbeat fallback config when no ops agent exists", async () => {
+        const user = userEvent.setup();
+        mockSettings({
+            config: {
+                data: {
+                    agents: { list: [] },
+                    heartbeat: { every: "45s", target: "" },
+                },
+                isLoading: false,
+            },
+        });
+
+        render(<Settings />);
+
+        await user.click(screen.getByRole("button", { name: "Save heartbeat" }));
+
+        expect(hooks.updateConfig).toHaveBeenCalledWith({
+            heartbeat: { every: 1800, target: "ops-check" },
+        });
+    });
+
     it("shows backup, restart, skill, and section-specific errors", async () => {
         const user = userEvent.setup();
         hooks.createBackup.mockRejectedValueOnce("backup failed");
@@ -470,7 +491,9 @@ describe("Settings page", () => {
         hooks.updateConfig
             .mockRejectedValueOnce("model failed")
             .mockRejectedValueOnce(new Error("Tool patch failed"))
-            .mockRejectedValueOnce(new Error("Channel patch failed"));
+            .mockRejectedValueOnce(new Error("Channel patch failed"))
+            .mockRejectedValueOnce(new Error("Heartbeat patch failed"))
+            .mockRejectedValueOnce(new Error("Agent patch failed"));
 
         render(<Settings />);
 
@@ -492,5 +515,11 @@ describe("Settings page", () => {
 
         await user.click(screen.getByRole("button", { name: "Save channels" }));
         expect(await screen.findByText("Channel patch failed")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Save heartbeat" }));
+        expect(await screen.findByText("Heartbeat patch failed")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Save agent access" }));
+        expect(await screen.findByText("Agent patch failed")).toBeInTheDocument();
     });
 });
