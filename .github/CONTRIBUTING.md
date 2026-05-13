@@ -4,9 +4,9 @@ Thanks for helping improve Mira Dashboard.
 
 ## Development flow
 
-- Create a branch from `master`.
+- Create a branch from `main`.
 - Open a pull request for every change.
-- Do not push directly to `master`.
+- Do not push directly to `main`.
 - Keep pull requests focused and small enough to review comfortably.
 - Use squash merge when merging accepted pull requests.
 
