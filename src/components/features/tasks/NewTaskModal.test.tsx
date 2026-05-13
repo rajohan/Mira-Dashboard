@@ -23,6 +23,7 @@ describe("NewTaskModal", () => {
             "  Useful details  "
         );
         await user.click(screen.getByRole("button", { name: "High" }));
+        await user.click(screen.getByRole("button", { name: "Mira" }));
         await user.click(screen.getByRole("button", { name: "Raymond" }));
         await user.type(screen.getByLabelText("Cron job ID"), "  job-123  ");
         await user.type(screen.getByLabelText("Schedule summary"), " Daily ");

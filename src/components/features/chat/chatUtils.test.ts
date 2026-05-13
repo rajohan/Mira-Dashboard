@@ -54,7 +54,46 @@ describe("chat utils", () => {
         const newer = message({ role: "assistant", text: "same", timestamp: "2" });
         const empty = message({ role: "assistant", text: "" });
 
-        expect(dedupeMessages([first, empty, newer])).toEqual([empty, newer]);
+        expect(dedupeMessages([first, undefined, empty, newer] as never)).toEqual([
+            empty,
+            newer,
+        ]);
+    });
+
+    it("covers merge edge cases and timestamp ordering", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({ role: "assistant", text: "" }),
+            message({ role: "tool", text: "tool output" }),
+            message({ role: "user", text: "timeless" }),
+            message({
+                role: "user",
+                text: "later",
+                timestamp: "2026-05-10T10:01:50.000Z",
+            }),
+            message({
+                role: "user",
+                text: "earlier",
+                timestamp: "2026-05-10T10:01:10.000Z",
+            }),
+            message({ role: "system", text: "local", local: true }),
+        ];
+        const next = [
+            message({
+                role: "assistant",
+                text: "middle",
+                timestamp: "2026-05-10T10:01:30.000Z",
+            }),
+        ];
+
+        expect(mergeWithRecentOptimisticMessages([], next)).toEqual(next);
+        expect(mergeWithRecentOptimisticMessages(previous, [])).toEqual(previous);
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
+        ).toEqual(["earlier", "middle", "later", "local"]);
     });
 
     it("retains recent optimistic and local messages missing from refreshed history", () => {
@@ -99,12 +138,57 @@ describe("chat utils", () => {
                 text: "This response is still streaming from the assistant",
                 timestamp: "2026-05-10T10:01:30.000Z",
             }),
+            message({
+                role: "assistant",
+                text: "exact recovered text",
+                timestamp: "2026-05-10T10:01:31.000Z",
+            }),
+            message({
+                role: "assistant",
+                text: "short",
+                timestamp: "2026-05-10T10:01:32.000Z",
+            }),
         ];
         const next = [
             message({ role: "assistant", text: "response is still streaming" }),
+            message({ role: "assistant", text: "exact recovered text" }),
         ];
 
-        expect(mergeWithRecentOptimisticMessages(previous, next)).toHaveLength(1);
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
+        ).toEqual(["response is still streaming", "exact recovered text", "short"]);
+    });
+
+    it("rejects unreadable file results", async () => {
+        const OriginalFileReader = globalThis.FileReader;
+        try {
+            class NonStringFileReader extends EventTarget {
+                result: ArrayBuffer | null = new ArrayBuffer(0);
+                error: Error | null = null;
+                readAsDataURL() {
+                    this.dispatchEvent(new Event("load"));
+                }
+            }
+            class ErrorFileReader extends EventTarget {
+                result: string | null = null;
+                error: Error | null = new Error("reader failed");
+                readAsDataURL() {
+                    this.dispatchEvent(new Event("error"));
+                }
+            }
+
+            vi.stubGlobal("FileReader", NonStringFileReader);
+            await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
+                "Could not read bad.bin"
+            );
+
+            vi.stubGlobal("FileReader", ErrorFileReader);
+            await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
+                "reader failed"
+            );
+        } finally {
+            vi.stubGlobal("FileReader", OriginalFileReader);
+        }
     });
 
     it("reads file metadata and file contents for attachments", async () => {

@@ -41,6 +41,18 @@ describe("Agents page", () => {
         expect(screen.getByTestId("task-history")).toBeInTheDocument();
     });
 
+    it("renders fallback text for non-Error load failures", () => {
+        hooks.useAgentsStatus.mockReturnValue({
+            data: { agents: [] },
+            error: "broken",
+            isLoading: false,
+        });
+
+        render(<Agents />);
+
+        expect(screen.getByText("Failed to load agents")).toBeInTheDocument();
+    });
+
     it("renders errors while keeping the agent list area", () => {
         hooks.useAgentsStatus.mockReturnValue({
             data: { agents: [] },

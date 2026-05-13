@@ -186,6 +186,15 @@ describe("Files page", () => {
         expect(hooks.setError).toHaveBeenCalledWith(null);
     });
 
+    it("renders empty syntax when no file is selected", () => {
+        mockFileState({ fileContent: null, selectedPath: null });
+
+        render(<Files />);
+
+        expect(screen.getByTestId("file-editor")).toHaveTextContent("path: none");
+        expect(screen.getByTestId("file-editor")).toHaveTextContent("syntax:");
+    });
+
     it("disables editing for binary or oversized files", () => {
         mockFileState({
             fileContent: { isBinary: true, path: "image.png" },

@@ -14,14 +14,13 @@ describe("log utils", () => {
     });
 
     it("parses structured JSON logs", () => {
-        const entry = parseLogLine(
-            JSON.stringify({
-                level: "warn",
-                time: "2026-05-10T06:07:08.000Z",
-                msg: "gateway: reconnecting",
-            }),
-            1
-        );
+        const line = JSON.stringify({
+            level: "warn",
+            time: "2026-05-10T06:07:08.000Z",
+            msg: "gateway: reconnecting",
+        });
+        const entry = parseLogLine(line, 1);
+        const implicitIndexEntry = parseLogLine(line);
 
         expect(entry).toMatchObject({
             level: "warn",
@@ -30,6 +29,7 @@ describe("log utils", () => {
             msg: "reconnecting",
         });
         expect(entry?.id).toContain("-1");
+        expect(implicitIndexEntry?.id).toContain("|warn|gateway|reconnecting-");
     });
 
     it("parses JSON with _meta level/date", () => {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -25,7 +25,7 @@ const images: DockerImage[] = [
         lastTagTime: "2026-05-10T09:00:00.000Z",
         platform: "linux/arm64",
         repository: "orphan",
-        size: 512,
+        size: 0,
         tag: "",
     },
 ];
@@ -55,8 +55,10 @@ describe("DockerImagesTable", () => {
         expect(screen.getAllByText("50 MB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("Unused")[0]).toBeInTheDocument();
 
+        const table = screen.getByRole("table");
+        await userEvent.click(within(table).getByText("Used by"));
         await userEvent.click(screen.getByRole("button", { name: "Remove unused (1)" }));
-        const enabledDeleteButton = screen
+        const enabledDeleteButton = within(table)
             .getAllByRole("button", { name: "Delete" })
             .find((button) => !button.hasAttribute("disabled"));
         await userEvent.click(enabledDeleteButton!);

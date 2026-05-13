@@ -89,7 +89,7 @@ describe("session hooks", () => {
     it("clears stale non-infinite cached history before mounting", () => {
         const queryClient = createTestQueryClient();
         const queryKey = sessionKeys.history("agent:main");
-        queryClient.setQueryData(queryKey, { messages: [], hasMore: false });
+        queryClient.setQueryData(queryKey, "stale plain cache value");
         vi.stubGlobal("fetch", vi.fn());
 
         const { result } = renderHook(() => useSessionHistory("agent:main"), {
@@ -98,6 +98,25 @@ describe("session hooks", () => {
 
         expect(result.current.error).toBeNull();
         expect(queryClient.getQueryData(queryKey)).toBeUndefined();
+    });
+
+    it("handles missing next offsets on hasMore history pages", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ messages: [], hasMore: true }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useSessionHistory("agent:main"), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await act(async () => {
+            await result.current.refetch();
+        });
+
+        expect(result.current.hasNextPage).toBe(false);
     });
 
     it("keeps valid infinite cached history while mounting", () => {

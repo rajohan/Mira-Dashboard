@@ -41,9 +41,11 @@ function historyMessage(overrides: Partial<ChatHistoryMessage>): ChatHistoryMess
 describe("chat type normalizers", () => {
     it("extracts images, thinking blocks, and tool calls from content blocks", () => {
         const content = [
+            null,
             { type: "image", data: "abc" },
             { type: "thinking", thinking: "considering" },
             { type: "thinking", text: "fallback thought" },
+            { type: "thinking" },
             { type: "toolCall", id: "call-1", name: "read", arguments: { path: "x" } },
             { type: "toolCall" },
             { type: "text", text: "hello" },
@@ -93,8 +95,9 @@ describe("chat type normalizers", () => {
             role: "assistant",
             timestamp: 1778407200000,
             content:
-                "hello\nMEDIA:/tmp/picture.png\n" +
-                '<file name="note.txt" mime="text/plain">hello</file>',
+                "hello\nMEDIA:   \nMEDIA:/tmp/archive.unknown\nMEDIA:/tmp/picture.png\n" +
+                '<file name="note.txt" mime="text/plain">hello</file>' +
+                '<file name="photo.svg" mime="image/svg+xml"><<<EXTERNAL_UNTRUSTED_CONTENT test>>>\n---\n<svg /><<<END_EXTERNAL_UNTRUSTED_CONTENT test>>></file>',
         });
 
         expect(normalized).toMatchObject({
@@ -105,7 +108,14 @@ describe("chat type normalizers", () => {
         });
         expect(normalized.attachments).toEqual([
             {
-                id: "media-/tmp/picture.png-0",
+                id: "media-/tmp/archive.unknown-0",
+                fileName: "archive.unknown",
+                mimeType: "application/octet-stream",
+                dataUrl: undefined,
+                kind: "file",
+            },
+            {
+                id: "media-/tmp/picture.png-1",
                 fileName: "picture.png",
                 mimeType: "image/png",
                 dataUrl: "/api/media?path=%2Ftmp%2Fpicture.png",
@@ -119,6 +129,15 @@ describe("chat type normalizers", () => {
                 contentBase64: window.btoa("hello"),
                 dataUrl: undefined,
                 kind: "text",
+            },
+            {
+                id: "inline-photo.svg-1",
+                fileName: "photo.svg",
+                mimeType: "image/svg+xml",
+                sizeBytes: 7,
+                contentBase64: window.btoa("<svg />"),
+                dataUrl: `data:image/svg+xml;base64,${window.btoa("<svg />")}`,
+                kind: "image",
             },
         ]);
     });
@@ -157,6 +176,30 @@ describe("chat type normalizers", () => {
                 kind: "image",
             },
         ]);
+
+        expect(
+            normalizeChatHistoryMessage({
+                content: "MEDIA:relative",
+                MediaPath: "/tmp/sound.mp3",
+                MediaType: "audio/mpeg",
+            })
+        ).toMatchObject({
+            role: "unknown",
+            attachments: [
+                {
+                    id: "/tmp/sound.mp3-0",
+                    fileName: "sound.mp3",
+                    mimeType: "audio/mpeg",
+                    kind: "file",
+                },
+                {
+                    id: "media-relative-0",
+                    fileName: "relative",
+                    mimeType: "application/octet-stream",
+                    kind: "file",
+                },
+            ],
+        });
     });
 
     it("normalizes tool result messages", () => {
@@ -178,6 +221,15 @@ describe("chat type normalizers", () => {
             isError: true,
             images: [{ type: "image", data: "abc" }],
         });
+
+        expect(
+            normalizeChatHistoryMessage({
+                role: "tool",
+                toolCallId: "tool-2",
+                toolName: "exec",
+                content: "done",
+            }).toolResult
+        ).toMatchObject({ id: "tool-2", name: "exec", content: "done" });
     });
 
     it("normalizes text from common content shapes", () => {
@@ -239,6 +291,31 @@ describe("chat type normalizers", () => {
                 historyMessage({
                     role: "tool",
                     toolResult: { content: "result" },
+                }),
+                { showThinking: false, showTools: true }
+            )
+        ).toBe(true);
+        expect(
+            isRenderableChatHistoryMessage(
+                historyMessage({ role: "tool", toolResult: { content: "" } }),
+                { showThinking: false, showTools: true }
+            )
+        ).toBe(false);
+        expect(
+            isRenderableChatHistoryMessage(
+                historyMessage({
+                    role: "tool",
+                    toolResult: { content: " ", images: [{ type: "image" }] },
+                }),
+                { showThinking: false, showTools: true }
+            )
+        ).toBe(true);
+        expect(
+            isRenderableChatHistoryMessage(
+                historyMessage({
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ name: "read" }],
                 }),
                 { showThinking: false, showTools: true }
             )

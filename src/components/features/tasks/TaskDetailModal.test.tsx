@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -138,6 +138,24 @@ describe("TaskDetailModal", () => {
         expect(props.onDelete).toHaveBeenCalledTimes(1);
     });
 
+    it("handles remaining move, assign, and edit cancel controls", async () => {
+        const user = userEvent.setup();
+        const props = renderModal({
+            task: makeTask({ assignees: [], labels: [{ name: "todo" }] }),
+        });
+
+        await user.click(screen.getByRole("button", { name: "Move to In Progress" }));
+        await user.click(screen.getByRole("button", { name: "Move to Blocked" }));
+        await user.click(screen.getByRole("button", { name: "Assign to Raymond" }));
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        await user.click(screen.getByRole("button", { name: "Cancel Edit" }));
+
+        expect(props.onMove).toHaveBeenNthCalledWith(1, "in-progress");
+        expect(props.onMove).toHaveBeenNthCalledWith(2, "blocked");
+        expect(props.onAssign).toHaveBeenCalledWith("rajohan");
+        expect(props.onUpdate).not.toHaveBeenCalled();
+    });
+
     it("saves task edits and clears automation when cron id is blank", async () => {
         const user = userEvent.setup();
         const onUpdate = vi.fn().mockResolvedValue(makeTask());
@@ -160,13 +178,15 @@ describe("TaskDetailModal", () => {
         });
 
         await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
-        await user.clear(screen.getByLabelText("Title"));
-        await user.type(screen.getByLabelText("Title"), "  Refined task title  ");
-        const description = screen.getByDisplayValue(
-            "Keep work reviewable and **do not deploy** without approval."
+        fireEvent.change(screen.getByLabelText("Title"), {
+            target: { value: "  Refined task title  " },
+        });
+        fireEvent.change(
+            screen.getByDisplayValue(
+                "Keep work reviewable and **do not deploy** without approval."
+            ),
+            { target: { value: "Updated body" } }
         );
-        await user.clear(description);
-        await user.type(description, "Updated body");
         await user.click(screen.getByRole("button", { name: "low" }));
         await user.clear(screen.getByLabelText("Cron job ID"));
         await user.click(screen.getByRole("button", { name: "Save Changes" }));

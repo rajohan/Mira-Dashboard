@@ -46,6 +46,29 @@ describe("ChatMessageDetails", () => {
         expect(screen.getByText("cache fresh")).toBeInTheDocument();
     });
 
+    it("renders string and non-json tool argument fallbacks", () => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+
+        render(
+            <ChatMessageDetails
+                message={{
+                    content: [],
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        { arguments: "raw args", name: "raw.tool" },
+                        { arguments: circular, name: "circular.tool" },
+                    ],
+                }}
+                visibility={{ showThinking: false, showTools: true }}
+            />
+        );
+
+        expect(screen.getByText("raw args")).toBeInTheDocument();
+        expect(screen.getByText("[object Object]")).toBeInTheDocument();
+    });
+
     it("renders tool result fallbacks and errors", () => {
         render(
             <ChatMessageDetails

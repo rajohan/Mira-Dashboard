@@ -78,6 +78,16 @@ describe("Moltbook page", () => {
         expect(hooks.refetch).toHaveBeenCalledTimes(1);
     });
 
+    it("defaults unread count when home metadata is unavailable", () => {
+        mockMoltbookData({ home: undefined });
+
+        render(<Moltbook />);
+
+        expect(screen.getByTestId("profile-card")).toHaveTextContent(
+            "mira_2026, unread: 0"
+        );
+    });
+
     it("renders profile and feed posts by default", () => {
         render(<Moltbook />);
 
@@ -107,6 +117,16 @@ describe("Moltbook page", () => {
 
         await user.click(screen.getByRole("button", { name: "Comments" }));
         expect(screen.getByTestId("my-comment")).toHaveTextContent("comment: Nice work");
+    });
+
+    it("renders empty state when my content has not loaded", async () => {
+        const user = userEvent.setup();
+        mockMoltbookData({ myContent: undefined });
+
+        render(<Moltbook />);
+
+        await user.click(screen.getByRole("button", { name: "Posts" }));
+        expect(screen.getByText("No posts yet.")).toBeInTheDocument();
     });
 
     it("renders empty states for empty content", async () => {

@@ -1,5 +1,7 @@
 # Mira Dashboard
 
+[![codecov](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+
 Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Node/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
 ## What it includes
@@ -56,6 +58,8 @@ From the repo root:
 ```bash
 npm run lint
 npm run build
+npm test
+npm run test:coverage
 npm run format:check
 ```
 
@@ -68,6 +72,8 @@ npm run format:check
 ```
 
 Use the smallest meaningful gate for the change you are making. For docs-only changes, `git diff --check` is usually enough; for frontend/backend code changes, prefer lint plus the relevant build.
+
+Frontend `npm test` and `npm run test:coverage` use the chunked Vitest runner to avoid one large resource-heavy Vitest process. Coverage LCOV files are written under `coverage/chunks/chunk-*/lcov.info` and uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
 
 ## Runtime notes
 

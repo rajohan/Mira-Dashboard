@@ -74,10 +74,11 @@ describe("TopQueriesTable", () => {
         const table = screen.getByRole("table");
         const bodyRows = () => within(table).getAllByRole("row").slice(1);
 
-        await userEvent.click(screen.getByRole("button", { name: "Calls" }));
-        expect(within(bodyRows()[0]!).getAllByRole("cell")[1]).toHaveTextContent("12");
+        for (const column of ["Calls", "Total ms", "Mean ms", "Rows"]) {
+            await userEvent.click(screen.getByRole("button", { name: column }));
+            await userEvent.click(screen.getByRole("button", { name: column }));
+        }
 
-        await userEvent.click(screen.getByRole("button", { name: "Calls" }));
         expect(within(bodyRows()[0]!).getAllByRole("cell")[1]).toHaveTextContent("2");
     });
 

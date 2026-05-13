@@ -36,9 +36,8 @@ export function formatDockerMemory(value: string | undefined): string {
             return null;
         }
 
-        const amount = Number.parseFloat(match[1] || "0");
-        const unit = (match[2] || "B").toUpperCase();
-        const factors: Record<string, number> = {
+        const amount = Number.parseFloat(match[1]);
+        const factors = {
             B: 1,
             KIB: 1024,
             KB: 1024,
@@ -49,8 +48,9 @@ export function formatDockerMemory(value: string | undefined): string {
             TIB: 1024 ** 4,
             TB: 1024 ** 4,
         };
+        const unit = match[2].toUpperCase() as keyof typeof factors;
 
-        return amount * (factors[unit] || 1);
+        return amount * factors[unit];
     };
 
     const usedBytes = parsePart(usedRaw);

@@ -39,7 +39,7 @@ interface ChatMessagesListProps {
 }
 
 /** Renders the attachment icon UI. */
-function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
+export function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     if (attachment.kind === "image") {
         return <ImageIcon className="h-4 w-4" />;
     }
@@ -52,7 +52,7 @@ function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
 }
 
 /** Decodes base64 text attachments without throwing during rendering. */
-function base64ToText(base64: string): string | undefined {
+export function base64ToText(base64: string): string | undefined {
     try {
         const binary = window.atob(base64);
         const bytes = Uint8Array.from(
@@ -66,7 +66,7 @@ function base64ToText(base64: string): string | undefined {
 }
 
 /** Performs preview from attachment. */
-function previewFromAttachment(
+export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
     if (!attachment.dataUrl && !attachment.contentBase64) {

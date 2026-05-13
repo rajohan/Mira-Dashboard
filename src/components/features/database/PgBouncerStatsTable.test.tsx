@@ -41,7 +41,7 @@ describe("PgBouncerStatsTable", () => {
         expect(screen.getByText("1234")).toBeInTheDocument();
     });
 
-    it("sorts query counts numerically", async () => {
+    it("sorts PgBouncer numeric stat columns", async () => {
         render(<PgBouncerStatsTable data={stats} />);
 
         const table = screen.getByRole("table");
@@ -49,10 +49,11 @@ describe("PgBouncerStatsTable", () => {
 
         expect(within(bodyRows()[0]!).getByText("comet")).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole("button", { name: "Queries" }));
-        expect(within(bodyRows()[0]!).getByText("comet")).toBeInTheDocument();
+        for (const column of ["Avg query", "Avg transaction", "Queries"]) {
+            await userEvent.click(screen.getByRole("button", { name: column }));
+            await userEvent.click(screen.getByRole("button", { name: column }));
+        }
 
-        await userEvent.click(screen.getByRole("button", { name: "Queries" }));
         expect(within(bodyRows()[0]!).getByText("n8n")).toBeInTheDocument();
     });
 

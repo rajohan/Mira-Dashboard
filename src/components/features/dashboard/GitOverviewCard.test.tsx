@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { GitOverviewCard } from "./GitOverviewCard";
@@ -22,6 +22,25 @@ describe("GitOverviewCard", () => {
         rerender(<GitOverviewCard />);
 
         expect(screen.getByText("Git cache unavailable.")).toBeInTheDocument();
+    });
+
+    it("shows green dirty repo count when every repo is clean", () => {
+        hooks.useCacheEntry.mockReturnValue({
+            data: {
+                data: {
+                    checkedAt: "2026-05-10T10:00:00.000Z",
+                    dirtyRepos: [],
+                    repos: [],
+                },
+            },
+            isError: false,
+            isLoading: false,
+        });
+
+        render(<GitOverviewCard />);
+
+        const dirtyRepoRow = screen.getByText("Dirty repos").parentElement!;
+        expect(within(dirtyRepoRow).getByText("0")).toHaveClass("text-green-300");
     });
 
     it("summarizes tracked git repos and dirty status", () => {

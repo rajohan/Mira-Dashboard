@@ -19,7 +19,7 @@ const LOG_BOTTOM_THRESHOLD_PX = 24;
 let lastVisibleLogFiles: LogFile[] = [];
 
 /** Returns whether named log file. */
-function isNamedLogFile(file: unknown): file is LogFile {
+export function isNamedLogFile(file: unknown): file is LogFile {
     return (
         Boolean(file) &&
         typeof file === "object" &&
@@ -29,7 +29,10 @@ function isNamedLogFile(file: unknown): file is LogFile {
 }
 
 /** Performs compare log file names descending. */
-function compareLogFileNamesDescending(a: { name?: unknown }, b: { name?: unknown }) {
+export function compareLogFileNamesDescending(
+    a: { name?: unknown },
+    b: { name?: unknown }
+) {
     return String(b.name || "").localeCompare(String(a.name || ""));
 }
 

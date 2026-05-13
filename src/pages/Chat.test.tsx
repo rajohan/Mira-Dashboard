@@ -1,9 +1,18 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatRow } from "../components/features/chat/chatTypes";
-import { Chat } from "./Chat";
+import {
+    Chat,
+    historyHasNewerAssistantMessage,
+    readDeletedMessageKeys,
+    readStoredChatDiagnosticVisibility,
+    sessionTimestampMs,
+    supportedAudioRecordingMimeType,
+    writeDeletedMessageKeys,
+    writeStoredChatDiagnosticVisibility,
+} from "./Chat";
 
 const mocks = vi.hoisted(() => ({
     request: vi.fn(),
@@ -146,19 +155,36 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
 vi.mock("../components/features/chat/ChatMessagesList", () => ({
     ChatMessagesList: ({
         chatRows,
+        isAtBottom,
         isLoadingHistory,
+        messagesBottomReference,
+        messagesContainerReference,
         onDeleteMessage,
+        onDynamicContentLoad,
+        onFollow,
         onPreview,
+        onScroll,
         visibility,
     }: {
         chatRows: ChatRow[];
+        isAtBottom: boolean;
         isLoadingHistory: boolean;
+        messagesBottomReference: React.RefObject<HTMLDivElement | null>;
+        messagesContainerReference: React.RefObject<HTMLDivElement | null>;
         onDeleteMessage: (messageKey: string) => void;
+        onDynamicContentLoad: () => void;
+        onFollow: () => void;
         onPreview: (preview: { title: string; kind: "text" }) => void;
+        onScroll: () => void;
         visibility: { showThinking: boolean; showTools: boolean };
     }) => (
-        <section aria-label="chat messages">
+        <section
+            ref={messagesContainerReference}
+            aria-label="chat messages"
+            onScroll={onScroll}
+        >
             <div data-testid="loading-history">{String(isLoadingHistory)}</div>
+            <div data-testid="bottom-state">{String(isAtBottom)}</div>
             <div data-testid="visibility">
                 {String(visibility.showThinking)}:{String(visibility.showTools)}
             </div>
@@ -173,11 +199,18 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
                     ) : null}
                 </article>
             ))}
+            <div ref={messagesBottomReference} data-testid="messages-bottom" />
             <button
                 type="button"
                 onClick={() => onPreview({ kind: "text", title: "preview.txt" })}
             >
                 preview attachment
+            </button>
+            <button type="button" onClick={onDynamicContentLoad}>
+                dynamic content loaded
+            </button>
+            <button type="button" onClick={onFollow}>
+                follow bottom
             </button>
         </section>
     ),
@@ -189,21 +222,29 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
         canSend,
         draft,
         isConnected,
+        isRecording,
+        isTranscribing,
+        onApplySlashSuggestion,
         onAttachFiles,
         onChangeDraft,
         onRemoveAttachment,
         onSend,
         onToggleRecording,
+        slashCommandSuggestions,
     }: {
         attachments: Array<{ id: string; fileName: string }>;
         canSend: boolean;
         draft: string;
         isConnected: boolean;
+        isRecording: boolean;
+        isTranscribing: boolean;
+        onApplySlashSuggestion: (value: string) => void;
         onAttachFiles: (files: FileList | null) => void;
         onChangeDraft: (draft: string) => void;
         onRemoveAttachment: (id: string) => void;
         onSend: () => void;
         onToggleRecording: () => void;
+        slashCommandSuggestions: Array<{ value: string }>;
     }) => (
         <form
             onSubmit={(event) => {
@@ -212,7 +253,8 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
             }}
         >
             <div data-testid="composer-state">
-                {String(isConnected)}:{String(canSend)}
+                {String(isConnected)}:{String(canSend)}:{String(isRecording)}:
+                {String(isTranscribing)}
             </div>
             <label>
                 Draft
@@ -239,6 +281,16 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
                     remove {attachment.fileName}
                 </button>
             ))}
+            {slashCommandSuggestions[0] ? (
+                <button
+                    type="button"
+                    onClick={() =>
+                        onApplySlashSuggestion(slashCommandSuggestions[0]!.value)
+                    }
+                >
+                    apply first slash suggestion
+                </button>
+            ) : null}
             <button type="button" onClick={onToggleRecording}>
                 toggle recording
             </button>
@@ -320,6 +372,129 @@ function setupRequest() {
     });
 }
 
+describe("Chat helpers", () => {
+    beforeEach(() => {
+        installLocalStorageMock();
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: undefined,
+        });
+    });
+
+    it("stores deleted message keys and tolerates invalid storage", () => {
+        expect(readDeletedMessageKeys("")).toEqual(new Set());
+
+        window.localStorage.setItem(
+            "openclaw:deleted:session-a",
+            JSON.stringify(["one", 2, "two"])
+        );
+        expect(readDeletedMessageKeys("session-a")).toEqual(new Set(["one", "two"]));
+
+        window.localStorage.setItem("openclaw:deleted:session-a", "not json");
+        expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
+
+        writeDeletedMessageKeys("session-a", new Set(["three"]));
+        expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBe(
+            '["three"]'
+        );
+        writeDeletedMessageKeys("", new Set(["ignored"]));
+    });
+
+    it("reads and writes diagnostic visibility storage", () => {
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            thinking: false,
+            tools: false,
+        });
+
+        writeStoredChatDiagnosticVisibility({ thinking: true, tools: true });
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            thinking: true,
+            tools: true,
+        });
+
+        window.localStorage.setItem(
+            "mira-dashboard-chat-diagnostic-visibility",
+            JSON.stringify({ thinking: true, tools: "yes" })
+        );
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            thinking: true,
+            tools: false,
+        });
+
+        window.localStorage.setItem(
+            "mira-dashboard-chat-diagnostic-visibility",
+            "not json"
+        );
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            thinking: false,
+            tools: false,
+        });
+    });
+
+    it("normalizes timestamps and detects recovered assistant history", () => {
+        expect(sessionTimestampMs(42)).toBe(42);
+        expect(sessionTimestampMs(Number.NaN)).toBeNull();
+        expect(sessionTimestampMs("2026-05-11T00:00:00.000Z")).toBe(
+            Date.parse("2026-05-11T00:00:00.000Z")
+        );
+        expect(sessionTimestampMs("not-a-date")).toBeNull();
+        expect(sessionTimestampMs({})).toBeNull();
+
+        expect(historyHasNewerAssistantMessage([])).toBe(false);
+        expect(
+            historyHasNewerAssistantMessage(
+                [
+                    {
+                        content: "hello",
+                        role: "user",
+                        text: "hello",
+                        timestamp: "2026-05-11T00:01:00.000Z",
+                    },
+                    {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        timestamp: "2026-05-11T00:02:00.000Z",
+                    },
+                    {
+                        content: "done",
+                        role: "assistant",
+                        text: "done",
+                        timestamp: "2026-05-11T00:03:00.000Z",
+                    },
+                ],
+                "2026-05-11T00:02:30.000Z"
+            )
+        ).toBe(true);
+        expect(
+            historyHasNewerAssistantMessage(
+                [
+                    {
+                        content: "old",
+                        role: "assistant",
+                        text: "old",
+                        timestamp: "2026-05-11T00:01:00.000Z",
+                    },
+                ],
+                "2026-05-11T00:02:30.000Z"
+            )
+        ).toBe(false);
+    });
+
+    it("selects the first supported recorder mime type", () => {
+        expect(supportedAudioRecordingMimeType()).toBeUndefined();
+
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: {
+                isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/mp4"),
+            },
+        });
+
+        expect(supportedAudioRecordingMimeType()).toBe("audio/mp4");
+    });
+});
+
 describe("Chat", () => {
     beforeEach(() => {
         installLocalStorageMock();
@@ -337,6 +512,8 @@ describe("Chat", () => {
             configurable: true,
             value: undefined,
         });
+        Element.prototype.scrollIntoView = vi.fn();
+        vi.stubGlobal("fetch", vi.fn());
     });
 
     it("loads sessions, models, history, and toggles diagnostic visibility", async () => {
@@ -518,6 +695,168 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
 
         expect(await screen.findByText("send failed")).toBeInTheDocument();
+    });
+
+    it("applies slash suggestions and follows dynamic message content", async () => {
+        const user = userEvent.setup();
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/mo");
+        await user.click(
+            screen.getByRole("button", { name: "apply first slash suggestion" })
+        );
+        expect((screen.getByLabelText("Draft") as HTMLTextAreaElement).value).toMatch(
+            /^\//u
+        );
+
+        await user.click(screen.getByRole("button", { name: "dynamic content loaded" }));
+        await user.click(screen.getByRole("button", { name: "follow bottom" }));
+        fireEvent.scroll(screen.getByLabelText("chat messages"));
+        expect(screen.getByTestId("bottom-state")).toHaveTextContent("true");
+    });
+
+    it("transcribes selected voice files and reports audio errors", async () => {
+        const user = userEvent.setup();
+        const fetchMock = vi.mocked(fetch);
+        fetchMock
+            .mockResolvedValueOnce({
+                json: async () => ({ text: "  voice draft  " }),
+                ok: true,
+            } as Response)
+            .mockResolvedValueOnce({
+                json: async () => ({ text: "" }),
+                ok: true,
+            } as Response)
+            .mockResolvedValueOnce({
+                json: async () => ({ error: "speech service unavailable" }),
+                ok: false,
+                status: 503,
+            } as Response);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+        const voiceInput = document.querySelector<HTMLInputElement>(
+            'input[accept="audio/*"]'
+        )!;
+
+        fireEvent.change(voiceInput, {
+            target: {
+                files: [new File(["voice"], "voice.webm", { type: "audio/webm" })],
+            },
+        });
+        await waitFor(() =>
+            expect(screen.getByLabelText("Draft")).toHaveValue("voice draft")
+        );
+
+        await user.clear(screen.getByLabelText("Draft"));
+        fireEvent.change(voiceInput, {
+            target: {
+                files: [new File(["silence"], "silence.webm", { type: "audio/webm" })],
+            },
+        });
+        expect(
+            await screen.findByText("Whisper did not detect any speech.")
+        ).toBeInTheDocument();
+
+        fireEvent.change(voiceInput, {
+            target: { files: [new File(["bad"], "bad.webm", { type: "audio/webm" })] },
+        });
+        expect(await screen.findByText("speech service unavailable")).toBeInTheDocument();
+
+        const oversizedFile = new File(["x"], "too-big.webm", { type: "audio/webm" });
+        Object.defineProperty(oversizedFile, "size", { value: 21 * 1024 * 1024 });
+        fireEvent.change(voiceInput, { target: { files: [oversizedFile] } });
+        expect(
+            await screen.findByText(/too-big\.webm is too large/u)
+        ).toBeInTheDocument();
+
+        fireEvent.change(voiceInput, { target: { files: [] } });
+    });
+
+    it("records direct microphone audio and transcribes the stopped recording", async () => {
+        const user = userEvent.setup();
+        const stopTrack = vi.fn();
+        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+            json: async () => ({ text: "recorded text" }),
+            ok: true,
+        } as Response);
+        let recorder: {
+            listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
+            mimeType: string;
+            stop: () => void;
+        } | null = null;
+        const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
+            recorder = {
+                listeners: {},
+                mimeType: "audio/webm",
+                stop: () => {
+                    const dataListeners = recorder?.listeners.dataavailable;
+                    if (dataListeners) {
+                        for (const listener of dataListeners) {
+                            listener({
+                                data: new Blob(["audio"], { type: "audio/webm" }),
+                            });
+                        }
+                    }
+
+                    const stopListeners = recorder?.listeners.stop;
+                    if (stopListeners) {
+                        for (const listener of stopListeners) listener();
+                    }
+                },
+            };
+            Object.assign(this as object, recorder, {
+                addEventListener: (
+                    type: string,
+                    listener: (event?: { data: Blob }) => void
+                ) => {
+                    recorder!.listeners[type] = [
+                        ...(recorder!.listeners[type] || []),
+                        listener,
+                    ];
+                },
+                start: vi.fn(),
+            });
+        });
+        Object.assign(MediaRecorderMock, {
+            isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/webm"),
+        });
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn().mockResolvedValue({
+                    getTracks: () => [{ stop: stopTrack }],
+                }),
+            },
+        });
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: MediaRecorderMock,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("composer-state")).toHaveTextContent(
+                "true:false:true:false"
+            )
+        );
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/stt/transcribe",
+                expect.objectContaining({ method: "POST" })
+            )
+        );
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+        await waitFor(() =>
+            expect(screen.getByLabelText("Draft")).toHaveValue("recorded text")
+        );
     });
 
     it("switches sessions, reloads history, and clears queued attachments", async () => {

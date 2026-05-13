@@ -40,4 +40,22 @@ describe("LogLine", () => {
         expect(screen.queryByText("WARN")).not.toBeInTheDocument();
         expect(screen.getByText("fallback raw")).toBeInTheDocument();
     });
+
+    it("renders an empty message fallback when raw text is missing", () => {
+        const { container } = render(
+            <LogLine
+                log={
+                    {
+                        id: "3",
+                        msg: { structured: true },
+                    } as unknown as LogEntry
+                }
+            />
+        );
+
+        const message = container.querySelector("span.text-primary-200");
+
+        expect(message).toBeTruthy();
+        expect(message?.textContent).toBe("");
+    });
 });

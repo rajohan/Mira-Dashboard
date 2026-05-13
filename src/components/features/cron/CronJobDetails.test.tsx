@@ -96,6 +96,8 @@ describe("CronJobDetails", () => {
         const onSave = vi.fn();
         const onNameDraftChange = vi.fn();
         const onScheduleDraftChange = vi.fn();
+        const onPayloadDraftChange = vi.fn();
+        const onDeliveryDraftChange = vi.fn();
 
         renderDetails({
             isEditMode: true,
@@ -103,6 +105,8 @@ describe("CronJobDetails", () => {
             onSave,
             onNameDraftChange,
             onScheduleDraftChange,
+            onPayloadDraftChange,
+            onDeliveryDraftChange,
         });
 
         expect(screen.getByText("Update failed")).toBeInTheDocument();
@@ -110,11 +114,15 @@ describe("CronJobDetails", () => {
 
         await user.clear(screen.getByPlaceholderText("Job name"));
         await user.type(screen.getByPlaceholderText("Job name"), "Updated autopilot");
-        await user.type(screen.getByDisplayValue(/30 9,18/), " ");
+        await user.type(screen.getByDisplayValue(/30 9,18/u), " ");
+        await user.type(screen.getByDisplayValue(/Improve the dashboard/u), " ");
+        await user.type(screen.getByDisplayValue(/"mode": "none"/u), " ");
         await user.click(screen.getByRole("button", { name: "Save edits" }));
 
         expect(onNameDraftChange).toHaveBeenCalled();
         expect(onScheduleDraftChange).toHaveBeenCalled();
+        expect(onPayloadDraftChange).toHaveBeenCalled();
+        expect(onDeliveryDraftChange).toHaveBeenCalled();
         expect(onSave).toHaveBeenCalledWith(job);
     });
 

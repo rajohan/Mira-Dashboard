@@ -18,6 +18,8 @@ jobs:
         name: frontend-checks
         runs-on: ubuntu-latest
         timeout-minutes: 15
+        env:
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         steps:
             - name: Checkout
               uses: actions/checkout@v6
@@ -39,6 +41,25 @@ jobs:
 
             - name: Test frontend coverage
               run: npm run test:coverage
+
+            - name: Upload frontend coverage artifact
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: frontend-coverage-lcov
+                  path: coverage/chunks/*/lcov.info
+                  if-no-files-found: error
+                  retention-days: 14
+
+            - name: Upload frontend coverage to Codecov
+              uses: codecov/codecov-action@v5
+              if: ${{ env.CODECOV_TOKEN != '' }}
+              with:
+                  token: ${{ env.CODECOV_TOKEN }}
+                  files: coverage/chunks/*/lcov.info
+                  flags: frontend
+                  name: frontend
+                  fail_ci_if_error: true
 
     backend-checks:
         name: backend-checks

@@ -11,9 +11,10 @@ export default defineConfig({
             provider: "v8",
             reporter: ["text", "lcov"],
             thresholds: {
-                lines: 89,
-                functions: 90,
-                branches: 78,
+                lines: 95,
+                functions: 96,
+                branches: 87,
+                statements: 95,
             },
             include: ["src/**/*.{ts,tsx}"],
             exclude: [

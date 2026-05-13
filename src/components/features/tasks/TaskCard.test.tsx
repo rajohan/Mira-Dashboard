@@ -14,6 +14,7 @@ vi.mock("@dnd-kit/sortable", () => ({
     }),
 }));
 
+/** Creates a task fixture for card rendering tests. */
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
         number: 42,
@@ -45,6 +46,15 @@ describe("TaskCard", () => {
         await userEvent.click(screen.getByText("Expand dashboard test coverage"));
 
         expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops card clicks from the drag handle", async () => {
+        const onClick = vi.fn();
+        render(<TaskCard task={makeTask()} onClick={onClick} />);
+
+        await userEvent.click(screen.getByRole("button", { name: "Drag task #42" }));
+
+        expect(onClick).not.toHaveBeenCalled();
     });
 
     it("shows recurring marker, fallback avatar, and dragging styling", () => {

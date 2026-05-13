@@ -57,7 +57,7 @@ describe("DockerVolumesTable", () => {
         expect(screen.getAllByText("Unused")[0]).toBeInTheDocument();
 
         await userEvent.click(screen.getByRole("button", { name: "Remove unused (1)" }));
-        const enabledDeleteButton = screen
+        const enabledDeleteButton = within(screen.getByRole("table"))
             .getAllByRole("button", { name: "Delete" })
             .find((button) => !button.hasAttribute("disabled"));
         await userEvent.click(enabledDeleteButton!);

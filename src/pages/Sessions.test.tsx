@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,22 +31,49 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-    useLiveQuery: () => ({ data: mocks.sessions }),
+    useLiveQuery: (select: (query: { from: () => typeof mocks.sessions }) => unknown) => {
+        const data = select({ from: () => mocks.sessions });
+        return { data };
+    },
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-    useVirtualizer: ({ count }: { count: number }) => ({
-        getTotalSize: () => count * 100,
-        getVirtualItems: () =>
-            Array.from({ length: count }, (_, index) => ({
-                end: (index + 1) * 100,
-                index,
-                key: `row-${index}`,
-                start: index * 100,
-            })),
-        measureElement: mocks.measureElement,
-        scrollToIndex: mocks.scrollToIndex,
-    }),
+    useVirtualizer: ({
+        count,
+        estimateSize,
+        getItemKey,
+        getScrollElement,
+        measureElement,
+    }: {
+        count: number;
+        estimateSize: (index: number) => number;
+        getItemKey: (index: number) => string;
+        getScrollElement: () => Element | null;
+        measureElement: (element: Element) => number;
+    }) => {
+        if (count > 0) {
+            getItemKey(0);
+            estimateSize(0);
+        }
+        if (count > 1) {
+            getItemKey(1);
+            estimateSize(1);
+        }
+        getScrollElement();
+        measureElement({ getBoundingClientRect: () => ({ height: 123 }) } as Element);
+        return {
+            getTotalSize: () => count * 100,
+            getVirtualItems: () =>
+                Array.from({ length: count }, (_, index) => ({
+                    end: (index + 1) * 100,
+                    index,
+                    key: `row-${index}`,
+                    start: index * 100,
+                })),
+            measureElement: mocks.measureElement,
+            scrollToIndex: mocks.scrollToIndex,
+        };
+    },
 }));
 
 vi.mock("../collections/sessions", () => ({
@@ -279,6 +306,12 @@ describe("Sessions page", () => {
         expect(screen.getByText("assistant message")).toBeInTheDocument();
         expect(screen.queryByText("user message")).not.toBeInTheDocument();
 
+        await user.selectOptions(selects[1], "DIRECT");
+        expect(screen.getByText("No live messages yet.")).toBeInTheDocument();
+        await user.selectOptions(selects[2], "channel-1");
+        expect(screen.queryByText("assistant message")).not.toBeInTheDocument();
+        expect(screen.getByText("No live messages yet.")).toBeInTheDocument();
+
         await user.click(screen.getByRole("button", { name: "CHANNEL" }));
         expect(screen.getByTestId("sessions-table")).toHaveTextContent("sessions: 1");
     });
@@ -312,20 +345,100 @@ describe("Sessions page", () => {
         expect(mocks.compact).toHaveBeenCalledWith("main");
 
         await user.click(screen.getByRole("button", { name: "Select Main session" }));
+        await user.click(screen.getByRole("button", { name: "Reset selected" }));
+        expect(mocks.reset).toHaveBeenCalledWith("main");
+
+        await user.click(screen.getByRole("button", { name: "Select Main session" }));
+        await user.click(screen.getByRole("button", { name: "Close details" }));
+        expect(screen.queryByTestId("session-details")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Select Main session" }));
         await user.click(screen.getByRole("button", { name: "Delete selected" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Main session");
         await user.click(screen.getByRole("button", { name: "Confirm delete" }));
         expect(mocks.remove).toHaveBeenCalledWith("main");
     });
 
+    it("handles empty data, live feed scrolling, and delete guard branches", async () => {
+        const user = userEvent.setup();
+        mockSessions({
+            feed: [],
+            sessions: [
+                {
+                    displayName: "Display name only",
+                    key: "name-only",
+                    lastActivityAt: "2026-05-09T00:00:00.000Z",
+                },
+            ],
+        });
+        const { rerender } = render(<Sessions />);
+        expect(screen.getByText("No live messages yet.")).toBeInTheDocument();
+        expect(screen.getByText("All sessions")).toBeInTheDocument();
+
+        mockSessions({ sessions: null });
+        rerender(<Sessions />);
+        expect(screen.getByTestId("sessions-table")).toHaveTextContent("sessions: 0");
+
+        mockSessions({
+            actions: {
+                compact: mocks.compact,
+                isDeleting: true,
+                remove: mocks.remove,
+                reset: mocks.reset,
+            },
+        });
+        rerender(<Sessions />);
+        await user.click(screen.getByRole("button", { name: "Delete main" }));
+        await user.click(screen.getByRole("button", { name: "Cancel delete" }));
+        expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
+
+        mocks.remove.mockClear();
+        await user.click(screen.getByRole("button", { name: "Delete main" }));
+        await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+        expect(mocks.remove).not.toHaveBeenCalled();
+
+        mockSessions();
+        rerender(<Sessions />);
+        const feedContainer = screen
+            .getByText("assistant message")
+            .closest("div[style]") as HTMLDivElement;
+        Object.defineProperties(feedContainer, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 300 },
+            scrollTop: { configurable: true, value: 0, writable: true },
+        });
+        fireEvent.scroll(feedContainer);
+        expect(
+            await screen.findByRole("button", { name: "↓ Follow" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "↓ Follow" }));
+        expect(mocks.scrollToIndex).toHaveBeenCalled();
+    });
+
     it("shows delete errors from failed session removal", async () => {
         const user = userEvent.setup();
         mocks.remove.mockRejectedValueOnce(new Error("Delete failed"));
 
-        render(<Sessions />);
+        const { rerender } = render(<Sessions />);
 
         await user.click(screen.getByRole("button", { name: "Delete main" }));
         await user.click(screen.getByRole("button", { name: "Confirm delete" }));
         expect(await screen.findByText("Delete failed")).toBeInTheDocument();
+
+        mockSessions({
+            sessions: [
+                {
+                    key: "raw-key",
+                    lastActivityAt: "2026-05-09T00:00:00.000Z",
+                    type: "direct",
+                },
+            ],
+        });
+        mocks.remove.mockRejectedValueOnce("string delete failure");
+        rerender(<Sessions />);
+        await user.click(screen.getByRole("button", { name: "Delete raw-key" }));
+        expect(screen.getByTestId("confirm-modal")).toHaveTextContent("raw-key");
+        await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+        expect(await screen.findByText("Failed to delete session")).toBeInTheDocument();
     });
 });
