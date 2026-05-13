@@ -482,7 +482,7 @@ async function ensureProductionReadyForDeploy(): Promise<void> {
 }
 
 /** Performs sync main. */
-async function syncMaster(): Promise<void> {
+async function syncMain(): Promise<void> {
     await ensureProductionCheckout();
     await runCommand("git", ["fetch", "--prune", "origin"], { timeoutMs: 120_000 });
     await runCommand("git", ["checkout", DEFAULT_BASE], { timeoutMs: 60_000 });
@@ -552,7 +552,7 @@ async function deployLatest(): Promise<DeploymentJob> {
     writeDeploymentJob(job);
 
     try {
-        await syncMaster();
+        await syncMain();
 
         await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
         await runCommand("npm", ["--prefix", "backend", "run", "build"], {
@@ -608,7 +608,7 @@ async function approvePullRequest(number: number, deploy: boolean) {
         { timeoutMs: 120_000 }
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
-    await syncMaster();
+    await syncMain();
 
     return {
         ok: true,

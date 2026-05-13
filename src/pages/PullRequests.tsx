@@ -38,6 +38,7 @@ type PendingAction =
 
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
+const DEFAULT_BASE = "main";
 
 /** Returns whether mira pull request. */
 function isMiraPullRequest(pr: PullRequestSummary): boolean {
@@ -120,7 +121,9 @@ function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout) return "Checking production checkout";
     if (!checkout.isProductionRoot) return "Wrong root";
     if (!checkout.isClean) return "Dirty checkout";
-    if (checkout.branch !== checkout.expectedBranch) return "Will switch to main";
+    if (checkout.branch !== checkout.expectedBranch) {
+        return `Will switch to ${checkout.expectedBranch}`;
+    }
     return "Ready to deploy";
 }
 
@@ -154,7 +157,7 @@ function actionLabel(action: PendingAction) {
         case "reject":
             return "Reject PR";
         case "deploy":
-            return "Deploy latest main";
+            return `Deploy latest ${DEFAULT_BASE}`;
     }
 }
 
@@ -165,11 +168,11 @@ function actionMessage(action: PendingAction) {
         case "merge":
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
         case "merge-deploy":
-            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to main, build frontend/backend from there, schedule a service restart, and run a health check.`;
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
         case "reject":
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
         case "deploy":
-            return "Deploy latest main?\n\nThis will sync the production checkout to main, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.";
+            return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.`;
     }
 }
 
@@ -375,7 +378,7 @@ export function PullRequests() {
                             disabled={isActionPending || isProductionActionBlocked}
                         >
                             <Rocket className="h-4 w-4" />
-                            Deploy latest main
+                            {`Deploy latest ${DEFAULT_BASE}`}
                         </Button>
                     </div>
                 </div>
