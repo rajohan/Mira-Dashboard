@@ -345,6 +345,29 @@ export default function tasksRoutes(
         res.json(rows.map((task) => toFrontendTask(task, cronJobsById)));
     }) as RequestHandler);
 
+    app.get("/api/tasks/:id", (async (req, res) => {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) {
+            res.status(400).json({ error: "Invalid id" });
+            return;
+        }
+
+        const row = db
+            .prepare(
+                `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
+                 FROM tasks WHERE id = ?`
+            )
+            .get(id) as unknown as DbTask | undefined;
+
+        if (!row) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        const cronJobsById = await fetchCronJobsById();
+        res.json(toFrontendTask(row, cronJobsById));
+    }) as RequestHandler);
+
     app.post("/api/tasks", express.json(), (async (req, res) => {
         const { title, body, labels, assignee, automation } = req.body as {
             title?: string;
