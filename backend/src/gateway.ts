@@ -109,11 +109,21 @@ interface PendingRequest {
     method?: string;
 }
 
+/** Represents a live agent activity observed from Gateway runtime events. */
+interface LiveAgentActivity {
+    activity: string;
+    lastActivity: number;
+}
+
 /** Represents history message. */
 interface HistoryMessage {
     role?: string;
-    content?: string | Array<{ type?: string; text?: string }>;
+    content?: unknown;
     timestamp?: string | number;
+    toolCallId?: string;
+    tool_call_id?: string;
+    toolName?: string;
+    tool_name?: string;
 }
 
 /** Represents the chat history payload. */
@@ -122,6 +132,23 @@ interface ChatHistoryPayload {
     sessionId?: string;
     messages?: unknown[];
 }
+
+/** Represents a flattened session history feed message. */
+interface FlattenedHistoryMessage {
+    role: string;
+    content: string;
+    timestamp?: string;
+}
+
+const NON_DISPLAY_TOOL_NAMES = new Set([
+    "message",
+    "messages",
+    "reply",
+    "send",
+    "reaction",
+    "react",
+    "typing",
+]);
 
 /** Represents chat image block record. */
 interface ChatImageBlockRecord {
@@ -152,6 +179,8 @@ let isGatewayConnected = false;
 let requestId = 1000;
 const pendingRequests = new Map<string, PendingRequest>();
 let currentToken: string | null = null;
+const liveAgentActivities = new Map<string, LiveAgentActivity>();
+const subscribedSessionMessageKeys = new Set<string>();
 
 /** Performs transform session. */
 function transformSession(session: GatewaySession): Session {
@@ -257,6 +286,67 @@ function sessionHasRunIdentifier(session: Session, runId: string): boolean {
     ].includes(runId);
 }
 
+/** Returns an agent id from a Gateway session key. */
+function agentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
+    if (!sessionKey) {
+        return undefined;
+    }
+
+    const parts = sessionKey.split(":");
+    return parts[0] === "agent" && parts[1] ? parts[1] : undefined;
+}
+
+/** Formats a short live activity label from a Gateway runtime event. */
+function summarizeRuntimeActivity(event: unknown, payload: unknown): string | undefined {
+    const record = asRecord(payload);
+    if (!record) {
+        return undefined;
+    }
+
+    const stream = stringField(record, "stream");
+    const data = asRecord(record.data) || {};
+    const name = stringField(data, "name") || (event === "session.tool" ? "tool" : "");
+    const args = asRecord(data.args) || {};
+    const phase = stringField(data, "phase");
+
+    if (stream === "lifecycle" && phase === "start") {
+        return "thinking";
+    }
+
+    if (stream !== "tool" && event !== "session.tool") {
+        return undefined;
+    }
+
+    const normalized = name.includes(".") ? name.split(".").pop() || name : name;
+    const detail =
+        stringField(args, "command") ||
+        stringField(args, "query") ||
+        stringField(args, "url") ||
+        stringField(args, "path") ||
+        stringField(args, "message") ||
+        stringField(args, "text") ||
+        stringField(data, "title") ||
+        stringField(data, "summary");
+
+    return detail ? `${normalized} ${detail}`.slice(0, 90) : normalized || "tool";
+}
+
+/** Records live agent activity from Gateway runtime events. */
+function recordLiveAgentActivity(event: unknown, payload: unknown): void {
+    const record = asRecord(payload);
+    const agentId = agentIdFromSessionKey(stringField(record || {}, "sessionKey"));
+    const activity = summarizeRuntimeActivity(event, payload);
+
+    if (!agentId || !activity) {
+        return;
+    }
+
+    liveAgentActivities.set(agentId, {
+        activity,
+        lastActivity: Date.now(),
+    });
+}
+
 /** Performs enrich runtime event payload. */
 function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
     if (event !== "agent" && event !== "session.tool") {
@@ -318,6 +408,120 @@ function normalizeMessageText(content: unknown): string {
         .filter(Boolean)
         .join("\n\n")
         .trim();
+}
+
+/** Formats unknown history payload content for the sessions live feed. */
+function formatHistoryPayload(value: unknown): string {
+    if (value === undefined || value === null) {
+        return "";
+    }
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+}
+
+/** Returns first text field from a content block. */
+function blockText(block: Record<string, unknown>): string {
+    return typeof block.text === "string" ? block.text : "";
+}
+
+/** Returns display-canonical tool name for filtering while preserving original labels. */
+function canonicalToolName(value: string | undefined): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    return trimmed.replace(/^(functions|runtime)\./iu, "");
+}
+
+/** Returns whether a tool name should be hidden from user-facing diagnostics. */
+function isNonDisplayToolName(value: string | undefined): boolean {
+    const canonical = canonicalToolName(value);
+    return Boolean(canonical && NON_DISPLAY_TOOL_NAMES.has(canonical.toLowerCase()));
+}
+
+/** Expands a rich chat history message into feed-friendly rows. */
+function flattenHistoryMessage(msg: HistoryMessage): FlattenedHistoryMessage[] {
+    const timestamp =
+        typeof msg.timestamp === "number"
+            ? new Date(msg.timestamp).toISOString()
+            : msg.timestamp;
+    const role = msg.role || "unknown";
+    const normalizedRole = role.toLowerCase();
+    const toolName =
+        typeof msg.toolName === "string"
+            ? msg.toolName
+            : typeof msg.tool_name === "string"
+              ? msg.tool_name
+              : undefined;
+
+    if (isNonDisplayToolName(toolName)) {
+        return [];
+    }
+
+    if (
+        normalizedRole === "tool" ||
+        normalizedRole === "toolresult" ||
+        normalizedRole === "tool_result"
+    ) {
+        const content = Array.isArray(msg.content)
+            ? normalizeMessageText(msg.content)
+            : formatHistoryPayload(msg.content);
+        return content ? [{ role: "tool_result", content, timestamp }] : [];
+    }
+
+    if (!Array.isArray(msg.content)) {
+        const content =
+            typeof msg.content === "string"
+                ? normalizeMessageText(msg.content)
+                : formatHistoryPayload(msg.content);
+        return content ? [{ role, content, timestamp }] : [];
+    }
+
+    const rows: FlattenedHistoryMessage[] = [];
+    const textContent = msg.content.map(blockText).filter(Boolean).join("\n\n").trim();
+
+    if (textContent) {
+        rows.push({ role, content: textContent, timestamp });
+    }
+
+    for (const block of msg.content) {
+        if (!block || typeof block !== "object" || Array.isArray(block)) {
+            continue;
+        }
+
+        if (block.type !== "toolCall") {
+            continue;
+        }
+
+        const name = typeof block.name === "string" ? block.name : "tool";
+        if (isNonDisplayToolName(name)) {
+            continue;
+        }
+
+        const content = [
+            name,
+            formatHistoryPayload(block.arguments || block.input || block.parameters),
+        ]
+            .filter(Boolean)
+            .join("\n");
+
+        rows.push({
+            role: "tool",
+            content,
+            timestamp,
+        });
+    }
+
+    return rows;
 }
 
 /** Normalizes timestamp. */
@@ -520,6 +724,32 @@ async function refreshSessions(): Promise<void> {
 
     sessionList = (payload.sessions || []).map(transformSession);
     broadcast({ type: "sessions", sessions: sessionList });
+    subscribeToSessionMessages(sessionList);
+}
+
+/** Subscribes Gateway connection to transcript/message events for visible sessions. */
+function subscribeToSessionMessages(sessions: Session[]): void {
+    if (!gatewayClient || !isGatewayConnected) {
+        return;
+    }
+
+    for (const session of sessions) {
+        const key = session.key?.trim();
+        if (!key || subscribedSessionMessageKeys.has(key)) {
+            continue;
+        }
+
+        subscribedSessionMessageKeys.add(key);
+        void gatewayClient
+            .request("sessions.messages.subscribe", { key })
+            .catch((error) => {
+                subscribedSessionMessageKeys.delete(key);
+                console.warn(
+                    "[Gateway] Failed to subscribe to session messages:",
+                    error instanceof Error ? error.message : String(error)
+                );
+            });
+    }
 }
 
 /** Performs init. */
@@ -530,6 +760,7 @@ function init(token: string): void {
 
     currentToken = token;
     gatewayClient?.stop();
+    subscribedSessionMessageKeys.clear();
     gatewayClient = new OpenClawGatewayClient({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
@@ -544,7 +775,14 @@ function init(token: string): void {
         deviceIdentity: loadOrCreateDashboardDeviceIdentity(),
         onHelloOk: () => {
             isGatewayConnected = true;
+            subscribedSessionMessageKeys.clear();
             broadcast({ type: "connected", gatewayConnected: true });
+            void gatewayClient?.request("sessions.subscribe", {}).catch((error) => {
+                console.warn(
+                    "[Gateway] Failed to subscribe to session events:",
+                    error instanceof Error ? error.message : String(error)
+                );
+            });
             void refreshSessions().catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
@@ -553,10 +791,12 @@ function init(token: string): void {
             });
         },
         onEvent: (evt) => {
+            const payload = enrichRuntimeEventPayload(evt.event, evt.payload);
+            recordLiveAgentActivity(evt.event, payload);
             broadcast({
                 type: "event",
                 event: evt.event,
-                payload: enrichRuntimeEventPayload(evt.event, evt.payload),
+                payload,
             });
             if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
                 void refreshSessions().catch((error) => {
@@ -572,6 +812,7 @@ function init(token: string): void {
         },
         onClose: () => {
             isGatewayConnected = false;
+            subscribedSessionMessageKeys.clear();
             broadcast({ type: "disconnected", gatewayConnected: false });
         },
     });
@@ -742,6 +983,23 @@ function getStatus(): { gateway: string; sessions: number } {
     };
 }
 
+/** Returns recent live agent activities observed from Gateway events. */
+function getLiveAgentActivities(): Record<string, LiveAgentActivity> {
+    const cutoff = Date.now() - 5 * 60_000;
+    const activities: Record<string, LiveAgentActivity> = {};
+
+    for (const [agentId, activity] of liveAgentActivities) {
+        if (activity.lastActivity < cutoff) {
+            liveAgentActivities.delete(agentId);
+            continue;
+        }
+
+        activities[agentId] = activity;
+    }
+
+    return activities;
+}
+
 /** Returns sessions. */
 function getSessions(): Session[] {
     return sessionList;
@@ -819,7 +1077,7 @@ async function getSessionHistory(
     limit: number = 50,
     offset: number = 0
 ): Promise<{
-    messages: Array<{ role: string; content: string; timestamp?: string }>;
+    messages: FlattenedHistoryMessage[];
     total: number;
 }> {
     const result = (await sendRequestAsync("chat.history", {
@@ -829,16 +1087,7 @@ async function getSessionHistory(
         messages?: HistoryMessage[];
     };
 
-    const allMessages = (result.messages || []).map((msg) => ({
-        role: msg.role || "unknown",
-        content: Array.isArray(msg.content)
-            ? msg.content.map((block) => block?.text || "").join("")
-            : String(msg.content || ""),
-        timestamp:
-            typeof msg.timestamp === "number"
-                ? new Date(msg.timestamp).toISOString()
-                : msg.timestamp,
-    }));
+    const allMessages = (result.messages || []).flatMap(flattenHistoryMessage);
 
     const total = allMessages.length;
     const end = Math.max(total - offset, 0);
@@ -860,6 +1109,7 @@ export const __testing = {
     getTranscriptPath,
     normalizeMessageText,
     normalizeTimestamp,
+    flattenHistoryMessage,
     imageBlockHasOmittedData,
     sessionHasRunIdentifier,
     setSessionListForTest(sessions: Session[]): void {
@@ -870,6 +1120,8 @@ export const __testing = {
         sessionList = [];
         isGatewayConnected = false;
         pendingRequests.clear();
+        liveAgentActivities.clear();
+        subscribedSessionMessageKeys.clear();
         requestId = 1000;
     },
 };
@@ -878,6 +1130,7 @@ export default {
     init,
     handleClient,
     getStatus,
+    getLiveAgentActivities,
     getSessions,
     isConnected,
     getGatewayWs,

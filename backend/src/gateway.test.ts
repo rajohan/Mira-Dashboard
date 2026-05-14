@@ -120,6 +120,78 @@ describe("gateway state and helper utilities", () => {
         );
     });
 
+    it("flattens rich history messages into live-feed rows", () => {
+        assert.deepEqual(
+            __testing.flattenHistoryMessage({
+                role: "assistant",
+                content: [
+                    { type: "text", text: "Working" },
+                    { type: "text", text: "now" },
+                    {
+                        type: "toolCall",
+                        name: "exec",
+                        arguments: { command: "npm test" },
+                    },
+                    { type: "toolCall", name: "message", arguments: { text: "hidden" } },
+                    {
+                        type: "toolCall",
+                        name: "runtime.message",
+                        arguments: { text: "hidden" },
+                    },
+                ],
+                timestamp: 1_767_570_000_000,
+            }),
+            [
+                {
+                    role: "assistant",
+                    content: "Working\n\nnow",
+                    timestamp: "2026-01-04T23:40:00.000Z",
+                },
+                {
+                    role: "tool",
+                    content: 'exec\n{\n  "command": "npm test"\n}',
+                    timestamp: "2026-01-04T23:40:00.000Z",
+                },
+            ]
+        );
+
+        assert.deepEqual(
+            __testing.flattenHistoryMessage({
+                role: "tool_result",
+                tool_name: "runtime.message",
+                content: "sent",
+            }),
+            []
+        );
+        assert.deepEqual(
+            __testing.flattenHistoryMessage({
+                role: "tool",
+                toolName: "exec",
+                content: { status: "ok" },
+            }),
+            [
+                {
+                    role: "tool_result",
+                    content: '{\n  "status": "ok"\n}',
+                    timestamp: undefined,
+                },
+            ]
+        );
+        assert.deepEqual(
+            __testing.flattenHistoryMessage({
+                role: "assistant",
+                content: { text: "structured assistant" },
+            }),
+            [
+                {
+                    role: "assistant",
+                    content: '{\n  "text": "structured assistant"\n}',
+                    timestamp: undefined,
+                },
+            ]
+        );
+    });
+
     it("hydrates omitted chat-history images from raw transcripts", async () => {
         const transcriptDir = path.join(openclawHome, "agents", "main", "sessions");
         await mkdir(transcriptDir, { recursive: true });

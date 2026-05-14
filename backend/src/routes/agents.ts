@@ -683,14 +683,19 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
 
     // Get activity from JSONL file
     const activity = await getLatestActivityFromFile(agentId);
+    const liveActivity = gateway.getLiveAgentActivities()[agentId];
 
     // Determine status from file modification time
     const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
-    const status = determineStatus(fileModTime);
+    const effectiveActivityTime = Math.max(
+        fileModTime || 0,
+        liveActivity?.lastActivity || 0
+    );
+    const status = determineStatus(effectiveActivityTime || null);
 
     const sessionKey = latestSession?.key || null;
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
-    const effectiveModTime = fileModTime || 0;
+    const effectiveModTime = effectiveActivityTime || 0;
 
     const currentTask =
         activeTask?.task || metadata?.currentTask || activity?.task || null;
@@ -700,7 +705,7 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
         status,
         model: "unknown", // Will be filled from config
         currentTask,
-        currentActivity: activity?.activity || null,
+        currentActivity: liveActivity?.activity || activity?.activity || null,
         lastActivity:
             effectiveModTime > 0 ? new Date(effectiveModTime).toISOString() : null,
         sessionKey,

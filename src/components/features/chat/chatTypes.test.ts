@@ -47,6 +47,8 @@ describe("chat type normalizers", () => {
             { type: "thinking", text: "fallback thought" },
             { type: "thinking" },
             { type: "toolCall", id: "call-1", name: "read", arguments: { path: "x" } },
+            { type: "toolCall", id: "call-message", name: "message" },
+            { type: "toolCall", id: "call-functions-message", name: "functions.message" },
             { type: "toolCall" },
             { type: "text", text: "hello" },
         ];
@@ -230,6 +232,38 @@ describe("chat type normalizers", () => {
                 content: "done",
             }).toolResult
         ).toMatchObject({ id: "tool-2", name: "exec", content: "done" });
+
+        expect(
+            normalizeChatHistoryMessage({
+                role: "tool",
+                toolCallId: "tool-status",
+                toolName: "exec",
+                content: JSON.stringify({
+                    status: "completed",
+                    exitCode: 0,
+                    durationMs: 958,
+                }),
+            }).toolResult
+        ).toBeUndefined();
+
+        expect(
+            normalizeChatHistoryMessage({
+                role: "tool",
+                toolCallId: "tool-message",
+                toolName: "functions.message",
+                content: [
+                    {
+                        type: "toolResult",
+                        content: JSON.stringify({
+                            sourceReply: { text: "visible delivery reply" },
+                        }),
+                    },
+                ],
+            })
+        ).toMatchObject({
+            role: "assistant",
+            text: "visible delivery reply",
+        });
     });
 
     it("normalizes text from common content shapes", () => {

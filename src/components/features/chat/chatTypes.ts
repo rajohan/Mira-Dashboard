@@ -93,6 +93,32 @@ export interface ChatHistoryMessage {
     runId?: string;
 }
 
+const NON_DISPLAY_TOOL_NAMES = new Set([
+    "message",
+    "messages",
+    "reply",
+    "send",
+    "reaction",
+    "react",
+    "typing",
+]);
+
+/** Returns display-canonical tool name for filtering while preserving original labels. */
+function canonicalToolName(value: string | undefined): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    return trimmed.replace(/^(functions|runtime)\./iu, "");
+}
+
+/** Returns whether a tool name should be hidden from user-facing diagnostics. */
+function isNonDisplayToolName(value: string | undefined): boolean {
+    const canonical = canonicalToolName(value);
+    return Boolean(canonical && NON_DISPLAY_TOOL_NAMES.has(canonical.toLowerCase()));
+}
+
 /** Represents raw chat history message. */
 export interface RawChatHistoryMessage {
     role?: string;
@@ -197,9 +223,14 @@ export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
             continue;
         }
 
+        const name = typeof item.name === "string" ? item.name.trim() : "tool";
+        if (isNonDisplayToolName(name)) {
+            continue;
+        }
+
         toolCalls.push({
             id: typeof item.id === "string" ? item.id : undefined,
-            name: typeof item.name === "string" ? item.name : "tool",
+            name,
             arguments: item.arguments,
         });
     }
@@ -413,6 +444,22 @@ function extractToolResult(
         return undefined;
     }
 
+    const name =
+        typeof message.toolName === "string"
+            ? message.toolName
+            : typeof message.tool_name === "string"
+              ? message.tool_name
+              : undefined;
+
+    if (isNonDisplayToolName(name)) {
+        return undefined;
+    }
+
+    const normalizedContent = normalizeText(content);
+    if (!message.isError && isStatusOnlyToolResultText(normalizedContent)) {
+        return undefined;
+    }
+
     return {
         id:
             typeof message.toolCallId === "string"
@@ -420,16 +467,66 @@ function extractToolResult(
                 : typeof message.tool_call_id === "string"
                   ? message.tool_call_id
                   : undefined,
-        name:
-            typeof message.toolName === "string"
-                ? message.toolName
-                : typeof message.tool_name === "string"
-                  ? message.tool_name
-                  : undefined,
-        content: normalizeText(content),
+        name,
+        content: normalizedContent,
         isError: message.isError,
         images: extractImages(content),
     };
+}
+
+/** Parses JSON object content from a tool result block. */
+function parseToolResultJson(value: string): Record<string, unknown> | undefined {
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        return isRecord(parsed) ? parsed : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Returns whether tool result text only contains completion metadata. */
+function isStatusOnlyToolResultText(value: string): boolean {
+    const parsed = parseToolResultJson(value.trim());
+    if (!parsed) {
+        return false;
+    }
+
+    const keys = Object.keys(parsed);
+    return (
+        keys.length > 0 &&
+        keys.every((key) =>
+            ["durationMs", "exitCode", "status", "success", "timedOut"].includes(key)
+        )
+    );
+}
+
+/** Extracts a user-visible source reply from hidden delivery tool results. */
+function extractSourceReplyText(content: unknown): string | undefined {
+    const textCandidates = Array.isArray(content)
+        ? content
+              .map((block) => (isRecord(block) ? block.content || block.text : undefined))
+              .filter((value): value is string => typeof value === "string")
+        : typeof content === "string"
+          ? [content]
+          : [];
+
+    for (const candidate of textCandidates) {
+        const parsed = parseToolResultJson(candidate);
+        const sourceReply = isRecord(parsed?.sourceReply)
+            ? parsed.sourceReply
+            : undefined;
+        const text =
+            typeof sourceReply?.text === "string"
+                ? sourceReply.text
+                : typeof parsed?.message === "string"
+                  ? parsed.message
+                  : undefined;
+        if (text?.trim()) {
+            return text.trim();
+        }
+    }
+
+    return undefined;
 }
 
 /** Performs strip generated media only text. */
@@ -461,6 +558,33 @@ export function normalizeChatHistoryMessage(
     message: RawChatHistoryMessage
 ): ChatHistoryMessage {
     const content = message.content ?? message.text ?? "";
+    const role = message.role || "unknown";
+    const toolName =
+        typeof message.toolName === "string"
+            ? message.toolName
+            : typeof message.tool_name === "string"
+              ? message.tool_name
+              : undefined;
+    const sourceReplyText =
+        isToolRole(role) && isNonDisplayToolName(toolName)
+            ? extractSourceReplyText(content)
+            : undefined;
+    if (sourceReplyText) {
+        return {
+            role: "assistant",
+            content: sourceReplyText,
+            text: sourceReplyText,
+            images: [],
+            attachments: [],
+            thinking: [],
+            toolCalls: [],
+            timestamp:
+                typeof message.timestamp === "number"
+                    ? new Date(message.timestamp).toISOString()
+                    : message.timestamp,
+        };
+    }
+
     const images = extractImages(content);
     const thinking = extractThinkingBlocks(content);
     const toolCalls = extractToolCalls(content);
@@ -478,7 +602,7 @@ export function normalizeChatHistoryMessage(
     );
 
     return {
-        role: message.role || "unknown",
+        role,
         content,
         text,
         images,
@@ -515,6 +639,10 @@ export function normalizeText(content: unknown): string {
                     return block.text;
                 }
 
+                if (typeof block.content === "string") {
+                    return block.content;
+                }
+
                 if (block.type === "image") {
                     return "[image]";
                 }
@@ -540,13 +668,15 @@ export function isRenderableChatHistoryMessage(
     message: ChatHistoryMessage,
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY
 ): boolean {
+    const hasToolResult = (result: ChatToolResultDisplay | undefined): boolean =>
+        Boolean(
+            result &&
+            ((result.content.trim() || "").length > 0 || (result.images?.length || 0) > 0)
+        );
+    const hasToolResults = hasToolResult(message.toolResult);
     const role = message.role.toLowerCase();
     if (isToolRole(role)) {
-        return Boolean(
-            visibility.showTools &&
-            ((message.toolResult?.content.trim() || "").length > 0 ||
-                (message.toolResult?.images?.length || 0) > 0)
-        );
+        return Boolean(visibility.showTools && hasToolResults);
     }
 
     if (
@@ -559,7 +689,7 @@ export function isRenderableChatHistoryMessage(
 
     return Boolean(
         (visibility.showThinking && (message.thinking?.length || 0) > 0) ||
-        (visibility.showTools && (message.toolCalls?.length || 0) > 0)
+        (visibility.showTools && ((message.toolCalls?.length || 0) > 0 || hasToolResults))
     );
 }
 
