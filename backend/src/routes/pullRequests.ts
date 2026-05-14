@@ -228,16 +228,31 @@ async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
             stdoutBuffer += chunk;
+
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() || "";
             if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
                 settle(() => reject(new Error("GitHub CLI JSON line was too large")));
                 return;
             }
 
-            const lines = stdoutBuffer.split("\n");
-            stdoutBuffer = lines.pop() || "";
-            for (const line of lines) {
-                parseLine(line);
+            try {
+                for (const line of lines) {
+                    if (line.length > MAX_JSON_LINE_LENGTH) {
+                        throw new Error("GitHub CLI JSON line was too large");
+                    }
+                    parseLine(line);
+                }
+            } catch (error) {
+                child.kill("SIGTERM");
+                settle(() =>
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error("Failed to parse GitHub CLI output")
+                    )
+                );
             }
         });
 
