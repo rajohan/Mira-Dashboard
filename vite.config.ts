@@ -42,28 +42,37 @@ export default defineConfig({
                 pluginTimings: false,
             },
             output: {
-                manualChunks(id) {
-                    if (
-                        id.includes("node_modules/@headlessui/react") ||
-                        id.includes("node_modules/lucide-react")
-                    ) {
-                        return "ui";
-                    }
-                    if (id.includes("node_modules/@tanstack/react-router")) {
-                        return "router";
-                    }
-                    if (id.includes("node_modules/@tanstack/react-query")) {
-                        return "query";
-                    }
-                    if (
-                        id.includes("node_modules/react-markdown") ||
-                        id.includes("node_modules/remark-gfm")
-                    ) {
-                        return "markdown";
-                    }
-                    if (id.includes("node_modules/react-syntax-highlighter")) {
-                        return "syntax";
-                    }
+                codeSplitting: {
+                    groups: [
+                        {
+                            name(id) {
+                                if (
+                                    id.includes("node_modules/@headlessui/react") ||
+                                    id.includes("node_modules/lucide-react")
+                                ) {
+                                    return "ui";
+                                }
+                                if (id.includes("node_modules/@tanstack/react-router")) {
+                                    return "router";
+                                }
+                                if (id.includes("node_modules/@tanstack/react-query")) {
+                                    return "query";
+                                }
+                                if (
+                                    id.includes("node_modules/react-markdown") ||
+                                    id.includes("node_modules/remark-gfm")
+                                ) {
+                                    return "markdown";
+                                }
+                                if (
+                                    id.includes("node_modules/react-syntax-highlighter")
+                                ) {
+                                    return "syntax";
+                                }
+                                return null;
+                            },
+                        },
+                    ],
                 },
             },
         },

@@ -278,7 +278,10 @@ describe("DockerContainersTable", () => {
         expect(screen.getAllByText("537 MB")[0]).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "CPU" }));
+        expect(document.querySelector("tbody tr")).toHaveTextContent("mystery-state");
+
         await user.click(screen.getByRole("button", { name: "State" }));
+        expect(document.querySelector("tbody tr")).toHaveTextContent("running-no-health");
     });
 
     it("opens details from the desktop row click", () => {

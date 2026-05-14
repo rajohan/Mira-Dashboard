@@ -513,7 +513,8 @@ describe("Chat helpers", () => {
         );
 
         try {
-            Reflect.deleteProperty(globalThis, "window");
+            const removed = Reflect.deleteProperty(globalThis, "window");
+            expect(removed).toBe(true);
 
             expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
             expect(readStoredChatDiagnosticVisibility()).toEqual({
