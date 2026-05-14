@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -207,6 +207,65 @@ describe("DockerContainersTable", () => {
         expect(screen.getAllByText("1073.74 GB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("-")[0]).toBeInTheDocument();
         expect(screen.getAllByText("-7.5%")[0]).toBeInTheDocument();
+    });
+
+    it("renders null stats and less common rank fallbacks", () => {
+        renderTable([
+            makeContainer({
+                health: "starting",
+                id: "null-stats",
+                name: "null-stats",
+                state: "paused",
+                stats: null,
+                status: "Paused",
+            }),
+            makeContainer({
+                health: "mystery",
+                id: "mystery-state",
+                name: "mystery-state",
+                state: "mystery",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "100%",
+                    memory: "512B / 1KiB",
+                    memoryPercent: "50%",
+                    netIO: "0B / 0B",
+                    pids: "1",
+                },
+                status: "Unknown",
+            }),
+            makeContainer({
+                health: "none",
+                id: "created-state",
+                name: "created-state",
+                state: "created",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "5%",
+                    memory: "2MB / 4MB",
+                    memoryPercent: "50%",
+                    netIO: "0B / 0B",
+                    pids: "1",
+                },
+                status: "Created",
+            }),
+        ]);
+
+        expect(screen.getAllByText("paused")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("mystery")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("created")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("-").length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText("0 MB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("2 MB")[0]).toBeInTheDocument();
+    });
+
+    it("opens details from the desktop row click", () => {
+        const onDetails = vi.fn();
+        const { container } = renderTable(containers, { onDetails });
+
+        fireEvent.click(container.querySelector("tbody tr")!);
+
+        expect(onDetails).toHaveBeenCalledWith("container-1");
     });
 
     it("supports keyboard row activation and sortable columns", async () => {

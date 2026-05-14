@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,6 +48,11 @@ const mocks = vi.hoisted(() => ({
             },
         ],
     },
+    runtimeEventsOptions: null as {
+        updateActiveStreams: (
+            updater: (previous: Record<string, unknown>) => Record<string, unknown>
+        ) => void;
+    } | null,
 }));
 
 vi.mock("@tanstack/react-db", () => ({
@@ -86,7 +91,15 @@ vi.mock("../hooks/useOpenClawSocket", () => ({
 }));
 
 vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
-    useChatRuntimeEvents: vi.fn(),
+    useChatRuntimeEvents: vi.fn(
+        (options: {
+            updateActiveStreams: (
+                updater: (previous: Record<string, unknown>) => Record<string, unknown>
+            ) => void;
+        }) => {
+            mocks.runtimeEventsOptions = options;
+        }
+    ),
 }));
 
 vi.mock("../components/features/chat/useChatSlashCommands", () => ({
@@ -503,6 +516,7 @@ describe("Chat", () => {
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
+        mocks.runtimeEventsOptions = null;
         setupRequest();
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
@@ -562,6 +576,40 @@ describe("Chat", () => {
         );
         expect(screen.getByText("Hello from test")).toBeInTheDocument();
         expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
+    it("renders runtime stream rows and clears them when disconnected", async () => {
+        const { rerender } = render(<Chat />);
+        await screen.findByText("old user message");
+
+        act(() => {
+            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                ...previous,
+                "session-a": {
+                    aliases: ["run-live"],
+                    message: {
+                        content: "streaming answer",
+                        role: "assistant",
+                        text: "streaming answer",
+                    },
+                    runId: "run-live",
+                    sessionKey: "session-a",
+                    statusText: "Using tools",
+                    text: "streaming answer",
+                    updatedAt: "2026-05-11T00:02:00.000Z",
+                },
+            }));
+        });
+
+        expect(await screen.findByText("streaming answer")).toBeInTheDocument();
+        expect(screen.getByText("Using tools")).toBeInTheDocument();
+
+        mocks.isConnected = false;
+        rerender(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.queryByText("streaming answer")).not.toBeInTheDocument()
+        );
     });
 
     it("persists deleted message keys and can open attachment previews", async () => {

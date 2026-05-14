@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Terminal } from "./Terminal";
@@ -187,6 +188,112 @@ describe("Terminal page", () => {
         expect(input).toHaveValue("npm test");
         await user.keyboard("{ArrowDown}");
         expect(input).toHaveValue("git status");
+    });
+
+    it("handles empty tab, empty history navigation, scrolling, and follow button", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<Terminal />);
+        const input = screen.getByPlaceholderText("Enter command...");
+        const output = container.querySelector(".overflow-auto") as HTMLDivElement;
+
+        await user.click(input);
+        await user.keyboard("{Tab}{ArrowUp}{ArrowDown}");
+        expect(terminal.getCompletions).not.toHaveBeenCalled();
+        expect(input).toHaveValue("");
+
+        Object.defineProperties(output, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 500 },
+            scrollTop: { configurable: true, value: 0, writable: true },
+        });
+        act(() => {
+            output.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
+
+        const follow = await screen.findByRole("button", { name: "↓ Follow" });
+        await user.click(follow);
+        expect(output.scrollTop).toBe(500);
+    });
+
+    it("shows cwd outside home and completed job updates without duplicate history writes", async () => {
+        const user = userEvent.setup();
+        terminal.changeDirectory.mockResolvedValueOnce({
+            newCwd: "/tmp",
+            success: true,
+        });
+        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: 0,
+                      endedAt: 3_000,
+                      stderr: "",
+                      stdout: "done stdout",
+                      status: "done",
+                  }
+                : null,
+        }));
+
+        const { rerender } = render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "cd /tmp");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        await user.type(screen.getByPlaceholderText("Enter command..."), "echo done");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.addCommand).toHaveBeenCalledTimes(2);
+        rerender(<Terminal />);
+
+        await waitFor(() => {
+            expect(terminal.updateCommand).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.objectContaining({
+                    code: 0,
+                    endedAt: 3_000,
+                    stdout: "done stdout",
+                    status: "done",
+                })
+            );
+        });
+        expect(screen.getByText("/tmp$")).toBeInTheDocument();
+    });
+
+    it("renders terminal output states and current detached job output", () => {
+        terminal.history = [
+            makeHistoryEntry("running", {
+                code: null,
+                endedAt: null,
+                jobId: "job-running",
+                status: "running",
+                stdout: "still working",
+            }),
+            makeHistoryEntry("failed", {
+                code: null,
+                endedAt: null,
+                status: "error",
+                stderr: "spawn failed",
+            }),
+            makeHistoryEntry("unknown exit", {
+                code: null,
+                endedAt: null,
+                status: "done",
+            }),
+        ];
+        terminal.useTerminalJob.mockReturnValue({
+            data: {
+                code: null,
+                endedAt: null,
+                stderr: "detached stderr",
+                stdout: "detached stdout",
+                status: "running",
+            },
+        });
+
+        render(<Terminal />);
+
+        expect(screen.getByText("still working")).toBeInTheDocument();
+        expect(screen.getByText("spawn failed")).toBeInTheDocument();
+        expect(screen.getByText("Command failed to start")).toBeInTheDocument();
+        expect(screen.getByText("Exit code: unknown")).toBeInTheDocument();
+        expect(screen.queryByText("detached stdout")).not.toBeInTheDocument();
     });
 
     it("clears command history", async () => {

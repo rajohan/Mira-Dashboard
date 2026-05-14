@@ -175,4 +175,88 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("No Postgres backup cache data yet")).toBeInTheDocument();
         expect(screen.getByText("Loading backup status...")).toBeInTheDocument();
     });
+
+    it("renders healthy, non-stale, and unknown backup fallbacks", () => {
+        hooks.useCacheEntry.mockImplementation((key: string) => {
+            if (key === "backup.walg.status") {
+                return {
+                    data: {
+                        data: {
+                            backupCount: null,
+                            latest: {
+                                backupName: null,
+                                modified: null,
+                                walFileName: null,
+                            },
+                            ok: false,
+                        },
+                        status: "fresh",
+                    },
+                    isLoading: false,
+                };
+            }
+
+            return {
+                data: {
+                    data: {
+                        ok: true,
+                        snapshotsByPath: [
+                            {
+                                latest: null,
+                                path: null,
+                                snapshotCount: 1,
+                                snapshots: [
+                                    {
+                                        description: null,
+                                        endTime: null,
+                                        errorCount: null,
+                                        fileCount: null,
+                                        id: null,
+                                        ignoredErrorCount: null,
+                                        path: null,
+                                        retentionReason: [],
+                                        startTime: null,
+                                        totalSize: null,
+                                    },
+                                ],
+                            },
+                        ],
+                        stale: [],
+                    },
+                    status: "fresh",
+                },
+                isLoading: false,
+            };
+        });
+
+        render(<BackupOverviewCard />);
+
+        expect(screen.getByText("healthy")).toBeInTheDocument();
+        expect(screen.getByText("attention")).toBeInTheDocument();
+        expect(screen.getByText("Unknown source")).toBeInTheDocument();
+        expect(screen.getByText("1 snapshot")).toBeInTheDocument();
+        expect(screen.getByText("OK")).toBeInTheDocument();
+        expect(screen.getByText("Unnamed snapshot")).toBeInTheDocument();
+        expect(screen.getAllByText("Unknown").length).toBeGreaterThanOrEqual(4);
+        expect(screen.getByText("0")).toBeInTheDocument();
+    });
+
+    it("renders backup cache errors", () => {
+        hooks.useCacheEntry.mockImplementation((key: string) => ({
+            data: {
+                data: { ok: false, snapshotsByPath: [] },
+                errorMessage:
+                    key === "backup.walg.status" ? "WAL-G failed" : "Kopia failed",
+                status: "error",
+            },
+            isLoading: false,
+        }));
+
+        render(<BackupOverviewCard />);
+
+        expect(screen.getAllByText("error")).toHaveLength(2);
+        expect(screen.getByText("WAL-G failed")).toBeInTheDocument();
+        expect(screen.getByText("Kopia failed")).toBeInTheDocument();
+        expect(screen.getByText("No backup cache data yet")).toBeInTheDocument();
+    });
 });

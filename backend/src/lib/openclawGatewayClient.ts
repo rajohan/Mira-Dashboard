@@ -546,7 +546,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
         void this.request("connect", {
             minProtocol: 3,
-            maxProtocol: 3,
+            maxProtocol: 4,
             client: {
                 id: clientName,
                 displayName: this.opts.clientDisplayName,
