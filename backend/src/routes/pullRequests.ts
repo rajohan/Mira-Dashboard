@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +18,7 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_BASE = "main";
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
+const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 
 /** Represents command result. */
 interface CommandResult {
@@ -191,39 +192,145 @@ async function runGhJson<T>(args: string[]): Promise<T> {
     return JSON.parse(String(stdout || "null")) as T;
 }
 
+/** Streams newline-delimited JSON values from a GitHub CLI command. */
+async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("gh", args, {
+            cwd: DASHBOARD_ROOT,
+            env: buildCommandEnv(),
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        const rows: T[] = [];
+        let stdoutBuffer = "";
+        let stderr = "";
+        let settled = false;
+        const timeout = setTimeout(() => {
+            child.kill("SIGTERM");
+            settle(() => reject(new Error("GitHub CLI command timed out")));
+        }, 60_000);
+
+        const settle = (callback: () => void) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            callback();
+        };
+
+        const parseLine = (line: string) => {
+            if (!line.trim()) {
+                return;
+            }
+            rows.push(JSON.parse(line) as T);
+        };
+
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdoutBuffer += chunk;
+            if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
+                child.kill("SIGTERM");
+                settle(() => reject(new Error("GitHub CLI JSON line was too large")));
+                return;
+            }
+
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() || "";
+            for (const line of lines) {
+                parseLine(line);
+            }
+        });
+
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+            stderr = trimOutput(stderr + chunk);
+        });
+
+        child.on("error", (error) => {
+            settle(() => reject(error));
+        });
+
+        child.on("close", (code) => {
+            settle(() => {
+                if (code !== 0) {
+                    reject(new Error(stderr || `GitHub CLI exited with code ${code}`));
+                    return;
+                }
+                try {
+                    parseLine(stdoutBuffer);
+                    resolve(rows);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
+    });
+}
+
 /** Lists open pull requests targeting the dashboard production branch. */
 async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
-    const pullRequests = await runGhJson<PullRequestSummary[]>([
-        "pr",
-        "list",
-        "--repo",
-        DASHBOARD_REPO,
-        "--state",
-        "open",
-        "--base",
-        DEFAULT_BASE,
-        "--limit",
-        "1000",
-        "--json",
+    const pullRequests = await runGhJsonLines<PullRequestSummary>([
+        "api",
+        "graphql",
+        "--paginate",
+        "-f",
+        `query=query($endCursor: String) {
+            repository(owner: "rajohan", name: "Mira-Dashboard") {
+                pullRequests(
+                    first: 100
+                    after: $endCursor
+                    states: OPEN
+                    baseRefName: "${DEFAULT_BASE}"
+                    orderBy: { field: UPDATED_AT, direction: DESC }
+                ) {
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                    nodes {
+                        number
+                        title
+                        body
+                        url
+                        headRefName
+                        baseRefName
+                        author {
+                            login
+                        }
+                        createdAt
+                        updatedAt
+                        isDraft
+                        mergeable
+                        mergeStateStatus
+                        reviewDecision
+                        additions
+                        deletions
+                        changedFiles
+                        statusCheckRollup {
+                            contexts(first: 20) {
+                                nodes {
+                                    __typename
+                                    ... on CheckRun {
+                                        name
+                                        status
+                                        conclusion
+                                    }
+                                    ... on StatusContext {
+                                        context
+                                        state
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }`,
+        "--jq",
         [
-            "number",
-            "title",
-            "body",
-            "url",
-            "headRefName",
-            "baseRefName",
-            "author",
-            "createdAt",
-            "updatedAt",
-            "isDraft",
-            "mergeable",
-            "mergeStateStatus",
-            "reviewDecision",
-            "statusCheckRollup",
-            "additions",
-            "deletions",
-            "changedFiles",
-        ].join(","),
+            ".data.repository.pullRequests.nodes[]",
+            "| .statusCheckRollup = (.statusCheckRollup.contexts.nodes // [])",
+        ].join(" "),
     ]);
 
     return pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

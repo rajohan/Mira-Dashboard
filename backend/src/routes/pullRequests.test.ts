@@ -90,21 +90,24 @@ const pullRequests = [
 }
 ];
 if (args[0] === "pr" && args[1] === "list") {
-  if (args.includes("--author")) {
-    process.stderr.write("pr list should not filter by author");
+  process.stderr.write("pr list should use paginated graphql instead");
+  process.exit(1);
+}
+if (args[0] === "api" && args[1] === "graphql") {
+  if (!args.includes("--paginate")) {
+    process.stderr.write("pull request listing should paginate");
     process.exit(1);
   }
-  if (!args.includes("--base") || args[args.indexOf("--base") + 1] !== "main") {
-    process.stderr.write("pr list should filter by base");
+  if (!args.some((arg) => arg.includes("baseRefName: \"main\""))) {
+    process.stderr.write("pull request listing should filter by base in graphql");
     process.exit(1);
   }
-  if (!args.includes("--limit") || args[args.indexOf("--limit") + 1] !== "1000") {
-    process.stderr.write("pr list should fetch enough results for pagination");
-    process.exit(1);
-  }
-  process.stdout.write(
-    JSON.stringify(pullRequests.filter((pullRequest) => pullRequest.baseRefName === "main"))
+  const mainPullRequests = pullRequests.filter(
+    (pullRequest) => pullRequest.baseRefName === "main"
   );
+  for (const pullRequest of mainPullRequests) {
+    process.stdout.write(JSON.stringify(pullRequest) + "\n");
+  }
   process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "view") {
