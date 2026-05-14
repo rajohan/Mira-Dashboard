@@ -159,6 +159,66 @@ describe("chat utils", () => {
         ).toEqual(["response is still streaming", "exact recovered text", "short"]);
     });
 
+    it("orders missing messages with invalid timestamps after dated insertions", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({
+                role: "system",
+                text: "invalid timestamp",
+                local: true,
+                timestamp: "not a date",
+            }),
+            message({
+                role: "system",
+                text: "no timestamp",
+                local: true,
+            }),
+            message({
+                role: "user",
+                text: "dated",
+                timestamp: "2026-05-10T10:01:00.000Z",
+            }),
+        ];
+        const next = [
+            message({
+                role: "assistant",
+                text: "server middle",
+                timestamp: "2026-05-10T10:01:30.000Z",
+            }),
+        ];
+
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
+        ).toEqual(["dated", "server middle", "invalid timestamp", "no timestamp"]);
+    });
+
+    it("drops old optimistic messages with invalid timestamps", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({
+                role: "user",
+                text: "invalid timestamp",
+                timestamp: "not a date",
+            }),
+            message({
+                role: "user",
+                text: "old timestamp",
+                timestamp: "2026-05-10T09:00:00.000Z",
+            }),
+        ];
+        const next = [message({ role: "assistant", text: "server" })];
+
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
+        ).toEqual(["server"]);
+    });
+
     it("rejects unreadable file results", async () => {
         const OriginalFileReader = globalThis.FileReader;
         try {

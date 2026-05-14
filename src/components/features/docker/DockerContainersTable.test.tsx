@@ -209,7 +209,9 @@ describe("DockerContainersTable", () => {
         expect(screen.getAllByText("-7.5%")[0]).toBeInTheDocument();
     });
 
-    it("renders null stats and less common rank fallbacks", () => {
+    it("renders null stats and less common rank fallbacks", async () => {
+        const user = userEvent.setup();
+
         renderTable([
             makeContainer({
                 health: "starting",
@@ -249,14 +251,34 @@ describe("DockerContainersTable", () => {
                 },
                 status: "Created",
             }),
+            makeContainer({
+                health: "none",
+                id: "running-no-health",
+                name: "running-no-health",
+                state: "running",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "n/a",
+                    memory: "512MiB",
+                    memoryPercent: "unavailable",
+                    netIO: "0B / 0B",
+                    pids: "1",
+                },
+                status: "Up",
+            }),
         ]);
 
         expect(screen.getAllByText("paused")[0]).toBeInTheDocument();
         expect(screen.getAllByText("mystery")[0]).toBeInTheDocument();
         expect(screen.getAllByText("created")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("running")[0]).toBeInTheDocument();
         expect(screen.getAllByText("-").length).toBeGreaterThanOrEqual(2);
         expect(screen.getAllByText("0 MB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("2 MB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("537 MB")[0]).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "CPU" }));
+        await user.click(screen.getByRole("button", { name: "State" }));
     });
 
     it("opens details from the desktop row click", () => {
@@ -306,5 +328,76 @@ describe("DockerContainersTable", () => {
         await user.click(screen.getByRole("button", { name: "Memory" }));
 
         expect(screen.getAllByText("running-container")[0]).toBeInTheDocument();
+    });
+
+    it("sorts equal-ranked state rows by status text", async () => {
+        const user = userEvent.setup();
+
+        renderTable([
+            makeContainer({
+                id: "later",
+                name: "later-running",
+                state: "running",
+                status: "Up 9 hours",
+            }),
+            makeContainer({
+                id: "earlier",
+                name: "earlier-running",
+                state: "running",
+                status: "Up 1 hour",
+            }),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "State" }));
+
+        const desktopRows = [
+            ...document.querySelectorAll<HTMLTableRowElement>("tbody tr"),
+        ];
+        expect(desktopRows[0]).toHaveTextContent("earlier-running");
+        expect(desktopRows[1]).toHaveTextContent("later-running");
+    });
+
+    it("sorts through every state and health rank", async () => {
+        const user = userEvent.setup();
+
+        renderTable([
+            makeContainer({
+                health: "unhealthy",
+                id: "unhealthy",
+                name: "unhealthy-exited",
+                state: "exited",
+                status: "Exited",
+            }),
+            makeContainer({
+                health: "starting",
+                id: "starting",
+                name: "starting-restarting",
+                state: "restarting",
+                status: "Restarting",
+            }),
+            makeContainer({
+                health: "none",
+                id: "created",
+                name: "none-created",
+                state: "created",
+                status: "Created",
+            }),
+            makeContainer({
+                health: "none",
+                id: "dead",
+                name: "none-dead",
+                state: "dead",
+                status: "Dead",
+            }),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "State" }));
+        await user.click(screen.getByRole("button", { name: "Health" }));
+
+        const rows = [...document.querySelectorAll<HTMLTableRowElement>("tbody tr")];
+        expect(rows[0]).toHaveTextContent("starting-restarting");
+        expect(rows[1]).toHaveTextContent("unhealthy-exited");
+        expect(rows[2]).toHaveTextContent("none-created");
+        expect(rows[3]).toHaveTextContent("none-dead");
     });
 });

@@ -116,7 +116,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 quotas.openrouter.percentUsed !== null
                     ? quotas.openrouter.percentUsed
                     : null,
-            resetAt: null,
         },
         {
             key: "elevenlabs",
@@ -133,7 +132,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 quotas.elevenlabs.percentUsed !== null
                     ? quotas.elevenlabs.percentUsed
                     : null,
-            resetAt: null,
         },
         {
             key: "zai",
@@ -151,7 +149,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                       quotas.zai.fiveHour.usedPercentage,
                       quotas.zai.weekly.usedPercentage
                   ),
-            resetAt: null,
         },
         {
             key: "synthetic",
@@ -171,7 +168,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                           100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
                       )
                   ),
-            resetAt: null,
         },
         {
             key: "openai",
@@ -184,7 +180,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 ? quotas.openai.note || ""
                 : `Resets: 5h ${formatResetValue(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
             percent: hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed,
-            resetAt: null,
         },
     ];
 
@@ -219,11 +214,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                         {provider.line2 && (
                             <div className="text-primary-400 text-xs break-words">
                                 {provider.line2}
-                            </div>
-                        )}
-                        {provider.resetAt && provider.resetAt !== "unknown" && (
-                            <div className="text-primary-500 text-xs">
-                                Reset {formatDate(new Date(provider.resetAt))}
                             </div>
                         )}
                     </div>

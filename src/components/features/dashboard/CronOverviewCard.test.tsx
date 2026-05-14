@@ -82,4 +82,49 @@ describe("CronOverviewCard", () => {
         expect(container).toHaveTextContent("Epoch next run");
         expect(screen.getByText("ERROR")).toBeInTheDocument();
     });
+
+    it("selects the latest run and earliest upcoming job from multiple candidates", () => {
+        hooks.useCronJobs.mockReturnValue({
+            data: [
+                {
+                    name: "Older last run",
+                    enabled: true,
+                    state: {
+                        lastRunAtMs: new Date("2026-05-10T08:00:00.000Z").getTime(),
+                        lastRunStatus: "success",
+                    },
+                },
+                {
+                    name: "Newest last run",
+                    enabled: true,
+                    state: {
+                        lastRunAtMs: new Date("2026-05-10T10:00:00.000Z").getTime(),
+                        lastRunStatus: "failed",
+                    },
+                },
+                {
+                    name: "Soonest next run",
+                    enabled: true,
+                    state: {
+                        nextRunAtMs: new Date("2026-05-10T11:00:00.000Z").getTime(),
+                    },
+                },
+                {
+                    name: "Later next run",
+                    enabled: true,
+                    state: {
+                        nextRunAtMs: new Date("2026-05-10T12:00:00.000Z").getTime(),
+                    },
+                },
+            ] satisfies CronJob[],
+        });
+
+        const { container } = render(<CronOverviewCard />);
+
+        expect(container).toHaveTextContent("Newest last run");
+        expect(container).not.toHaveTextContent("Older last run");
+        expect(container).toHaveTextContent("Soonest next run");
+        expect(container).not.toHaveTextContent("Later next run");
+        expect(screen.getByText("FAILED")).toBeInTheDocument();
+    });
 });

@@ -36,7 +36,11 @@ export default defineConfig({
     build: {
         outDir: "dist",
         emptyOutDir: true,
-        rollupOptions: {
+        chunkSizeWarningLimit: 1500,
+        rolldownOptions: {
+            checks: {
+                pluginTimings: false,
+            },
             output: {
                 manualChunks(id) {
                     if (
