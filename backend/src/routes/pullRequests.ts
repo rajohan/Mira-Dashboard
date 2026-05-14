@@ -179,7 +179,7 @@ async function runCommand(
     };
 }
 
-/** Performs run gh JSON. */
+/** Runs a GitHub CLI command and parses its JSON output. */
 async function runGhJson<T>(args: string[]): Promise<T> {
     const { stdout } = await execFileAsync("gh", args, {
         cwd: DASHBOARD_ROOT,
@@ -191,7 +191,7 @@ async function runGhJson<T>(args: string[]): Promise<T> {
     return JSON.parse(String(stdout || "null")) as T;
 }
 
-/** Performs list dashboard pull requests. */
+/** Lists open pull requests targeting the dashboard production branch. */
 async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     const pullRequests = await runGhJson<PullRequestSummary[]>([
         "pr",
@@ -200,8 +200,10 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
         DASHBOARD_REPO,
         "--state",
         "open",
+        "--base",
+        DEFAULT_BASE,
         "--limit",
-        "50",
+        "1000",
         "--json",
         [
             "number",
@@ -224,12 +226,10 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
         ].join(","),
     ]);
 
-    return pullRequests
-        .filter((pullRequest) => pullRequest.baseRefName === DEFAULT_BASE)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-/** Returns pull request. */
+/** Returns the current GitHub metadata for one pull request. */
 async function getPullRequest(number: number): Promise<PullRequestSummary> {
     return runGhJson<PullRequestSummary>([
         "pr",
@@ -293,7 +293,7 @@ function parseGitWorktrees(output: string): GitWorktree[] {
         .filter((worktree) => worktree.path);
 }
 
-/** Returns whether path insIDe root. */
+/** Returns whether a path is strictly inside the configured worktree root. */
 function isPathInsideRoot(value: string, root: string): boolean {
     const resolvedValue = path.resolve(value);
     const resolvedRoot = path.resolve(root);

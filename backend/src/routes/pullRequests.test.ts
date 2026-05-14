@@ -94,12 +94,26 @@ if (args[0] === "pr" && args[1] === "list") {
     process.stderr.write("pr list should not filter by author");
     process.exit(1);
   }
-  process.stdout.write(JSON.stringify(pullRequests));
+  if (!args.includes("--base") || args[args.indexOf("--base") + 1] !== "main") {
+    process.stderr.write("pr list should filter by base");
+    process.exit(1);
+  }
+  if (!args.includes("--limit") || args[args.indexOf("--limit") + 1] !== "1000") {
+    process.stderr.write("pr list should fetch enough results for pagination");
+    process.exit(1);
+  }
+  process.stdout.write(
+    JSON.stringify(pullRequests.filter((pullRequest) => pullRequest.baseRefName === "main"))
+  );
   process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "view") {
   const requested = Number(args[2]);
-  const pr = pullRequests.find((candidate) => candidate.number === requested) || pullRequests[0];
+  const pr = pullRequests.find((candidate) => candidate.number === requested);
+  if (!pr) {
+    process.stderr.write("pull request not found");
+    process.exit(1);
+  }
   process.stdout.write(JSON.stringify(pr));
   process.exit(0);
 }
