@@ -15,9 +15,7 @@ const DASHBOARD_WORKTREE_ROOT =
     "/home/ubuntu/projects/mira-dashboard-worktrees";
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
-const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
-const DASHBOARD_PR_AUTHORS = [MIRA_AUTHOR, DEPENDABOT_AUTHOR];
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 
@@ -195,52 +193,40 @@ async function runGhJson<T>(args: string[]): Promise<T> {
 
 /** Performs list dashboard pull requests. */
 async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
-    const pullRequestsByNumber = new Map<number, PullRequestSummary>();
+    const pullRequests = await runGhJson<PullRequestSummary[]>([
+        "pr",
+        "list",
+        "--repo",
+        DASHBOARD_REPO,
+        "--state",
+        "open",
+        "--limit",
+        "50",
+        "--json",
+        [
+            "number",
+            "title",
+            "body",
+            "url",
+            "headRefName",
+            "baseRefName",
+            "author",
+            "createdAt",
+            "updatedAt",
+            "isDraft",
+            "mergeable",
+            "mergeStateStatus",
+            "reviewDecision",
+            "statusCheckRollup",
+            "additions",
+            "deletions",
+            "changedFiles",
+        ].join(","),
+    ]);
 
-    for (const author of DASHBOARD_PR_AUTHORS) {
-        const pullRequests = await runGhJson<PullRequestSummary[]>([
-            "pr",
-            "list",
-            "--repo",
-            DASHBOARD_REPO,
-            "--state",
-            "open",
-            "--author",
-            author,
-            "--limit",
-            "50",
-            "--json",
-            [
-                "number",
-                "title",
-                "body",
-                "url",
-                "headRefName",
-                "baseRefName",
-                "author",
-                "createdAt",
-                "updatedAt",
-                "isDraft",
-                "mergeable",
-                "mergeStateStatus",
-                "reviewDecision",
-                "statusCheckRollup",
-                "additions",
-                "deletions",
-                "changedFiles",
-            ].join(","),
-        ]);
-
-        for (const pullRequest of pullRequests) {
-            if (pullRequest.baseRefName === DEFAULT_BASE) {
-                pullRequestsByNumber.set(pullRequest.number, pullRequest);
-            }
-        }
-    }
-
-    return [...pullRequestsByNumber.values()].sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt)
-    );
+    return pullRequests
+        .filter((pullRequest) => pullRequest.baseRefName === DEFAULT_BASE)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 /** Returns pull request. */

@@ -30,7 +30,8 @@ async function installFakeCommands(tempDir: string): Promise<void> {
         path.join(binDir, "gh"),
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
-const pr = {
+const pullRequests = [
+{
   number: 10,
   title: "Add Playwright smoke tests",
   body: "Coverage batch",
@@ -48,12 +49,57 @@ const pr = {
   additions: 12,
   deletions: 3,
   changedFiles: 4
-};
+},
+{
+  number: 11,
+  title: "Raise frontend coverage",
+  body: "Coverage follow-up",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/11",
+  headRefName: "chore/coverage-to-100-followup",
+  baseRefName: "main",
+  author: { login: "rajohan" },
+  createdAt: "2026-05-10T01:00:00Z",
+  updatedAt: "2026-05-12T00:00:00Z",
+  isDraft: false,
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "CLEAN",
+  reviewDecision: "",
+  statusCheckRollup: [],
+  additions: 20,
+  deletions: 5,
+  changedFiles: 3
+},
+{
+  number: 12,
+  title: "Target a release branch",
+  body: "Not for the main dashboard review queue",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/12",
+  headRefName: "release-only",
+  baseRefName: "release",
+  author: { login: "mira-2026" },
+  createdAt: "2026-05-10T02:00:00Z",
+  updatedAt: "2026-05-13T00:00:00Z",
+  isDraft: false,
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "CLEAN",
+  reviewDecision: "",
+  statusCheckRollup: [],
+  additions: 1,
+  deletions: 1,
+  changedFiles: 1
+}
+];
 if (args[0] === "pr" && args[1] === "list") {
-  process.stdout.write(JSON.stringify([pr]));
+  if (args.includes("--author")) {
+    process.stderr.write("pr list should not filter by author");
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(pullRequests));
   process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "view") {
+  const requested = Number(args[2]);
+  const pr = pullRequests.find((candidate) => candidate.number === requested) || pullRequests[0];
   process.stdout.write(JSON.stringify(pr));
   process.exit(0);
 }
@@ -207,7 +253,7 @@ describe("pull request routes", () => {
         await rm(tempDir, { recursive: true, force: true });
     });
 
-    it("lists Mira-authored pull requests from GitHub", async () => {
+    it("lists open main-targeted pull requests from GitHub", async () => {
         const response = await requestJson<{
             pullRequests: Array<{
                 number: number;
@@ -218,6 +264,25 @@ describe("pull request routes", () => {
 
         assert.equal(response.status, 200);
         assert.deepEqual(response.body.pullRequests, [
+            {
+                number: 11,
+                title: "Raise frontend coverage",
+                body: "Coverage follow-up",
+                url: "https://github.com/rajohan/Mira-Dashboard/pull/11",
+                headRefName: "chore/coverage-to-100-followup",
+                baseRefName: "main",
+                author: { login: "rajohan" },
+                createdAt: "2026-05-10T01:00:00Z",
+                updatedAt: "2026-05-12T00:00:00Z",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: "",
+                statusCheckRollup: [],
+                additions: 20,
+                deletions: 5,
+                changedFiles: 3,
+            },
             {
                 number: 10,
                 title: "Add Playwright smoke tests",
@@ -347,5 +412,27 @@ describe("pull request routes", () => {
             deploy.body.deployment.note,
             "Build passed; restart + health check scheduled"
         );
+    });
+
+    it("keeps dashboard actions restricted to Mira-authored pull requests", async () => {
+        const originalConsoleError = console.error;
+        console.error = () => {
+            // Suppress the expected route error for this negative-path assertion.
+        };
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/11/approve",
+                { method: "POST", body: { deploy: false } }
+            );
+
+            assert.equal(response.status, 500);
+            assert.equal(
+                response.body.error,
+                "Only Mira-authored pull requests can be managed here"
+            );
+        } finally {
+            console.error = originalConsoleError;
+        }
     });
 });
