@@ -98,12 +98,22 @@ if (args[0] === "api" && args[1] === "graphql") {
     process.stderr.write("pull request listing should paginate");
     process.exit(1);
   }
+  if (!args.includes("owner=rajohan") || !args.includes("name=Mira-Dashboard")) {
+    process.stderr.write("pull request listing should pass the configured repo");
+    process.exit(1);
+  }
   const jqIndex = args.indexOf("--jq");
+  const jq = args[jqIndex + 1] || "";
   if (
     jqIndex === -1 ||
-    !args[jqIndex + 1]?.includes(".data.repository.pullRequests.nodes[]")
+    !jq.includes(".data.repository.pullRequests.nodes[]") ||
+    !jq.includes(
+      ".statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)"
+    )
   ) {
-    process.stderr.write("pull request listing should flatten graphql nodes with jq");
+    process.stderr.write(
+      "pull request listing should flatten graphql nodes and status rollup state with jq"
+    );
     process.exit(1);
   }
   if (!args.some((arg) => arg.includes("baseRefName: \"main\""))) {

@@ -19,6 +19,7 @@ const DEFAULT_BASE = "main";
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
+const PR_LIST_TIMEOUT_MS = 180_000;
 
 /** Represents command result. */
 interface CommandResult {
@@ -147,6 +148,15 @@ function trimOutput(value: string): string {
     return value.slice(-20_000);
 }
 
+/** Splits an owner/name GitHub repository identifier. */
+function parseRepoParts(repo: string): { owner: string; name: string } {
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) {
+        throw new Error("Dashboard repository must be configured as owner/name");
+    }
+    return { owner, name };
+}
+
 /** Builds command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
     const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -193,7 +203,10 @@ async function runGhJson<T>(args: string[]): Promise<T> {
 }
 
 /** Streams newline-delimited JSON values from a GitHub CLI command. */
-async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
+async function runGhJsonLines<T>(
+    args: string[],
+    options: { timeoutMs?: number } = {}
+): Promise<T[]> {
     return new Promise((resolve, reject) => {
         const child = spawn("gh", args, {
             cwd: DASHBOARD_ROOT,
@@ -210,7 +223,7 @@ async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
                 child.kill("SIGKILL");
             }, 5_000).unref();
             settle(() => reject(new Error("GitHub CLI command timed out")));
-        }, 60_000);
+        }, options.timeoutMs || 60_000);
 
         const settle = (callback: () => void) => {
             if (settled) {
@@ -287,13 +300,19 @@ async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
 
 /** Lists open pull requests targeting the dashboard production branch. */
 async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
-    const pullRequests = await runGhJsonLines<PullRequestSummary>([
-        "api",
-        "graphql",
-        "--paginate",
-        "-f",
-        `query=query($endCursor: String) {
-            repository(owner: "rajohan", name: "Mira-Dashboard") {
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    const pullRequests = await runGhJsonLines<PullRequestSummary>(
+        [
+            "api",
+            "graphql",
+            "--paginate",
+            "-F",
+            `owner=${repo.owner}`,
+            "-F",
+            `name=${repo.name}`,
+            "-f",
+            `query=query($owner: String!, $name: String!, $endCursor: String) {
+            repository(owner: $owner, name: $name) {
                 pullRequests(
                     first: 100
                     after: $endCursor
@@ -325,31 +344,20 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
                         deletions
                         changedFiles
                         statusCheckRollup {
-                            contexts(first: 20) {
-                                nodes {
-                                    __typename
-                                    ... on CheckRun {
-                                        name
-                                        status
-                                        conclusion
-                                    }
-                                    ... on StatusContext {
-                                        context
-                                        state
-                                    }
-                                }
-                            }
+                            state
                         }
                     }
                 }
             }
         }`,
-        "--jq",
-        [
-            ".data.repository.pullRequests.nodes[]",
-            "| .statusCheckRollup = (.statusCheckRollup.contexts.nodes // [])",
-        ].join(" "),
-    ]);
+            "--jq",
+            [
+                ".data.repository.pullRequests.nodes[]",
+                "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
+            ].join(" "),
+        ],
+        { timeoutMs: PR_LIST_TIMEOUT_MS }
+    );
 
     return pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
