@@ -98,6 +98,14 @@ if (args[0] === "api" && args[1] === "graphql") {
     process.stderr.write("pull request listing should paginate");
     process.exit(1);
   }
+  const jqIndex = args.indexOf("--jq");
+  if (
+    jqIndex === -1 ||
+    !args[jqIndex + 1]?.includes(".data.repository.pullRequests.nodes[]")
+  ) {
+    process.stderr.write("pull request listing should flatten graphql nodes with jq");
+    process.exit(1);
+  }
   if (!args.some((arg) => arg.includes("baseRefName: \"main\""))) {
     process.stderr.write("pull request listing should filter by base in graphql");
     process.exit(1);
