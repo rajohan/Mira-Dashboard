@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -17,17 +17,24 @@ describe("NewTaskModal", () => {
         const onSubmit = vi.fn(async () => {});
         render(<NewTaskModal isOpen onClose={onClose} onSubmit={onSubmit} />);
 
-        await user.type(screen.getByLabelText("Title"), "  Add task tests  ");
-        await user.type(
-            screen.getByPlaceholderText("Task description..."),
-            "  Useful details  "
-        );
+        fireEvent.change(screen.getByLabelText("Title"), {
+            target: { value: "  Add task tests  " },
+        });
+        fireEvent.change(screen.getByPlaceholderText("Task description..."), {
+            target: { value: "  Useful details  " },
+        });
         await user.click(screen.getByRole("button", { name: "High" }));
         await user.click(screen.getByRole("button", { name: "Mira" }));
         await user.click(screen.getByRole("button", { name: "Raymond" }));
-        await user.type(screen.getByLabelText("Cron job ID"), "  job-123  ");
-        await user.type(screen.getByLabelText("Schedule summary"), " Daily ");
-        await user.type(screen.getByLabelText("Session target"), " session:tests ");
+        fireEvent.change(screen.getByLabelText("Cron job ID"), {
+            target: { value: "  job-123  " },
+        });
+        fireEvent.change(screen.getByLabelText("Schedule summary"), {
+            target: { value: " Daily " },
+        });
+        fireEvent.change(screen.getByLabelText("Session target"), {
+            target: { value: " session:tests " },
+        });
         await user.click(screen.getByRole("button", { name: /Create Task/ }));
 
         expect(onSubmit).toHaveBeenCalledWith(

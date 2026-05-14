@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,24 +103,24 @@ describe("SessionDetails", () => {
         expect(screen.getByText("Hello Mira")).toBeInTheDocument();
         expect(screen.getByText("Working on it")).toBeInTheDocument();
 
-        await user.click(screen.getAllByRole("button")[2]);
+        fireEvent.click(screen.getAllByRole("button")[2]);
         expect(hooks.refetch).toHaveBeenCalledTimes(1);
 
-        await user.click(screen.getByRole("button", { name: "Load more" }));
+        fireEvent.click(screen.getByRole("button", { name: "Load more" }));
         expect(hooks.fetchNextPage).toHaveBeenCalledTimes(1);
 
-        await user.click(screen.getAllByRole("button")[0]);
+        fireEvent.click(screen.getAllByRole("button")[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
-        await user.click(screen.getAllByRole("button")[0]);
+        fireEvent.click(screen.getAllByRole("button")[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Reset" }));
-        await user.click(screen.getAllByRole("button")[0]);
+        fireEvent.click(screen.getAllByRole("button")[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
         expect(onCompact).toHaveBeenCalledTimes(1);
         expect(onReset).toHaveBeenCalledTimes(1);
         expect(onDelete).toHaveBeenCalledTimes(1);
 
-        await user.click(screen.getAllByRole("button")[1]);
+        fireEvent.click(screen.getAllByRole("button")[1]);
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 

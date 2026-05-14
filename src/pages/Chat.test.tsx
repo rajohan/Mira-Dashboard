@@ -56,21 +56,39 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-    useLiveQuery: () => ({ data: mocks.liveSessions }),
+    useLiveQuery: (
+        buildQuery: (query: { from: (collection: unknown) => unknown }) => unknown
+    ) => ({
+        data: buildQuery({ from: vi.fn(() => mocks.liveSessions) }),
+    }),
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-    useVirtualizer: ({ count }: { count: number }) => ({
-        getTotalSize: () => count * 100,
-        getVirtualItems: () =>
-            Array.from({ length: count }, (_, index) => ({
-                end: (index + 1) * 100,
-                index,
-                key: `row-${index}`,
-                start: index * 100,
-            })),
-        measureElement: vi.fn(),
-    }),
+    useVirtualizer: ({
+        count,
+        estimateSize,
+        getItemKey,
+        getScrollElement,
+    }: {
+        count: number;
+        estimateSize: (index: number) => number;
+        getItemKey: (index: number) => string;
+        getScrollElement: () => Element | null;
+    }) => {
+        getScrollElement();
+
+        return {
+            getTotalSize: () => count * 100,
+            getVirtualItems: () =>
+                Array.from({ length: count }, (_, index) => ({
+                    end: (index + 1) * estimateSize(index),
+                    index,
+                    key: getItemKey(index),
+                    start: index * estimateSize(index),
+                })),
+            measureElement: vi.fn(),
+        };
+    },
 }));
 
 vi.mock("../collections/sessions", () => ({
@@ -406,11 +424,33 @@ describe("Chat helpers", () => {
         window.localStorage.setItem("openclaw:deleted:session-a", "not json");
         expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
 
+        window.localStorage.setItem("openclaw:deleted:session-a", '{"one":true}');
+        expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
+
         writeDeletedMessageKeys("session-a", new Set(["three"]));
         expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBe(
             '["three"]'
         );
         writeDeletedMessageKeys("", new Set(["ignored"]));
+    });
+
+    it("falls back when deleted-message storage is unavailable", () => {
+        Object.defineProperty(window, "localStorage", {
+            configurable: true,
+            value: {
+                getItem: vi.fn(() => {
+                    throw new Error("storage blocked");
+                }),
+                setItem: vi.fn(() => {
+                    throw new Error("storage blocked");
+                }),
+            },
+        });
+
+        expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
+        expect(() =>
+            writeDeletedMessageKeys("session-a", new Set(["hidden"]))
+        ).not.toThrow();
     });
 
     it("reads and writes diagnostic visibility storage", () => {
@@ -442,6 +482,50 @@ describe("Chat helpers", () => {
             thinking: false,
             tools: false,
         });
+    });
+
+    it("uses diagnostic visibility defaults when browser storage is unavailable", () => {
+        Object.defineProperty(window, "localStorage", {
+            configurable: true,
+            value: {
+                getItem: vi.fn(() => {
+                    throw new Error("storage blocked");
+                }),
+                setItem: vi.fn(() => {
+                    throw new Error("storage blocked");
+                }),
+            },
+        });
+
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            thinking: false,
+            tools: false,
+        });
+        expect(() =>
+            writeStoredChatDiagnosticVisibility({ thinking: true, tools: true })
+        ).not.toThrow();
+    });
+
+    it("uses helper defaults outside a browser window", () => {
+        const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
+            globalThis,
+            "window"
+        );
+
+        try {
+            const removed = Reflect.deleteProperty(globalThis, "window");
+            expect(removed).toBe(true);
+
+            expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
+            expect(readStoredChatDiagnosticVisibility()).toEqual({
+                thinking: false,
+                tools: false,
+            });
+        } finally {
+            if (originalWindowDescriptor) {
+                Object.defineProperty(globalThis, "window", originalWindowDescriptor);
+            }
+        }
     });
 
     it("normalizes timestamps and detects recovered assistant history", () => {
@@ -505,6 +589,17 @@ describe("Chat helpers", () => {
         });
 
         expect(supportedAudioRecordingMimeType()).toBe("audio/mp4");
+    });
+
+    it("returns undefined when no recorder mime types are supported", () => {
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: {
+                isTypeSupported: vi.fn(() => false),
+            },
+        });
+
+        expect(supportedAudioRecordingMimeType()).toBeUndefined();
     });
 });
 
@@ -722,6 +817,54 @@ describe("Chat", () => {
         );
     });
 
+    it("sends unknown slash commands as normal chat messages", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(false);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/unknown command");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "/unknown command",
+                    sessionKey: "session-a",
+                })
+            )
+        );
+    });
+
+    it("keeps the optimistic stream when chat send returns without a run id", async () => {
+        const user = userEvent.setup();
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "chat.send") {
+                return {};
+            }
+
+            return method === "chat.history" ? { messages: [] } : { models: [] };
+        });
+
+        render(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+
+        await user.type(screen.getByLabelText("Draft"), "No run id");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "No run id" })
+            )
+        );
+        expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
     it("surfaces socket and send failures", async () => {
         const user = userEvent.setup();
         mocks.socketError = "Gateway disconnected";
@@ -823,6 +966,31 @@ describe("Chat", () => {
         fireEvent.change(voiceInput, { target: { files: [] } });
     });
 
+    it("uses generic transcription errors when the response body is unavailable", async () => {
+        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+            json: async () => {
+                throw new Error("invalid json");
+            },
+            ok: false,
+            status: 502,
+        } as unknown as Response);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+        const voiceInput = document.querySelector<HTMLInputElement>(
+            'input[accept="audio/*"]'
+        )!;
+
+        fireEvent.change(voiceInput, {
+            target: {
+                files: [new File(["bad"], "bad.webm", { type: "audio/webm" })],
+            },
+        });
+
+        expect(await screen.findByText("Failed to transcribe audio")).toBeInTheDocument();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("records direct microphone audio and transcribes the stopped recording", async () => {
         const user = userEvent.setup();
         const stopTrack = vi.fn();
@@ -907,6 +1075,88 @@ describe("Chat", () => {
         );
     });
 
+    it("reports an empty recording when no audio chunks are captured", async () => {
+        const user = userEvent.setup();
+        const stopTrack = vi.fn();
+        let stopListener: (() => void) | null = null;
+        const MediaRecorderMock = vi.fn(function (this: {
+            addEventListener: (type: string, listener: () => void) => void;
+            mimeType: string;
+            start: () => void;
+            stop: () => void;
+        }) {
+            Object.assign(this, {
+                addEventListener: (type: string, listener: () => void) => {
+                    if (type === "stop") stopListener = listener;
+                },
+                mimeType: "",
+                start: vi.fn(),
+                stop: () => stopListener?.(),
+            });
+        });
+        Object.assign(MediaRecorderMock, {
+            isTypeSupported: vi.fn(() => false),
+        });
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn().mockResolvedValue({
+                    getTracks: () => [{ stop: stopTrack }],
+                }),
+            },
+        });
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: MediaRecorderMock,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+        expect(await screen.findByText("No audio was recorded.")).toBeInTheDocument();
+        expect(MediaRecorderMock).toHaveBeenCalledWith(expect.anything());
+        expect(stopTrack).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the HTTPS recording fallback when the page is not secure", async () => {
+        const user = userEvent.setup();
+        const originalIsSecureContextDescriptor = Object.getOwnPropertyDescriptor(
+            window,
+            "isSecureContext"
+        );
+
+        try {
+            Object.defineProperty(window, "isSecureContext", {
+                configurable: true,
+                value: false,
+            });
+
+            render(<Chat />);
+            await screen.findByText("old user message");
+
+            await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+            expect(
+                await screen.findByText(
+                    /Direct voice recording requires HTTPS or localhost/u
+                )
+            ).toBeInTheDocument();
+        } finally {
+            if (originalIsSecureContextDescriptor) {
+                Object.defineProperty(
+                    window,
+                    "isSecureContext",
+                    originalIsSecureContextDescriptor
+                );
+            } else {
+                Reflect.deleteProperty(window, "isSecureContext");
+            }
+        }
+    });
+
     it("switches sessions, reloads history, and clears queued attachments", async () => {
         const user = userEvent.setup();
         const file = new File(["hello"], "queued.txt", {
@@ -958,6 +1208,40 @@ describe("Chat", () => {
         expect(screen.getByTestId("composer-state")).toHaveTextContent("false:false");
     });
 
+    it("polls visible history while connected and following the bottom", async () => {
+        const intervalCallbacks: Array<() => void> = [];
+        const setIntervalSpy = vi
+            .spyOn(window, "setInterval")
+            .mockImplementation((callback: TimerHandler) => {
+                intervalCallbacks.push(callback as () => void);
+                return intervalCallbacks.length as unknown as ReturnType<
+                    typeof setInterval
+                >;
+            });
+
+        try {
+            render(<Chat />);
+            await screen.findByText("old user message");
+            await waitFor(() => expect(intervalCallbacks.length).toBeGreaterThan(0));
+            mocks.request.mockClear();
+
+            await act(async () => {
+                for (const callback of intervalCallbacks) {
+                    callback();
+                }
+            });
+
+            await waitFor(() =>
+                expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                    limit: 1000,
+                    sessionKey: "session-a",
+                })
+            );
+        } finally {
+            setIntervalSpy.mockRestore();
+        }
+    });
+
     it("limits attachment batches and surfaces recorder startup failures", async () => {
         const user = userEvent.setup();
         const files = Array.from(
@@ -996,5 +1280,37 @@ describe("Chat", () => {
 
         await user.click(screen.getByRole("button", { name: "toggle recording" }));
         expect(await screen.findByText("microphone denied")).toBeInTheDocument();
+    });
+
+    it("stops opened microphone tracks when recorder construction fails", async () => {
+        const user = userEvent.setup();
+        const stopTrack = vi.fn();
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn().mockResolvedValue({
+                    getTracks: () => [{ stop: stopTrack }],
+                }),
+            },
+        });
+        class MediaRecorderMock {
+            static isTypeSupported = vi.fn(() => false);
+
+            constructor() {
+                throw new Error("recorder unavailable");
+            }
+        }
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: MediaRecorderMock,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+        expect(await screen.findByText("recorder unavailable")).toBeInTheDocument();
+        expect(stopTrack).toHaveBeenCalledTimes(1);
     });
 });

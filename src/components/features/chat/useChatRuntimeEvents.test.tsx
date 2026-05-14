@@ -406,6 +406,31 @@ describe("useChatRuntimeEvents", () => {
         expect(request).not.toHaveBeenCalled();
     });
 
+    it("skips chat terminal history refresh when not following the bottom", async () => {
+        const { emit, request } = renderRuntimeEvents({
+            shouldStickToBottom: false,
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "Done", role: "assistant" },
+                    runId: "run-done",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(500);
+        });
+
+        expect(request).not.toHaveBeenCalled();
+    });
+
     it("appends aborted buffered text and surfaces chat errors", async () => {
         const { emit, result } = renderRuntimeEvents();
 
@@ -614,6 +639,109 @@ describe("useChatRuntimeEvents", () => {
 
         expect(result.current.messages).toEqual([]);
         expect(result.current.sendError).toBe("Chat request failed");
+    });
+
+    it("handles runtime aliases, refresh failures, and command final messages", async () => {
+        const request = vi.fn().mockRejectedValue(new Error("history offline"));
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-alias"],
+                    runId: "run-alias",
+                    sessionKey: "session-a",
+                    text: "",
+                    updatedAt: "2026-05-11T00:00:00.000Z",
+                },
+            },
+            request,
+        });
+
+        act(() => {
+            emit({
+                event: "session.item",
+                payload: {
+                    data: { itemKind: "note", summary: "Alias progress" },
+                    runId: "run-alias",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Note: Alias progress"
+        );
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: { command: true, content: "Command finished" },
+                    runId: "run-alias",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages.at(-1)).toEqual(
+            expect.objectContaining({
+                local: true,
+                role: "system",
+                text: "Command finished",
+            })
+        );
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(500);
+        });
+
+        expect(request).toHaveBeenCalledWith("chat.history", {
+            limit: 1000,
+            sessionKey: "session-a",
+        });
+        expect(result.current.historyLoadVersion).toBe(0);
+    });
+
+    it("uses buffered text when final payload is hidden by diagnostic visibility", async () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-thinking"],
+                    runId: "run-thinking",
+                    sessionKey: "session-a",
+                    text: "Buffered visible fallback",
+                    updatedAt: "2026-05-11T00:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        thinking: [{ text: "hidden thinking" }],
+                    },
+                    runId: "run-thinking",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages.at(-1)).toEqual(
+            expect.objectContaining({
+                role: "assistant",
+                text: "Buffered visible fallback",
+            })
+        );
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
 
     it("clears pending timers on unmount", async () => {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -354,22 +354,42 @@ describe("Settings page", () => {
 
     it("backs up config and confirms gateway restart", async () => {
         const user = userEvent.setup();
+        let setTimeoutSpy: { mockRestore: () => void } | undefined;
+        let clearTimeoutSpy: { mockRestore: () => void } | undefined;
 
-        render(<Settings />);
+        const { unmount } = render(<Settings />);
 
-        await user.click(screen.getByRole("button", { name: "Backup" }));
-        expect(hooks.createBackup).toHaveBeenCalledTimes(1);
-        expect(hooks.createObjectUrl).toHaveBeenCalledTimes(1);
-        expect(hooks.revokeObjectUrl).toHaveBeenCalledWith("blob:backup");
+        try {
+            await user.click(screen.getByRole("button", { name: "Backup" }));
+            expect(hooks.createBackup).toHaveBeenCalledTimes(1);
+            expect(hooks.createObjectUrl).toHaveBeenCalledTimes(1);
+            expect(hooks.revokeObjectUrl).toHaveBeenCalledWith("blob:backup");
 
-        await user.click(screen.getByRole("button", { name: "Restart" }));
-        expect(screen.getByTestId("modal")).toHaveTextContent("Restart Gateway");
-        await user.click(screen.getByRole("button", { name: "Cancel" }));
-        expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
+            await user.click(screen.getByRole("button", { name: "Restart" }));
+            expect(screen.getByTestId("modal")).toHaveTextContent("Restart Gateway");
+            await user.click(screen.getByRole("button", { name: "Cancel" }));
+            expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Restart" }));
-        await user.click(screen.getAllByRole("button", { name: "Restart" }).at(-1)!);
-        expect(hooks.restartGateway).toHaveBeenCalledTimes(1);
+            await user.click(screen.getByRole("button", { name: "Restart" }));
+            setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => {
+                return 1 as unknown as ReturnType<typeof setTimeout>;
+            });
+            await act(async () => {
+                fireEvent.click(
+                    screen.getAllByRole("button", { name: "Restart" }).at(-1)!
+                );
+                await Promise.resolve();
+            });
+            expect(hooks.restartGateway).toHaveBeenCalledTimes(1);
+            await Promise.resolve();
+
+            clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+            unmount();
+            expect(clearTimeoutSpy).toHaveBeenCalled();
+        } finally {
+            setTimeoutSpy?.mockRestore();
+            clearTimeoutSpy?.mockRestore();
+        }
     });
 
     it("saves section updates with expected config patches", async () => {
