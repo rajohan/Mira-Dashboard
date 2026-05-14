@@ -110,4 +110,32 @@ describe("ChatMarkdown", () => {
             screen.getByRole("link", { name: "https://example.com/raw.png" })
         ).toHaveAttribute("href", "https://example.com/raw.png");
     });
+
+    it("renders nested inline content inside code and detects JSON objects", () => {
+        render(
+            <ChatMarkdown
+                text={[
+                    "`before **nested** after`",
+                    "",
+                    "```",
+                    "{answer: 'yes'}",
+                    "```",
+                ].join("\n")}
+            />
+        );
+
+        expect(screen.getByText("before **nested** after")).toBeInTheDocument();
+        expect(screen.getByText("json")).toBeInTheDocument();
+        expect(screen.getByTestId("json-block")).toHaveTextContent(
+            JSON.stringify({ answer: "yes" })
+        );
+    });
+
+    it("falls back for JSON-like non-JSON blocks", () => {
+        render(<ChatMarkdown text={"```text\n[not valid\n```"} />);
+
+        const block = screen.getByTestId("syntax-block");
+        expect(block).toHaveAttribute("data-language", "text");
+        expect(block).toHaveTextContent("[not valid");
+    });
 });

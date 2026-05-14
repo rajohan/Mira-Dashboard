@@ -153,4 +153,53 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getAllByText("not configured")).toHaveLength(2);
         expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });
+
+    it("renders null percentages and invalid OpenAI-style reset values", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    elevenlabs: {
+                        ...quotas.elevenlabs,
+                        percentUsed: null,
+                        resetAt: null,
+                    },
+                    openai: {
+                        ...quotas.openai,
+                        fiveHourLeftPercent: 0,
+                        fiveHourReset: "13:45 on 10 Foo",
+                        percentUsed: 0,
+                    },
+                    openrouter: {
+                        ...quotas.openrouter,
+                        percentUsed: null,
+                    },
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            percentUsed: null,
+                        },
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            percentRemaining: -12,
+                        },
+                    },
+                    zai: {
+                        ...quotas.zai,
+                        fiveHour: { resetAt: "13:45 on 10 Foo", usedPercentage: 130 },
+                        weekly: { resetAt: "13:45", usedPercentage: 110 },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
+        expect(screen.getByText("100% left")).toBeInTheDocument();
+        expect(screen.getByText(/weekly 0% left/u)).toBeInTheDocument();
+        expect(screen.getByText(/5h 0% left · weekly 0% left/u)).toBeInTheDocument();
+        expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(2);
+    });
 });

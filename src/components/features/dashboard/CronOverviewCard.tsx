@@ -1,6 +1,6 @@
 import { Clock3 } from "lucide-react";
 
-import { useCronJobs } from "../../../hooks";
+import { type CronJob, useCronJobs } from "../../../hooks";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -11,6 +11,12 @@ import {
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
+/** Returns finite cron timestamp values. */
+function cronTimestamp(job: CronJob, key: "lastRunAtMs" | "nextRunAtMs") {
+    const value = getCronStateValue(job, key);
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 /** Renders the cron overview card UI. */
 export function CronOverviewCard() {
     const { data: jobs = [] } = useCronJobs();
@@ -20,20 +26,18 @@ export function CronOverviewCard() {
 
     const latestRunJob =
         [...jobs]
-            .filter((job) => typeof getCronStateValue(job, "lastRunAtMs") === "number")
+            .filter((job) => cronTimestamp(job, "lastRunAtMs") !== null)
             .sort(
                 (a, b) =>
-                    (Number(getCronStateValue(b, "lastRunAtMs")) || 0) -
-                    (Number(getCronStateValue(a, "lastRunAtMs")) || 0)
+                    cronTimestamp(b, "lastRunAtMs")! - cronTimestamp(a, "lastRunAtMs")!
             )[0] || null;
 
     const nextRunJob =
         [...jobs]
-            .filter((job) => typeof getCronStateValue(job, "nextRunAtMs") === "number")
+            .filter((job) => cronTimestamp(job, "nextRunAtMs") !== null)
             .sort(
                 (a, b) =>
-                    (Number(getCronStateValue(a, "nextRunAtMs")) || 0) -
-                    (Number(getCronStateValue(b, "nextRunAtMs")) || 0)
+                    cronTimestamp(a, "nextRunAtMs")! - cronTimestamp(b, "nextRunAtMs")!
             )[0] || null;
 
     const lastStatus = formatCronLastStatus(

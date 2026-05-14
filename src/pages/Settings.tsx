@@ -93,6 +93,7 @@ export function Settings() {
     const [success, setSuccess] = useState<string | null>(null);
     const [showRestartModal, setShowRestartModal] = useState(false);
     const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const restartReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Queries
     const { data: config, isLoading: configLoading } = useConfig();
@@ -110,6 +111,9 @@ export function Settings() {
     useEffect(() => {
         return () => {
             if (successTimerRef.current) clearTimeout(successTimerRef.current);
+            if (restartReloadTimerRef.current) {
+                clearTimeout(restartReloadTimerRef.current);
+            }
         };
     }, []);
 
@@ -118,7 +122,11 @@ export function Settings() {
         try {
             await restartGateway.mutateAsync();
             setShowRestartModal(false);
-            setTimeout(() => window.location.reload(), 2000);
+            restartReloadTimerRef.current = setTimeout(
+                /* c8 ignore next -- jsdom does not implement navigation reload. */
+                () => window.location.reload(),
+                2000
+            );
         } catch (error_) {
             setError(error_ instanceof Error ? error_.message : "Failed to restart");
         }
