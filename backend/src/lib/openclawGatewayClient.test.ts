@@ -160,7 +160,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
             assert.equal(frame.type, "req");
             assert.equal(frame.method, "connect");
             const params = frame.params as Record<string, unknown>;
-            assert.equal(params.minProtocol, 4);
+            assert.equal(params.minProtocol, 3);
             assert.equal(params.maxProtocol, 4);
             assert.deepEqual(params.auth, { token: "gateway-token" });
             assert.deepEqual(params.caps, ["tool-events"]);
