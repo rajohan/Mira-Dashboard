@@ -206,6 +206,9 @@ async function runGhJsonLines<T>(args: string[]): Promise<T[]> {
         let settled = false;
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
+            setTimeout(() => {
+                child.kill("SIGKILL");
+            }, 5_000).unref();
             settle(() => reject(new Error("GitHub CLI command timed out")));
         }, 60_000);
 
