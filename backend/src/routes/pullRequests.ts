@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -15,11 +15,11 @@ const DASHBOARD_WORKTREE_ROOT =
     "/home/ubuntu/projects/mira-dashboard-worktrees";
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
-const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
-const DASHBOARD_PR_AUTHORS = [MIRA_AUTHOR, DEPENDABOT_AUTHOR];
 const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
+const MAX_JSON_LINE_LENGTH = 1024 * 1024;
+const PR_LIST_TIMEOUT_MS = 180_000;
 
 /** Represents command result. */
 interface CommandResult {
@@ -148,6 +148,15 @@ function trimOutput(value: string): string {
     return value.slice(-20_000);
 }
 
+/** Splits an owner/name GitHub repository identifier. */
+function parseRepoParts(repo: string): { owner: string; name: string } {
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) {
+        throw new Error("Dashboard repository must be configured as owner/name");
+    }
+    return { owner, name };
+}
+
 /** Builds command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
     const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -181,7 +190,7 @@ async function runCommand(
     };
 }
 
-/** Performs run gh JSON. */
+/** Runs a GitHub CLI command and parses its JSON output. */
 async function runGhJson<T>(args: string[]): Promise<T> {
     const { stdout } = await execFileAsync("gh", args, {
         cwd: DASHBOARD_ROOT,
@@ -193,57 +202,167 @@ async function runGhJson<T>(args: string[]): Promise<T> {
     return JSON.parse(String(stdout || "null")) as T;
 }
 
-/** Performs list dashboard pull requests. */
-async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
-    const pullRequestsByNumber = new Map<number, PullRequestSummary>();
+/** Streams newline-delimited JSON values from a GitHub CLI command. */
+async function runGhJsonLines<T>(
+    args: string[],
+    options: { timeoutMs?: number } = {}
+): Promise<T[]> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("gh", args, {
+            cwd: DASHBOARD_ROOT,
+            env: buildCommandEnv(),
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        const rows: T[] = [];
+        let stdoutBuffer = "";
+        let stderr = "";
+        let settled = false;
+        const timeout = setTimeout(() => {
+            child.kill("SIGTERM");
+            setTimeout(() => {
+                child.kill("SIGKILL");
+            }, 5_000).unref();
+            settle(() => reject(new Error("GitHub CLI command timed out")));
+        }, options.timeoutMs || 60_000);
 
-    for (const author of DASHBOARD_PR_AUTHORS) {
-        const pullRequests = await runGhJson<PullRequestSummary[]>([
-            "pr",
-            "list",
-            "--repo",
-            DASHBOARD_REPO,
-            "--state",
-            "open",
-            "--author",
-            author,
-            "--limit",
-            "50",
-            "--json",
-            [
-                "number",
-                "title",
-                "body",
-                "url",
-                "headRefName",
-                "baseRefName",
-                "author",
-                "createdAt",
-                "updatedAt",
-                "isDraft",
-                "mergeable",
-                "mergeStateStatus",
-                "reviewDecision",
-                "statusCheckRollup",
-                "additions",
-                "deletions",
-                "changedFiles",
-            ].join(","),
-        ]);
-
-        for (const pullRequest of pullRequests) {
-            if (pullRequest.baseRefName === DEFAULT_BASE) {
-                pullRequestsByNumber.set(pullRequest.number, pullRequest);
+        const settle = (callback: () => void) => {
+            if (settled) {
+                return;
             }
-        }
-    }
+            settled = true;
+            clearTimeout(timeout);
+            callback();
+        };
 
-    return [...pullRequestsByNumber.values()].sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt)
-    );
+        const parseLine = (line: string) => {
+            if (!line.trim()) {
+                return;
+            }
+            rows.push(JSON.parse(line) as T);
+        };
+
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdoutBuffer += chunk;
+
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() || "";
+            if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
+                child.kill("SIGTERM");
+                settle(() => reject(new Error("GitHub CLI JSON line was too large")));
+                return;
+            }
+
+            try {
+                for (const line of lines) {
+                    if (line.length > MAX_JSON_LINE_LENGTH) {
+                        throw new Error("GitHub CLI JSON line was too large");
+                    }
+                    parseLine(line);
+                }
+            } catch (error) {
+                child.kill("SIGTERM");
+                settle(() =>
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error("Failed to parse GitHub CLI output")
+                    )
+                );
+            }
+        });
+
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+            stderr = trimOutput(stderr + chunk);
+        });
+
+        child.on("error", (error) => {
+            settle(() => reject(error));
+        });
+
+        child.on("close", (code) => {
+            settle(() => {
+                if (code !== 0) {
+                    reject(new Error(stderr || `GitHub CLI exited with code ${code}`));
+                    return;
+                }
+                try {
+                    parseLine(stdoutBuffer);
+                    resolve(rows);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
+    });
 }
 
-/** Returns pull request. */
+/** Lists open pull requests targeting the dashboard production branch. */
+async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    const pullRequests = await runGhJsonLines<PullRequestSummary>(
+        [
+            "api",
+            "graphql",
+            "--paginate",
+            "-F",
+            `owner=${repo.owner}`,
+            "-F",
+            `name=${repo.name}`,
+            "-f",
+            `query=query($owner: String!, $name: String!, $endCursor: String) {
+            repository(owner: $owner, name: $name) {
+                pullRequests(
+                    first: 100
+                    after: $endCursor
+                    states: OPEN
+                    baseRefName: "${DEFAULT_BASE}"
+                    orderBy: { field: UPDATED_AT, direction: DESC }
+                ) {
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                    nodes {
+                        number
+                        title
+                        body
+                        url
+                        headRefName
+                        baseRefName
+                        author {
+                            login
+                        }
+                        createdAt
+                        updatedAt
+                        isDraft
+                        mergeable
+                        mergeStateStatus
+                        reviewDecision
+                        additions
+                        deletions
+                        changedFiles
+                        statusCheckRollup {
+                            state
+                        }
+                    }
+                }
+            }
+        }`,
+            "--jq",
+            [
+                ".data.repository.pullRequests.nodes[]",
+                "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
+            ].join(" "),
+        ],
+        { timeoutMs: PR_LIST_TIMEOUT_MS }
+    );
+
+    return pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Returns the current GitHub metadata for one pull request. */
 async function getPullRequest(number: number): Promise<PullRequestSummary> {
     return runGhJson<PullRequestSummary>([
         "pr",
@@ -307,7 +426,7 @@ function parseGitWorktrees(output: string): GitWorktree[] {
         .filter((worktree) => worktree.path);
 }
 
-/** Returns whether path insIDe root. */
+/** Returns whether a path is strictly inside the configured worktree root. */
 function isPathInsideRoot(value: string, root: string): boolean {
     const resolvedValue = path.resolve(value);
     const resolvedRoot = path.resolve(root);
