@@ -271,6 +271,52 @@ describe("chat type normalizers", () => {
         ).toMatchObject({ name: "exec", content: "tool output" });
     });
 
+    it("converts internal delivery tool results into assistant messages", () => {
+        const visible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { message: "Visible delivery" },
+                            name: "message",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: JSON.stringify({
+                        deliveryStatus: "sent",
+                        sourceReply: { text: "Visible delivery" },
+                        status: "ok",
+                    }),
+                    role: "tool_result",
+                    toolName: "message",
+                },
+                {
+                    content: "actual output",
+                    role: "tool_result",
+                    toolName: "bash",
+                },
+            ],
+            { showThinking: false, showTools: true }
+        );
+
+        expect(visible).toEqual([
+            expect.objectContaining({
+                role: "assistant",
+                text: "Visible delivery",
+            }),
+            expect.objectContaining({
+                role: "tool_result",
+                toolResult: expect.objectContaining({
+                    content: "actual output",
+                    name: "bash",
+                }),
+            }),
+        ]);
+    });
+
     it("decides renderability from text, media, thinking, and tools visibility", () => {
         expect(isRenderableChatHistoryMessage(historyMessage({ text: "hello" }))).toBe(
             true

@@ -406,6 +406,63 @@ function isToolRole(role: string): boolean {
     );
 }
 
+const INTERNAL_DELIVERY_TOOL_NAMES = new Set([
+    "message",
+    "messages",
+    "reply",
+    "send",
+    "reaction",
+    "react",
+    "typing",
+]);
+
+/** Returns whether a tool name is an internal delivery helper. */
+export function isInternalDeliveryToolName(value?: string): boolean {
+    if (!value) {
+        return false;
+    }
+
+    const normalized = value
+        .replace(/^functions\./, "")
+        .replaceAll("_", "-")
+        .trim()
+        .toLowerCase();
+    return INTERNAL_DELIVERY_TOOL_NAMES.has(normalized);
+}
+
+/** Parses a record from direct or JSON-encoded content. */
+function contentRecord(content: unknown): Record<string, unknown> | null {
+    if (isRecord(content)) {
+        return content;
+    }
+
+    if (typeof content !== "string" || !content.trim().startsWith("{")) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(content) as unknown;
+        return isRecord(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Extracts the visible source reply text from a delivery tool result. */
+function deliverySourceReplyText(content: unknown): string | undefined {
+    const record = contentRecord(content);
+    if (!record) {
+        return undefined;
+    }
+
+    const sourceReply = isRecord(record.sourceReply) ? record.sourceReply : null;
+    const text =
+        (typeof sourceReply?.text === "string" && sourceReply.text.trim()) ||
+        (typeof record.message === "string" && record.message.trim());
+
+    return text || undefined;
+}
+
 /** Extracts tool result. */
 function extractToolResult(
     message: RawChatHistoryMessage,
@@ -574,7 +631,33 @@ export function normalizeVisibleChatHistoryMessages(
     const visibleMessages: ChatHistoryMessage[] = [];
     let pendingHiddenToolMedia: ChatAttachmentDisplay[] = [];
 
-    for (const message of messages.map(normalizeChatHistoryMessage)) {
+    for (const normalizedMessage of messages.map(normalizeChatHistoryMessage)) {
+        const internalDeliveryToolResult =
+            isToolRole(normalizedMessage.role) &&
+            isInternalDeliveryToolName(normalizedMessage.toolResult?.name);
+        if (internalDeliveryToolResult) {
+            const sourceReplyText = deliverySourceReplyText(normalizedMessage.content);
+            if (sourceReplyText) {
+                visibleMessages.push({
+                    role: "assistant",
+                    content: sourceReplyText,
+                    text: sourceReplyText,
+                    images: [],
+                    attachments: [],
+                    timestamp: normalizedMessage.timestamp,
+                });
+            }
+            continue;
+        }
+
+        const filteredToolCalls = normalizedMessage.toolCalls?.filter(
+            (toolCall) => !isInternalDeliveryToolName(toolCall.name)
+        );
+        const message =
+            filteredToolCalls &&
+            filteredToolCalls.length !== normalizedMessage.toolCalls?.length
+                ? { ...normalizedMessage, toolCalls: filteredToolCalls }
+                : normalizedMessage;
         const isToolMessage = isToolRole(message.role);
         const hiddenToolMedia =
             isToolMessage &&

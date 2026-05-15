@@ -5,6 +5,7 @@ import {
     createChatVisibility,
     createLocalSystemMessage,
     finalMessageFromPayload,
+    historyContainsRecoveredStream,
     isRecord,
     isSameSessionKey,
     mergeStreamMessage,
@@ -437,6 +438,52 @@ export function useChatRuntimeEvents({
             );
 
             if (!eventMatchesSelected) {
+                return;
+            }
+
+            if (eventName === "session.message") {
+                const rawMessage = isRecord(payload.message)
+                    ? (payload.message as RawChatHistoryMessage)
+                    : payload.message === undefined
+                      ? null
+                      : ({
+                            content: payload.message,
+                            role: "assistant",
+                        } satisfies RawChatHistoryMessage);
+
+                if (!rawMessage) {
+                    return;
+                }
+
+                const nextMessages = visibleHistoryMessages(
+                    [rawMessage],
+                    createChatVisibility(showThinkingOutput, showToolOutput)
+                );
+
+                if (nextMessages.length === 0) {
+                    return;
+                }
+
+                setMessages((previous) =>
+                    mergeWithRecentOptimisticMessages(previous, nextMessages)
+                );
+
+                const activeStream = activeStreamsReference.current[selectedSessionKey];
+                if (
+                    activeStream?.text &&
+                    historyContainsRecoveredStream(nextMessages, activeStream.text)
+                ) {
+                    updateActiveStreamsReference.current((previous) => {
+                        const next = { ...previous };
+                        delete next[selectedSessionKey];
+                        return next;
+                    });
+                }
+
+                if (shouldStickToBottomReference.current) {
+                    setIsAtBottom(true);
+                }
+                setHistoryLoadVersion((previous) => previous + 1);
                 return;
             }
 

@@ -27,6 +27,8 @@ function renderRuntimeEvents(
         request?: ReturnType<typeof vi.fn>;
         selectedSessionKey?: string;
         shouldStickToBottom?: boolean;
+        showThinkingOutput?: boolean;
+        showToolOutput?: boolean;
     } = {}
 ) {
     let listener: ((data: unknown) => void) | undefined;
@@ -82,8 +84,8 @@ function renderRuntimeEvents(
             setMessages,
             setSendError,
             shouldStickToBottomReference,
-            showThinkingOutput: false,
-            showToolOutput: false,
+            showThinkingOutput: overrides.showThinkingOutput ?? false,
+            showToolOutput: overrides.showToolOutput ?? false,
             subscribe,
             updateActiveStreams,
         });
@@ -322,6 +324,63 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Snapshot text");
+    });
+
+    it("appends subscribed transcript messages immediately", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Live transcript row",
+                        role: "assistant",
+                        timestamp: "2026-05-15T02:05:00.000Z",
+                    },
+                    sessionKey: "session-a",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([
+            expect.objectContaining({
+                role: "assistant",
+                text: "Live transcript row",
+            }),
+        ]);
+        expect(result.current.historyLoadVersion).toBe(1);
+        expect(result.current.isAtBottom).toBe(true);
+    });
+
+    it("renders subscribed transcript tool results when tool output is visible", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "LIVE_TOOL_OUTPUT",
+                        role: "tool_result",
+                        toolName: "bash",
+                    },
+                    sessionKey: "session-a",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([
+            expect.objectContaining({
+                role: "tool_result",
+                toolResult: expect.objectContaining({
+                    content: "LIVE_TOOL_OUTPUT",
+                    name: "bash",
+                }),
+            }),
+        ]);
     });
 
     it("tracks runtime work events and clears them on terminal lifecycle", async () => {
