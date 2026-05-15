@@ -315,6 +315,31 @@ describe("ChatMessagesList", () => {
         expect(screen.queryByText("hidden tool text")).not.toBeInTheDocument();
     });
 
+    it("hides raw tool result text when tool diagnostics are disabled", () => {
+        const rows: ChatRow[] = [
+            {
+                key: "tool-1",
+                kind: "message",
+                message: {
+                    content: "raw tool output",
+                    role: "tool_result",
+                    text: "raw tool output",
+                    toolResult: { content: "formatted tool output" },
+                },
+            },
+        ];
+
+        renderMessages({
+            chatRows: rows,
+            messagesVirtualizer: makeVirtualizer(rows.length),
+            visibility: { showThinking: false, showTools: false },
+        });
+
+        expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
+        expect(screen.queryByText("raw tool output")).not.toBeInTheDocument();
+        expect(screen.queryByText("formatted tool output")).not.toBeInTheDocument();
+    });
+
     it("uses the TTS endpoint for assistant messages and reports errors", async () => {
         const user = userEvent.setup();
         const onTtsError = vi.fn();

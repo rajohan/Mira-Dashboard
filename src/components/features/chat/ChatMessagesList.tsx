@@ -388,7 +388,7 @@ export function ChatMessagesList({
                             normalizedRole === "toolresult" ||
                             normalizedRole === "tool_result";
                         const shouldRenderPrimaryText = Boolean(
-                            row.message.text && !(visibility.showTools && isToolResult)
+                            row.message.text && !isToolResult
                         );
 
                         return (
