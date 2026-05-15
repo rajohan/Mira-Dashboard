@@ -123,7 +123,6 @@ export function Settings() {
             await restartGateway.mutateAsync();
             setShowRestartModal(false);
             restartReloadTimerRef.current = setTimeout(
-                /* c8 ignore next -- jsdom does not implement navigation reload. */
                 () => window.location.reload(),
                 2000
             );
