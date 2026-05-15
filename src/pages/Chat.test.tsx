@@ -649,6 +649,31 @@ describe("Chat", () => {
         expect(screen.getByTestId("visibility")).toHaveTextContent("true:true");
     });
 
+    it("subscribes to the selected session transcript and cleans up on switch", async () => {
+        const user = userEvent.setup();
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.messages.subscribe", {
+                key: "session-a",
+            })
+        );
+
+        await user.click(screen.getByRole("button", { name: "select side chat" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.messages.unsubscribe", {
+                key: "session-a",
+            })
+        );
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.messages.subscribe", {
+                key: "session-b",
+            })
+        );
+    });
+
     it("sends chat text and renders optimistic/user stream rows", async () => {
         const user = userEvent.setup();
 

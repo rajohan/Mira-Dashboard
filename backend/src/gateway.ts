@@ -522,6 +522,15 @@ async function refreshSessions(): Promise<void> {
     broadcast({ type: "sessions", sessions: sessionList });
 }
 
+/** Subscribes the dashboard Gateway client to session index events. */
+async function subscribeToSessionEvents(): Promise<void> {
+    if (!gatewayClient || !isGatewayConnected) {
+        return;
+    }
+
+    await gatewayClient.request("sessions.subscribe", {});
+}
+
 /** Performs init. */
 function init(token: string): void {
     if (currentToken === token && gatewayClient) {
@@ -545,6 +554,12 @@ function init(token: string): void {
         onHelloOk: () => {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
+            void subscribeToSessionEvents().catch((error) => {
+                console.warn(
+                    "[Gateway] Failed to subscribe to session events:",
+                    error instanceof Error ? error.message : String(error)
+                );
+            });
             void refreshSessions().catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",

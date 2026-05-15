@@ -250,6 +250,80 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
+    it("handles v4 deltaText frames and explicit replacement deltas", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "First draft",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("First draft");
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Replacement",
+                    replace: true,
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: " done",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement done");
+    });
+
+    it("prefers cumulative message snapshots over deltaText", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "ignored",
+                    message: { content: "Snapshot text", role: "assistant" },
+                    runId: "run-snapshot",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Snapshot text");
+    });
+
     it("tracks runtime work events and clears them on terminal lifecycle", async () => {
         const { emit, request, result } = renderRuntimeEvents();
 

@@ -371,6 +371,26 @@ export function Chat() {
     }, [isConnected, request, selectedSessionKey]);
 
     useEffect(() => {
+        if (!isConnected || !selectedSessionKey) {
+            return;
+        }
+
+        void request("sessions.messages.subscribe", {
+            key: selectedSessionKey,
+        }).catch(() => {
+            // Live transcript updates are opportunistic; polling/history still recovers.
+        });
+
+        return () => {
+            void request("sessions.messages.unsubscribe", {
+                key: selectedSessionKey,
+            }).catch(() => {
+                // Keep cleanup best-effort so route/session changes never throw.
+            });
+        };
+    }, [isConnected, request, selectedSessionKey]);
+
+    useEffect(() => {
         writeStoredChatDiagnosticVisibility({
             thinking: showThinkingOutput,
             tools: showToolOutput,

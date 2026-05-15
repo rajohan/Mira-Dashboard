@@ -121,6 +121,9 @@ export interface ChatStreamEventMessage {
     content?: unknown;
     text?: string;
     delta?: unknown;
+    deltaText?: string;
+    replace?: boolean;
+    seq?: number;
 }
 
 /** Represents one chat row. */

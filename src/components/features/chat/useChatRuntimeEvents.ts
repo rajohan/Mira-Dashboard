@@ -31,11 +31,17 @@ interface MutableReference<T> {
     current: T;
 }
 
+/** Represents one pending chat delta frame. */
+interface PendingDeltaMessage {
+    message: ChatHistoryMessage;
+    replace?: boolean;
+}
+
 /** Represents pending delta update. */
 interface PendingDeltaUpdate {
     runId?: string;
     aliases: string[];
-    deltas: ChatHistoryMessage[];
+    deltas: PendingDeltaMessage[];
 }
 
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
@@ -305,8 +311,11 @@ export function useChatRuntimeEvents({
                 let text = startsNewRun ? "" : existing?.text || "";
                 let message = startsNewRun ? undefined : existing?.message;
 
-                for (const deltaMessage of pending.deltas) {
-                    text = mergeStreamText(text, deltaMessage.text);
+                for (const delta of pending.deltas) {
+                    const deltaMessage = delta.message;
+                    text = delta.replace
+                        ? deltaMessage.text
+                        : mergeStreamText(text, deltaMessage.text);
                     message = mergeStreamMessage(message, deltaMessage, text, runId);
                 }
 
@@ -337,7 +346,8 @@ export function useChatRuntimeEvents({
         const queueDeltaUpdate = (
             streamSessionKey: string,
             runId: string,
-            deltaMessage: ChatHistoryMessage
+            deltaMessage: ChatHistoryMessage,
+            replace = false
         ) => {
             const pending = pendingDeltaUpdatesReference.current[streamSessionKey] || {
                 aliases: [],
@@ -346,7 +356,7 @@ export function useChatRuntimeEvents({
 
             pending.runId ||= runId;
             pending.aliases = uniqueStrings([...pending.aliases, runId]);
-            pending.deltas = [...pending.deltas, deltaMessage];
+            pending.deltas = [...pending.deltas, { message: deltaMessage, replace }];
             pendingDeltaUpdatesReference.current[streamSessionKey] = pending;
 
             if (pendingDeltaFlushTimerReference.current === null) {
@@ -586,9 +596,20 @@ export function useChatRuntimeEvents({
             };
 
             if (payload.state === "delta") {
-                const deltaMessage = normalizeAssistantPayload(
-                    payload.message ?? payload.delta ?? payload.content ?? payload.text
-                );
+                const deltaMessage =
+                    payload.message === undefined
+                        ? typeof payload.deltaText === "string"
+                            ? {
+                                  role: "assistant",
+                                  content: payload.deltaText,
+                                  text: payload.deltaText,
+                                  images: [],
+                                  attachments: [],
+                              }
+                            : normalizeAssistantPayload(
+                                  payload.delta ?? payload.content ?? payload.text
+                              )
+                        : normalizeAssistantPayload(payload.message);
                 const nextText = deltaMessage.text;
 
                 if (
@@ -598,7 +619,12 @@ export function useChatRuntimeEvents({
                 ) {
                     const existing = activeStreamsReference.current[streamSessionKey];
                     const runId = payload.runId || existing?.runId || streamSessionKey;
-                    queueDeltaUpdate(streamSessionKey, runId, deltaMessage);
+                    queueDeltaUpdate(
+                        streamSessionKey,
+                        runId,
+                        deltaMessage,
+                        payload.replace === true
+                    );
                 }
                 return;
             }
