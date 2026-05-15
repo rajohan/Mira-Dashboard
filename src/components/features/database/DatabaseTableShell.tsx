@@ -12,12 +12,17 @@ import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
+type DatabaseColumnDef<T extends object> =
+    | ColumnDef<T, string>
+    | ColumnDef<T, number>
+    | ColumnDef<T, boolean>
+    | ColumnDef<T, null>
+    | ColumnDef<T, undefined>;
+
 /** Represents props. */
 interface Props<T extends object> {
     data: T[];
-    // TanStack column definitions are invariant in TValue; the shell accepts mixed accessor value types.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    columns: ColumnDef<T, any>[];
+    columns: DatabaseColumnDef<T>[];
     emptyMessage?: string;
     maxHeight?: string;
     onRowClick?: (row: T) => void;
