@@ -190,7 +190,7 @@ export function supportedAudioRecordingMimeType(): string | undefined {
 
 /** Renders the chat UI. */
 export function Chat() {
-    const { isConnected, error, request, subscribe } = useOpenClawSocket();
+    const { connectionId, isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
     const messagesBottomReference = useRef<HTMLDivElement | null>(null);
     const fileInputReference = useRef<HTMLInputElement | null>(null);
@@ -611,6 +611,8 @@ export function Chat() {
     useChatRuntimeEvents({
         request,
         subscribe,
+        connectionId,
+        isConnected,
         selectedSessionKey,
         showThinkingOutput,
         showToolOutput,

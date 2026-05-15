@@ -60,6 +60,13 @@ describe("chat utils", () => {
         expect(messageDeleteKey(toolCall)).toContain(
             'assistant::no-time::run-1::tool-call::tool-1::bash::{"command":"date"}'
         );
+
+        const thinking = message({
+            role: "assistant",
+            text: "",
+            thinking: [{ text: "reasoning" }],
+        });
+        expect(messageIdentity(thinking)).toBe("assistant::thinking::reasoning");
     });
 
     it("dedupes messages from the newest duplicate while retaining distinct diagnostic rows", () => {

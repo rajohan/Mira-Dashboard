@@ -290,10 +290,6 @@ function runtimeToolMessages(
         phase === "error" ||
         result !== undefined;
 
-    if (!name && args === undefined && result === undefined) {
-        return [];
-    }
-
     const timestamp = new Date().toISOString();
     const messages: ChatHistoryMessage[] = [];
 
@@ -361,6 +357,8 @@ function runtimeSessionMessage(
 
 /** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParams {
+    connectionId: number;
+    isConnected: boolean;
     request: <T = unknown>(
         method: string,
         params?: Record<string, unknown>
@@ -383,6 +381,8 @@ interface UseChatRuntimeEventsParams {
 
 /** Provides chat runtime events. */
 export function useChatRuntimeEvents({
+    connectionId,
+    isConnected,
     request,
     subscribe,
     selectedSessionKey,
@@ -597,6 +597,10 @@ export function useChatRuntimeEvents({
             }
 
             if (shouldTrackActivity || runtimeMessage) {
+                if (runtimeMessage) {
+                    flushPendingDeltaUpdates();
+                }
+
                 updateActiveStreamsReference.current((previous) => {
                     const existing = previous[selectedSessionKey];
                     const incomingRunId =
@@ -605,9 +609,16 @@ export function useChatRuntimeEvents({
                     const runId = startsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
-                    const text =
-                        runtimeMessage?.text ||
-                        (startsNewRun ? "" : existing?.text || "");
+                    const text = runtimeMessage
+                        ? runtimeMessage.text
+                        : startsNewRun
+                          ? ""
+                          : existing?.text || "";
+                    const nextStatusText = shouldTrackActivity
+                        ? statusText ||
+                          (startsNewRun ? undefined : existing?.statusText) ||
+                          "Thinking"
+                        : statusText;
                     return {
                         ...previous,
                         [selectedSessionKey]: {
@@ -629,10 +640,7 @@ export function useChatRuntimeEvents({
                                 : startsNewRun
                                   ? undefined
                                   : existing?.message,
-                            statusText:
-                                statusText ||
-                                (startsNewRun ? undefined : existing?.statusText) ||
-                                "Thinking",
+                            statusText: nextStatusText,
                             updatedAt: new Date().toISOString(),
                         },
                     };
@@ -882,10 +890,6 @@ export function useChatRuntimeEvents({
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
                 liveHistoryRefreshTimerReference.current = null;
             }
-            if (pendingDeltaFlushTimerReference.current !== null) {
-                window.clearTimeout(pendingDeltaFlushTimerReference.current);
-                pendingDeltaFlushTimerReference.current = null;
-            }
             pendingDeltaUpdatesReference.current = {};
         };
     }, [
@@ -903,7 +907,7 @@ export function useChatRuntimeEvents({
     ]);
 
     useEffect(() => {
-        if (!selectedSessionKey) {
+        if (!isConnected || !selectedSessionKey) {
             return;
         }
 
@@ -922,5 +926,5 @@ export function useChatRuntimeEvents({
                 // The backend WebSocket teardown also drops Gateway-side subscriptions.
             });
         };
-    }, [selectedSessionKey]);
+    }, [connectionId, isConnected, selectedSessionKey]);
 }

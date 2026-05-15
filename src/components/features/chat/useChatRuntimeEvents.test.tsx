@@ -25,6 +25,8 @@ function renderRuntimeEvents(
     overrides: {
         activeStreams?: ActiveChatStreams;
         clearInitialRequests?: boolean;
+        connectionId?: number;
+        isConnected?: boolean;
         request?: ReturnType<typeof vi.fn>;
         selectedSessionKey?: string;
         shouldStickToBottom?: boolean;
@@ -49,55 +51,65 @@ function renderRuntimeEvents(
             ],
         });
 
-    const hook = renderHook(() => {
-        const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>(
-            overrides.activeStreams ?? {}
-        );
-        const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
-        const [sendError, setSendError] = useState<string | null>(null);
-        const [isAtBottom, setIsAtBottom] = useState(false);
-        const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
-        const activeStreamsReference = useRef(activeStreams);
-        const liveHistoryRefreshTimerReference = useRef<number | null>(null);
-        const shouldStickToBottomReference = useRef(
-            overrides.shouldStickToBottom ?? true
-        );
-        activeStreamsReference.current = activeStreams;
+    const hook = renderHook(
+        ({
+            connectionId = overrides.connectionId ?? 1,
+            isConnected = overrides.isConnected ?? true,
+        }: {
+            connectionId?: number;
+            isConnected?: boolean;
+        } = {}) => {
+            const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>(
+                overrides.activeStreams ?? {}
+            );
+            const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
+            const [sendError, setSendError] = useState<string | null>(null);
+            const [isAtBottom, setIsAtBottom] = useState(false);
+            const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
+            const activeStreamsReference = useRef(activeStreams);
+            const liveHistoryRefreshTimerReference = useRef<number | null>(null);
+            const shouldStickToBottomReference = useRef(
+                overrides.shouldStickToBottom ?? true
+            );
+            activeStreamsReference.current = activeStreams;
 
-        const updateActiveStreams = (
-            updater: (previous: ActiveChatStreams) => ActiveChatStreams
-        ) => {
-            setActiveStreams((previous) => {
-                const next = updater(previous);
-                activeStreamsReference.current = next;
-                return next;
+            const updateActiveStreams = (
+                updater: (previous: ActiveChatStreams) => ActiveChatStreams
+            ) => {
+                setActiveStreams((previous) => {
+                    const next = updater(previous);
+                    activeStreamsReference.current = next;
+                    return next;
+                });
+            };
+
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId,
+                isConnected,
+                liveHistoryRefreshTimerReference,
+                request: request as unknown as ChatRequest,
+                selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
+                setHistoryLoadVersion,
+                setIsAtBottom,
+                setMessages,
+                setSendError,
+                shouldStickToBottomReference,
+                showThinkingOutput: false,
+                showToolOutput: overrides.showToolOutput ?? false,
+                subscribe,
+                updateActiveStreams,
             });
-        };
 
-        useChatRuntimeEvents({
-            activeStreamsReference,
-            liveHistoryRefreshTimerReference,
-            request: request as unknown as ChatRequest,
-            selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
-            setHistoryLoadVersion,
-            setIsAtBottom,
-            setMessages,
-            setSendError,
-            shouldStickToBottomReference,
-            showThinkingOutput: false,
-            showToolOutput: overrides.showToolOutput ?? false,
-            subscribe,
-            updateActiveStreams,
-        });
-
-        return {
-            activeStreams,
-            historyLoadVersion,
-            isAtBottom,
-            messages,
-            sendError,
-        };
-    });
+            return {
+                activeStreams,
+                historyLoadVersion,
+                isAtBottom,
+                messages,
+                sendError,
+            };
+        }
+    );
 
     if (overrides.clearInitialRequests !== false) {
         request.mockClear();
@@ -324,6 +336,38 @@ describe("useChatRuntimeEvents", () => {
         });
     });
 
+    it("re-subscribes selected Gateway v4 transcript events after reconnect", () => {
+        const { request, rerender } = renderRuntimeEvents({
+            clearInitialRequests: false,
+            connectionId: 1,
+        });
+
+        expect(request).toHaveBeenCalledWith("sessions.messages.subscribe", {
+            key: "session-a",
+        });
+
+        request.mockClear();
+        rerender({ connectionId: 2 });
+
+        expect(request).toHaveBeenCalledWith("sessions.messages.unsubscribe", {
+            key: "session-a",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.messages.subscribe", {
+            key: "session-a",
+        });
+    });
+
+    it("does not subscribe selected Gateway v4 transcript events while disconnected", () => {
+        const { request } = renderRuntimeEvents({
+            clearInitialRequests: false,
+            isConnected: false,
+        });
+
+        expect(request).not.toHaveBeenCalledWith("sessions.messages.subscribe", {
+            key: "session-a",
+        });
+    });
+
     it("renders Gateway v4 tool events as ordered bubbles before history refresh", () => {
         const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
 
@@ -391,6 +435,44 @@ describe("useChatRuntimeEvents", () => {
                 }),
             })
         );
+    });
+
+    it("renders Gateway v4 tool result display text variants", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+
+        act(() => {
+            for (const [id, resultValue] of [
+                ["string-result", "plain output"],
+                ["array-result", [{ text: "array output" }]],
+                ["empty-result", undefined],
+                ["circular-result", circular],
+            ] as const) {
+                emit({
+                    event: "session.tool",
+                    payload: {
+                        data: {
+                            id,
+                            name: "functions.openclaw_status",
+                            phase: "result",
+                            result: resultValue,
+                        },
+                        runId: "run-tool",
+                        sessionKey: "session-a",
+                        stream: "tool",
+                    },
+                    type: "event",
+                });
+            }
+        });
+
+        expect(result.current.messages.map((message) => message.text)).toEqual([
+            "plain output",
+            "array output",
+            "",
+            "[object Object]",
+        ]);
     });
 
     it("ignores non-work Gateway v4 tool events", () => {
@@ -510,6 +592,83 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+    });
+
+    it("flushes queued chat deltas before applying Gateway v4 transcript messages", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Hel",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Hello",
+                        role: "assistant",
+                    },
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
+    });
+
+    it("uses empty Gateway v4 transcript text and clears pure transcript status", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-v4"],
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    statusText: "Thinking",
+                    text: "Previous text",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "",
+                        role: "assistant",
+                    },
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                statusText: undefined,
+                text: "",
+            })
+        );
+        expect(result.current.activeStreams["session-a"]?.message?.text).toBe("");
     });
 
     it("formats OpenClaw runtime transcript progress events", () => {

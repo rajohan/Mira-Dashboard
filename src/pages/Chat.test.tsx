@@ -49,6 +49,8 @@ const mocks = vi.hoisted(() => ({
         ],
     },
     runtimeEventsOptions: null as {
+        connectionId: number;
+        isConnected: boolean;
         updateActiveStreams: (
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
@@ -101,6 +103,7 @@ vi.mock("../hooks/useAgents", () => ({
 
 vi.mock("../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: () => ({
+        connectionId: 1,
         error: mocks.socketError,
         isConnected: mocks.isConnected,
         request: mocks.request,
@@ -111,6 +114,8 @@ vi.mock("../hooks/useOpenClawSocket", () => ({
 vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
     useChatRuntimeEvents: vi.fn(
         (options: {
+            connectionId: number;
+            isConnected: boolean;
             updateActiveStreams: (
                 updater: (previous: Record<string, unknown>) => Record<string, unknown>
             ) => void;
@@ -647,6 +652,12 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "thinking false" }));
         await user.click(screen.getByRole("button", { name: "tools false" }));
         expect(screen.getByTestId("visibility")).toHaveTextContent("true:true");
+        expect(mocks.runtimeEventsOptions).toEqual(
+            expect.objectContaining({
+                connectionId: 1,
+                isConnected: true,
+            })
+        );
     });
 
     it("sends chat text and renders optimistic/user stream rows", async () => {
