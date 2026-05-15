@@ -29,18 +29,63 @@ export function base64ToText(base64: string): string {
     return new TextDecoder().decode(bytes);
 }
 
+/** Returns a diagnostic identity for tool/thinking rows without primary text. */
+function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefined {
+    const toolCalls = message.toolCalls || [];
+    if (toolCalls.length > 0) {
+        const fallbackScope = message.timestamp || message.runId || "unknown";
+        return [
+            "tool-calls",
+            ...toolCalls.map((toolCall, index) =>
+                [
+                    toolCall.id || "no-id-" + fallbackScope + "-" + index,
+                    toolCall.name,
+                    JSON.stringify(toolCall.arguments ?? null),
+                ].join("::")
+            ),
+        ].join("::");
+    }
+
+    if (message.toolResult) {
+        const fallbackScope = message.timestamp || message.runId || "unknown";
+        return [
+            "tool-result",
+            message.toolResult.id || "no-id-" + fallbackScope,
+            message.toolResult.name || "tool",
+            message.toolResult.content.trim(),
+        ].join("::");
+    }
+
+    if (message.thinking?.length) {
+        return ["thinking", message.thinking.map((block) => block.text).join("\n")].join(
+            "::"
+        );
+    }
+
+    return undefined;
+}
+
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
-    return `${message.role.toLowerCase()}::${message.text.trim()}`;
+    const role = message.role.toLowerCase();
+    const diagnosticIdentity = diagnosticMessageIdentity(message);
+    const textIdentity = message.text.trim();
+    const isToolResultRole =
+        role === "tool" || role === "tool_result" || role === "toolresult";
+    const identity = isToolResultRole
+        ? diagnosticIdentity || textIdentity
+        : textIdentity || diagnosticIdentity;
+    return `${role}::${identity || ""}`;
 }
 
 /** Performs message delete key. */
 export function messageDeleteKey(message: ChatHistoryMessage): string {
+    const diagnosticIdentity = diagnosticMessageIdentity(message);
     return [
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        message.text.trim(),
+        diagnosticIdentity || message.text.trim() || "no-text",
     ].join("::");
 }
 
@@ -79,7 +124,10 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         }
 
         const identity = messageIdentity(message);
-        if (message.text.trim() && seen.has(identity)) {
+        if (
+            (message.text.trim() || diagnosticMessageIdentity(message)) &&
+            seen.has(identity)
+        ) {
             continue;
         }
 
@@ -167,13 +215,21 @@ export function mergeWithRecentOptimisticMessages(
     const recentMissingMessages = previousMessages.filter((message) => {
         const role = message.role.toLowerCase();
         const isOptimisticRole = role === "user" || role === "assistant";
-        const isLocalUiMessage = message.local === true || role === "system";
+        const isLocalMessage = message.local === true;
+        const isSystemMessage = role === "system";
+        const isLocalUiMessage = isLocalMessage || isSystemMessage;
+        const hasLocalDiagnosticDetails =
+            (message.thinking?.length || 0) > 0 ||
+            (message.toolCalls?.length || 0) > 0 ||
+            Boolean(message.toolResult);
+        const isLocalDiagnosticMessage =
+            message.local === true && hasLocalDiagnosticDetails;
 
-        if (!isOptimisticRole && !isLocalUiMessage) {
+        if (!isOptimisticRole && !isLocalUiMessage && !isLocalDiagnosticMessage) {
             return false;
         }
 
-        if (!message.text.trim()) {
+        if (!message.text.trim() && !isSystemMessage && !isLocalDiagnosticMessage) {
             return false;
         }
 

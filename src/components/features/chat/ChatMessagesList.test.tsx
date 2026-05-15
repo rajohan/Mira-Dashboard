@@ -34,6 +34,7 @@ vi.mock("./ChatMessageDetails", () => ({
     ),
 }));
 
+/** Creates a deterministic virtualizer stub for chat row tests. */
 function makeVirtualizer(
     rowCount: number,
     options: { includeMissing?: boolean; padded?: boolean } = {}
@@ -52,6 +53,7 @@ function makeVirtualizer(
     } as never;
 }
 
+/** Creates representative chat rows for list rendering tests. */
 function makeRows(): ChatRow[] {
     return [
         {
@@ -99,6 +101,7 @@ function makeRows(): ChatRow[] {
     ];
 }
 
+/** Creates default ChatMessagesList props for tests. */
 function makeProps(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
@@ -121,6 +124,7 @@ function makeProps(
     } satisfies React.ComponentProps<typeof ChatMessagesList>;
 }
 
+/** Renders ChatMessagesList with default props and optional overrides. */
 function renderMessages(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
@@ -315,6 +319,31 @@ describe("ChatMessagesList", () => {
         expect(screen.queryByText("hidden tool text")).not.toBeInTheDocument();
     });
 
+    it("hides raw tool result text when tool diagnostics are disabled", () => {
+        const rows: ChatRow[] = [
+            {
+                key: "tool-1",
+                kind: "message",
+                message: {
+                    content: "raw tool output",
+                    role: "tool_result",
+                    text: "raw tool output",
+                    toolResult: { content: "formatted tool output" },
+                },
+            },
+        ];
+
+        renderMessages({
+            chatRows: rows,
+            messagesVirtualizer: makeVirtualizer(rows.length),
+            visibility: { showThinking: false, showTools: false },
+        });
+
+        expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
+        expect(screen.queryByText("raw tool output")).not.toBeInTheDocument();
+        expect(screen.queryByText("formatted tool output")).not.toBeInTheDocument();
+    });
+
     it("uses the TTS endpoint for assistant messages and reports errors", async () => {
         const user = userEvent.setup();
         const onTtsError = vi.fn();
@@ -346,6 +375,7 @@ describe("ChatMessagesList", () => {
     });
 });
 
+/** Dispatches an image load event for the first image matching alt text. */
 function fireImageLoad(alt: string) {
     const image = screen.getAllByAltText(alt)[0]!;
     image.dispatchEvent(new Event("load", { bubbles: true }));

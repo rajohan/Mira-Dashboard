@@ -12,6 +12,7 @@ import {
     readFileAsDataUrl,
 } from "./chatUtils";
 
+/** Creates a normalized chat history message for utility tests. */
 function message(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
     return {
         role: "assistant",
@@ -47,17 +48,146 @@ describe("chat utils", () => {
         expect(messageDeleteKey(message({ role: "user", text: "hi" }))).toBe(
             "user::no-time::no-run::hi"
         );
+
+        const toolCall = message({
+            role: "assistant",
+            runId: "run-1",
+            text: "",
+            toolCalls: [{ arguments: { command: "date" }, id: "tool-1", name: "bash" }],
+        });
+        expect(messageIdentity(toolCall)).toContain(
+            'assistant::tool-calls::tool-1::bash::{"command":"date"}'
+        );
+        expect(messageDeleteKey(toolCall)).toContain(
+            'assistant::no-time::run-1::tool-calls::tool-1::bash::{"command":"date"}'
+        );
+
+        const thinking = message({
+            role: "assistant",
+            text: "",
+            thinking: [{ text: "reasoning" }],
+        });
+        expect(messageIdentity(thinking)).toBe("assistant::thinking::reasoning");
+
+        const visibleThinking = message({
+            role: "assistant",
+            text: "visible reply",
+            thinking: [{ text: "same reasoning" }],
+        });
+        expect(messageIdentity(visibleThinking)).toBe("assistant::visible reply");
     });
 
-    it("dedupes messages from the newest duplicate while retaining empty text rows", () => {
+    it("dedupes messages from the newest duplicate while retaining distinct diagnostic rows", () => {
         const first = message({ role: "assistant", text: "same", timestamp: "1" });
         const newer = message({ role: "assistant", text: "same", timestamp: "2" });
         const empty = message({ role: "assistant", text: "" });
+        const toolA = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { command: "a" }, id: "tool-a", name: "bash" }],
+        });
+        const toolB = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { command: "b" }, id: "tool-b", name: "bash" }],
+        });
 
-        expect(dedupeMessages([first, undefined, empty, newer] as never)).toEqual([
-            empty,
-            newer,
+        expect(
+            dedupeMessages([first, undefined, empty, toolA, toolB, newer] as never)
+        ).toEqual([empty, toolA, toolB, newer]);
+    });
+
+    it("keeps no-id and multi-call tool diagnostics distinct", () => {
+        const first = message({
+            role: "assistant",
+            text: "",
+            timestamp: "1",
+            toolCalls: [{ arguments: { command: "same" }, name: "bash" }],
+        });
+        const second = message({
+            role: "assistant",
+            text: "",
+            timestamp: "2",
+            toolCalls: [{ arguments: { command: "same" }, name: "bash" }],
+        });
+        const multiA = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                { arguments: { command: "same" }, id: "tool-1", name: "bash" },
+                { arguments: { command: "a" }, id: "tool-2", name: "bash" },
+            ],
+        });
+        const multiB = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                { arguments: { command: "same" }, id: "tool-1", name: "bash" },
+                { arguments: { command: "b" }, id: "tool-3", name: "bash" },
+            ],
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(messageIdentity(multiA)).not.toBe(messageIdentity(multiB));
+        expect(dedupeMessages([first, second, multiA, multiB])).toEqual([
+            first,
+            second,
+            multiA,
+            multiB,
         ]);
+    });
+
+    it("keeps matching text tool results distinct by diagnostic identity", () => {
+        const first = message({
+            role: "tool",
+            text: '{ "ok": true }',
+            timestamp: "1",
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-a",
+                name: "bash",
+            },
+        });
+        const second = message({
+            role: "tool",
+            text: '{ "ok": true }',
+            timestamp: "2",
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-b",
+                name: "bash",
+            },
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(messageDeleteKey(first)).toContain(
+            'tool-result::tool-a::bash::{ "ok": true }'
+        );
+        expect(dedupeMessages([first, second])).toEqual([first, second]);
+    });
+
+    it("uses diagnostic identity for toolresult role variants", () => {
+        const first = message({
+            role: "toolresult",
+            text: '{ "ok": true }',
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-a",
+                name: "bash",
+            },
+        });
+        const second = message({
+            role: "toolresult",
+            text: '{ "ok": true }',
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-b",
+                name: "bash",
+            },
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(dedupeMessages([first, second])).toEqual([first, second]);
     });
 
     it("covers merge edge cases and timestamp ordering", () => {
@@ -125,6 +255,44 @@ describe("chat utils", () => {
         expect(
             mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
         ).toEqual(["recent local send", "server reply", "local notice"]);
+    });
+
+    it("retains empty local diagnostics during history merges", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({
+                role: "assistant",
+                text: "",
+                local: true,
+                timestamp: "2026-05-10T10:01:30.000Z",
+                toolCalls: [
+                    { arguments: { command: "date" }, id: "tool-1", name: "bash" },
+                ],
+            }),
+            message({
+                role: "assistant",
+                text: "",
+                local: true,
+                timestamp: "2026-05-10T10:01:31.000Z",
+                thinking: [{ text: "hidden thinking" }],
+            }),
+        ];
+        const next = [
+            message({
+                role: "assistant",
+                text: "server reply",
+                timestamp: "2026-05-10T10:01:45.000Z",
+            }),
+        ];
+
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map(
+                (item) => item.toolCalls?.[0]?.id || item.thinking?.[0]?.text || item.text
+            )
+        ).toEqual(["tool-1", "hidden thinking", "server reply"]);
     });
 
     it("does not retain optimistic assistant text recovered in refreshed history", () => {
