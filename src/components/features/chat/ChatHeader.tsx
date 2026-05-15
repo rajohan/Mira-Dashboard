@@ -1,4 +1,4 @@
-import { Brain, type LucideIcon, Wrench } from "lucide-react";
+import { Brain, type LucideIcon, Terminal, Wrench } from "lucide-react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration } from "../../../utils/format";
@@ -16,6 +16,7 @@ interface Option {
 /** Provides props for diagnostic toggle. */
 interface DiagnosticToggleProps {
     active: boolean;
+    disabled?: boolean;
     icon: LucideIcon;
     label: string;
     title: string;
@@ -25,6 +26,7 @@ interface DiagnosticToggleProps {
 /** Renders the diagnostic toggle UI. */
 function DiagnosticToggle({
     active,
+    disabled = false,
     icon: Icon,
     label,
     title,
@@ -42,6 +44,7 @@ function DiagnosticToggle({
                     ? "border-accent-400/40 bg-accent-500/20 text-accent-100 hover:bg-accent-500/25 shadow-[0_0_0_1px_rgba(99,102,241,0.12)]"
                     : "border-primary-700/80 bg-primary-900/40 text-primary-300 hover:border-primary-600 hover:bg-primary-800/80 hover:text-primary-100",
             ].join(" ")}
+            disabled={disabled}
             onClick={onClick}
             title={title}
         >
@@ -59,8 +62,11 @@ interface ChatHeaderProps {
     agentOptions: Option[];
     showThinking: boolean;
     showTools: boolean;
+    liveToolOutput: boolean;
+    isLiveToolOutputBusy?: boolean;
     onToggleThinking: () => void;
     onToggleTools: () => void;
+    onToggleLiveToolOutput: () => void;
     onSelectSession: (sessionKey: string) => void;
 }
 
@@ -71,8 +77,9 @@ function formatHeaderStatus(selectedSession: Session | null): string {
     }
 
     const thinkingLevel = selectedSession.thinkingLevel || "default";
+    const verboseLevel = selectedSession.verboseLevel || "off";
 
-    return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Thinking: ${thinkingLevel} · ${formatDuration(selectedSession.updatedAt)}`;
+    return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Thinking: ${thinkingLevel} · Verbose: ${verboseLevel} · ${formatDuration(selectedSession.updatedAt)}`;
 }
 
 /** Renders the chat header UI. */
@@ -83,8 +90,11 @@ export function ChatHeader({
     agentOptions,
     showThinking,
     showTools,
+    liveToolOutput,
+    isLiveToolOutputBusy = false,
     onToggleThinking,
     onToggleTools,
+    onToggleLiveToolOutput,
     onSelectSession,
 }: ChatHeaderProps) {
     return (
@@ -110,6 +120,14 @@ export function ChatHeader({
                             label="Tools"
                             title="Toggle tool calls and tool result output"
                             onClick={onToggleTools}
+                        />
+                        <DiagnosticToggle
+                            active={liveToolOutput}
+                            disabled={!selectedSessionKey || isLiveToolOutputBusy}
+                            icon={Terminal}
+                            label="Live output"
+                            title="Toggle live tool stdout for this session. Full output can expose large or sensitive command output."
+                            onClick={onToggleLiveToolOutput}
                         />
                     </div>
                     <div

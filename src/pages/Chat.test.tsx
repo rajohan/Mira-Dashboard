@@ -145,7 +145,10 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
 vi.mock("../components/features/chat/ChatHeader", () => ({
     ChatHeader: ({
         agentOptions,
+        isLiveToolOutputBusy,
+        liveToolOutput,
         onSelectSession,
+        onToggleLiveToolOutput,
         onToggleThinking,
         onToggleTools,
         selectedSessionKey,
@@ -154,7 +157,10 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
         showTools,
     }: {
         agentOptions: Array<{ label: string; value: string }>;
+        isLiveToolOutputBusy?: boolean;
+        liveToolOutput: boolean;
         onSelectSession: (sessionKey: string) => void;
+        onToggleLiveToolOutput: () => void;
         onToggleThinking: () => void;
         onToggleTools: () => void;
         selectedSessionKey: string;
@@ -178,6 +184,13 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
             </button>
             <button type="button" onClick={onToggleTools}>
                 tools {String(showTools)}
+            </button>
+            <button
+                type="button"
+                disabled={isLiveToolOutputBusy}
+                onClick={onToggleLiveToolOutput}
+            >
+                live output {String(liveToolOutput)}
             </button>
         </header>
     ),
@@ -672,6 +685,28 @@ describe("Chat", () => {
                 key: "session-b",
             })
         );
+    });
+
+    it("toggles live tool output by setting the selected session verbose level", async () => {
+        const user = userEvent.setup();
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.click(screen.getByRole("button", { name: "live output false" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.patch", {
+                key: "session-a",
+                verboseLevel: "full",
+            })
+        );
+        expect(screen.getByTestId("visibility")).toHaveTextContent("false:true");
+        expect(
+            await screen.findByText(
+                /Live tool output enabled for this session\. Tool stdout can include large or sensitive output\./u
+            )
+        ).toBeInTheDocument();
     });
 
     it("sends chat text and renders optimistic/user stream rows", async () => {

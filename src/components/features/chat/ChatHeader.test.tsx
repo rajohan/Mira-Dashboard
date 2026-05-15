@@ -29,6 +29,7 @@ describe("ChatHeader", () => {
         const user = userEvent.setup();
         const onToggleThinking = vi.fn();
         const onToggleTools = vi.fn();
+        const onToggleLiveToolOutput = vi.fn();
 
         render(
             <ChatHeader
@@ -38,8 +39,10 @@ describe("ChatHeader", () => {
                 agentOptions={[]}
                 showThinking={false}
                 showTools
+                liveToolOutput={false}
                 onToggleThinking={onToggleThinking}
                 onToggleTools={onToggleTools}
+                onToggleLiveToolOutput={onToggleLiveToolOutput}
                 onSelectSession={vi.fn()}
             />
         );
@@ -53,21 +56,24 @@ describe("ChatHeader", () => {
             "aria-pressed",
             "true"
         );
+        expect(screen.getByRole("button", { name: "Live output" })).toBeDisabled();
 
         await user.click(screen.getByRole("button", { name: "Thinking" }));
         await user.click(screen.getByRole("button", { name: "Tools" }));
 
         expect(onToggleThinking).toHaveBeenCalledTimes(1);
         expect(onToggleTools).toHaveBeenCalledTimes(1);
+        expect(onToggleLiveToolOutput).not.toHaveBeenCalled();
     });
 
     it("renders selected session metadata and session selectors", async () => {
         const user = userEvent.setup();
         const onSelectSession = vi.fn();
+        const onToggleLiveToolOutput = vi.fn();
 
         render(
             <ChatHeader
-                selectedSession={session}
+                selectedSession={{ ...session, verboseLevel: "full" }}
                 selectedSessionKey="agent:main:main"
                 sessionOptions={[
                     { label: "Main", value: "agent:main:main" },
@@ -76,22 +82,31 @@ describe("ChatHeader", () => {
                 agentOptions={[{ label: "Coder", value: "agent:coder:main" }]}
                 showThinking
                 showTools={false}
+                liveToolOutput
                 onToggleThinking={vi.fn()}
                 onToggleTools={vi.fn()}
+                onToggleLiveToolOutput={onToggleLiveToolOutput}
                 onSelectSession={onSelectSession}
             />
         );
 
         expect(screen.getByText(/codex/u)).toBeInTheDocument();
         expect(screen.getByText(/Thinking: high/u)).toBeInTheDocument();
+        expect(screen.getByText(/Verbose: full/u)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Live output" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
 
         await user.click(screen.getByRole("button", { name: /Main/u }));
         await user.click(await screen.findByRole("menuitem", { name: "Scratch" }));
         await user.click(screen.getByRole("button", { name: /Jump to agent/u }));
         await user.click(await screen.findByRole("menuitem", { name: "Coder" }));
+        await user.click(screen.getByRole("button", { name: "Live output" }));
 
         expect(onSelectSession).toHaveBeenNthCalledWith(1, "scratch");
         expect(onSelectSession).toHaveBeenNthCalledWith(2, "agent:coder:main");
+        expect(onToggleLiveToolOutput).toHaveBeenCalledTimes(1);
     });
 
     it("renders unknown model and default thinking fallbacks", () => {
@@ -103,13 +118,16 @@ describe("ChatHeader", () => {
                 agentOptions={[]}
                 showThinking
                 showTools
+                liveToolOutput={false}
                 onToggleThinking={vi.fn()}
                 onToggleTools={vi.fn()}
+                onToggleLiveToolOutput={vi.fn()}
                 onSelectSession={vi.fn()}
             />
         );
 
         expect(screen.getByText(/Unknown/u)).toBeInTheDocument();
         expect(screen.getByText(/Thinking: default/u)).toBeInTheDocument();
+        expect(screen.getByText(/Verbose: off/u)).toBeInTheDocument();
     });
 });

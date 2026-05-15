@@ -11,6 +11,7 @@ import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
     type ActiveChatStreams,
     createChatVisibility,
+    createLocalSystemMessage,
     historyContainsRecoveredStream,
     shouldShowStreamRow as shouldRenderStreamRow,
     uniqueStrings,
@@ -232,6 +233,7 @@ export function Chat() {
     const [showToolOutput, setShowToolOutput] = useState(
         () => readStoredChatDiagnosticVisibility().tools
     );
+    const [isLiveToolOutputBusy, setIsLiveToolOutputBusy] = useState(false);
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [, setHistoryLoadVersion] = useState(0);
 
@@ -263,6 +265,7 @@ export function Chat() {
     const selectedStream = selectedSessionKey
         ? activeStreams[selectedSessionKey]
         : undefined;
+    const liveToolOutput = selectedSession?.verboseLevel === "full";
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
     const shouldShowSelectedStreamRow = shouldRenderStreamRow(
@@ -769,6 +772,44 @@ export function Chat() {
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
 
+    /** Performs add local system message. */
+    const addLocalSystemMessage = (text: string) => {
+        setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
+    };
+
+    /** Responds to live tool output toggle events. */
+    const handleToggleLiveToolOutput = async () => {
+        if (!selectedSessionKey || isLiveToolOutputBusy) {
+            return;
+        }
+
+        const nextVerboseLevel = liveToolOutput ? "off" : "full";
+        setIsLiveToolOutputBusy(true);
+        setSendError(null);
+
+        try {
+            await request("sessions.patch", {
+                key: selectedSessionKey,
+                verboseLevel: nextVerboseLevel,
+            });
+
+            if (nextVerboseLevel === "full") {
+                setShowToolOutput(true);
+                addLocalSystemMessage(
+                    "Live tool output enabled for this session. Tool stdout can include large or sensitive output."
+                );
+            } else {
+                addLocalSystemMessage("Live tool output disabled for this session.");
+            }
+        } catch (error_) {
+            setSendError(
+                (error_ as Error).message || "Failed to toggle live tool output"
+            );
+        } finally {
+            setIsLiveToolOutputBusy(false);
+        }
+    };
+
     /** Performs apply slash suggestion. */
     const applySlashSuggestion = (value: string) => {
         setDraft(value);
@@ -1125,10 +1166,13 @@ export function Chat() {
                         agentOptions={agentOptions}
                         showThinking={showThinkingOutput}
                         showTools={showToolOutput}
+                        liveToolOutput={liveToolOutput}
+                        isLiveToolOutputBusy={isLiveToolOutputBusy}
                         onToggleThinking={() =>
                             setShowThinkingOutput((previous) => !previous)
                         }
                         onToggleTools={() => setShowToolOutput((previous) => !previous)}
+                        onToggleLiveToolOutput={() => void handleToggleLiveToolOutput()}
                         onSelectSession={setSelectedSessionKey}
                     />
 
