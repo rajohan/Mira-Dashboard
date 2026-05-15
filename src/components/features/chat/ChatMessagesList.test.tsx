@@ -34,6 +34,7 @@ vi.mock("./ChatMessageDetails", () => ({
     ),
 }));
 
+/** Creates a deterministic virtualizer stub for chat row tests. */
 function makeVirtualizer(
     rowCount: number,
     options: { includeMissing?: boolean; padded?: boolean } = {}
@@ -52,6 +53,7 @@ function makeVirtualizer(
     } as never;
 }
 
+/** Creates representative chat rows for list rendering tests. */
 function makeRows(): ChatRow[] {
     return [
         {
@@ -99,6 +101,7 @@ function makeRows(): ChatRow[] {
     ];
 }
 
+/** Creates default ChatMessagesList props for tests. */
 function makeProps(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
@@ -121,6 +124,7 @@ function makeProps(
     } satisfies React.ComponentProps<typeof ChatMessagesList>;
 }
 
+/** Renders ChatMessagesList with default props and optional overrides. */
 function renderMessages(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
@@ -371,6 +375,7 @@ describe("ChatMessagesList", () => {
     });
 });
 
+/** Dispatches an image load event for the first image matching alt text. */
 function fireImageLoad(alt: string) {
     const image = screen.getAllByAltText(alt)[0]!;
     image.dispatchEvent(new Event("load", { bubbles: true }));

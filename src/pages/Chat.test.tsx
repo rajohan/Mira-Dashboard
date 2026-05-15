@@ -361,6 +361,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         ) : null,
 }));
 
+/** Installs an isolated localStorage mock for chat page tests. */
 function installLocalStorageMock() {
     const store = new Map<string, string>();
 
@@ -375,6 +376,7 @@ function installLocalStorageMock() {
     });
 }
 
+/** Configures the default OpenClaw request mock responses. */
 function setupRequest() {
     mocks.request.mockImplementation(async (method: string) => {
         if (method === "models.list") {
@@ -658,6 +660,40 @@ describe("Chat", () => {
                 isConnected: true,
             })
         );
+    });
+
+    it("filters hidden tool result rows before message virtualization", async () => {
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "models.list") {
+                return { models: [{ id: "codex", label: "Codex" }] };
+            }
+
+            if (method === "chat.history") {
+                return {
+                    messages: [
+                        {
+                            content: "raw tool output",
+                            role: "tool_result",
+                            text: "raw tool output",
+                            toolResult: { content: "formatted tool output" },
+                        },
+                        {
+                            content: "visible assistant message",
+                            role: "assistant",
+                            text: "visible assistant message",
+                        },
+                    ],
+                };
+            }
+
+            return {};
+        });
+
+        render(<Chat />);
+
+        expect(await screen.findByText("visible assistant message")).toBeInTheDocument();
+        expect(screen.queryByText("raw tool output")).not.toBeInTheDocument();
+        expect(screen.queryByText("formatted tool output")).not.toBeInTheDocument();
     });
 
     it("sends chat text and renders optimistic/user stream rows", async () => {

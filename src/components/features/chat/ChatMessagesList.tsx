@@ -359,7 +359,15 @@ export function ChatMessagesList({
                         const row = chatRows[virtualItem.index];
 
                         if (!row) {
-                            return null;
+                            return (
+                                <div
+                                    key={virtualItem.key}
+                                    data-index={virtualItem.index}
+                                    ref={messagesVirtualizer.measureElement}
+                                    className="h-0 overflow-hidden"
+                                    aria-hidden="true"
+                                />
+                            );
                         }
 
                         if (row.kind === "typing") {

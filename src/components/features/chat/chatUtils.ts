@@ -70,10 +70,11 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     const textIdentity = message.text.trim();
-    const identity =
-        role === "tool" || role === "tool_result"
-            ? diagnosticIdentity || textIdentity
-            : textIdentity || diagnosticIdentity;
+    const isToolResultRole =
+        role === "tool" || role === "tool_result" || role === "toolresult";
+    const identity = isToolResultRole
+        ? diagnosticIdentity || textIdentity
+        : textIdentity || diagnosticIdentity;
     return `${role}::${identity || ""}`;
 }
 
@@ -214,7 +215,9 @@ export function mergeWithRecentOptimisticMessages(
     const recentMissingMessages = previousMessages.filter((message) => {
         const role = message.role.toLowerCase();
         const isOptimisticRole = role === "user" || role === "assistant";
-        const isLocalUiMessage = message.local === true || role === "system";
+        const isLocalMessage = message.local === true;
+        const isSystemMessage = role === "system";
+        const isLocalUiMessage = isLocalMessage || isSystemMessage;
         const hasLocalDiagnosticDetails =
             (message.thinking?.length || 0) > 0 ||
             (message.toolCalls?.length || 0) > 0 ||
@@ -226,7 +229,7 @@ export function mergeWithRecentOptimisticMessages(
             return false;
         }
 
-        if (!message.text.trim() && !isLocalDiagnosticMessage) {
+        if (!message.text.trim() && !isSystemMessage && !isLocalDiagnosticMessage) {
             return false;
         }
 

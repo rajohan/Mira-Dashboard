@@ -135,7 +135,7 @@ export function runtimeProgressText(
     }
 
     if (stream === "tool" || eventName === "session.tool") {
-        const toolName = stringValue(data.name) || "tool";
+        const toolName = stringValue(data.name) || stringValue(data.toolName) || "tool";
         if (isNonWorkToolName(toolName)) {
             return undefined;
         }
@@ -237,9 +237,12 @@ export function isRuntimeWorkEvent(
     phase: string,
     statusText?: string
 ): boolean {
+    if (eventName === "session.tool" || stream === "tool") {
+        return Boolean(statusText);
+    }
+
     return (
         Boolean(statusText) ||
-        eventName === "session.tool" ||
         (stream === "lifecycle" && phase === "start") ||
         WORK_STREAMS.has(stream)
     );
@@ -363,6 +366,7 @@ function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
     return Boolean(
         message.text.trim() ||
         message.thinking?.length ||
+        message.toolCalls?.length ||
         message.images?.length ||
         message.attachments?.length
     );
@@ -579,7 +583,18 @@ export function useChatRuntimeEvents({
                 stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase);
 
             if (isTerminalLifecycleEvent) {
+                flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((previous) => {
+                    const existing = previous[selectedSessionKey];
+                    if (
+                        !existing ||
+                        (eventRunId &&
+                            existing.runId !== eventRunId &&
+                            !existing.aliases.includes(eventRunId))
+                    ) {
+                        return previous;
+                    }
+
                     const next = { ...previous };
                     delete next[selectedSessionKey];
                     return next;
@@ -955,18 +970,22 @@ export function useChatRuntimeEvents({
 
         const requestForSubscription = requestReference.current;
 
+        /** Ignores optional Gateway transcript subscription failures. */
+        function ignoreTranscriptSubscriptionError(): void {
+            // Older gateways or narrow tokens may not expose transcript subscriptions.
+        }
+
         void requestForSubscription("sessions.messages.subscribe", {
             key: selectedSessionKey,
-        }).catch(() => {
-            // Older gateways or narrow tokens may not expose transcript subscriptions.
-        });
+        }).catch(ignoreTranscriptSubscriptionError);
 
-        return () => {
+        /** Unsubscribes from selected session transcript messages. */
+        function unsubscribeTranscriptMessages(): void {
             void requestForSubscription("sessions.messages.unsubscribe", {
                 key: selectedSessionKey,
-            }).catch(() => {
-                // The backend WebSocket teardown also drops Gateway-side subscriptions.
-            });
-        };
+            }).catch(ignoreTranscriptSubscriptionError);
+        }
+
+        return unsubscribeTranscriptMessages;
     }, [connectionId, isConnected, selectedSessionKey]);
 }

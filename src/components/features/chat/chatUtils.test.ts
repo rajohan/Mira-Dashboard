@@ -12,6 +12,7 @@ import {
     readFileAsDataUrl,
 } from "./chatUtils";
 
+/** Creates a normalized chat history message for utility tests. */
 function message(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
     return {
         role: "assistant",
@@ -165,6 +166,30 @@ describe("chat utils", () => {
         expect(dedupeMessages([first, second])).toEqual([first, second]);
     });
 
+    it("uses diagnostic identity for toolresult role variants", () => {
+        const first = message({
+            role: "toolresult",
+            text: '{ "ok": true }',
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-a",
+                name: "bash",
+            },
+        });
+        const second = message({
+            role: "toolresult",
+            text: '{ "ok": true }',
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-b",
+                name: "bash",
+            },
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(dedupeMessages([first, second])).toEqual([first, second]);
+    });
+
     it("covers merge edge cases and timestamp ordering", () => {
         vi.spyOn(Date, "now").mockReturnValue(
             new Date("2026-05-10T10:02:00.000Z").getTime()
@@ -230,6 +255,44 @@ describe("chat utils", () => {
         expect(
             mergeWithRecentOptimisticMessages(previous, next).map((item) => item.text)
         ).toEqual(["recent local send", "server reply", "local notice"]);
+    });
+
+    it("retains empty local diagnostics during history merges", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({
+                role: "assistant",
+                text: "",
+                local: true,
+                timestamp: "2026-05-10T10:01:30.000Z",
+                toolCalls: [
+                    { arguments: { command: "date" }, id: "tool-1", name: "bash" },
+                ],
+            }),
+            message({
+                role: "assistant",
+                text: "",
+                local: true,
+                timestamp: "2026-05-10T10:01:31.000Z",
+                thinking: [{ text: "hidden thinking" }],
+            }),
+        ];
+        const next = [
+            message({
+                role: "assistant",
+                text: "server reply",
+                timestamp: "2026-05-10T10:01:45.000Z",
+            }),
+        ];
+
+        expect(
+            mergeWithRecentOptimisticMessages(previous, next).map(
+                (item) => item.toolCalls?.[0]?.id || item.thinking?.[0]?.text || item.text
+            )
+        ).toEqual(["tool-1", "hidden thinking", "server reply"]);
     });
 
     it("does not retain optimistic assistant text recovered in refreshed history", () => {

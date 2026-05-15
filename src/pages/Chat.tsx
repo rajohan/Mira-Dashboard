@@ -23,6 +23,7 @@ import {
     type ChatRow,
     type ChatSendAttachment,
     gatewayAttachments,
+    isRenderableChatHistoryMessage,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
@@ -265,16 +266,19 @@ export function Chat() {
         : undefined;
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
+    const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const shouldShowSelectedStreamRow = shouldRenderStreamRow(
         selectedStreamText,
         selectedStreamMessage,
-        createChatVisibility(showThinkingOutput, showToolOutput)
+        chatVisibility
     );
     const shouldShowTypingIndicator = Boolean(
         selectedStream && (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
-        (message) => !deletedMessageKeys.has(messageDeleteKey(message))
+        (message) =>
+            !deletedMessageKeys.has(messageDeleteKey(message)) &&
+            isRenderableChatHistoryMessage(message, chatVisibility)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),

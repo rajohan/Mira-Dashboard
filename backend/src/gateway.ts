@@ -259,7 +259,7 @@ function sessionHasRunIdentifier(session: Session, runId: string): boolean {
 
 /** Performs enrich runtime event payload. */
 function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
-    if (event !== "agent" && event !== "session.tool") {
+    if (event !== "agent" && event !== "session.tool" && event !== "session.message") {
         return payload;
     }
 
@@ -546,7 +546,9 @@ function init(token: string): void {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
             const connectedGatewayClient = gatewayClient;
-            const subscribeToSessionIndexEvents = async (attempt = 0): Promise<void> => {
+
+            /** Subscribes to Gateway session index events for live session updates. */
+            async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
                 if (
                     !connectedGatewayClient ||
                     connectedGatewayClient !== gatewayClient ||
@@ -560,9 +562,13 @@ function init(token: string): void {
                 } catch (error) {
                     if (attempt < 3) {
                         const delayMs = 500 * 2 ** attempt;
-                        setTimeout(() => {
+
+                        /** Retries the session index subscription after backoff. */
+                        function retrySessionIndexSubscription(): void {
                             void subscribeToSessionIndexEvents(attempt + 1);
-                        }, delayMs);
+                        }
+
+                        setTimeout(retrySessionIndexSubscription, delayMs);
                         return;
                     }
 
@@ -571,7 +577,7 @@ function init(token: string): void {
                         error instanceof Error ? error.message : String(error)
                     );
                 }
-            };
+            }
             void subscribeToSessionIndexEvents();
             void refreshSessions().catch((error) => {
                 console.error(

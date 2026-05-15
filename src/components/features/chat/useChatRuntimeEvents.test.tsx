@@ -21,6 +21,7 @@ type ChatRequest = <T = unknown>(
     params?: Record<string, unknown>
 ) => Promise<T>;
 
+/** Renders the runtime event hook with controllable Gateway event input. */
 function renderRuntimeEvents(
     overrides: {
         activeStreams?: ActiveChatStreams;
@@ -150,6 +151,17 @@ describe("runtime event formatting helpers", () => {
         expect(
             runtimeProgressText("session.tool", "tool", "start", { name: "message" })
         ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.tool", "tool", "start", {
+                toolName: "functions.message",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.tool", "tool", "start", {
+                args: { command: "date" },
+                toolName: "functions.exec",
+            })
+        ).toBe("Exec: date");
         expect(runtimeProgressText("session.tool", "tool", "start", {})).toBe("Tool");
         expect(runtimeProgressText("session.item", "item", "start", {})).toBeUndefined();
         expect(
@@ -192,7 +204,8 @@ describe("runtime event formatting helpers", () => {
         );
         expect(isNewRunForStream({ runId: "run-1", aliases: [] }, "run-2")).toBe(true);
 
-        expect(isRuntimeWorkEvent("session.tool", "", "")).toBe(true);
+        expect(isRuntimeWorkEvent("session.tool", "", "")).toBe(false);
+        expect(isRuntimeWorkEvent("session.tool", "tool", "", "Exec")).toBe(true);
         expect(isRuntimeWorkEvent("session.lifecycle", "lifecycle", "start")).toBe(true);
         expect(isRuntimeWorkEvent("session.patch", "patch", "")).toBe(true);
         expect(isRuntimeWorkEvent("session.other", "other", "")).toBe(false);
@@ -477,6 +490,90 @@ describe("useChatRuntimeEvents", () => {
         ]);
     });
 
+    it("renders Gateway v4 tool call fallbacks and error results", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        arguments: { query: "status" },
+                        callId: "call-1",
+                        phase: "start",
+                        toolName: "functions.web_search",
+                    },
+                    runId: "run-tool",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        error: "boom",
+                        isError: true,
+                        phase: "error",
+                        tool_call_id: "call-1",
+                        toolName: "functions.web_search",
+                    },
+                    runId: "run-tool",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages[0]).toEqual(
+            expect.objectContaining({
+                toolCalls: [
+                    expect.objectContaining({
+                        arguments: { query: "status" },
+                        id: "call-1",
+                        name: "functions.web_search",
+                    }),
+                ],
+            })
+        );
+        expect(result.current.messages[1]).toEqual(
+            expect.objectContaining({
+                toolResult: expect.objectContaining({
+                    content: "boom",
+                    id: "call-1",
+                    isError: true,
+                    name: "functions.web_search",
+                }),
+            })
+        );
+    });
+
+    it("tracks Gateway v4 tool activity without rendering tool rows when hidden", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: false });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "date" },
+                        name: "functions.exec",
+                        phase: "start",
+                    },
+                    runId: "run-tool-hidden",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([]);
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe("Exec: date");
+    });
+
     it("ignores non-work Gateway v4 tool events", () => {
         const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
 
@@ -524,6 +621,30 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.messages).toEqual([]);
     });
 
+    it("keeps active streams for Gateway v4 transcript media", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [{ data: "abc", mimeType: "image/png", type: "image" }],
+                        role: "assistant",
+                    },
+                    runId: "run-image",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.message?.images).toHaveLength(
+            1
+        );
+    });
+
     it("uses Gateway v4 deltaText replacements for live chat deltas", async () => {
         const { emit, result } = renderRuntimeEvents();
 
@@ -558,6 +679,32 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+    });
+
+    it("uses Gateway v4 delta, content, and text fallbacks for live chat deltas", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        for (const [runId, payloadKey, value] of [
+            ["run-delta", "delta", "Delta fallback"],
+            ["run-content", "content", "Content fallback"],
+            ["run-text", "text", "Text fallback"],
+        ] as const) {
+            await act(async () => {
+                emit({
+                    event: "chat",
+                    payload: {
+                        [payloadKey]: value,
+                        runId,
+                        sessionKey: "session-a",
+                        state: "delta",
+                    },
+                    type: "event",
+                });
+                await vi.advanceTimersByTimeAsync(80);
+            });
+
+            expect(result.current.activeStreams["session-a"]?.text).toBe(value);
+        }
     });
 
     it("drops stale aliases when Gateway v4 replacement starts a new run", () => {
@@ -664,6 +811,37 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
     });
 
+    it("keeps active streams for Gateway v4 transcript tool-call messages", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [
+                            {
+                                arguments: { command: "date" },
+                                id: "tool-1",
+                                name: "functions.exec",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.message?.toolCalls).toEqual([
+            expect.objectContaining({ id: "tool-1", name: "functions.exec" }),
+        ]);
+    });
+
     it("ignores empty Gateway v4 transcript text and clears pure transcript status", () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
@@ -749,6 +927,85 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams).toEqual({});
+    });
+
+    it("only clears terminal lifecycle events for the matching active run", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["active-alias"],
+                    runId: "active-run",
+                    sessionKey: "session-a",
+                    text: "Still active",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.lifecycle",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "old-run",
+                    sessionKey: "session-a",
+                    stream: "lifecycle",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Still active");
+
+        act(() => {
+            emit({
+                event: "session.lifecycle",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "active-alias",
+                    sessionKey: "session-a",
+                    stream: "lifecycle",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+    });
+
+    it("flushes pending deltas before terminal lifecycle clear", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Queued text",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            emit({
+                event: "session.lifecycle",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    stream: "lifecycle",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
 
     it("formats OpenClaw runtime transcript progress events", () => {
@@ -853,6 +1110,76 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(request).not.toHaveBeenCalled();
+    });
+
+    it("does not create thinking status for filtered non-work tool events", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        name: "message",
+                        phase: "start",
+                    },
+                    runId: "run-message",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams).toEqual({});
+        expect(result.current.messages).toEqual([]);
+    });
+
+    it("preserves status text or falls back to thinking for work events without text", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-existing"],
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    statusText: "Existing work",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.item",
+                payload: {
+                    data: {},
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe(
+            "Existing work"
+        );
+
+        act(() => {
+            emit({
+                event: "session.item",
+                payload: {
+                    data: {},
+                    runId: "run-new",
+                    sessionKey: "session-a",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.statusText).toBe("Thinking");
     });
 
     it("skips chat terminal history refresh when not following the bottom", async () => {
