@@ -545,6 +545,12 @@ function init(token: string): void {
         onHelloOk: () => {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
+            void gatewayClient?.request("sessions.subscribe", {}).catch((error) => {
+                console.warn(
+                    "[Gateway] Failed to subscribe to session index events:",
+                    error instanceof Error ? error.message : String(error)
+                );
+            });
             void refreshSessions().catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",

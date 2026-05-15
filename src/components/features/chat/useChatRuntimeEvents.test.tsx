@@ -24,9 +24,11 @@ type ChatRequest = <T = unknown>(
 function renderRuntimeEvents(
     overrides: {
         activeStreams?: ActiveChatStreams;
+        clearInitialRequests?: boolean;
         request?: ReturnType<typeof vi.fn>;
         selectedSessionKey?: string;
         shouldStickToBottom?: boolean;
+        showToolOutput?: boolean;
     } = {}
 ) {
     let listener: ((data: unknown) => void) | undefined;
@@ -83,7 +85,7 @@ function renderRuntimeEvents(
             setSendError,
             shouldStickToBottomReference,
             showThinkingOutput: false,
-            showToolOutput: false,
+            showToolOutput: overrides.showToolOutput ?? false,
             subscribe,
             updateActiveStreams,
         });
@@ -96,6 +98,10 @@ function renderRuntimeEvents(
             sendError,
         };
     });
+
+    if (overrides.clearInitialRequests !== false) {
+        request.mockClear();
+    }
 
     return {
         emit: (data: unknown) => listener?.(data),
@@ -300,6 +306,150 @@ describe("useChatRuntimeEvents", () => {
             limit: 1000,
             sessionKey: "session-a",
         });
+    });
+
+    it("subscribes to selected Gateway v4 transcript events", () => {
+        const { request, unmount } = renderRuntimeEvents({
+            clearInitialRequests: false,
+        });
+
+        expect(request).toHaveBeenCalledWith("sessions.messages.subscribe", {
+            key: "session-a",
+        });
+
+        unmount();
+
+        expect(request).toHaveBeenCalledWith("sessions.messages.unsubscribe", {
+            key: "session-a",
+        });
+    });
+
+    it("renders Gateway v4 tool events as ordered bubbles before history refresh", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { cmd: "status" },
+                        id: "tool-1",
+                        name: "functions.openclaw_status",
+                        phase: "start",
+                    },
+                    runId: "run-tool",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toHaveLength(1);
+        expect(result.current.messages[0]).toEqual(
+            expect.objectContaining({
+                local: true,
+                role: "assistant",
+                toolCalls: [
+                    {
+                        arguments: { cmd: "status" },
+                        id: "tool-1",
+                        name: "functions.openclaw_status",
+                    },
+                ],
+            })
+        );
+        expect(result.current.activeStreams["session-a"]?.message).toBeUndefined();
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "tool-1",
+                        name: "functions.openclaw_status",
+                        phase: "result",
+                        result: { ok: true },
+                    },
+                    runId: "run-tool",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toHaveLength(2);
+        expect(result.current.messages[1]).toEqual(
+            expect.objectContaining({
+                local: true,
+                role: "tool",
+                toolResult: expect.objectContaining({
+                    content: '{\n  "ok": true\n}',
+                    id: "tool-1",
+                    name: "functions.openclaw_status",
+                }),
+            })
+        );
+    });
+
+    it("ignores Gateway v4 user transcript message events", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Ok har refreshet siden. Kan du prøve tests igjen",
+                        role: "user",
+                    },
+                    runId: "run-user",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams).toEqual({});
+        expect(result.current.messages).toEqual([]);
+    });
+
+    it("uses Gateway v4 deltaText replacements for live chat deltas", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "First",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("First");
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Replacement",
+                    replace: true,
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
     });
 
     it("formats OpenClaw runtime transcript progress events", () => {

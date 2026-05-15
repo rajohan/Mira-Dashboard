@@ -18,6 +18,7 @@ import {
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     isRenderableChatHistoryMessage,
+    normalizeText,
     type RawChatHistoryMessage,
 } from "./chatTypes";
 import {
@@ -49,6 +50,16 @@ const NON_WORK_TOOL_NAMES = new Set([
     "react",
     "typing",
 ]);
+
+/** Returns a tool name without provider/runtime namespace. */
+function normalizedToolName(value: string): string {
+    return value.startsWith("functions.") ? value.slice("functions.".length) : value;
+}
+
+/** Returns whether a tool is chat delivery noise rather than agent work. */
+function isNonWorkToolName(value: string): boolean {
+    return NON_WORK_TOOL_NAMES.has(normalizedToolName(value).toLowerCase());
+}
 
 /** Performs compact status text. */
 export function compactStatusText(value: string): string {
@@ -125,7 +136,7 @@ export function runtimeProgressText(
 
     if (stream === "tool" || eventName === "session.tool") {
         const toolName = stringValue(data.name) || "tool";
-        if (NON_WORK_TOOL_NAMES.has(toolName.toLowerCase())) {
+        if (isNonWorkToolName(toolName)) {
             return undefined;
         }
 
@@ -232,6 +243,116 @@ export function isRuntimeWorkEvent(
         (stream === "lifecycle" && phase === "start") ||
         WORK_STREAMS.has(stream)
     );
+}
+
+/** Returns a compact display string for runtime payload values. */
+function runtimeDisplayText(value: unknown): string {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return normalizeText(value);
+    }
+
+    if (value === undefined || value === null) {
+        return "";
+    }
+
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+}
+
+/** Builds transient chat rows for Gateway v4 tool transcript events. */
+function runtimeToolMessages(
+    data: Record<string, unknown>,
+    runId?: string
+): ChatHistoryMessage[] {
+    const name = stringValue(data.name) || stringValue(data.toolName) || "tool";
+    const id =
+        stringValue(data.id) ||
+        stringValue(data.toolCallId) ||
+        stringValue(data.tool_call_id) ||
+        stringValue(data.callId);
+    const args = data.args ?? data.arguments ?? data.input;
+    const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
+    const phase = stringValue(data.phase);
+    const hasResult =
+        phase === "result" ||
+        phase === "end" ||
+        phase === "error" ||
+        result !== undefined;
+
+    if (!name && args === undefined && result === undefined) {
+        return [];
+    }
+
+    const timestamp = new Date().toISOString();
+    const messages: ChatHistoryMessage[] = [];
+
+    if (args !== undefined || !hasResult) {
+        messages.push({
+            role: "assistant",
+            content: "",
+            text: "",
+            images: [],
+            attachments: [],
+            toolCalls: [
+                {
+                    id,
+                    name,
+                    arguments: args,
+                },
+            ],
+            timestamp,
+            local: true,
+            runId,
+        });
+    }
+
+    if (hasResult) {
+        const content = runtimeDisplayText(result);
+        messages.push({
+            role: "tool",
+            content,
+            text: content,
+            images: [],
+            attachments: [],
+            toolResult: {
+                id,
+                name,
+                content,
+                isError: phase === "error" || data.isError === true,
+            },
+            timestamp: new Date(Date.now() + messages.length).toISOString(),
+            local: true,
+            runId,
+        });
+    }
+
+    return messages;
+}
+
+/** Builds a transient assistant message for Gateway v4 session.message events. */
+function runtimeSessionMessage(
+    payload: Record<string, unknown>
+): ChatHistoryMessage | undefined {
+    const message = normalizeAssistantPayload(
+        payload.message ?? payload.content ?? payload.deltaText ?? payload.text
+    );
+
+    if (message.role.toLowerCase() !== "assistant") {
+        return undefined;
+    }
+
+    return {
+        ...message,
+        timestamp: new Date().toISOString(),
+        runId: typeof payload.runId === "string" ? payload.runId : undefined,
+    };
 }
 
 /** Represents use chat runtime events paramilliseconds. */
@@ -455,8 +576,21 @@ export function useChatRuntimeEvents({
                 phase,
                 statusText
             );
+            const runtimeMessage =
+                eventName === "session.message"
+                    ? runtimeSessionMessage(payload)
+                    : undefined;
 
-            if (shouldTrackActivity) {
+            if (eventName === "session.tool" && showToolOutput) {
+                const toolMessages = runtimeToolMessages(data, eventRunId);
+                if (toolMessages.length > 0) {
+                    setMessages((previous) =>
+                        dedupeMessages([...previous, ...toolMessages])
+                    );
+                }
+            }
+
+            if (shouldTrackActivity || runtimeMessage) {
                 updateActiveStreamsReference.current((previous) => {
                     const existing = previous[selectedSessionKey];
                     const incomingRunId =
@@ -465,6 +599,9 @@ export function useChatRuntimeEvents({
                     const runId = startsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
+                    const text =
+                        runtimeMessage?.text ||
+                        (startsNewRun ? "" : existing?.text || "");
                     return {
                         ...previous,
                         [selectedSessionKey]: {
@@ -475,8 +612,17 @@ export function useChatRuntimeEvents({
                                 eventRunId,
                                 runId,
                             ]),
-                            text: startsNewRun ? "" : existing?.text || "",
-                            message: startsNewRun ? undefined : existing?.message,
+                            text,
+                            message: runtimeMessage
+                                ? mergeStreamMessage(
+                                      startsNewRun ? undefined : existing?.message,
+                                      runtimeMessage,
+                                      text,
+                                      runId
+                                  )
+                                : startsNewRun
+                                  ? undefined
+                                  : existing?.message,
                             statusText:
                                 statusText ||
                                 (startsNewRun ? undefined : existing?.statusText) ||
@@ -489,9 +635,7 @@ export function useChatRuntimeEvents({
 
             if (
                 showThinkingOutput ||
-                showToolOutput ||
-                eventName === "session.tool" ||
-                stream === "tool" ||
+                (eventName !== "session.tool" && showToolOutput) ||
                 stream === "item"
             ) {
                 refreshSelectedHistorySoon(500);
@@ -587,7 +731,11 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "delta") {
                 const deltaMessage = normalizeAssistantPayload(
-                    payload.message ?? payload.delta ?? payload.content ?? payload.text
+                    payload.message ??
+                        payload.deltaText ??
+                        payload.delta ??
+                        payload.content ??
+                        payload.text
                 );
                 const nextText = deltaMessage.text;
 
@@ -598,6 +746,34 @@ export function useChatRuntimeEvents({
                 ) {
                     const existing = activeStreamsReference.current[streamSessionKey];
                     const runId = payload.runId || existing?.runId || streamSessionKey;
+                    if (
+                        payload.replace === true &&
+                        payload.message === undefined &&
+                        typeof payload.deltaText === "string"
+                    ) {
+                        const message = mergeStreamMessage(
+                            undefined,
+                            deltaMessage,
+                            nextText,
+                            runId
+                        );
+                        updateActiveStreamsReference.current((previous) => ({
+                            ...previous,
+                            [streamSessionKey]: {
+                                sessionKey: streamSessionKey,
+                                runId,
+                                aliases: uniqueStrings([
+                                    ...(existing?.aliases || []),
+                                    payload.runId,
+                                    runId,
+                                ]),
+                                text: nextText,
+                                message,
+                                updatedAt: new Date().toISOString(),
+                            },
+                        }));
+                        return;
+                    }
                     queueDeltaUpdate(streamSessionKey, runId, deltaMessage);
                 }
                 return;
@@ -711,4 +887,24 @@ export function useChatRuntimeEvents({
         showToolOutput,
         subscribe,
     ]);
+
+    useEffect(() => {
+        if (!selectedSessionKey) {
+            return;
+        }
+
+        void request("sessions.messages.subscribe", { key: selectedSessionKey }).catch(
+            () => {
+                // Older gateways or narrow tokens may not expose transcript subscriptions.
+            }
+        );
+
+        return () => {
+            void request("sessions.messages.unsubscribe", {
+                key: selectedSessionKey,
+            }).catch(() => {
+                // The backend WebSocket teardown also drops Gateway-side subscriptions.
+            });
+        };
+    }, [request, selectedSessionKey]);
 }

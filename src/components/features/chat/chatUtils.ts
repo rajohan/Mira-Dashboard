@@ -29,9 +29,41 @@ export function base64ToText(base64: string): string {
     return new TextDecoder().decode(bytes);
 }
 
+/** Returns a diagnostic identity for tool/thinking rows without primary text. */
+function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefined {
+    const toolCall = message.toolCalls?.[0];
+    if (toolCall) {
+        return [
+            "tool-call",
+            toolCall.id || "no-id",
+            toolCall.name,
+            JSON.stringify(toolCall.arguments ?? null),
+        ].join("::");
+    }
+
+    if (message.toolResult) {
+        return [
+            "tool-result",
+            message.toolResult.id || "no-id",
+            message.toolResult.name || "tool",
+            message.toolResult.content.trim(),
+        ].join("::");
+    }
+
+    if (message.thinking?.length) {
+        return ["thinking", message.thinking.map((block) => block.text).join("\n")].join(
+            "::"
+        );
+    }
+
+    return undefined;
+}
+
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
-    return `${message.role.toLowerCase()}::${message.text.trim()}`;
+    return `${message.role.toLowerCase()}::${
+        message.text.trim() || diagnosticMessageIdentity(message) || ""
+    }`;
 }
 
 /** Performs message delete key. */
@@ -40,7 +72,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        message.text.trim(),
+        message.text.trim() || diagnosticMessageIdentity(message) || "no-text",
     ].join("::");
 }
 
@@ -79,7 +111,10 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         }
 
         const identity = messageIdentity(message);
-        if (message.text.trim() && seen.has(identity)) {
+        if (
+            (message.text.trim() || diagnosticMessageIdentity(message)) &&
+            seen.has(identity)
+        ) {
             continue;
         }
 
@@ -168,12 +203,18 @@ export function mergeWithRecentOptimisticMessages(
         const role = message.role.toLowerCase();
         const isOptimisticRole = role === "user" || role === "assistant";
         const isLocalUiMessage = message.local === true || role === "system";
+        const hasLocalDiagnosticDetails =
+            (message.thinking?.length || 0) > 0 ||
+            (message.toolCalls?.length || 0) > 0 ||
+            Boolean(message.toolResult);
+        const isLocalDiagnosticMessage =
+            message.local === true && hasLocalDiagnosticDetails;
 
-        if (!isOptimisticRole && !isLocalUiMessage) {
+        if (!isOptimisticRole && !isLocalUiMessage && !isLocalDiagnosticMessage) {
             return false;
         }
 
-        if (!message.text.trim()) {
+        if (!message.text.trim() && !isLocalDiagnosticMessage) {
             return false;
         }
 

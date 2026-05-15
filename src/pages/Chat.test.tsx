@@ -660,6 +660,12 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
 
         await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.patch", {
+                key: "session-a",
+                verboseLevel: "full",
+            })
+        );
+        await waitFor(() =>
             expect(mocks.request).toHaveBeenCalledWith(
                 "chat.send",
                 expect.objectContaining({
@@ -669,6 +675,15 @@ describe("Chat", () => {
                 })
             )
         );
+        const verbosePatchCall = mocks.request.mock.calls.findIndex(
+            ([method, params]) =>
+                method === "sessions.patch" &&
+                (params as { verboseLevel?: string })?.verboseLevel === "full"
+        );
+        const chatSendCall = mocks.request.mock.calls.findIndex(
+            ([method]) => method === "chat.send"
+        );
+        expect(verbosePatchCall).toBeLessThan(chatSendCall);
         expect(screen.getByText("Hello from test")).toBeInTheDocument();
         expect(screen.getByText("Thinking")).toBeInTheDocument();
     });

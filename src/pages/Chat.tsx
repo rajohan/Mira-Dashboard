@@ -1044,6 +1044,13 @@ export function Chat() {
         }));
 
         try {
+            if (selectedSession?.verboseLevel !== "full") {
+                await request("sessions.patch", {
+                    key: selectedSessionKey,
+                    verboseLevel: "full",
+                });
+            }
+
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 message: messageText,

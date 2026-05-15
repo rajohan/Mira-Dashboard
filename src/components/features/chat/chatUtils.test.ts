@@ -47,17 +47,39 @@ describe("chat utils", () => {
         expect(messageDeleteKey(message({ role: "user", text: "hi" }))).toBe(
             "user::no-time::no-run::hi"
         );
+
+        const toolCall = message({
+            role: "assistant",
+            runId: "run-1",
+            text: "",
+            toolCalls: [{ arguments: { command: "date" }, id: "tool-1", name: "bash" }],
+        });
+        expect(messageIdentity(toolCall)).toContain(
+            'assistant::tool-call::tool-1::bash::{"command":"date"}'
+        );
+        expect(messageDeleteKey(toolCall)).toContain(
+            'assistant::no-time::run-1::tool-call::tool-1::bash::{"command":"date"}'
+        );
     });
 
-    it("dedupes messages from the newest duplicate while retaining empty text rows", () => {
+    it("dedupes messages from the newest duplicate while retaining distinct diagnostic rows", () => {
         const first = message({ role: "assistant", text: "same", timestamp: "1" });
         const newer = message({ role: "assistant", text: "same", timestamp: "2" });
         const empty = message({ role: "assistant", text: "" });
+        const toolA = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { command: "a" }, id: "tool-a", name: "bash" }],
+        });
+        const toolB = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { command: "b" }, id: "tool-b", name: "bash" }],
+        });
 
-        expect(dedupeMessages([first, undefined, empty, newer] as never)).toEqual([
-            empty,
-            newer,
-        ]);
+        expect(
+            dedupeMessages([first, undefined, empty, toolA, toolB, newer] as never)
+        ).toEqual([empty, toolA, toolB, newer]);
     });
 
     it("covers merge edge cases and timestamp ordering", () => {

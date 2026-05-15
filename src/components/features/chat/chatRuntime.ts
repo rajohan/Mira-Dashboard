@@ -147,6 +147,7 @@ export function mergeStreamMessage(
             : previous?.attachments || [],
         thinking: next.thinking?.length ? next.thinking : previous?.thinking,
         toolCalls: next.toolCalls?.length ? next.toolCalls : previous?.toolCalls,
+        toolResult: next.toolResult || previous?.toolResult,
         timestamp: new Date().toISOString(),
         runId,
     };
