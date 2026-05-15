@@ -355,6 +355,16 @@ function runtimeSessionMessage(
     };
 }
 
+/** Returns whether a transcript message should occupy active stream state. */
+function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.text.trim() ||
+        message.thinking?.length ||
+        message.images?.length ||
+        message.attachments?.length
+    );
+}
+
 /** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParams {
     connectionId: number;
@@ -596,8 +606,28 @@ export function useChatRuntimeEvents({
                 }
             }
 
-            if (shouldTrackActivity || runtimeMessage) {
-                if (runtimeMessage) {
+            const shouldApplyRuntimeMessage = runtimeMessage
+                ? hasActiveStreamContent(runtimeMessage)
+                : false;
+            const runtimeMessageToApply = shouldApplyRuntimeMessage
+                ? runtimeMessage
+                : undefined;
+
+            if (runtimeMessage && !runtimeMessageToApply) {
+                flushPendingDeltaUpdates();
+                updateActiveStreamsReference.current((previous) => {
+                    if (!previous[selectedSessionKey]) {
+                        return previous;
+                    }
+
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+            }
+
+            if (shouldTrackActivity || runtimeMessageToApply) {
+                if (runtimeMessageToApply) {
                     flushPendingDeltaUpdates();
                 }
 
@@ -609,8 +639,8 @@ export function useChatRuntimeEvents({
                     const runId = startsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
-                    const text = runtimeMessage
-                        ? runtimeMessage.text
+                    const text = runtimeMessageToApply
+                        ? runtimeMessageToApply.text
                         : startsNewRun
                           ? ""
                           : existing?.text || "";
@@ -630,10 +660,10 @@ export function useChatRuntimeEvents({
                                 runId,
                             ]),
                             text,
-                            message: runtimeMessage
+                            message: runtimeMessageToApply
                                 ? mergeStreamMessage(
                                       startsNewRun ? undefined : existing?.message,
-                                      runtimeMessage,
+                                      runtimeMessageToApply,
                                       text,
                                       runId
                                   )

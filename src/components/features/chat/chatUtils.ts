@@ -31,20 +31,26 @@ export function base64ToText(base64: string): string {
 
 /** Returns a diagnostic identity for tool/thinking rows without primary text. */
 function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefined {
-    const toolCall = message.toolCalls?.[0];
-    if (toolCall) {
+    const toolCalls = message.toolCalls || [];
+    if (toolCalls.length > 0) {
+        const fallbackScope = message.timestamp || message.runId || "unknown";
         return [
-            "tool-call",
-            toolCall.id || "no-id",
-            toolCall.name,
-            JSON.stringify(toolCall.arguments ?? null),
+            "tool-calls",
+            ...toolCalls.map((toolCall, index) =>
+                [
+                    toolCall.id || "no-id-" + fallbackScope + "-" + index,
+                    toolCall.name,
+                    JSON.stringify(toolCall.arguments ?? null),
+                ].join("::")
+            ),
         ].join("::");
     }
 
     if (message.toolResult) {
+        const fallbackScope = message.timestamp || message.runId || "unknown";
         return [
             "tool-result",
-            message.toolResult.id || "no-id",
+            message.toolResult.id || "no-id-" + fallbackScope,
             message.toolResult.name || "tool",
             message.toolResult.content.trim(),
         ].join("::");

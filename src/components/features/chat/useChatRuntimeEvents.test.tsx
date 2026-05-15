@@ -632,7 +632,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
     });
 
-    it("uses empty Gateway v4 transcript text and clears pure transcript status", () => {
+    it("ignores empty Gateway v4 transcript text and clears pure transcript status", () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
                 "session-a": {
@@ -662,13 +662,29 @@ describe("useChatRuntimeEvents", () => {
             });
         });
 
-        expect(result.current.activeStreams["session-a"]).toEqual(
-            expect.objectContaining({
-                statusText: undefined,
-                text: "",
-            })
-        );
-        expect(result.current.activeStreams["session-a"]?.message?.text).toBe("");
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+    });
+
+    it("ignores empty Gateway v4 transcript text when no stream exists", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "",
+                        role: "assistant",
+                    },
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams).toEqual({});
     });
 
     it("formats OpenClaw runtime transcript progress events", () => {

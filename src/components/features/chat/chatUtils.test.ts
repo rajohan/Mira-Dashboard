@@ -55,10 +55,10 @@ describe("chat utils", () => {
             toolCalls: [{ arguments: { command: "date" }, id: "tool-1", name: "bash" }],
         });
         expect(messageIdentity(toolCall)).toContain(
-            'assistant::tool-call::tool-1::bash::{"command":"date"}'
+            'assistant::tool-calls::tool-1::bash::{"command":"date"}'
         );
         expect(messageDeleteKey(toolCall)).toContain(
-            'assistant::no-time::run-1::tool-call::tool-1::bash::{"command":"date"}'
+            'assistant::no-time::run-1::tool-calls::tool-1::bash::{"command":"date"}'
         );
 
         const thinking = message({
@@ -87,6 +87,46 @@ describe("chat utils", () => {
         expect(
             dedupeMessages([first, undefined, empty, toolA, toolB, newer] as never)
         ).toEqual([empty, toolA, toolB, newer]);
+    });
+
+    it("keeps no-id and multi-call tool diagnostics distinct", () => {
+        const first = message({
+            role: "assistant",
+            text: "",
+            timestamp: "1",
+            toolCalls: [{ arguments: { command: "same" }, name: "bash" }],
+        });
+        const second = message({
+            role: "assistant",
+            text: "",
+            timestamp: "2",
+            toolCalls: [{ arguments: { command: "same" }, name: "bash" }],
+        });
+        const multiA = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                { arguments: { command: "same" }, id: "tool-1", name: "bash" },
+                { arguments: { command: "a" }, id: "tool-2", name: "bash" },
+            ],
+        });
+        const multiB = message({
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                { arguments: { command: "same" }, id: "tool-1", name: "bash" },
+                { arguments: { command: "b" }, id: "tool-3", name: "bash" },
+            ],
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(messageIdentity(multiA)).not.toBe(messageIdentity(multiB));
+        expect(dedupeMessages([first, second, multiA, multiB])).toEqual([
+            first,
+            second,
+            multiA,
+            multiB,
+        ]);
     });
 
     it("keeps matching text tool results distinct by diagnostic identity", () => {
