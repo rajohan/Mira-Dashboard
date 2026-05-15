@@ -108,6 +108,12 @@ describe("gateway state and helper utilities", () => {
             }),
             { runId: "run-primary", sessionKey: "agent:main:main" }
         );
+        assert.deepEqual(
+            __testing.enrichRuntimeEventPayload("session.message", {
+                runId: "run-active",
+            }),
+            { runId: "run-active", sessionKey: "agent:main:main" }
+        );
         assert.deepEqual(__testing.enrichRuntimeEventPayload("other", { runId: "x" }), {
             runId: "x",
         });

@@ -23,6 +23,7 @@ import {
     type ChatRow,
     type ChatSendAttachment,
     gatewayAttachments,
+    isRenderableChatHistoryMessage,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
@@ -190,7 +191,7 @@ export function supportedAudioRecordingMimeType(): string | undefined {
 
 /** Renders the chat UI. */
 export function Chat() {
-    const { isConnected, error, request, subscribe } = useOpenClawSocket();
+    const { connectionId, isConnected, error, request, subscribe } = useOpenClawSocket();
     const messagesContainerReference = useRef<HTMLDivElement | null>(null);
     const messagesBottomReference = useRef<HTMLDivElement | null>(null);
     const fileInputReference = useRef<HTMLInputElement | null>(null);
@@ -265,16 +266,19 @@ export function Chat() {
         : undefined;
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
+    const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const shouldShowSelectedStreamRow = shouldRenderStreamRow(
         selectedStreamText,
         selectedStreamMessage,
-        createChatVisibility(showThinkingOutput, showToolOutput)
+        chatVisibility
     );
     const shouldShowTypingIndicator = Boolean(
         selectedStream && (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
-        (message) => !deletedMessageKeys.has(messageDeleteKey(message))
+        (message) =>
+            !deletedMessageKeys.has(messageDeleteKey(message)) &&
+            isRenderableChatHistoryMessage(message, chatVisibility)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
@@ -611,6 +615,8 @@ export function Chat() {
     useChatRuntimeEvents({
         request,
         subscribe,
+        connectionId,
+        isConnected,
         selectedSessionKey,
         showThinkingOutput,
         showToolOutput,
@@ -1044,6 +1050,17 @@ export function Chat() {
         }));
 
         try {
+            if (selectedSession?.verboseLevel !== "full") {
+                try {
+                    await request("sessions.patch", {
+                        key: selectedSessionKey,
+                        verboseLevel: "full",
+                    });
+                } catch {
+                    // Best-effort diagnostics config; do not block message delivery.
+                }
+            }
+
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 message: messageText,

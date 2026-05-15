@@ -49,6 +49,8 @@ const mocks = vi.hoisted(() => ({
         ],
     },
     runtimeEventsOptions: null as {
+        connectionId: number;
+        isConnected: boolean;
         updateActiveStreams: (
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
@@ -101,6 +103,7 @@ vi.mock("../hooks/useAgents", () => ({
 
 vi.mock("../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: () => ({
+        connectionId: 1,
         error: mocks.socketError,
         isConnected: mocks.isConnected,
         request: mocks.request,
@@ -111,6 +114,8 @@ vi.mock("../hooks/useOpenClawSocket", () => ({
 vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
     useChatRuntimeEvents: vi.fn(
         (options: {
+            connectionId: number;
+            isConnected: boolean;
             updateActiveStreams: (
                 updater: (previous: Record<string, unknown>) => Record<string, unknown>
             ) => void;
@@ -356,6 +361,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         ) : null,
 }));
 
+/** Installs an isolated localStorage mock for chat page tests. */
 function installLocalStorageMock() {
     const store = new Map<string, string>();
 
@@ -370,6 +376,7 @@ function installLocalStorageMock() {
     });
 }
 
+/** Configures the default OpenClaw request mock responses. */
 function setupRequest() {
     mocks.request.mockImplementation(async (method: string) => {
         if (method === "models.list") {
@@ -647,6 +654,46 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "thinking false" }));
         await user.click(screen.getByRole("button", { name: "tools false" }));
         expect(screen.getByTestId("visibility")).toHaveTextContent("true:true");
+        expect(mocks.runtimeEventsOptions).toEqual(
+            expect.objectContaining({
+                connectionId: 1,
+                isConnected: true,
+            })
+        );
+    });
+
+    it("filters hidden tool result rows before message virtualization", async () => {
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "models.list") {
+                return { models: [{ id: "codex", label: "Codex" }] };
+            }
+
+            if (method === "chat.history") {
+                return {
+                    messages: [
+                        {
+                            content: "raw tool output",
+                            role: "tool_result",
+                            text: "raw tool output",
+                            toolResult: { content: "formatted tool output" },
+                        },
+                        {
+                            content: "visible assistant message",
+                            role: "assistant",
+                            text: "visible assistant message",
+                        },
+                    ],
+                };
+            }
+
+            return {};
+        });
+
+        render(<Chat />);
+
+        expect(await screen.findByText("visible assistant message")).toBeInTheDocument();
+        expect(screen.queryByText("raw tool output")).not.toBeInTheDocument();
+        expect(screen.queryByText("formatted tool output")).not.toBeInTheDocument();
     });
 
     it("sends chat text and renders optimistic/user stream rows", async () => {
@@ -660,6 +707,12 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
 
         await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("sessions.patch", {
+                key: "session-a",
+                verboseLevel: "full",
+            })
+        );
+        await waitFor(() =>
             expect(mocks.request).toHaveBeenCalledWith(
                 "chat.send",
                 expect.objectContaining({
@@ -669,8 +722,53 @@ describe("Chat", () => {
                 })
             )
         );
+        const verbosePatchCall = mocks.request.mock.calls.findIndex(
+            ([method, params]) =>
+                method === "sessions.patch" &&
+                (params as { verboseLevel?: string })?.verboseLevel === "full"
+        );
+        const chatSendCall = mocks.request.mock.calls.findIndex(
+            ([method]) => method === "chat.send"
+        );
+        expect(verbosePatchCall).toBeLessThan(chatSendCall);
         expect(screen.getByText("Hello from test")).toBeInTheDocument();
         expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
+    it("still sends chat text when enabling verbose diagnostics fails", async () => {
+        const user = userEvent.setup();
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "sessions.patch") {
+                throw new Error("verbose unavailable");
+            }
+
+            if (method === "chat.send") {
+                return { runId: "run-123" };
+            }
+
+            return method === "chat.history"
+                ? { messages: [] }
+                : { models: [{ id: "codex", label: "Codex" }] };
+        });
+
+        render(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+
+        await user.type(screen.getByLabelText("Draft"), "Still send");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "Still send",
+                    sessionKey: "session-a",
+                })
+            )
+        );
+        expect(screen.queryByText("verbose unavailable")).not.toBeInTheDocument();
     });
 
     it("renders runtime stream rows and clears them when disconnected", async () => {

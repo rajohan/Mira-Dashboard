@@ -18,6 +18,7 @@ import {
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     isRenderableChatHistoryMessage,
+    normalizeText,
     type RawChatHistoryMessage,
 } from "./chatTypes";
 import {
@@ -49,6 +50,16 @@ const NON_WORK_TOOL_NAMES = new Set([
     "react",
     "typing",
 ]);
+
+/** Returns a tool name without provider/runtime namespace. */
+function normalizedToolName(value: string): string {
+    return value.startsWith("functions.") ? value.slice("functions.".length) : value;
+}
+
+/** Returns whether a tool is chat delivery noise rather than agent work. */
+function isNonWorkToolName(value: string): boolean {
+    return NON_WORK_TOOL_NAMES.has(normalizedToolName(value).toLowerCase());
+}
 
 /** Performs compact status text. */
 export function compactStatusText(value: string): string {
@@ -124,8 +135,8 @@ export function runtimeProgressText(
     }
 
     if (stream === "tool" || eventName === "session.tool") {
-        const toolName = stringValue(data.name) || "tool";
-        if (NON_WORK_TOOL_NAMES.has(toolName.toLowerCase())) {
+        const toolName = stringValue(data.name) || stringValue(data.toolName) || "tool";
+        if (isNonWorkToolName(toolName)) {
             return undefined;
         }
 
@@ -226,16 +237,145 @@ export function isRuntimeWorkEvent(
     phase: string,
     statusText?: string
 ): boolean {
+    if (eventName === "session.tool" || stream === "tool") {
+        return Boolean(statusText);
+    }
+
     return (
         Boolean(statusText) ||
-        eventName === "session.tool" ||
         (stream === "lifecycle" && phase === "start") ||
         WORK_STREAMS.has(stream)
     );
 }
 
+/** Returns a compact display string for runtime payload values. */
+function runtimeDisplayText(value: unknown): string {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        const text = normalizeText(value);
+        if (text) {
+            return text;
+        }
+    }
+
+    if (value === undefined || value === null) {
+        return "";
+    }
+
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+}
+
+/** Builds transient chat rows for Gateway v4 tool transcript events. */
+function runtimeToolMessages(
+    data: Record<string, unknown>,
+    runId?: string
+): ChatHistoryMessage[] {
+    const name = stringValue(data.name) || stringValue(data.toolName) || "tool";
+    if (isNonWorkToolName(name)) {
+        return [];
+    }
+
+    const id =
+        stringValue(data.id) ||
+        stringValue(data.toolCallId) ||
+        stringValue(data.tool_call_id) ||
+        stringValue(data.callId);
+    const args = data.args ?? data.arguments ?? data.input;
+    const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
+    const phase = stringValue(data.phase);
+    const hasResult =
+        phase === "result" ||
+        phase === "end" ||
+        phase === "error" ||
+        result !== undefined;
+
+    const timestamp = new Date().toISOString();
+    const messages: ChatHistoryMessage[] = [];
+
+    if (args !== undefined || !hasResult) {
+        messages.push({
+            role: "assistant",
+            content: "",
+            text: "",
+            images: [],
+            attachments: [],
+            toolCalls: [
+                {
+                    id,
+                    name,
+                    arguments: args,
+                },
+            ],
+            timestamp,
+            local: true,
+            runId,
+        });
+    }
+
+    if (hasResult) {
+        const content = runtimeDisplayText(result);
+        messages.push({
+            role: "tool",
+            content,
+            text: content,
+            images: [],
+            attachments: [],
+            toolResult: {
+                id,
+                name,
+                content,
+                isError: phase === "error" || data.isError === true,
+            },
+            timestamp: new Date(Date.now() + messages.length).toISOString(),
+            local: true,
+            runId,
+        });
+    }
+
+    return messages;
+}
+
+/** Builds a transient assistant message for Gateway v4 session.message events. */
+function runtimeSessionMessage(
+    payload: Record<string, unknown>
+): ChatHistoryMessage | undefined {
+    const message = normalizeAssistantPayload(
+        payload.message ?? payload.content ?? payload.deltaText ?? payload.text
+    );
+
+    if (message.role.toLowerCase() !== "assistant") {
+        return undefined;
+    }
+
+    return {
+        ...message,
+        timestamp: new Date().toISOString(),
+        runId: typeof payload.runId === "string" ? payload.runId : undefined,
+    };
+}
+
+/** Returns whether a transcript message should occupy active stream state. */
+function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.text.trim() ||
+        message.thinking?.length ||
+        message.toolCalls?.length ||
+        message.images?.length ||
+        message.attachments?.length
+    );
+}
+
 /** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParams {
+    connectionId: number;
+    isConnected: boolean;
     request: <T = unknown>(
         method: string,
         params?: Record<string, unknown>
@@ -258,6 +398,8 @@ interface UseChatRuntimeEventsParams {
 
 /** Provides chat runtime events. */
 export function useChatRuntimeEvents({
+    connectionId,
+    isConnected,
     request,
     subscribe,
     selectedSessionKey,
@@ -275,8 +417,10 @@ export function useChatRuntimeEvents({
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<number | null>(null);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
+    const requestReference = useRef(request);
 
     updateActiveStreamsReference.current = updateActiveStreams;
+    requestReference.current = request;
 
     useEffect(() => {
         /** Performs flush pending delta updates. */
@@ -439,7 +583,18 @@ export function useChatRuntimeEvents({
                 stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase);
 
             if (isTerminalLifecycleEvent) {
+                flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((previous) => {
+                    const existing = previous[selectedSessionKey];
+                    if (
+                        !existing ||
+                        (eventRunId &&
+                            existing.runId !== eventRunId &&
+                            !existing.aliases.includes(eventRunId))
+                    ) {
+                        return previous;
+                    }
+
                     const next = { ...previous };
                     delete next[selectedSessionKey];
                     return next;
@@ -455,8 +610,53 @@ export function useChatRuntimeEvents({
                 phase,
                 statusText
             );
+            const runtimeMessage =
+                eventName === "session.message"
+                    ? runtimeSessionMessage(payload)
+                    : undefined;
 
-            if (shouldTrackActivity) {
+            if (eventName === "session.tool" && showToolOutput) {
+                const toolMessages = runtimeToolMessages(data, eventRunId);
+                if (toolMessages.length > 0) {
+                    setMessages((previous) =>
+                        dedupeMessages([...previous, ...toolMessages])
+                    );
+                }
+            }
+
+            const shouldApplyRuntimeMessage = runtimeMessage
+                ? hasActiveStreamContent(runtimeMessage)
+                : false;
+            const runtimeMessageToApply = shouldApplyRuntimeMessage
+                ? runtimeMessage
+                : undefined;
+
+            if (runtimeMessage && !runtimeMessageToApply) {
+                flushPendingDeltaUpdates();
+                updateActiveStreamsReference.current((previous) => {
+                    const existing = previous[selectedSessionKey];
+                    const incomingRunId =
+                        typeof payload.runId === "string" ? payload.runId : undefined;
+                    if (
+                        !existing ||
+                        (incomingRunId &&
+                            existing.runId !== incomingRunId &&
+                            !existing.aliases.includes(incomingRunId))
+                    ) {
+                        return previous;
+                    }
+
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+            }
+
+            if (shouldTrackActivity || runtimeMessageToApply) {
+                if (runtimeMessageToApply) {
+                    flushPendingDeltaUpdates();
+                }
+
                 updateActiveStreamsReference.current((previous) => {
                     const existing = previous[selectedSessionKey];
                     const incomingRunId =
@@ -465,6 +665,16 @@ export function useChatRuntimeEvents({
                     const runId = startsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
+                    const text = runtimeMessageToApply
+                        ? runtimeMessageToApply.text
+                        : startsNewRun
+                          ? ""
+                          : existing?.text || "";
+                    const nextStatusText = shouldTrackActivity
+                        ? statusText ||
+                          (startsNewRun ? undefined : existing?.statusText) ||
+                          "Thinking"
+                        : statusText;
                     return {
                         ...previous,
                         [selectedSessionKey]: {
@@ -475,12 +685,18 @@ export function useChatRuntimeEvents({
                                 eventRunId,
                                 runId,
                             ]),
-                            text: startsNewRun ? "" : existing?.text || "",
-                            message: startsNewRun ? undefined : existing?.message,
-                            statusText:
-                                statusText ||
-                                (startsNewRun ? undefined : existing?.statusText) ||
-                                "Thinking",
+                            text,
+                            message: runtimeMessageToApply
+                                ? mergeStreamMessage(
+                                      startsNewRun ? undefined : existing?.message,
+                                      runtimeMessageToApply,
+                                      text,
+                                      runId
+                                  )
+                                : startsNewRun
+                                  ? undefined
+                                  : existing?.message,
+                            statusText: nextStatusText,
                             updatedAt: new Date().toISOString(),
                         },
                     };
@@ -489,9 +705,7 @@ export function useChatRuntimeEvents({
 
             if (
                 showThinkingOutput ||
-                showToolOutput ||
-                eventName === "session.tool" ||
-                stream === "tool" ||
+                (eventName !== "session.tool" && showToolOutput) ||
                 stream === "item"
             ) {
                 refreshSelectedHistorySoon(500);
@@ -587,7 +801,11 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "delta") {
                 const deltaMessage = normalizeAssistantPayload(
-                    payload.message ?? payload.delta ?? payload.content ?? payload.text
+                    payload.message ??
+                        payload.deltaText ??
+                        payload.delta ??
+                        payload.content ??
+                        payload.text
                 );
                 const nextText = deltaMessage.text;
 
@@ -598,6 +816,44 @@ export function useChatRuntimeEvents({
                 ) {
                     const existing = activeStreamsReference.current[streamSessionKey];
                     const runId = payload.runId || existing?.runId || streamSessionKey;
+                    if (
+                        payload.replace === true &&
+                        payload.message === undefined &&
+                        typeof payload.deltaText === "string"
+                    ) {
+                        delete pendingDeltaUpdatesReference.current[streamSessionKey];
+                        if (
+                            pendingDeltaFlushTimerReference.current !== null &&
+                            Object.keys(pendingDeltaUpdatesReference.current).length === 0
+                        ) {
+                            window.clearTimeout(pendingDeltaFlushTimerReference.current);
+                            pendingDeltaFlushTimerReference.current = null;
+                        }
+
+                        const message = mergeStreamMessage(
+                            undefined,
+                            deltaMessage,
+                            nextText,
+                            runId
+                        );
+                        const startsNewRun = isNewRunForStream(existing, payload.runId);
+                        updateActiveStreamsReference.current((previous) => ({
+                            ...previous,
+                            [streamSessionKey]: {
+                                sessionKey: streamSessionKey,
+                                runId,
+                                aliases: uniqueStrings([
+                                    ...(startsNewRun ? [] : existing?.aliases || []),
+                                    payload.runId,
+                                    runId,
+                                ]),
+                                text: nextText,
+                                message,
+                                updatedAt: new Date().toISOString(),
+                            },
+                        }));
+                        return;
+                    }
                     queueDeltaUpdate(streamSessionKey, runId, deltaMessage);
                 }
                 return;
@@ -691,16 +947,11 @@ export function useChatRuntimeEvents({
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
                 liveHistoryRefreshTimerReference.current = null;
             }
-            if (pendingDeltaFlushTimerReference.current !== null) {
-                window.clearTimeout(pendingDeltaFlushTimerReference.current);
-                pendingDeltaFlushTimerReference.current = null;
-            }
             pendingDeltaUpdatesReference.current = {};
         };
     }, [
         activeStreamsReference,
         liveHistoryRefreshTimerReference,
-        request,
         selectedSessionKey,
         setHistoryLoadVersion,
         setIsAtBottom,
@@ -711,4 +962,30 @@ export function useChatRuntimeEvents({
         showToolOutput,
         subscribe,
     ]);
+
+    useEffect(() => {
+        if (!isConnected || !selectedSessionKey) {
+            return;
+        }
+
+        const requestForSubscription = requestReference.current;
+
+        /** Ignores optional Gateway transcript subscription failures. */
+        function ignoreTranscriptSubscriptionError(): void {
+            // Older gateways or narrow tokens may not expose transcript subscriptions.
+        }
+
+        void requestForSubscription("sessions.messages.subscribe", {
+            key: selectedSessionKey,
+        }).catch(ignoreTranscriptSubscriptionError);
+
+        /** Unsubscribes from selected session transcript messages. */
+        function unsubscribeTranscriptMessages(): void {
+            void requestForSubscription("sessions.messages.unsubscribe", {
+                key: selectedSessionKey,
+            }).catch(ignoreTranscriptSubscriptionError);
+        }
+
+        return unsubscribeTranscriptMessages;
+    }, [connectionId, isConnected, selectedSessionKey]);
 }

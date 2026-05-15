@@ -259,7 +259,7 @@ function sessionHasRunIdentifier(session: Session, runId: string): boolean {
 
 /** Performs enrich runtime event payload. */
 function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
-    if (event !== "agent" && event !== "session.tool") {
+    if (event !== "agent" && event !== "session.tool" && event !== "session.message") {
         return payload;
     }
 
@@ -545,6 +545,40 @@ function init(token: string): void {
         onHelloOk: () => {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
+            const connectedGatewayClient = gatewayClient;
+
+            /** Subscribes to Gateway session index events for live session updates. */
+            async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
+                if (
+                    !connectedGatewayClient ||
+                    connectedGatewayClient !== gatewayClient ||
+                    !isGatewayConnected
+                ) {
+                    return;
+                }
+
+                try {
+                    await connectedGatewayClient.request("sessions.subscribe", {});
+                } catch (error) {
+                    if (attempt < 3) {
+                        const delayMs = 500 * 2 ** attempt;
+
+                        /** Retries the session index subscription after backoff. */
+                        function retrySessionIndexSubscription(): void {
+                            void subscribeToSessionIndexEvents(attempt + 1);
+                        }
+
+                        setTimeout(retrySessionIndexSubscription, delayMs);
+                        return;
+                    }
+
+                    console.warn(
+                        "[Gateway] Failed to subscribe to session index events:",
+                        error instanceof Error ? error.message : String(error)
+                    );
+                }
+            }
+            void subscribeToSessionIndexEvents();
             void refreshSessions().catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
