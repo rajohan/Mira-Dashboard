@@ -122,7 +122,7 @@ function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout.isProductionRoot) return "Wrong root";
     if (!checkout.isClean) return "Dirty checkout";
     if (checkout.branch !== checkout.expectedBranch) {
-        return `Will switch to ${checkout.expectedBranch}`;
+        return `Off ${checkout.expectedBranch}`;
     }
     return "Ready to deploy";
 }
@@ -141,7 +141,7 @@ function checkoutMessage(
         return "Deploy and merge are blocked until local changes in the production checkout are resolved.";
     }
     if (checkout.branch !== checkout.expectedBranch) {
-        return `The next deploy/merge will switch the production checkout from ${checkout.branch} to ${checkout.expectedBranch} before building.`;
+        return `Deploy and merge are blocked until the production checkout is switched from ${checkout.branch} to ${checkout.expectedBranch}.`;
     }
     return "Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees.";
 }
@@ -289,10 +289,7 @@ export function PullRequests() {
         approvePullRequest.isPending ||
         rejectPullRequest.isPending ||
         deployDashboard.isPending;
-    const isProductionActionBlocked = Boolean(
-        productionCheckout &&
-        (!productionCheckout.isProductionRoot || !productionCheckout.isClean)
-    );
+    const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 

@@ -140,7 +140,7 @@ describe("PullRequests page", () => {
             message: "PR merged",
         });
         hooks.deploy.mockResolvedValue({
-            deployment: { note: "Master deploy scheduled" },
+            deployment: { note: "Main deploy scheduled" },
         });
         hooks.refetch.mockResolvedValue(Promise.resolve());
         hooks.reject.mockResolvedValue({
@@ -245,7 +245,7 @@ describe("PullRequests page", () => {
             screen.getByTestId("confirm-modal").querySelector("button:last-child")!
         );
         expect(hooks.deploy).toHaveBeenCalledTimes(1);
-        expect(screen.getByText(/Master deploy scheduled/)).toBeInTheDocument();
+        expect(screen.getByText(/Main deploy scheduled/)).toBeInTheDocument();
     });
 
     it("blocks production actions when checkout is dirty", () => {
@@ -263,6 +263,30 @@ describe("PullRequests page", () => {
         render(<PullRequests />);
 
         expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Deploy latest main" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("blocks production actions when checkout is off main", () => {
+        mockPullRequests({
+            checkout: {
+                data: {
+                    ...hooks.productionCheckout,
+                    branch: "fix/gateway-v4-live-streaming",
+                    isSafeForDeploy: false,
+                },
+                error: null,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Off main")).toBeInTheDocument();
+        expect(
+            screen.getByText(/blocked until the production checkout is switched/)
+        ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Deploy latest main" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
@@ -288,7 +312,7 @@ describe("PullRequests page", () => {
                 data: {
                     ...hooks.productionCheckout,
                     branch: "feature-branch",
-                    isSafeForDeploy: true,
+                    isSafeForDeploy: false,
                 },
                 error: null,
             },
@@ -327,9 +351,9 @@ describe("PullRequests page", () => {
 
         render(<PullRequests />);
 
-        expect(screen.getByText("Will switch to main")).toBeInTheDocument();
+        expect(screen.getByText("Off main")).toBeInTheDocument();
         expect(
-            screen.getByText(/will switch the production checkout from feature-branch/)
+            screen.getByText(/checkout is switched from feature-branch/)
         ).toBeInTheDocument();
         expect(
             screen.getByText("No dashboard deploy jobs recorded yet.")
