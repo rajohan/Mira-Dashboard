@@ -39,6 +39,12 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const [connectionId, setConnectionId] = useState(0);
 
+    /** Subscribes to session events and refreshes the session index. */
+    const syncSessions = (client: SocketClient) => {
+        void client.request("sessions.subscribe").catch(() => {});
+        void client.request("sessions.list").catch(() => {});
+    };
+
     /** Performs connect. */
     const connect = () => {
         if (!isAuthenticated) {
@@ -53,7 +59,9 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     setIsConnected(true);
                     setError(null);
                     setConnectionId((previous) => previous + 1);
-                    void clientRef.current?.request("sessions.list").catch(() => {});
+                    if (clientRef.current) {
+                        syncSessions(clientRef.current);
+                    }
                 },
                 onClose: () => {
                     setIsConnected(false);
@@ -149,7 +157,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            void clientRef.current.request("sessions.list").catch(() => {});
+            syncSessions(clientRef.current);
         };
 
         document.addEventListener("visibilitychange", resyncVisibleSocket);

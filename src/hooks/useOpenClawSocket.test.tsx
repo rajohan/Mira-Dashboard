@@ -254,6 +254,7 @@ describe("useOpenClawSocket", () => {
         expect(result.current.error).toBeNull();
         expect(result.current.connectionId).toBe(1);
         expect(onConnect).toHaveBeenCalled();
+        expect(mockClient.request).toHaveBeenCalledWith("sessions.subscribe");
         expect(mockClient.request).toHaveBeenCalledWith("sessions.list");
 
         act(() => {
@@ -450,6 +451,7 @@ describe("useOpenClawSocket", () => {
         await waitFor(() =>
             expect(mockClient.request).toHaveBeenCalledWith("sessions.list")
         );
+        expect(mockClient.request).toHaveBeenCalledWith("sessions.subscribe");
     });
 
     it("swallows visible resync request failures", async () => {
@@ -470,6 +472,7 @@ describe("useOpenClawSocket", () => {
         });
 
         expect(mockClient.request).toHaveBeenCalledWith("sessions.list");
+        expect(mockClient.request).toHaveBeenCalledWith("sessions.subscribe");
     });
 
     it("skips visible resync while hidden and reconnects when visible but closed", async () => {
