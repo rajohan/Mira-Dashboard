@@ -82,6 +82,35 @@ describe("chat utils", () => {
         ).toEqual([empty, toolA, toolB, newer]);
     });
 
+    it("keeps matching text tool results distinct by diagnostic identity", () => {
+        const first = message({
+            role: "tool",
+            text: '{ "ok": true }',
+            timestamp: "1",
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-a",
+                name: "bash",
+            },
+        });
+        const second = message({
+            role: "tool",
+            text: '{ "ok": true }',
+            timestamp: "2",
+            toolResult: {
+                content: '{ "ok": true }',
+                id: "tool-b",
+                name: "bash",
+            },
+        });
+
+        expect(messageIdentity(first)).not.toBe(messageIdentity(second));
+        expect(messageDeleteKey(first)).toContain(
+            'tool-result::tool-a::bash::{ "ok": true }'
+        );
+        expect(dedupeMessages([first, second])).toEqual([first, second]);
+    });
+
     it("covers merge edge cases and timestamp ordering", () => {
         vi.spyOn(Date, "now").mockReturnValue(
             new Date("2026-05-10T10:02:00.000Z").getTime()

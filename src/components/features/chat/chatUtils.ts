@@ -61,18 +61,20 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
 
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
+    const diagnosticIdentity = diagnosticMessageIdentity(message);
     return `${message.role.toLowerCase()}::${
-        message.text.trim() || diagnosticMessageIdentity(message) || ""
+        diagnosticIdentity || message.text.trim() || ""
     }`;
 }
 
 /** Performs message delete key. */
 export function messageDeleteKey(message: ChatHistoryMessage): string {
+    const diagnosticIdentity = diagnosticMessageIdentity(message);
     return [
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        message.text.trim() || diagnosticMessageIdentity(message) || "no-text",
+        diagnosticIdentity || message.text.trim() || "no-text",
     ].join("::");
 }
 

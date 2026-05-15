@@ -688,6 +688,42 @@ describe("Chat", () => {
         expect(screen.getByText("Thinking")).toBeInTheDocument();
     });
 
+    it("still sends chat text when enabling verbose diagnostics fails", async () => {
+        const user = userEvent.setup();
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "sessions.patch") {
+                throw new Error("verbose unavailable");
+            }
+
+            if (method === "chat.send") {
+                return { runId: "run-123" };
+            }
+
+            return method === "chat.history"
+                ? { messages: [] }
+                : { models: [{ id: "codex", label: "Codex" }] };
+        });
+
+        render(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+
+        await user.type(screen.getByLabelText("Draft"), "Still send");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "Still send",
+                    sessionKey: "session-a",
+                })
+            )
+        );
+        expect(screen.queryByText("verbose unavailable")).not.toBeInTheDocument();
+    });
+
     it("renders runtime stream rows and clears them when disconnected", async () => {
         const { rerender } = render(<Chat />);
         await screen.findByText("old user message");

@@ -393,6 +393,30 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
+    it("ignores non-work Gateway v4 tool events", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "message-1",
+                        name: "message",
+                        phase: "result",
+                        result: { deliveryStatus: "sent" },
+                    },
+                    runId: "run-tool",
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([]);
+    });
+
     it("ignores Gateway v4 user transcript message events", () => {
         const { emit, result } = renderRuntimeEvents();
 
@@ -447,6 +471,42 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+    });
+
+    it("drops queued Gateway v4 deltas when a replacement arrives before flush", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "First",
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Replacement",
+                    replace: true,
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");

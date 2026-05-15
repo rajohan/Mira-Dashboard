@@ -272,6 +272,10 @@ function runtimeToolMessages(
     runId?: string
 ): ChatHistoryMessage[] {
     const name = stringValue(data.name) || stringValue(data.toolName) || "tool";
+    if (isNonWorkToolName(name)) {
+        return [];
+    }
+
     const id =
         stringValue(data.id) ||
         stringValue(data.toolCallId) ||
@@ -396,8 +400,10 @@ export function useChatRuntimeEvents({
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<number | null>(null);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
+    const requestReference = useRef(request);
 
     updateActiveStreamsReference.current = updateActiveStreams;
+    requestReference.current = request;
 
     useEffect(() => {
         /** Performs flush pending delta updates. */
@@ -751,6 +757,15 @@ export function useChatRuntimeEvents({
                         payload.message === undefined &&
                         typeof payload.deltaText === "string"
                     ) {
+                        delete pendingDeltaUpdatesReference.current[streamSessionKey];
+                        if (
+                            pendingDeltaFlushTimerReference.current !== null &&
+                            Object.keys(pendingDeltaUpdatesReference.current).length === 0
+                        ) {
+                            window.clearTimeout(pendingDeltaFlushTimerReference.current);
+                            pendingDeltaFlushTimerReference.current = null;
+                        }
+
                         const message = mergeStreamMessage(
                             undefined,
                             deltaMessage,
@@ -876,7 +891,6 @@ export function useChatRuntimeEvents({
     }, [
         activeStreamsReference,
         liveHistoryRefreshTimerReference,
-        request,
         selectedSessionKey,
         setHistoryLoadVersion,
         setIsAtBottom,
@@ -893,18 +907,20 @@ export function useChatRuntimeEvents({
             return;
         }
 
-        void request("sessions.messages.subscribe", { key: selectedSessionKey }).catch(
-            () => {
-                // Older gateways or narrow tokens may not expose transcript subscriptions.
-            }
-        );
+        const requestForSubscription = requestReference.current;
+
+        void requestForSubscription("sessions.messages.subscribe", {
+            key: selectedSessionKey,
+        }).catch(() => {
+            // Older gateways or narrow tokens may not expose transcript subscriptions.
+        });
 
         return () => {
-            void request("sessions.messages.unsubscribe", {
+            void requestForSubscription("sessions.messages.unsubscribe", {
                 key: selectedSessionKey,
             }).catch(() => {
                 // The backend WebSocket teardown also drops Gateway-side subscriptions.
             });
         };
-    }, [request, selectedSessionKey]);
+    }, [selectedSessionKey]);
 }

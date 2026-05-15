@@ -1045,10 +1045,14 @@ export function Chat() {
 
         try {
             if (selectedSession?.verboseLevel !== "full") {
-                await request("sessions.patch", {
-                    key: selectedSessionKey,
-                    verboseLevel: "full",
-                });
+                try {
+                    await request("sessions.patch", {
+                        key: selectedSessionKey,
+                        verboseLevel: "full",
+                    });
+                } catch {
+                    // Best-effort diagnostics config; do not block message delivery.
+                }
             }
 
             const result = (await request("chat.send", {

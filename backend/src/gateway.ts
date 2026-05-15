@@ -545,12 +545,26 @@ function init(token: string): void {
         onHelloOk: () => {
             isGatewayConnected = true;
             broadcast({ type: "connected", gatewayConnected: true });
-            void gatewayClient?.request("sessions.subscribe", {}).catch((error) => {
-                console.warn(
-                    "[Gateway] Failed to subscribe to session index events:",
-                    error instanceof Error ? error.message : String(error)
-                );
-            });
+            const connectedGatewayClient = gatewayClient;
+            const subscribeToSessionIndexEvents = async (attempt = 0): Promise<void> => {
+                try {
+                    await connectedGatewayClient?.request("sessions.subscribe", {});
+                } catch (error) {
+                    if (attempt < 3) {
+                        const delayMs = 500 * 2 ** attempt;
+                        setTimeout(() => {
+                            void subscribeToSessionIndexEvents(attempt + 1);
+                        }, delayMs);
+                        return;
+                    }
+
+                    console.warn(
+                        "[Gateway] Failed to subscribe to session index events:",
+                        error instanceof Error ? error.message : String(error)
+                    );
+                }
+            };
+            void subscribeToSessionIndexEvents();
             void refreshSessions().catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
