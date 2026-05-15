@@ -354,8 +354,14 @@ describe("Settings page", () => {
 
     it("backs up config and confirms gateway restart", async () => {
         const user = userEvent.setup();
+        const originalLocation = window.location;
+        const reload = vi.fn();
         let setTimeoutSpy: { mockRestore: () => void } | undefined;
         let clearTimeoutSpy: { mockRestore: () => void } | undefined;
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: { reload },
+        });
 
         const { unmount } = render(<Settings />);
 
@@ -371,9 +377,12 @@ describe("Settings page", () => {
             expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: "Restart" }));
-            setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => {
-                return 1 as unknown as ReturnType<typeof setTimeout>;
-            });
+            setTimeoutSpy = vi
+                .spyOn(globalThis, "setTimeout")
+                .mockImplementation((handler) => {
+                    if (typeof handler === "function") handler();
+                    return 1 as unknown as ReturnType<typeof setTimeout>;
+                });
             await act(async () => {
                 fireEvent.click(
                     screen.getAllByRole("button", { name: "Restart" }).at(-1)!
@@ -382,6 +391,7 @@ describe("Settings page", () => {
             });
             expect(hooks.restartGateway).toHaveBeenCalledTimes(1);
             await Promise.resolve();
+            expect(reload).toHaveBeenCalledTimes(1);
 
             clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
             unmount();
@@ -389,6 +399,10 @@ describe("Settings page", () => {
         } finally {
             setTimeoutSpy?.mockRestore();
             clearTimeoutSpy?.mockRestore();
+            Object.defineProperty(window, "location", {
+                configurable: true,
+                value: originalLocation,
+            });
         }
     });
 
