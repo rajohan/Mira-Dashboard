@@ -67,10 +67,14 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
 
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
+    const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
-    return `${message.role.toLowerCase()}::${
-        diagnosticIdentity || message.text.trim() || ""
-    }`;
+    const textIdentity = message.text.trim();
+    const identity =
+        role === "tool" || role === "tool_result"
+            ? diagnosticIdentity || textIdentity
+            : textIdentity || diagnosticIdentity;
+    return `${role}::${identity || ""}`;
 }
 
 /** Performs message delete key. */

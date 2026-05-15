@@ -446,6 +446,7 @@ describe("useChatRuntimeEvents", () => {
             for (const [id, resultValue] of [
                 ["string-result", "plain output"],
                 ["array-result", [{ text: "array output" }]],
+                ["json-array-result", [{ ok: true }]],
                 ["empty-result", undefined],
                 ["circular-result", circular],
             ] as const) {
@@ -470,6 +471,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.messages.map((message) => message.text)).toEqual([
             "plain output",
             "array output",
+            '[\n  {\n    "ok": true\n  }\n]',
             "",
             "[object Object]",
         ]);
@@ -556,6 +558,36 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
+    });
+
+    it("drops stale aliases when Gateway v4 replacement starts a new run", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["old-run"],
+                    runId: "old-run",
+                    sessionKey: "session-a",
+                    text: "Old",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "New",
+                    replace: true,
+                    runId: "new-run",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.aliases).toEqual(["new-run"]);
     });
 
     it("drops queued Gateway v4 deltas when a replacement arrives before flush", async () => {
@@ -663,6 +695,38 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
+    });
+
+    it("does not clear active stream for empty Gateway v4 transcript from another run", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["active-run"],
+                    runId: "active-run",
+                    sessionKey: "session-a",
+                    text: "Still active",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "",
+                        role: "assistant",
+                    },
+                    runId: "other-run",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Still active");
     });
 
     it("ignores empty Gateway v4 transcript text when no stream exists", () => {

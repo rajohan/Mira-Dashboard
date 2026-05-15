@@ -67,6 +67,13 @@ describe("chat utils", () => {
             thinking: [{ text: "reasoning" }],
         });
         expect(messageIdentity(thinking)).toBe("assistant::thinking::reasoning");
+
+        const visibleThinking = message({
+            role: "assistant",
+            text: "visible reply",
+            thinking: [{ text: "same reasoning" }],
+        });
+        expect(messageIdentity(visibleThinking)).toBe("assistant::visible reply");
     });
 
     it("dedupes messages from the newest duplicate while retaining distinct diagnostic rows", () => {

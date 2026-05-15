@@ -252,7 +252,10 @@ function runtimeDisplayText(value: unknown): string {
     }
 
     if (Array.isArray(value)) {
-        return normalizeText(value);
+        const text = normalizeText(value);
+        if (text) {
+            return text;
+        }
     }
 
     if (value === undefined || value === null) {
@@ -616,7 +619,15 @@ export function useChatRuntimeEvents({
             if (runtimeMessage && !runtimeMessageToApply) {
                 flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((previous) => {
-                    if (!previous[selectedSessionKey]) {
+                    const existing = previous[selectedSessionKey];
+                    const incomingRunId =
+                        typeof payload.runId === "string" ? payload.runId : undefined;
+                    if (
+                        !existing ||
+                        (incomingRunId &&
+                            existing.runId !== incomingRunId &&
+                            !existing.aliases.includes(incomingRunId))
+                    ) {
                         return previous;
                     }
 
@@ -810,13 +821,14 @@ export function useChatRuntimeEvents({
                             nextText,
                             runId
                         );
+                        const startsNewRun = isNewRunForStream(existing, payload.runId);
                         updateActiveStreamsReference.current((previous) => ({
                             ...previous,
                             [streamSessionKey]: {
                                 sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
-                                    ...(existing?.aliases || []),
+                                    ...(startsNewRun ? [] : existing?.aliases || []),
                                     payload.runId,
                                     runId,
                                 ]),
