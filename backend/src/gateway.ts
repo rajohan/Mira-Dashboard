@@ -547,8 +547,16 @@ function init(token: string): void {
             broadcast({ type: "connected", gatewayConnected: true });
             const connectedGatewayClient = gatewayClient;
             const subscribeToSessionIndexEvents = async (attempt = 0): Promise<void> => {
+                if (
+                    !connectedGatewayClient ||
+                    connectedGatewayClient !== gatewayClient ||
+                    !isGatewayConnected
+                ) {
+                    return;
+                }
+
                 try {
-                    await connectedGatewayClient?.request("sessions.subscribe", {});
+                    await connectedGatewayClient.request("sessions.subscribe", {});
                 } catch (error) {
                     if (attempt < 3) {
                         const delayMs = 500 * 2 ** attempt;
