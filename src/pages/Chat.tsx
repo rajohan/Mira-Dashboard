@@ -69,10 +69,6 @@ function getChatAgentId(session: Session): string {
         return normalizeChatAgentId(agentId);
     }
 
-    if (scope) {
-        return normalizeChatAgentId(scope);
-    }
-
     return normalizeChatAgentId(session.agentType || session.type || "unknown");
 }
 

@@ -674,7 +674,8 @@ describe("Chat", () => {
             expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
-        expect(screen.getByTestId("agent-options")).toHaveTextContent("session");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("direct");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("channel");
         expect(await screen.findByText("old assistant message")).toBeInTheDocument();
         expect(mocks.request).toHaveBeenCalledWith("models.list", {
             view: "configured",
@@ -755,6 +756,39 @@ describe("Chat", () => {
             )
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+    });
+
+    it("groups non-agent chat sessions by stable session metadata", async () => {
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                agentType: "direct",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "session-b",
+                agentType: "DIRECT",
+                displayLabel: "Side chat",
+                label: "side",
+                model: "kimi",
+                type: "direct",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("direct");
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("session-a");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("Side chat");
     });
 
     it("filters hidden tool result rows before message virtualization", async () => {
