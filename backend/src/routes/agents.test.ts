@@ -413,7 +413,7 @@ describe("agents routes", () => {
         }
     });
 
-    it("ignores message and memory search noise when newer session files have no visible activity", async () => {
+    it("shows memory search activity while still ignoring message delivery noise", async () => {
         const aliasSessionsDir = path.join(
             homeDir,
             ".openclaw",
@@ -508,7 +508,7 @@ describe("agents routes", () => {
 
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "active");
-            assert.equal(response.body.currentActivity, "exec npm run build");
+            assert.equal(response.body.currentActivity, "memory_search latest recall");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
@@ -819,6 +819,93 @@ describe("agents routes", () => {
         }
     });
 
+    it("ignores runless stale entries after locking onto the latest trajectory run", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "await tools.exec_command({ cmd: `npm run stale` });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "await tools.exec_command({ cmd: `npm run also-stale` });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "delivery only" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(trajectoryPath, new Date(now), new Date(now));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.currentActivity, null);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("continues within the newest session group when unrelated files are interleaved by mtime", async () => {
         const aliasSessionsDir = path.join(
             homeDir,
@@ -937,9 +1024,18 @@ describe("agents routes", () => {
             "05",
             "16"
         );
+        const unreadableCodexDir = path.join(
+            aliasAgentDir,
+            "agent",
+            "codex-home",
+            "sessions",
+            "unreadable"
+        );
         await rm(aliasAgentDir, { recursive: true, force: true });
         await mkdir(aliasSessionsDir, { recursive: true });
         await mkdir(codexSessionsDir, { recursive: true });
+        await mkdir(unreadableCodexDir, { recursive: true });
+        await chmod(unreadableCodexDir, 0);
 
         const gatewayTrajectoryPath = path.join(
             aliasSessionsDir,
@@ -984,7 +1080,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: "const r = await tools.write_stdin({ session_id: 123 });",
+                        input: 'await tools.mcp__server__memory_search({ query: "context" });',
                     },
                 }),
                 JSON.stringify({
@@ -992,7 +1088,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: 'await tools.mcp__server__memory_search({ query: "noise" });',
+                        input: "const r = await tools.write_stdin({ session_id: 123 });",
                     },
                 }),
                 JSON.stringify({
@@ -1045,6 +1141,7 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, "terminal output");
         } finally {
             gateway.request = previousGatewayRequest;
+            await chmod(unreadableCodexDir, 0o700).catch(() => {});
             await rm(aliasAgentDir, { recursive: true, force: true });
         }
     });

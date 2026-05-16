@@ -468,9 +468,14 @@ function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
             continue;
         }
 
-        const entries = readdirGuarded(guardedPath(current.dir), {
-            withFileTypes: true,
-        });
+        let entries: FS.Dirent[];
+        try {
+            entries = readdirGuarded(guardedPath(current.dir), {
+                withFileTypes: true,
+            });
+        } catch {
+            continue;
+        }
         for (const entry of entries) {
             const fullPath = Path.join(current.dir, entry.name);
             const relativePath = current.relativeDir
@@ -567,6 +572,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         | string
         | undefined;
     const url = (args.url || nested.url) as string | undefined;
+    const query = (args.query || nested.query) as string | undefined;
 
     // Fallback: parse partialJson/raw string if present
     let fallbackPath: string | undefined;
@@ -609,6 +615,9 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "message" && message) {
         return `message ${message.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
     }
+    if (normalizedTool === "memory_search" && query) {
+        return `memory_search ${query.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
+    }
     if (normalizedTool === "apply_patch") {
         return "edit files";
     }
@@ -637,7 +646,7 @@ function normalizeToolName(toolName: string): string {
 /** Returns whether a tool should be shown as user-facing current activity. */
 function isVisibleActivityTool(toolName: string): boolean {
     const normalizedToolName = normalizeToolName(toolName);
-    return normalizedToolName !== "message" && normalizedToolName !== "memory_search";
+    return normalizedToolName !== "message";
 }
 
 /** Extracts nested tool activity from Codex response-item session logs. */
@@ -663,10 +672,7 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
     }
 
     const input = typeof record.payload.input === "string" ? record.payload.input : "";
-    if (
-        /tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input) ||
-        /tools\.(?:mcp__[^.]+__|openclaw_)?memory_search\s*\(/u.test(input)
-    ) {
+    if (/tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input)) {
         return null;
     }
 
@@ -848,6 +854,9 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                             typeof record.runId === "string" ? record.runId : null;
                         if (!fileRunId && entryRunId) {
                             fileRunId = entryRunId;
+                        }
+                        if (fileRunId && !entryRunId) {
+                            continue;
                         }
                         if (fileRunId && entryRunId && entryRunId !== fileRunId) {
                             continue;
