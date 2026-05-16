@@ -881,7 +881,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: 'await tools.exec_command({ cmd: "npm run agents:test" });',
+                        input: "await tools.exec_command({ cmd: `npm run agents:test` });",
                     },
                 }),
                 JSON.stringify({

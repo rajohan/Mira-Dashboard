@@ -670,7 +670,7 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
         return null;
     }
 
-    const commandMatch = input.match(/\bcmd\s*:\s*(["'])([\s\S]*?)\1/u);
+    const commandMatch = input.match(/\bcmd\s*:\s*(["'`])([\s\S]*?)\1/u);
     if (commandMatch) {
         return summarizeToolActivity("exec", { command: commandMatch[2] });
     }
