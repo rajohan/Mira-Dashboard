@@ -8,7 +8,7 @@ import {
     Trash2,
     Volume2,
 } from "lucide-react";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -235,6 +235,23 @@ function TypingIndicator({ text = "Thinking" }: { text?: string }) {
     );
 }
 
+/** Stops active TTS playback and releases the object URL. */
+function stopAudioPlayback(
+    audioReference: RefObject<HTMLAudioElement | null>,
+    audioUrlReference: RefObject<string | null>,
+    setPlayingMessageKey: (messageKey: string | null) => void
+) {
+    audioReference.current?.pause();
+    audioReference.current = null;
+
+    if (audioUrlReference.current) {
+        URL.revokeObjectURL(audioUrlReference.current);
+        audioUrlReference.current = null;
+    }
+
+    setPlayingMessageKey(null);
+}
+
 /** Renders the chat messages list UI. */
 export function ChatMessagesList({
     isLoadingHistory,
@@ -256,20 +273,14 @@ export function ChatMessagesList({
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
     const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
 
-    /** Stops active TTS playback and releases the object URL. */
-    const stopAudio = useCallback(() => {
-        audioReference.current?.pause();
-        audioReference.current = null;
+    const stopAudio = () =>
+        stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey);
 
-        if (audioUrlReference.current) {
-            URL.revokeObjectURL(audioUrlReference.current);
-            audioUrlReference.current = null;
-        }
-
-        setPlayingMessageKey(null);
-    }, []);
-
-    useEffect(() => () => stopAudio(), [stopAudio]);
+    useEffect(
+        () => () =>
+            stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey),
+        []
+    );
 
     /** Speaks or stops the selected chat message. */
     const speakMessage = async (messageKey: string, text: string) => {
