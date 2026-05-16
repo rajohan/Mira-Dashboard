@@ -542,6 +542,9 @@ describe("agents routes", () => {
                             arguments: { command: "npm run old-task" },
                         },
                     ],
+                    __openclaw: {
+                        mirrorIdentity: "old-turn:tool:call",
+                    },
                 },
             }),
             "utf8"
@@ -568,7 +571,10 @@ describe("agents routes", () => {
                 JSON.stringify({
                     type: "prompt.submitted",
                     runId: "fresh-run",
-                    data: { prompt: "Investigate fresh agent activity" },
+                    data: {
+                        prompt: "Investigate fresh agent activity",
+                        turnId: "fresh-turn",
+                    },
                 }),
                 JSON.stringify({
                     type: "tool.call",
@@ -650,6 +656,9 @@ describe("agents routes", () => {
                             arguments: { command: "gh pr checks 55" },
                         },
                     ],
+                    __openclaw: {
+                        mirrorIdentity: "fresh-turn:tool:call",
+                    },
                 },
             }),
             "utf8"
@@ -665,7 +674,10 @@ describe("agents routes", () => {
                 JSON.stringify({
                     type: "prompt.submitted",
                     runId: "fresh-run",
-                    data: { prompt: "Fix current activity fallback" },
+                    data: {
+                        prompt: "Fix current activity fallback",
+                        turnId: "fresh-turn",
+                    },
                 }),
                 JSON.stringify({
                     type: "tool.call",
@@ -713,6 +725,112 @@ describe("agents routes", () => {
             assert.equal(response.body.status, "active");
             assert.equal(response.body.currentTask, "Fix current activity fallback");
             assert.equal(response.body.currentActivity, "exec gh pr checks 55");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("continues within the newest session group when unrelated files are interleaved by mtime", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const activeJsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const activeTrajectoryPath = path.join(
+            aliasSessionsDir,
+            "active.trajectory.jsonl"
+        );
+        const unrelatedPath = path.join(aliasSessionsDir, "other.jsonl");
+        await writeFile(
+            activeTrajectoryPath,
+            JSON.stringify({
+                type: "prompt.submitted",
+                runId: "fresh-run",
+                data: {
+                    prompt: "Keep scanning active group",
+                    turnId: "fresh-turn",
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            unrelatedPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run unrelated" },
+                        },
+                    ],
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            activeJsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run active" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "fresh-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(activeTrajectoryPath, new Date(now), new Date(now));
+        await utimes(unrelatedPath, new Date(now - 1_000), new Date(now - 1_000));
+        await utimes(activeJsonlPath, new Date(now - 2_000), new Date(now - 2_000));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentTask, "Keep scanning active group");
+            assert.equal(response.body.currentActivity, "exec npm run active");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {

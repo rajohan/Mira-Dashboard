@@ -406,6 +406,20 @@ interface ActivityInfo {
     modTime: number;
 }
 
+/** Cleans raw prompts/transcript text for dashboard task display. */
+function cleanTaskText(text: string): string {
+    return text
+        .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
+        .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
+        .replaceAll(/\[media attached[^\]]*\]/g, "")
+        .replaceAll(/Conversation info[^\n]*/g, "")
+        .replaceAll(/Sender[^\n]*/g, "")
+        .replaceAll(/\n+/g, " ")
+        .replaceAll(/\s+/g, " ")
+        .trim()
+        .slice(0, 100);
+}
+
 /** Performs summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
     const normalizedTool = normalizeToolName(toolName);
@@ -613,7 +627,22 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             return null;
         }
 
-        const latestModTime = files[0].mtime;
+        const getFileGroup = (name: string): string =>
+            name.replace(/\.trajectory\.jsonl$/u, "").replace(/\.jsonl$/u, "");
+        const groups = new Map<string, { files: typeof files; modTime: number }>();
+        for (const file of files) {
+            const group = getFileGroup(file.name);
+            const existing = groups.get(group);
+            if (existing) {
+                existing.files.push(file);
+                existing.modTime = Math.max(existing.modTime, file.mtime);
+            } else {
+                groups.set(group, { files: [file], modTime: file.mtime });
+            }
+        }
+
+        const latestGroup = [...groups.values()].sort((a, b) => b.modTime - a.modTime)[0];
+        const latestModTime = latestGroup.modTime;
         const now = Date.now();
 
         // If no session file has been modified in 5 minutes, agent is idle.
@@ -621,28 +650,36 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             return { task: null, activity: null, modTime: latestModTime };
         }
 
-        let pendingTask: string | null = null;
-        let pendingGroup: string | null = null;
-        const getFileGroup = (name: string): string =>
-            name.replace(/\.trajectory\.jsonl$/u, "").replace(/\.jsonl$/u, "");
+        const getEntryTurnId = (entry: unknown): string | null => {
+            if (!entry || typeof entry !== "object") return null;
+            const raw = entry as {
+                __openclaw?: { mirrorIdentity?: unknown };
+                message?: { __openclaw?: { mirrorIdentity?: unknown } };
+                data?: { turnId?: unknown };
+            };
+            if (typeof raw.data?.turnId === "string") return raw.data.turnId;
 
-        for (const file of files) {
+            const mirrorIdentity =
+                typeof raw.__openclaw?.mirrorIdentity === "string"
+                    ? raw.__openclaw.mirrorIdentity
+                    : typeof raw.message?.__openclaw?.mirrorIdentity === "string"
+                      ? raw.message.__openclaw.mirrorIdentity
+                      : null;
+            return mirrorIdentity ? mirrorIdentity.split(":")[0] || null : null;
+        };
+
+        let pendingTask: string | null = null;
+        let pendingTaskTurnId: string | null = null;
+
+        for (const file of latestGroup.files.sort((a, b) => b.mtime - a.mtime)) {
             if (now - file.mtime > STALE_THRESHOLD) {
                 continue;
-            }
-
-            const fileGroup = getFileGroup(file.name);
-            if (pendingTask && pendingGroup && fileGroup !== pendingGroup) {
-                return {
-                    task: pendingTask,
-                    activity: null,
-                    modTime: latestModTime,
-                };
             }
 
             const content = await readTextNoFollowGuarded(guardedPath(file.path));
             const lines = content.trim().split("\n");
             let fileTask: string | null = null;
+            let fileTaskTurnId: string | null = null;
             let fileActivity: string | null = null;
             let fileRunId: string | null = null;
 
@@ -667,18 +704,11 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                         break;
                     }
 
+                    const entryTurnId = getEntryTurnId(entry);
                     const trajectoryActivity = getTrajectoryActivity(entry);
                     if (!fileTask && trajectoryActivity.task) {
-                        fileTask = trajectoryActivity.task
-                            .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
-                            .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
-                            .replaceAll(/\[media attached[^\]]*\]/g, "")
-                            .replaceAll(/Conversation info[^\n]*/g, "")
-                            .replaceAll(/Sender[^\n]*/g, "")
-                            .replaceAll(/\n+/g, " ")
-                            .replaceAll(/\s+/g, " ")
-                            .trim()
-                            .slice(0, 100);
+                        fileTask = cleanTaskText(trajectoryActivity.task);
+                        fileTaskTurnId = entryTurnId || entryRunId;
                     }
                     if (!fileActivity && trajectoryActivity.activity) {
                         fileActivity = trajectoryActivity.activity;
@@ -688,7 +718,7 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
                     // First user message from end = current task
                     if (msg.role === "user" && msg.content && !fileTask) {
-                        let text =
+                        const text =
                             typeof msg.content === "string"
                                 ? msg.content
                                 : Array.isArray(msg.content)
@@ -701,18 +731,8 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                                   : String(msg.content);
 
                         // Clean metadata and extract actual message
-                        text = text
-                            .replaceAll(/```json[\s\S]*?```/g, "")
-                            .replaceAll(/```[\s\S]*?```/g, "")
-                            .replaceAll(/\[media attached[^\]]*\]/g, "")
-                            .replaceAll(/Conversation info[^\n]*/g, "")
-                            .replaceAll(/Sender[^\n]*/g, "")
-                            .replaceAll(/\n+/g, " ")
-                            .replaceAll(/\s+/g, " ")
-                            .trim()
-                            .slice(0, 100);
-
-                        fileTask = text || null;
+                        fileTask = cleanTaskText(text) || null;
+                        fileTaskTurnId = entryTurnId;
                     }
 
                     // First visible tool use from end = current activity.
@@ -734,7 +754,10 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                                   [key: string]: unknown;
                               }
                             | undefined;
-                        if (toolCall?.name) {
+                        const expectedTurnId = fileTaskTurnId || pendingTaskTurnId;
+                        const canUseToolCall =
+                            !expectedTurnId || entryTurnId === expectedTurnId;
+                        if (toolCall?.name && canUseToolCall) {
                             fileActivity = summarizeToolActivity(toolCall.name, toolCall);
                         }
                     }
@@ -748,15 +771,15 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
             if (fileActivity) {
                 return {
-                    task: fileTask || (pendingGroup === fileGroup ? pendingTask : null),
+                    task: fileTask || pendingTask,
                     activity: fileActivity,
                     modTime: latestModTime,
                 };
             }
 
-            if (fileTask) {
+            if (fileTask && !pendingTask) {
                 pendingTask = fileTask;
-                pendingGroup = fileGroup;
+                pendingTaskTurnId = fileTaskTurnId;
             }
         }
 
