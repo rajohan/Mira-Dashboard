@@ -56,4 +56,17 @@ describe("Select", () => {
 
         expect(screen.getByRole("button", { name: /Pick/u })).toBeInTheDocument();
     });
+
+    it("keeps selected option in the accessible name with a control label", () => {
+        render(
+            <Select
+                value="todo"
+                onChange={vi.fn()}
+                options={options}
+                ariaLabel="Status"
+            />
+        );
+
+        expect(screen.getByRole("button", { name: "Status: Todo" })).toBeInTheDocument();
+    });
 });

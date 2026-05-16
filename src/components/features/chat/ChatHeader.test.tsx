@@ -33,6 +33,7 @@ describe("ChatHeader", () => {
         render(
             <ChatHeader
                 selectedSession={null}
+                selectedAgentId=""
                 selectedSessionKey=""
                 sessionOptions={[{ label: "Main", value: "agent:main:main" }]}
                 agentOptions={[]}
@@ -40,6 +41,7 @@ describe("ChatHeader", () => {
                 showTools
                 onToggleThinking={onToggleThinking}
                 onToggleTools={onToggleTools}
+                onSelectAgent={vi.fn()}
                 onSelectSession={vi.fn()}
             />
         );
@@ -68,16 +70,21 @@ describe("ChatHeader", () => {
         render(
             <ChatHeader
                 selectedSession={session}
+                selectedAgentId="main"
                 selectedSessionKey="agent:main:main"
                 sessionOptions={[
-                    { label: "Main", value: "agent:main:main" },
+                    { label: "main", value: "agent:main:main" },
                     { label: "Scratch", value: "scratch" },
                 ]}
-                agentOptions={[{ label: "Coder", value: "agent:coder:main" }]}
+                agentOptions={[
+                    { label: "main", value: "main" },
+                    { label: "coder", value: "coder" },
+                ]}
                 showThinking
                 showTools={false}
                 onToggleThinking={vi.fn()}
                 onToggleTools={vi.fn()}
+                onSelectAgent={onSelectSession}
                 onSelectSession={onSelectSession}
             />
         );
@@ -85,19 +92,20 @@ describe("ChatHeader", () => {
         expect(screen.getByText(/codex/u)).toBeInTheDocument();
         expect(screen.getByText(/Thinking: high/u)).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: /Main/u }));
+        await user.click(screen.getByRole("button", { name: "Session: main" }));
         await user.click(await screen.findByRole("menuitem", { name: "Scratch" }));
-        await user.click(screen.getByRole("button", { name: /Jump to agent/u }));
-        await user.click(await screen.findByRole("menuitem", { name: "Coder" }));
+        await user.click(screen.getByRole("button", { name: "Agent: main" }));
+        await user.click(await screen.findByRole("menuitem", { name: "coder" }));
 
         expect(onSelectSession).toHaveBeenNthCalledWith(1, "scratch");
-        expect(onSelectSession).toHaveBeenNthCalledWith(2, "agent:coder:main");
+        expect(onSelectSession).toHaveBeenNthCalledWith(2, "coder");
     });
 
     it("renders unknown model and default thinking fallbacks", () => {
         render(
             <ChatHeader
                 selectedSession={{ ...session, model: "", thinkingLevel: undefined }}
+                selectedAgentId="main"
                 selectedSessionKey="agent:main:main"
                 sessionOptions={[{ label: "Main", value: "agent:main:main" }]}
                 agentOptions={[]}
@@ -105,6 +113,7 @@ describe("ChatHeader", () => {
                 showTools
                 onToggleThinking={vi.fn()}
                 onToggleTools={vi.fn()}
+                onSelectAgent={vi.fn()}
                 onSelectSession={vi.fn()}
             />
         );

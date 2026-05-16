@@ -14,6 +14,16 @@ import {
     writeStoredChatDiagnosticVisibility,
 } from "./Chat";
 
+interface MockLiveSession {
+    agentType?: string;
+    displayLabel: string;
+    key?: string;
+    label: string;
+    model: string;
+    type: string;
+    updatedAt: string;
+}
+
 const mocks = vi.hoisted(() => ({
     request: vi.fn(),
     subscribe: vi.fn(),
@@ -37,7 +47,7 @@ const mocks = vi.hoisted(() => ({
             type: "channel",
             updatedAt: "2026-05-10T23:00:00.000Z",
         },
-    ],
+    ] as MockLiveSession[],
     agentsStatus: {
         agents: [
             {
@@ -150,6 +160,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
 vi.mock("../components/features/chat/ChatHeader", () => ({
     ChatHeader: ({
         agentOptions,
+        onSelectAgent,
         onSelectSession,
         onToggleThinking,
         onToggleTools,
@@ -159,6 +170,7 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
         showTools,
     }: {
         agentOptions: Array<{ label: string; value: string }>;
+        onSelectAgent: (agentId: string) => void;
         onSelectSession: (sessionKey: string) => void;
         onToggleThinking: () => void;
         onToggleTools: () => void;
@@ -177,6 +189,15 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
             </div>
             <button type="button" onClick={() => onSelectSession("session-b")}>
                 select side chat
+            </button>
+            <button type="button" onClick={() => onSelectSession("agent:main:scratch")}>
+                select scratch chat
+            </button>
+            <button type="button" onClick={() => onSelectAgent("main")}>
+                select main agent
+            </button>
+            <button type="button" onClick={() => onSelectAgent("ops")}>
+                select ops agent
             </button>
             <button type="button" onClick={onToggleThinking}>
                 thinking {String(showThinking)}
@@ -615,6 +636,34 @@ describe("Chat", () => {
         installLocalStorageMock();
         mocks.isConnected = true;
         mocks.socketError = null;
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "session-b",
+                displayLabel: "Side chat",
+                label: "side",
+                model: "kimi",
+                type: "channel",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "mira",
+                    currentTask: "Testing chat",
+                    sessionKey: "agent:main:main",
+                    status: "online",
+                },
+            ],
+        };
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
@@ -641,7 +690,8 @@ describe("Chat", () => {
             expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
-        expect(screen.getByTestId("agent-options")).toHaveTextContent("mira");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("direct");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("channel");
         expect(await screen.findByText("old assistant message")).toBeInTheDocument();
         expect(mocks.request).toHaveBeenCalledWith("models.list", {
             view: "configured",
@@ -659,6 +709,256 @@ describe("Chat", () => {
                 connectionId: 1,
                 isConnected: true,
             })
+        );
+    });
+
+    it("groups chat sessions by agent bucket and selects the first session in a bucket", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "main",
+                    currentTask: "Main work",
+                    sessionKey: "agent:main:scratch",
+                    status: "online",
+                },
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:Ops:main",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:Main:main",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:main:scratch",
+                displayLabel: "Scratch",
+                label: "scratch",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-10T23:30:00.000Z",
+            },
+            {
+                key: "agent:Ops:main",
+                displayLabel: "Ops",
+                label: "ops",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+            {
+                key: "",
+                agentType: "",
+                displayLabel: "Unknown",
+                label: "unknown",
+                model: "codex",
+                type: "",
+                updatedAt: "2026-05-10T22:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:Main:main"
+            )
+        );
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("Main");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("ops");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("unknown");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
+
+        await user.click(screen.getByRole("button", { name: "select scratch chat" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:scratch"
+            )
+        );
+        await user.click(screen.getByRole("button", { name: "select main agent" }));
+        expect(screen.getByTestId("selected-session")).toHaveTextContent(
+            "agent:main:scratch"
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:Ops:main"
+            )
+        );
+        expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("session-options")).not.toHaveTextContent("scratch");
+    });
+
+    it("groups non-agent chat sessions by stable session metadata", async () => {
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                agentType: "direct",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "session-b",
+                agentType: "DIRECT",
+                displayLabel: "Side chat",
+                label: "side",
+                model: "kimi",
+                type: "direct",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("direct");
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("session-a");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("Side chat");
+    });
+
+    it("selects an agent-reported active session when switching buckets", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "Ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:ops:active",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:ops:scratch",
+                displayLabel: "Ops scratch",
+                label: "scratch",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:30:00.000Z",
+            },
+            {
+                key: "agent:Ops:active",
+                displayLabel: "Ops active",
+                label: "active",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:Ops:active"
+            )
+        );
+    });
+
+    it("falls back to the first agent session when reported session is unavailable", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:ops:missing",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:ops:fallback",
+                displayLabel: "Ops fallback",
+                label: "fallback",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:ops:fallback"
+            )
+        );
+    });
+
+    it("handles sessions without a key while deriving chat buckets", async () => {
+        mocks.liveSessions = [
+            {
+                key: undefined,
+                agentType: "direct",
+                displayLabel: "Missing key chat",
+                label: "missing",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("agent-options")).toHaveTextContent("direct")
+        );
+        expect(screen.getByTestId("session-options")).toHaveTextContent(
+            "Missing key chat"
         );
     });
 

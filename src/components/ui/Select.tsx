@@ -17,6 +17,7 @@ interface SelectProps {
     options: SelectOption[];
     placeholder?: string;
     icon?: React.ReactNode;
+    ariaLabel?: string;
     className?: string;
     width?: string;
     menuWidth?: string;
@@ -29,11 +30,14 @@ export function Select({
     options,
     placeholder = "Select...",
     icon,
+    ariaLabel,
     className,
     width = "min-w-[180px]",
     menuWidth,
 }: SelectProps) {
     const selectedOption = options.find((opt) => opt.value === value);
+    const selectedLabel = selectedOption?.label || placeholder;
+    const buttonLabel = ariaLabel ? `${ariaLabel}: ${selectedLabel}` : undefined;
 
     return (
         <Menu
@@ -41,6 +45,7 @@ export function Select({
             className={cn("relative inline-block", width === "w-full" && "block w-full")}
         >
             <MenuButton
+                aria-label={buttonLabel}
                 className={cn(
                     "border-primary-700 bg-primary-800 flex items-center gap-2 rounded border px-3 py-1.5 text-sm transition-colors outline-none",
                     "hover:bg-primary-700 hover:border-indigo-500 focus:outline-none data-[focus]:outline-none",
@@ -49,9 +54,7 @@ export function Select({
                 )}
             >
                 {icon && <span className="text-primary-400 flex-shrink-0">{icon}</span>}
-                <span className="flex-1 truncate text-left">
-                    {selectedOption?.label || placeholder}
-                </span>
+                <span className="flex-1 truncate text-left">{selectedLabel}</span>
                 <ChevronDown className="text-primary-400 h-4 w-4 flex-shrink-0 transition-transform data-[open]:rotate-180" />
             </MenuButton>
             <MenuItems
