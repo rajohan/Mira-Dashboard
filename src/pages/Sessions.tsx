@@ -128,7 +128,7 @@ export function Sessions() {
         ? Math.max(feedVirtualizer.getTotalSize() - lastFeedVirtualItem.end, 0)
         : 0;
 
-    /** Performs check feed is at bottom. */
+    /** Returns whether the live-feed viewport is already pinned near the bottom. */
     const checkFeedIsAtBottom = () => {
         const container = liveFeedContainerReference.current;
 
@@ -142,7 +142,7 @@ export function Sessions() {
         );
     };
 
-    /** Performs scroll feed to bottom. */
+    /** Scrolls the virtualized live feed to the newest rendered row. */
     const scrollFeedToBottom = () => {
         const container = liveFeedContainerReference.current;
         if (!container || feedRows.length === 0) {
@@ -155,7 +155,7 @@ export function Sessions() {
         lastKnownFeedScrollTopReference.current = container.scrollTop;
     };
 
-    /** Responds to feed scroll events. */
+    /** Tracks user scrolling so new feed rows only auto-stick when appropriate. */
     const handleFeedScroll = () => {
         const container = liveFeedContainerReference.current;
         if (container) {
@@ -203,7 +203,7 @@ export function Sessions() {
         scrollFeedToBottom,
     ]);
 
-    /** Performs role count. */
+    /** Counts retained feed items for one normalized role filter. */
     const roleCount = (role: string) =>
         liveFeed.filter((item) => item.role === role).length;
 
@@ -232,7 +232,7 @@ export function Sessions() {
         })),
     ];
 
-    /** Responds to delete confirm events. */
+    /** Deletes the selected session after confirmation and reports failures inline. */
     const handleDeleteConfirm = async () => {
         if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
 

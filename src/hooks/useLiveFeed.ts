@@ -36,6 +36,69 @@ function isFeedSession(session: unknown): session is Session {
     );
 }
 
+/** Returns the display label used to identify a session in the live feed. */
+function getSessionFeedLabel(session: Session): string {
+    return session.displayLabel || session.displayName || session.key;
+}
+
+/** Normalizes transcript roles for stable live-feed filtering. */
+function normalizeFeedRole(role: string): string {
+    const rawRole = role.toLowerCase();
+    return rawRole === "toolresult" || rawRole === "tool-result"
+        ? "tool_result"
+        : rawRole;
+}
+
+/** Converts one API history message into a dashboard feed item. */
+function toFeedItem(
+    session: Session,
+    message: SessionHistoryResponse["messages"][number],
+    index: number
+): FeedItem {
+    const fallbackTimestamp = session.updatedAt || Date.now();
+    const parsedTimestamp = message.timestamp
+        ? new Date(message.timestamp).getTime()
+        : fallbackTimestamp;
+
+    return {
+        id: `${session.key}-${index}-${parsedTimestamp}`,
+        sessionKey: session.key,
+        sessionLabel: getSessionFeedLabel(session),
+        sessionType: (session.type || "unknown").toUpperCase(),
+        role: normalizeFeedRole(String(message.role || "unknown")),
+        content: String(message.content || "").trim(),
+        timestamp: Number.isFinite(parsedTimestamp) ? parsedTimestamp : fallbackTimestamp,
+    };
+}
+
+/** Fetches recent feed items for one session, returning an empty list on failure. */
+async function fetchSessionFeedItems(session: Session): Promise<FeedItem[]> {
+    let history: SessionHistoryResponse;
+    try {
+        history = await apiFetchRequired<SessionHistoryResponse>(
+            `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
+        );
+    } catch {
+        return [];
+    }
+
+    const messages = Array.isArray(history.messages) ? history.messages : [];
+    return messages.map((message, index) => toFeedItem(session, message, index));
+}
+
+/** Fetches and merges live-feed items for the provided session candidates. */
+async function fetchLiveFeedItems(sessions: Session[]): Promise<FeedItem[]> {
+    const historyBySession = await Promise.all(
+        sessions.map((session) => fetchSessionFeedItems(session))
+    );
+
+    return historyBySession
+        .flat()
+        .filter((item) => item.content.length > 0)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 300);
+}
+
 /** Provides live feed. */
 export function useLiveFeed(sessions: Session[], refreshInterval: number | false) {
     const feedSessionCandidates = Array.isArray(sessions)
@@ -49,57 +112,6 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
         enabled: feedSessionCandidates.length > 0,
         refetchInterval: refreshInterval,
         staleTime: 2_000,
-        queryFn: async () => {
-            const historyBySession = await Promise.all(
-                feedSessionCandidates.map(async (session) => {
-                    let history: SessionHistoryResponse;
-                    try {
-                        history = await apiFetchRequired<SessionHistoryResponse>(
-                            `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
-                        );
-                    } catch {
-                        return [];
-                    }
-
-                    const messages = Array.isArray(history.messages)
-                        ? history.messages
-                        : [];
-
-                    return messages.map((message, index) => {
-                        const fallbackTimestamp = session.updatedAt || Date.now();
-                        const parsedTimestamp = message.timestamp
-                            ? new Date(message.timestamp).getTime()
-                            : fallbackTimestamp;
-
-                        const rawRole = String(message.role || "unknown").toLowerCase();
-                        const normalizedRole =
-                            rawRole === "toolresult" || rawRole === "tool-result"
-                                ? "tool_result"
-                                : rawRole;
-
-                        return {
-                            id: `${session.key}-${index}-${parsedTimestamp}`,
-                            sessionKey: session.key,
-                            sessionLabel:
-                                session.displayLabel ||
-                                session.displayName ||
-                                session.key,
-                            sessionType: (session.type || "unknown").toUpperCase(),
-                            role: normalizedRole,
-                            content: String(message.content || "").trim(),
-                            timestamp: Number.isFinite(parsedTimestamp)
-                                ? parsedTimestamp
-                                : fallbackTimestamp,
-                        } as FeedItem;
-                    });
-                })
-            );
-
-            return historyBySession
-                .flat()
-                .filter((item) => item.content.length > 0)
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .slice(0, 300);
-        },
+        queryFn: () => fetchLiveFeedItems(feedSessionCandidates),
     });
 }
