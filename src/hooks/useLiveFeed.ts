@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
+import {
+    compactStatusText,
+    formatToolName,
+    normalizeRuntimeStream,
+    runtimeProgressText,
+    stringValue,
+} from "../components/features/chat/useChatRuntimeEvents";
 import { type Session } from "../types/session";
+import { type SocketEnvelope } from "../types/socket";
 import { apiFetchRequired } from "./useApi";
 
 /** Represents the session history API response. */
@@ -76,13 +84,41 @@ function normalizeFeedRole(role: string): string {
     return rawRole;
 }
 
+/** Returns a plain object when the supplied runtime payload is record-like. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+}
+
+/** Creates a compact deterministic hash for feed fallback identifiers. */
+function stableFeedHash(value: string): string {
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.codePointAt(index) || 0;
+        hash = Math.imul(hash, 0x01000193);
+    }
+
+    return (hash >>> 0).toString(36);
+}
+
+/** Normalizes optional session timestamps without using wall-clock fallbacks. */
+function getSessionFallbackTimestamp(session: Session): number {
+    if (typeof session.updatedAt === "number" && Number.isFinite(session.updatedAt)) {
+        return session.updatedAt;
+    }
+
+    return 0;
+}
+
 /** Converts one API history message into a dashboard feed item. */
 function toFeedItem(
     session: Session,
     message: SessionHistoryResponse["messages"][number],
     index: number
 ): FeedItem {
-    const fallbackTimestamp = session.updatedAt || Date.now();
+    const fallbackTimestamp = getSessionFallbackTimestamp(session);
     const parsedTimestamp = message.timestamp
         ? new Date(message.timestamp).getTime()
         : fallbackTimestamp;
@@ -101,7 +137,7 @@ function toFeedItem(
     };
 }
 
-/** Builds a stable row id, falling back to timestamped indexes when history lacks ids. */
+/** Builds a stable row id, falling back to deterministic content fingerprints. */
 function getFeedMessageId(
     session: Session,
     message: SessionHistoryResponse["messages"][number],
@@ -116,7 +152,161 @@ function getFeedMessageId(
         return `${session.key}-${message.id}`;
     }
 
-    return `${session.key}-${index}-${timestamp}`;
+    return `${session.key}-fallback-${stableFeedHash(
+        [index, message.role || "unknown", timestamp, message.content || ""].join(
+            "\u001F"
+        )
+    )}`;
+}
+
+/** Finds the feed session that owns an incoming Gateway runtime event. */
+function findRuntimeFeedSession(
+    sessions: Session[],
+    payload: Record<string, unknown>
+): Session | null {
+    const sessionKey = stringValue(payload.sessionKey);
+    if (sessionKey) {
+        const normalizedSessionKey = sessionKey.toLowerCase();
+        const matchingSession = sessions.find(
+            (session) => session.key.toLowerCase() === normalizedSessionKey
+        );
+
+        if (matchingSession) {
+            return matchingSession;
+        }
+    }
+
+    const runId = stringValue(payload.runId);
+    if (!runId) {
+        return null;
+    }
+
+    return (
+        sessions.find((session) =>
+            [
+                session.id,
+                session.runId,
+                session.activeRunId,
+                session.currentRunId,
+            ].includes(runId)
+        ) || null
+    );
+}
+
+/** Extracts compact display text from live Gateway session.message events. */
+function runtimeMessageFeedText(payload: Record<string, unknown>): string | null {
+    const raw = payload.message ?? payload.content ?? payload.deltaText ?? payload.text;
+    if (typeof raw === "string") {
+        return compactStatusText(raw);
+    }
+
+    if (Array.isArray(raw)) {
+        const text = raw
+            .map((item) => {
+                const record = asRecord(item);
+                return record ? stringValue(record.text) || "" : "";
+            })
+            .join("")
+            .trim();
+
+        return text ? compactStatusText(text) : null;
+    }
+
+    return null;
+}
+
+/** Returns whether a tool event is chat delivery noise rather than session work. */
+function isDeliveryToolName(value: string): boolean {
+    const normalized = value.startsWith("functions.")
+        ? value.slice("functions.".length)
+        : value;
+    return [
+        "message",
+        "messages",
+        "reply",
+        "send",
+        "reaction",
+        "react",
+        "typing",
+    ].includes(normalized.toLowerCase());
+}
+
+/** Extracts compact display text from live Gateway session.tool events. */
+function runtimeToolFeedText(
+    eventName: string,
+    stream: string,
+    phase: string,
+    data: Record<string, unknown>
+): string | null {
+    const progress = runtimeProgressText(eventName, stream, phase, data);
+    if (progress) {
+        return progress;
+    }
+
+    const toolName = stringValue(data.name) || stringValue(data.toolName);
+    if (toolName && isDeliveryToolName(toolName)) {
+        return null;
+    }
+
+    return toolName ? formatToolName(toolName) : null;
+}
+
+/** Converts one Gateway runtime websocket event into a live-feed item. */
+export function feedItemFromSocketEvent(
+    envelope: SocketEnvelope,
+    sessions: Session[],
+    receivedAt: number = Date.now()
+): FeedItem | null {
+    if (envelope.type !== "event" || typeof envelope.event !== "string") {
+        return null;
+    }
+
+    if (envelope.event !== "session.message" && envelope.event !== "session.tool") {
+        return null;
+    }
+
+    const payload = asRecord(envelope.payload);
+    if (!payload) {
+        return null;
+    }
+
+    const session = findRuntimeFeedSession(sessions, payload);
+    if (!session) {
+        return null;
+    }
+
+    const data = asRecord(payload.data) || payload;
+    const stream = normalizeRuntimeStream(stringValue(payload.stream) || "");
+    const phase = stringValue(data.phase) || "";
+    const role = envelope.event === "session.tool" ? "tool" : "assistant";
+    const content =
+        envelope.event === "session.message"
+            ? runtimeMessageFeedText(payload)
+            : runtimeToolFeedText(envelope.event, stream, phase, data);
+
+    if (!content) {
+        return null;
+    }
+
+    const eventId =
+        stringValue(payload.id) ||
+        stringValue(data.id) ||
+        stringValue(data.toolCallId) ||
+        stringValue(data.tool_call_id) ||
+        stringValue(data.callId) ||
+        stableFeedHash(
+            JSON.stringify([envelope.event, payload.runId, stream, phase, content])
+        );
+
+    return {
+        id: `${session.key}-live-${eventId}-${receivedAt}`,
+        sessionKey: session.key,
+        sessionLabel: getSessionFeedLabel(session),
+        sessionType: (session.type || "unknown").toUpperCase(),
+        role,
+        content,
+        timestamp: receivedAt,
+    };
 }
 
 /** Fetches recent feed items for one session, returning an empty list on failure. */

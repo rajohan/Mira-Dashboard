@@ -424,6 +424,56 @@ function normalizeTimestamp(value: unknown): number | undefined {
     return undefined;
 }
 
+/** Creates a compact deterministic hash for fallback history ids. */
+function stableHistoryHash(value: string): string {
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.codePointAt(index) || 0;
+        hash = Math.imul(hash, 0x01000193);
+    }
+
+    return (hash >>> 0).toString(36);
+}
+
+/** Assigns deterministic ids to history rows that Gateway returned without ids. */
+function withStableHistoryIds(
+    messages: Array<{
+        id?: number | string;
+        role: string;
+        content: string;
+        timestamp?: string;
+    }>
+): Array<{
+    id: number | string;
+    role: string;
+    content: string;
+    timestamp?: string;
+}> {
+    const seen = new Map<string, number>();
+
+    return messages.map((message) => {
+        if (
+            message.id !== undefined &&
+            message.id !== null &&
+            String(message.id).length > 0
+        ) {
+            return { ...message, id: message.id };
+        }
+
+        const fingerprint = stableHistoryHash(
+            [message.role, message.timestamp || "", message.content].join("\u001F")
+        );
+        const occurrence = seen.get(fingerprint) || 0;
+        seen.set(fingerprint, occurrence + 1);
+
+        return {
+            ...message,
+            id: `fallback:${fingerprint}:${occurrence}`,
+        };
+    });
+}
+
 /** Returns transcript path. */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
     if (!sessionId) {
@@ -971,19 +1021,21 @@ async function getSessionHistory(
         messages?: HistoryMessage[];
     };
 
-    const allMessages = (result.messages || []).flatMap((msg) =>
-        expandHistoryMessage(msg).map((expanded) => ({
-            id: expanded.id,
-            role: expanded.role || "unknown",
-            content:
-                typeof expanded.content === "string"
-                    ? expanded.content
-                    : normalizeMessageText(expanded.content),
-            timestamp:
-                typeof expanded.timestamp === "number"
-                    ? new Date(expanded.timestamp).toISOString()
-                    : expanded.timestamp,
-        }))
+    const allMessages = withStableHistoryIds(
+        (result.messages || []).flatMap((msg) =>
+            expandHistoryMessage(msg).map((expanded) => ({
+                id: expanded.id,
+                role: expanded.role || "unknown",
+                content:
+                    typeof expanded.content === "string"
+                        ? expanded.content
+                        : normalizeMessageText(expanded.content),
+                timestamp:
+                    typeof expanded.timestamp === "number"
+                        ? new Date(expanded.timestamp).toISOString()
+                        : expanded.timestamp,
+            }))
+        )
     );
 
     const total = allMessages.length;

@@ -194,15 +194,23 @@ describe("sessions routes", () => {
         assert.equal(response.status, 200);
         assert.equal(response.body.total, 3);
         assert.equal(response.body.hasMore, false);
-        assert.deepEqual(response.body.messages, [
-            {
-                id: "1",
-                role: "assistant",
-                content: "Hello world",
-                timestamp: "2026-01-04T23:40:00.000Z",
-            },
-            { id: "2", role: "user", content: "Ping", timestamp: "2026-05-11T02:00:00Z" },
-        ]);
+        assert.match(String(response.body.messages[0]?.id), /^fallback:/u);
+        assert.match(String(response.body.messages[1]?.id), /^fallback:/u);
+        assert.deepEqual(
+            response.body.messages.map(({ content, role, timestamp }) => ({
+                content,
+                role,
+                timestamp,
+            })),
+            [
+                {
+                    role: "assistant",
+                    content: "Hello world",
+                    timestamp: "2026-01-04T23:40:00.000Z",
+                },
+                { role: "user", content: "Ping", timestamp: "2026-05-11T02:00:00Z" },
+            ]
+        );
 
         const missing = await requestJson<{ error: string }>(
             server,

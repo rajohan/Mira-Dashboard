@@ -38,7 +38,7 @@ export {
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { useHealth } from "./useHealth";
 export type { FeedItem } from "./useLiveFeed";
-export { liveFeedKeys, useLiveFeed } from "./useLiveFeed";
+export { feedItemFromSocketEvent, liveFeedKeys, useLiveFeed } from "./useLiveFeed";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export {

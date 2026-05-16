@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
     compact: vi.fn(),
+    feedItemFromSocketEvent: vi.fn(),
     liveFeed: [] as Array<{
         content?: string;
         id: string;
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => ({
         lastActivityAt?: string;
         type?: string;
     }>,
+    subscribe: vi.fn(),
     useLiveFeed: vi.fn(),
     useOpenClawSocket: vi.fn(),
     useSessionActions: vi.fn(),
@@ -92,6 +94,7 @@ vi.mock("../collections/sessions", () => ({
 }));
 
 vi.mock("../hooks", () => ({
+    feedItemFromSocketEvent: mocks.feedItemFromSocketEvent,
     useLiveFeed: mocks.useLiveFeed,
 }));
 
@@ -232,6 +235,7 @@ function mockSessions(overrides = {}) {
     mocks.useOpenClawSocket.mockReturnValue({
         error: null,
         isConnected: true,
+        subscribe: mocks.subscribe,
     });
     mocks.useSessionActions.mockReturnValue({
         compact: mocks.compact,
@@ -256,9 +260,12 @@ describe("Sessions page", () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
         mocks.compact.mockReset();
         mocks.measureElement.mockReset();
+        mocks.feedItemFromSocketEvent.mockReset();
         mocks.remove.mockResolvedValue(Promise.resolve());
         mocks.reset.mockReset();
         mocks.scrollToIndex.mockReset();
+        mocks.subscribe.mockReset();
+        mocks.subscribe.mockReturnValue(() => {});
         mocks.useLiveFeed.mockReset();
         mocks.useOpenClawSocket.mockReset();
         mocks.useSessionActions.mockReset();
@@ -674,6 +681,39 @@ describe("Sessions page", () => {
 
         expect(screen.getByText("exec gh pr checks 54")).toBeInTheDocument();
         expect(screen.queryByText("memory_search")).not.toBeInTheDocument();
+    });
+
+    it("appends live runtime websocket events without waiting for history polling", async () => {
+        let socketListener: ((data: unknown) => void) | undefined;
+        mocks.subscribe.mockImplementation((listener: (data: unknown) => void) => {
+            socketListener = listener;
+            return () => {};
+        });
+        mocks.feedItemFromSocketEvent.mockReturnValue({
+            content: "Exec: gh pr checks 54",
+            id: "main-live-tool-1",
+            role: "tool",
+            sessionLabel: "Main session",
+            sessionKey: "main",
+            sessionType: "DIRECT",
+            text: "Exec: gh pr checks 54",
+            timestamp: Date.parse("2026-05-11T00:02:00.000Z"),
+        });
+
+        render(<Sessions />);
+        act(() => {
+            socketListener?.({
+                event: "session.tool",
+                payload: { sessionKey: "main" },
+                type: "event",
+            });
+        });
+
+        expect(await screen.findByText("Exec: gh pr checks 54")).toBeInTheDocument();
+        expect(mocks.feedItemFromSocketEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ event: "session.tool" }),
+            expect.any(Array)
+        );
     });
 
     it("leaves an unpinned feed alone when no visible anchor can be captured", () => {

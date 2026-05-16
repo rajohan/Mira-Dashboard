@@ -18,6 +18,42 @@ interface HistoryResponse {
     hasMore: boolean;
 }
 
+/** Creates a compact deterministic hash for session-history fallback ids. */
+function stableRouteHistoryHash(value: string): string {
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.codePointAt(index) || 0;
+        hash = Math.imul(hash, 0x01000193);
+    }
+
+    return (hash >>> 0).toString(36);
+}
+
+/** Returns an upstream id or a deterministic fallback id for a response row. */
+function getHistoryResponseMessageId(
+    message: { id?: number | string; role?: string },
+    content: string,
+    timestamp: string | undefined,
+    seenFallbacks: Map<string, number>
+): number | string {
+    if (
+        message.id !== undefined &&
+        message.id !== null &&
+        String(message.id).length > 0
+    ) {
+        return message.id;
+    }
+
+    const fingerprint = stableRouteHistoryHash(
+        [message.role || "unknown", timestamp || "", content].join("\u001F")
+    );
+    const occurrence = seenFallbacks.get(fingerprint) || 0;
+    seenFallbacks.set(fingerprint, occurrence + 1);
+
+    return `fallback:${fingerprint}:${occurrence}`;
+}
+
 /** Registers sessions API routes. */
 export default function sessionsRoutes(app: express.Application): void {
     // List sessions with optional filtering
@@ -68,6 +104,7 @@ export default function sessionsRoutes(app: express.Application): void {
             const history = await gateway.getSessionHistory(session.key, limit, offset);
 
             // Transform messages to match frontend expectations
+            const fallbackIds = new Map<string, number>();
             const messages = history.messages.map(
                 (
                     msg: {
@@ -76,7 +113,7 @@ export default function sessionsRoutes(app: express.Application): void {
                         content?: string | Array<{ type?: string; text?: string }>;
                         timestamp?: string | number;
                     },
-                    idx: number
+                    _idx: number
                 ) => {
                     // Handle content as array of blocks
                     const content = Array.isArray(msg.content)
@@ -96,7 +133,12 @@ export default function sessionsRoutes(app: express.Application): void {
                         : undefined;
 
                     return {
-                        id: msg.id ?? `${offset + idx}`,
+                        id: getHistoryResponseMessageId(
+                            msg,
+                            content,
+                            timestamp,
+                            fallbackIds
+                        ),
                         role: msg.role || "unknown",
                         content,
                         timestamp,

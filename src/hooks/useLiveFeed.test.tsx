@@ -2,7 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
-import { useLiveFeed } from "./useLiveFeed";
+import { feedItemFromSocketEvent, useLiveFeed } from "./useLiveFeed";
 
 describe("useLiveFeed", () => {
     afterEach(() => {
@@ -115,7 +115,6 @@ describe("useLiveFeed", () => {
 
         await waitFor(() =>
             expect(result.current.data?.[0]).toMatchObject({
-                id: "s3-0-7",
                 sessionLabel: "s3",
                 sessionType: "UNKNOWN",
                 role: "unknown",
@@ -123,6 +122,85 @@ describe("useLiveFeed", () => {
                 timestamp: 7,
             })
         );
+        expect(result.current.data?.[0]?.id).toMatch(/^s3-fallback-/u);
+    });
+
+    it("uses deterministic fallback ids when history rows lack ids and timestamps", async () => {
+        vi.spyOn(Date, "now").mockReturnValue(987_654_321);
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                messages: [{ role: "assistant", content: "visible" }],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(
+            () => useLiveFeed([{ key: "s3", updatedAt: null }] as never, false),
+            { wrapper: createQueryWrapper() }
+        );
+
+        await waitFor(() => expect(result.current.data?.[0]?.content).toBe("visible"));
+
+        expect(result.current.data?.[0]?.timestamp).toBe(0);
+        expect(result.current.data?.[0]?.id).toMatch(/^s3-fallback-/u);
+        expect(result.current.data?.[0]?.id).not.toContain("987654321");
+    });
+
+    it("converts runtime socket events into feed rows for matching sessions", () => {
+        const session = {
+            activeRunId: "run-1",
+            displayLabel: "Main",
+            id: "session-1",
+            key: "agent:main:main",
+            type: "main",
+        };
+
+        expect(
+            feedItemFromSocketEvent(
+                {
+                    event: "session.tool",
+                    payload: {
+                        data: {
+                            args: { cmd: "gh pr checks 54" },
+                            name: "exec_command",
+                        },
+                        runId: "run-1",
+                    },
+                    type: "event",
+                },
+                [session] as never,
+                123
+            )
+        ).toMatchObject({
+            content: "Exec command: gh pr checks 54",
+            id: expect.stringMatching(/^agent:main:main-live-/u),
+            role: "tool",
+            sessionKey: "agent:main:main",
+            sessionLabel: "Main",
+            sessionType: "MAIN",
+            timestamp: 123,
+        });
+
+        expect(
+            feedItemFromSocketEvent(
+                {
+                    event: "session.message",
+                    payload: {
+                        message: "Working",
+                        sessionKey: "agent:main:main",
+                    },
+                    type: "event",
+                },
+                [session] as never,
+                124
+            )
+        ).toMatchObject({
+            content: "Working",
+            role: "assistant",
+            timestamp: 124,
+        });
     });
 
     it("stays disabled without valid sessions", () => {

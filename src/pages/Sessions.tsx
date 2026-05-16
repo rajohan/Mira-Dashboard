@@ -14,7 +14,7 @@ import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { Select } from "../components/ui/Select";
-import { type FeedItem, useLiveFeed } from "../hooks";
+import { type FeedItem, feedItemFromSocketEvent, useLiveFeed } from "../hooks";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
@@ -174,7 +174,7 @@ function countFeedRole(items: FeedItem[], role: string): number {
 
 /** Renders the sessions UI. */
 export function Sessions() {
-    const { isConnected, error } = useOpenClawSocket();
+    const { isConnected, error, subscribe } = useOpenClawSocket();
     const sessionActions = useSessionActions();
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -192,6 +192,7 @@ export function Sessions() {
     const feedRowsReference = useRef<FeedRow[]>([]);
     const feedVirtualItemsReference = useRef<FeedVirtualItem[]>([]);
     const pendingFeedAnchorReference = useRef<FeedViewportAnchor | null>(null);
+    const liveFeedSessionsReference = useRef<Session[]>([]);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -199,6 +200,7 @@ export function Sessions() {
 
     const sessionRows = Array.isArray(sessions) ? sessions : [];
     const sortedSessions = sortSessionsByTypeAndActivity(sessionRows);
+    liveFeedSessionsReference.current = sortedSessions;
     const filteredSessions =
         typeFilter === "ALL"
             ? sortedSessions
@@ -338,6 +340,25 @@ export function Sessions() {
             return next.items;
         });
     }, [latestFeedItems]);
+
+    useEffect(() => {
+        if (!isConnected) {
+            return;
+        }
+
+        return subscribe((data) => {
+            const item = feedItemFromSocketEvent(
+                data as Parameters<typeof feedItemFromSocketEvent>[0],
+                liveFeedSessionsReference.current
+            );
+
+            if (!item) {
+                return;
+            }
+
+            setLiveFeed((previous) => mergeLiveFeedItems(previous, [item]).items);
+        });
+    }, [isConnected, subscribe]);
 
     useLayoutEffect(() => {
         const filterKey = `${feedRoleFilter}:${feedSessionFilter}:${feedTypeFilter}`;
