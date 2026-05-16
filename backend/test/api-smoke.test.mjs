@@ -709,10 +709,6 @@ test("session APIs return empty disconnected state and validate unsupported acti
         activeInLastHour: 0,
     });
 
-    const history = await request("/api/sessions/missing/history");
-    assert.equal(history.response.status, 404);
-    assert.equal(history.body.error, "Session not found");
-
     const unsupportedAction = await request("/api/sessions/missing/action", {
         method: "POST",
         body: JSON.stringify({ action: "dance" }),

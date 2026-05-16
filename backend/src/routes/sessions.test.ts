@@ -15,7 +15,6 @@ interface TestServer {
 const originalGateway = {
     abortSessionRun: gateway.abortSessionRun,
     deleteSession: gateway.deleteSession,
-    getSessionHistory: gateway.getSessionHistory,
     getSessions: gateway.getSessions,
     sendSessionMessage: gateway.sendSessionMessage,
 };
@@ -103,20 +102,6 @@ describe("sessions routes", () => {
     before(async () => {
         console.log = () => {};
         gateway.getSessions = () => [...sessions];
-        gateway.getSessionHistory = (async () => ({
-            total: 3,
-            messages: [
-                {
-                    role: "assistant",
-                    content: [
-                        { type: "text", text: "Hello" },
-                        { type: "text", text: " world" },
-                    ],
-                    timestamp: 1_767_570_000_000,
-                },
-                { role: "user", content: "Ping", timestamp: "2026-05-11T02:00:00Z" },
-            ],
-        })) as typeof gateway.getSessionHistory;
         gateway.sendSessionMessage = async (key: string, message: string) => {
             sentMessages.push({ key, message });
         };
@@ -135,7 +120,6 @@ describe("sessions routes", () => {
         console.log = originalConsoleLog;
         gateway.abortSessionRun = originalGateway.abortSessionRun;
         gateway.deleteSession = originalGateway.deleteSession;
-        gateway.getSessionHistory = originalGateway.getSessionHistory;
         gateway.getSessions = originalGateway.getSessions;
         gateway.sendSessionMessage = originalGateway.sendSessionMessage;
     });
@@ -176,39 +160,6 @@ describe("sessions routes", () => {
         assert.deepEqual(response.body.byModel, { codex: 1, kimi: 1 });
         assert.equal(response.body.totalTokens, 200);
         assert.equal(response.body.activeInLastHour, 1);
-    });
-
-    it("loads history by id or key and transforms message content", async () => {
-        const response = await requestJson<{
-            messages: Array<{
-                id: string;
-                role: string;
-                content: string;
-                timestamp?: string;
-            }>;
-            total: number;
-            hasMore: boolean;
-            nextOffset?: number;
-        }>(server, "/api/sessions/main-id/history?limit=2&offset=1");
-
-        assert.equal(response.status, 200);
-        assert.equal(response.body.total, 3);
-        assert.equal(response.body.hasMore, false);
-        assert.deepEqual(response.body.messages, [
-            {
-                id: "1",
-                role: "assistant",
-                content: "Hello world",
-                timestamp: "2026-01-04T23:40:00.000Z",
-            },
-            { id: "2", role: "user", content: "Ping", timestamp: "2026-05-11T02:00:00Z" },
-        ]);
-
-        const missing = await requestJson<{ error: string }>(
-            server,
-            "/api/sessions/missing/history"
-        );
-        assert.equal(missing.status, 404);
     });
 
     it("runs session actions and deletes sessions through the gateway", async () => {

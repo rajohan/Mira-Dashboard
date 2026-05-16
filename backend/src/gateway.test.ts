@@ -6,27 +6,32 @@ import { after, before, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
+/** Provides a minimal WebSocket stand-in for gateway client tests. */
 class FakeWebSocket {
     readonly sent: string[] = [];
     private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
     readyState = WebSocket.OPEN;
 
+    /** Registers one fake WebSocket event listener. */
     on(event: string, listener: (...args: unknown[]) => void): this {
         this.listeners.set(event, [...(this.listeners.get(event) || []), listener]);
         return this;
     }
 
+    /** Emits one fake WebSocket event to registered listeners. */
     emit(event: string, ...args: unknown[]): void {
         for (const listener of this.listeners.get(event) || []) {
             listener(...args);
         }
     }
 
+    /** Captures outbound WebSocket data for assertions. */
     send(data: string): void {
         this.sent.push(data);
     }
 }
 
+/** Waits one tick so async WebSocket handlers can settle. */
 async function waitForAsyncHandlers(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }

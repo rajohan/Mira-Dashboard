@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,16 +42,23 @@ const sessions: Session[] = [
     },
 ];
 
+/** Renders the sessions table with default action spies and optional props. */
 function renderTable(overrides = {}) {
     const handlers = {
         onCompact: vi.fn(),
         onDelete: vi.fn(),
         onReset: vi.fn(),
-        onSelectSession: vi.fn(),
     };
 
     render(<SessionsTable sessions={sessions} {...handlers} {...overrides} />);
     return handlers;
+}
+
+/** Returns the rendered action menu trigger buttons. */
+function getActionMenuButtons() {
+    return screen
+        .getAllByRole("button")
+        .filter((button) => button.getAttribute("aria-haspopup") === "menu");
 }
 
 describe("SessionsTable", () => {
@@ -61,40 +68,29 @@ describe("SessionsTable", () => {
         expect(screen.getByText("No sessions found")).toBeInTheDocument();
     });
 
-    it("renders sessions and selects rows", async () => {
-        const user = userEvent.setup();
-        const handlers = renderTable();
+    it("renders sessions", () => {
+        renderTable();
 
         expect(screen.getAllByText("Main").length).toBeGreaterThan(0);
         expect(screen.getAllByText("Research helper").length).toBeGreaterThan(0);
         expect(screen.getAllByText("codex").length).toBeGreaterThan(0);
         expect(screen.getAllByText("25.0k / 100k").length).toBeGreaterThan(0);
-
-        await user.click(screen.getAllByText("Main")[0]);
-
-        expect(handlers.onSelectSession).toHaveBeenCalledWith(sessions[0]);
     });
 
-    it("invokes compact, reset, and delete actions without selecting the row", async () => {
+    it("invokes compact, reset, and delete actions", async () => {
         const user = userEvent.setup();
         const handlers = renderTable();
 
-        const actionButtons = () =>
-            screen
-                .getAllByRole("button")
-                .filter((button) => button.getAttribute("aria-haspopup") === "menu");
-
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Reset" }));
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
         expect(handlers.onCompact).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
-        expect(handlers.onSelectSession).not.toHaveBeenCalled();
     });
 
     it("sorts and handles desktop table row/actions", async () => {
@@ -103,7 +99,6 @@ describe("SessionsTable", () => {
         const table = screen.getByRole("table");
 
         await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
-        await user.click(within(table).getAllByRole("row")[1]!);
 
         const tableActionButton = within(table)
             .getAllByRole("button")
@@ -111,11 +106,10 @@ describe("SessionsTable", () => {
         await user.click(tableActionButton);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
 
-        expect(handlers.onSelectSession).toHaveBeenCalled();
         expect(handlers.onCompact).toHaveBeenCalled();
     });
 
-    it("handles keyboard selection and fallback labels", () => {
+    it("handles fallback labels", () => {
         const fallbackSession: Session = {
             ...sessions[0],
             displayLabel: "",
@@ -128,22 +122,11 @@ describe("SessionsTable", () => {
             tokenCount: 0,
             updatedAt: null,
         };
-        const handlers = renderTable({ sessions: [fallbackSession] });
+        renderTable({ sessions: [fallbackSession] });
 
         expect(screen.getAllByText("fallback-id").length).toBeGreaterThan(0);
         expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
         expect(screen.getAllByText("0.0k / 200k").length).toBeGreaterThan(0);
-
-        const mobileCard = screen
-            .getAllByRole("button")
-            .find((button) => button.textContent?.includes("fallback-id"));
-
-        expect(mobileCard).toBeDefined();
-        fireEvent.keyDown(mobileCard!, { key: "Enter" });
-        fireEvent.keyDown(mobileCard!, { key: " " });
-
-        expect(handlers.onSelectSession).toHaveBeenCalledTimes(2);
-        expect(handlers.onSelectSession).toHaveBeenCalledWith(fallbackSession);
     });
 
     it("treats non-array session data as empty", () => {

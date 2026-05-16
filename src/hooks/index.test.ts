@@ -15,7 +15,6 @@ describe("hooks barrel", () => {
         expect(hooks.cacheKeys.all).toEqual(["cache"]);
         expect(hooks.cronKeys.all).toEqual(["cron"]);
         expect(hooks.fileKeys.all).toEqual(["files"]);
-        expect(hooks.liveFeedKeys.all).toEqual(["live-feed"]);
         expect(hooks.logKeys.files()).toEqual(["logs", "files"]);
         expect(hooks.pullRequestKeys.all).toEqual(["pull-requests"]);
         expect(hooks.sessionKeys.all).toEqual(["sessions"]);

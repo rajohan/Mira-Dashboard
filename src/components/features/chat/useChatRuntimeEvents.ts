@@ -98,6 +98,7 @@ export function detailFromArgs(value: unknown): string | undefined {
 
     const keys = [
         "command",
+        "cmd",
         "query",
         "url",
         "path",

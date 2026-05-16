@@ -23,7 +23,6 @@ const columnHelper = createColumnHelper<Session>();
 /** Provides props for sessions table. */
 interface SessionsTableProps {
     sessions: Session[];
-    onSelectSession: (session: Session) => void;
     onCompact: (key: string) => void;
     onReset: (key: string) => void;
     onDelete: (session: Session) => void;
@@ -32,7 +31,6 @@ interface SessionsTableProps {
 /** Renders the sessions table UI. */
 export function SessionsTable({
     sessions,
-    onSelectSession,
     onCompact,
     onReset,
     onDelete,
@@ -43,11 +41,13 @@ export function SessionsTable({
     const columns = [
         columnHelper.accessor("type", {
             header: "Type",
+            /** Renders the formatted session type badge. */
             cell: (info) => (
                 <Badge variant={getSessionTypeVariant(info.getValue())}>
                     {formatSessionType(info.row.original)}
                 </Badge>
             ),
+            /** Sorts session types by the dashboard's preferred type order. */
             sortingFn: (a, b) => {
                 const orderA = getTypeSortOrder(a.original.type);
                 const orderB = getTypeSortOrder(b.original.type);
@@ -59,6 +59,7 @@ export function SessionsTable({
             {
                 id: "name",
                 header: "Name",
+                /** Renders the best available session display name. */
                 cell: (info) => (
                     <span className="text-primary-200 block max-w-xs truncate text-sm">
                         {info.getValue()?.slice(0, 40) || "unknown"}
@@ -68,6 +69,7 @@ export function SessionsTable({
         ),
         columnHelper.accessor("model", {
             header: "Model",
+            /** Renders the model name fallback for sparse session rows. */
             cell: (info) => (
                 <span className="text-primary-300 text-sm">
                     {info.getValue() || "Unknown"}
@@ -76,6 +78,7 @@ export function SessionsTable({
         }),
         columnHelper.accessor("tokenCount", {
             header: "Tokens",
+            /** Renders token usage text and progress for the session row. */
             cell: (info) => {
                 const current = info.getValue() || 0;
                 const max = info.row.original.maxTokens || 200_000;
@@ -92,6 +95,7 @@ export function SessionsTable({
         }),
         columnHelper.accessor("updatedAt", {
             header: "Last Active",
+            /** Renders the relative session activity age. */
             cell: (info) => (
                 <span className="text-primary-400 text-sm">
                     {formatDuration(info.getValue())}
@@ -101,6 +105,7 @@ export function SessionsTable({
         columnHelper.display({
             id: "actions",
             header: "",
+            /** Renders the row action menu without selecting the row. */
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <SessionActionsDropdown
@@ -149,16 +154,7 @@ export function SessionsTable({
                     return (
                         <div
                             key={row.id}
-                            role="button"
-                            tabIndex={0}
-                            className="border-primary-700 bg-primary-900/60 hover:border-primary-600 hover:bg-primary-800/80 cursor-pointer rounded-lg border p-3 transition"
-                            onClick={() => onSelectSession(session)}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    onSelectSession(session);
-                                }
-                            }}
+                            className="border-primary-700 bg-primary-900/60 rounded-lg border p-3"
                         >
                             <div className="mb-2 flex items-start justify-between gap-3">
                                 <div className="min-w-0 space-y-1">
@@ -242,11 +238,7 @@ export function SessionsTable({
                     </thead>
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr
-                                key={row.id}
-                                className="border-primary-700/50 hover:bg-primary-700/30 cursor-pointer border-b"
-                                onClick={() => onSelectSession(row.original)}
-                            >
+                            <tr key={row.id} className="border-primary-700/50 border-b">
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">
                                         {flexRender(
