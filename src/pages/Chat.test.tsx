@@ -641,7 +641,7 @@ describe("Chat", () => {
             expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
-        expect(screen.getByTestId("agent-options")).toHaveTextContent("mira");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("session");
         expect(await screen.findByText("old assistant message")).toBeInTheDocument();
         expect(mocks.request).toHaveBeenCalledWith("models.list", {
             view: "configured",
