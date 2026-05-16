@@ -17,7 +17,7 @@ import {
 interface MockLiveSession {
     agentType?: string;
     displayLabel: string;
-    key: string;
+    key?: string;
     label: string;
     model: string;
     type: string;
@@ -891,10 +891,58 @@ describe("Chat", () => {
         );
     });
 
+    it("falls back to the first agent session when reported session is unavailable", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:ops:missing",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:ops:fallback",
+                displayLabel: "Ops fallback",
+                label: "fallback",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:ops:fallback"
+            )
+        );
+    });
+
     it("handles sessions without a key while deriving chat buckets", async () => {
         mocks.liveSessions = [
             {
-                key: undefined as unknown as string,
+                key: undefined,
                 agentType: "direct",
                 displayLabel: "Missing key chat",
                 label: "missing",
