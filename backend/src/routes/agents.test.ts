@@ -382,6 +382,45 @@ describe("agents routes", () => {
         }
     });
 
+    it("sorts live Gateway agent sessions by normalized timestamps", async () => {
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:old",
+                                model: "old-model",
+                                updatedAt: "2026-05-16T12:00:00.000Z",
+                            },
+                            {
+                                key: "agent:alias-agent:new",
+                                model: "new-model",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                sessionKey: string;
+                model: string;
+                lastActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.sessionKey, "agent:alias-agent:new");
+            assert.equal(response.body.model, "new-model");
+            assert.equal(response.body.lastActivity, "2026-05-16T13:00:00.000Z");
+        } finally {
+            gateway.request = previousGatewayRequest;
+        }
+    });
+
     it("rejects symlink aliases to another agent's sessions", async () => {
         const agentsRoot = path.join(homeDir, ".openclaw", "agents");
         const aliasPath = path.join(agentsRoot, "alias-agent");

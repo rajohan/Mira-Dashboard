@@ -753,8 +753,8 @@ function findBestSessionForAgent(
     ];
 
     return matches.sort((a, b) => {
-        const timeA = a.updatedAt || 0;
-        const timeB = b.updatedAt || 0;
+        const timeA = toTimestamp(a.updatedAt) || 0;
+        const timeB = toTimestamp(b.updatedAt) || 0;
         const preferredA = preferredKinds.some((part) => a.key.includes(part)) ? 1 : 0;
         const preferredB = preferredKinds.some((part) => b.key.includes(part)) ? 1 : 0;
 
