@@ -2,7 +2,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Sessions } from "./Sessions";
+import {
+    type FeedRow,
+    findFeedRowIndex,
+    getFeedViewportAnchor,
+    restoreFeedViewportOffset,
+    Sessions,
+    trimLiveFeedItems,
+} from "./Sessions";
 
 const mocks = vi.hoisted(() => ({
     compact: vi.fn(),
@@ -253,6 +260,51 @@ describe("Sessions page", () => {
         vi.restoreAllMocks();
     });
 
+    it("handles feed anchor helper edge cases", () => {
+        const rows: FeedRow[] = [
+            { kind: "separator", key: "sep", label: "Now" },
+            { kind: "message", key: "message", item: mocks.liveFeed[0] as never },
+        ];
+        const container = document.createElement("div");
+        Object.defineProperty(container, "scrollTop", {
+            configurable: true,
+            value: 75,
+            writable: true,
+        });
+
+        expect(getFeedViewportAnchor(null, rows, [])).toBeNull();
+        expect(
+            getFeedViewportAnchor(container, rows, [{ end: 10, index: 0, start: 0 }])
+        ).toBeNull();
+        expect(
+            getFeedViewportAnchor(container, rows, [{ end: 80, index: 1, start: 50 }])
+        ).toEqual({ key: "message", offset: 25 });
+        expect(findFeedRowIndex(rows, "message")).toBe(1);
+        expect(findFeedRowIndex(rows, "missing")).toBe(-1);
+        expect(
+            restoreFeedViewportOffset(null, { key: "message", offset: 10 })
+        ).toBeNull();
+        expect(restoreFeedViewportOffset(container, { key: "message", offset: 10 })).toBe(
+            85
+        );
+    });
+
+    it("trims retained live feed items to the sticky history limit", () => {
+        const items = Array.from({ length: 501 }, (_, index) => ({
+            content: `message ${index}`,
+            id: `feed-${index}`,
+            role: "assistant",
+            sessionKey: "main",
+            sessionLabel: "Main",
+            sessionType: "direct",
+            timestamp: index,
+        }));
+
+        expect(trimLiveFeedItems(items)).toHaveLength(500);
+        expect(trimLiveFeedItems(items)[0]?.id).toBe("feed-1");
+        expect(trimLiveFeedItems(items.slice(0, 2))).toHaveLength(2);
+    });
+
     it("renders live feed and connected sessions", async () => {
         render(<Sessions />);
 
@@ -405,6 +457,11 @@ describe("Sessions page", () => {
     });
 
     it("preserves the visible feed anchor when rows are backfilled while unpinned", async () => {
+        vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+            callback(0);
+            return 1;
+        });
+        vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
         mockSessions({
             feed: [
                 {
@@ -457,6 +514,58 @@ describe("Sessions page", () => {
             })
         );
         expect(screen.getByText("backfilled message")).toBeInTheDocument();
+        expect(feedContainer.scrollTop).toBe(200);
+    });
+
+    it("leaves an unpinned feed alone when no visible anchor can be captured", () => {
+        mockSessions({
+            feed: [
+                {
+                    id: "anchor",
+                    role: "assistant",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "anchor message",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        const { rerender } = render(<Sessions />);
+        const feedContainer = screen
+            .getByText("anchor message")
+            .closest("div[style]") as HTMLDivElement;
+        Object.defineProperties(feedContainer, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 20_000 },
+            scrollTop: { configurable: true, value: 10_000, writable: true },
+        });
+        fireEvent.scroll(feedContainer);
+        mocks.scrollToIndex.mockClear();
+
+        mockSessions({
+            feed: [
+                {
+                    id: "backfill",
+                    role: "user",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "backfilled message",
+                    timestamp: Date.parse("2026-05-11T00:00:00.000Z"),
+                },
+                {
+                    id: "anchor",
+                    role: "assistant",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "anchor message",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        rerender(<Sessions />);
+
+        expect(screen.getByText("backfilled message")).toBeInTheDocument();
+        expect(mocks.scrollToIndex).not.toHaveBeenCalled();
     });
 
     it("shows delete errors from failed session removal", async () => {

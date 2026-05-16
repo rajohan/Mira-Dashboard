@@ -25,23 +25,26 @@ import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 const FEED_BOTTOM_THRESHOLD_PX = 32;
 const MAX_STICKY_LIVE_FEED_ITEMS = 500;
 
-type FeedRow =
+/** Represents one rendered row in the virtualized live feed. */
+export type FeedRow =
     | { kind: "separator"; key: string; label: string }
     | { kind: "message"; key: string; item: FeedItem };
 
-interface FeedVirtualItem {
+/** Represents the virtualizer row geometry used for scroll anchoring. */
+export interface FeedVirtualItem {
     end: number;
     index: number;
     start: number;
 }
 
-interface FeedViewportAnchor {
+/** Represents the visible feed row and intra-row offset to restore after inserts. */
+export interface FeedViewportAnchor {
     key: string;
     offset: number;
 }
 
 /** Captures the first visible message row so unpinned readers keep their place. */
-function getFeedViewportAnchor(
+export function getFeedViewportAnchor(
     container: HTMLDivElement | null,
     rows: FeedRow[],
     virtualItems: FeedVirtualItem[]
@@ -50,27 +53,49 @@ function getFeedViewportAnchor(
         return null;
     }
 
-    const firstVisible = virtualItems.find((virtualItem) => {
+    for (const virtualItem of virtualItems) {
         const row = rows[virtualItem.index];
-        return row?.kind === "message" && virtualItem.end >= container.scrollTop;
-    });
 
-    if (!firstVisible) {
-        return null;
+        if (row?.kind === "message" && virtualItem.end >= container.scrollTop) {
+            return {
+                key: row.key,
+                offset: Math.max(container.scrollTop - virtualItem.start, 0),
+            };
+        }
     }
 
-    const row = rows[firstVisible.index];
-    return row?.kind === "message"
-        ? {
-              key: row.key,
-              offset: Math.max(container.scrollTop - firstVisible.start, 0),
-          }
-        : null;
+    return null;
 }
 
 /** Finds a feed row index by stable row key. */
-function findFeedRowIndex(rows: FeedRow[], key: string): number {
-    return rows.findIndex((row) => row.key === key);
+export function findFeedRowIndex(rows: FeedRow[], key: string): number {
+    for (const [index, row] of rows.entries()) {
+        if (row.key === key) {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+/** Trims retained feed items to the configured sticky history limit. */
+export function trimLiveFeedItems(items: FeedItem[]): FeedItem[] {
+    return items.length > MAX_STICKY_LIVE_FEED_ITEMS
+        ? items.slice(-MAX_STICKY_LIVE_FEED_ITEMS)
+        : items;
+}
+
+/** Restores the captured intra-row scroll offset after virtualizer alignment. */
+export function restoreFeedViewportOffset(
+    container: HTMLDivElement | null,
+    anchor: FeedViewportAnchor
+): number | null {
+    if (!container) {
+        return null;
+    }
+
+    container.scrollTop += anchor.offset;
+    return container.scrollTop;
 }
 
 /** Renders the sessions UI. */
@@ -226,9 +251,7 @@ export function Sessions() {
             }
 
             const sorted = next.sort((a, b) => a.timestamp - b.timestamp);
-            return sorted.length > MAX_STICKY_LIVE_FEED_ITEMS
-                ? sorted.slice(-MAX_STICKY_LIVE_FEED_ITEMS)
-                : sorted;
+            return trimLiveFeedItems(sorted);
         });
     }, [latestFeedItems]);
 
@@ -254,39 +277,38 @@ export function Sessions() {
             return;
         }
 
-        if (!shouldStickFeedToBottomReference.current) {
-            const anchor = pendingFeedAnchorReference.current;
-            pendingFeedAnchorReference.current = null;
+        if (shouldStickFeedToBottomReference.current) {
+            scrollFeedToBottom();
 
-            if (!anchor) {
-                return;
-            }
-
-            const anchorIndex = findFeedRowIndex(feedRows, anchor.key);
-            if (anchorIndex === -1) {
-                return;
-            }
-
-            feedVirtualizer.scrollToIndex(anchorIndex, { align: "start" });
-
-            const scrollFrame = requestAnimationFrame(() => {
-                const container = liveFeedContainerReference.current;
-                if (!container) {
-                    return;
-                }
-
-                container.scrollTop += anchor.offset;
-                lastKnownFeedScrollTopReference.current = container.scrollTop;
-            });
+            const scrollFrame = requestAnimationFrame(scrollFeedToBottom);
 
             return () => cancelAnimationFrame(scrollFrame);
         }
 
-        scrollFeedToBottom();
+        const anchor = pendingFeedAnchorReference.current;
+        pendingFeedAnchorReference.current = null;
 
-        const scrollFrame = requestAnimationFrame(scrollFeedToBottom);
+        if (anchor) {
+            const anchorIndex = findFeedRowIndex(feedRows, anchor.key);
 
-        return () => cancelAnimationFrame(scrollFrame);
+            if (anchorIndex !== -1) {
+                feedVirtualizer.scrollToIndex(anchorIndex, { align: "start" });
+
+                const scrollFrame = requestAnimationFrame(() => {
+                    const restoredScrollTop = restoreFeedViewportOffset(
+                        liveFeedContainerReference.current,
+                        anchor
+                    );
+                    if (restoredScrollTop !== null) {
+                        lastKnownFeedScrollTopReference.current = restoredScrollTop;
+                    }
+                });
+
+                return () => cancelAnimationFrame(scrollFrame);
+            }
+        }
+
+        return;
     }, [
         feedRows.length,
         feedVirtualizer,
