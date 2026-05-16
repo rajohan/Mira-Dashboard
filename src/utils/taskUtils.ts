@@ -72,6 +72,32 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
     return "low";
 }
 
+/** Returns whether a task matches task board search text. */
+export function taskMatchesSearch(task: Task, search: string): boolean {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
+        return true;
+    }
+
+    const searchableValues = [
+        task.number.toString(),
+        task.title,
+        task.body,
+        ...task.labels.map((label) => label.name),
+        ...task.assignees.flatMap((assignee) => [assignee.login, assignee.name]),
+        task.automation?.cronJobId,
+        task.automation?.jobName,
+        task.automation?.scheduleSummary,
+        task.automation?.sessionTarget,
+        task.automation?.model,
+        task.automation?.thinking,
+        task.automation?.lastRunStatus,
+    ];
+
+    return searchableValues.some((value) => value?.toLowerCase().includes(query));
+}
+
 /** Returns column ID. */
 export function getColumnId(taskOrId: Task | string): ColumnId | null {
     if (typeof taskOrId === "string") {
