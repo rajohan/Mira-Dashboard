@@ -303,9 +303,243 @@ describe("agents routes", () => {
         assert.match(response.body.lastActivity, /^\d{4}-\d{2}-\d{2}T/u);
     });
 
+    it("reads OpenClaw v4 trajectory activity and live Gateway session state", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(aliasSessionsDir, "active.trajectory.jsonl"),
+            [
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    data: {
+                        prompt: [
+                            "Sender: noisy metadata",
+                            '"""json'.replaceAll('"', "`"),
+                            '{"ignore":true}',
+                            '"""'.replaceAll('"', "`"),
+                            "Fix agent activity [media attached: screenshot]",
+                        ].join("\n"),
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "exec_command",
+                        args: { cmd: "npm run test -- agents" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "message",
+                        arguments: { message: "Lower priority status update" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "exec_command",
+                        args: { cmd: "npm run result -- agents" },
+                        success: true,
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "functions.message",
+                        arguments: { message: "Namespaced delivery noise" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const gatewayUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "Agent:Alias-Agent:Main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: gatewayUpdatedAt,
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string;
+                sessionKey: string;
+                lastActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentTask, "Fix agent activity");
+            assert.equal(response.body.currentActivity, "exec npm run result -- agents");
+            assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
+            assert.equal(response.body.lastActivity, gatewayUpdatedAt);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("sorts live Gateway agent sessions by normalized timestamps", async () => {
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:old",
+                                model: "old-model",
+                                updatedAt: 1778932800000,
+                            },
+                            {
+                                key: "agent:alias-agent:new",
+                                model: "new-model",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                sessionKey: string;
+                model: string;
+                lastActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.sessionKey, "agent:alias-agent:new");
+            assert.equal(response.body.model, "new-model");
+            assert.equal(response.body.lastActivity, "2026-05-16T13:00:00.000Z");
+        } finally {
+            gateway.request = previousGatewayRequest;
+        }
+    });
+
+    it("prefers main live Gateway sessions case-insensitively", async () => {
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:scratch",
+                                model: "scratch-model",
+                                updatedAt: "2026-05-16T14:00:00.000Z",
+                            },
+                            {
+                                key: "Agent:Alias-Agent:Main",
+                                model: "main-model",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                sessionKey: string;
+                model: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
+            assert.equal(response.body.model, "main-model");
+        } finally {
+            gateway.request = previousGatewayRequest;
+        }
+    });
+
+    it("falls back to the best live Gateway session when file session key is stale", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(aliasSessionsDir, "sessions.json"),
+            JSON.stringify([{ key: "channel:discord:stale", updatedAt: Date.now() }]),
+            "utf8"
+        );
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "live-model",
+                                status: "running",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                sessionKey: string;
+                channel: string | null;
+                model: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.sessionKey, "agent:alias-agent:main");
+            assert.equal(response.body.channel, null);
+            assert.equal(response.body.model, "live-model");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("rejects symlink aliases to another agent's sessions", async () => {
         const agentsRoot = path.join(homeDir, ".openclaw", "agents");
         const aliasPath = path.join(agentsRoot, "alias-agent");
+        await rm(aliasPath, { recursive: true, force: true });
         try {
             await symlink("researcher", aliasPath, "dir");
 
@@ -322,7 +556,7 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, null);
             assert.equal(response.body.sessionKey, null);
         } finally {
-            await rm(aliasPath, { force: true });
+            await rm(aliasPath, { recursive: true, force: true });
         }
     });
 

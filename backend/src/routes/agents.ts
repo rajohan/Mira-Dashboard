@@ -127,7 +127,15 @@ interface AgentTaskHistoryItem {
 interface GatewaySessionSummary {
     key: string;
     model: string;
+    status?: string | null;
     updatedAt?: number | null;
+    startedAt?: string | number | null;
+    endedAt?: string | number | null;
+    runId?: string | null;
+    activeRunId?: string | null;
+    currentRunId?: string | null;
+    isRunning?: boolean | null;
+    running?: boolean | null;
 }
 
 /** Performs to display model name. */
@@ -171,12 +179,32 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     const cached = gateway.getSessions().map((session) => ({
         key: session.key,
         model: session.model,
+        status: session.status,
         updatedAt: session.updatedAt,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        runId: session.runId,
+        activeRunId: session.activeRunId,
+        currentRunId: session.currentRunId,
+        isRunning: session.isRunning,
+        running: session.running,
     }));
 
     try {
         const result = (await gateway.request("sessions.list", {})) as {
-            sessions?: Array<{ key?: string; model?: string; updatedAt?: number | null }>;
+            sessions?: Array<{
+                key?: string;
+                model?: string;
+                status?: string | null;
+                updatedAt?: number | null;
+                startedAt?: number | null;
+                endedAt?: number | null;
+                runId?: string | null;
+                activeRunId?: string | null;
+                currentRunId?: string | null;
+                isRunning?: boolean | null;
+                running?: boolean | null;
+            }>;
         };
 
         if (Array.isArray(result.sessions) && result.sessions.length > 0) {
@@ -187,7 +215,15 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                 .map((session) => ({
                     key: session.key || "",
                     model: session.model || "Unknown",
+                    status: session.status,
                     updatedAt: session.updatedAt,
+                    startedAt: session.startedAt,
+                    endedAt: session.endedAt,
+                    runId: session.runId,
+                    activeRunId: session.activeRunId,
+                    currentRunId: session.currentRunId,
+                    isRunning: session.isRunning,
+                    running: session.running,
                 }));
         }
     } catch {
@@ -195,6 +231,18 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     }
 
     return cached;
+}
+
+/** Returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings. */
+function toTimestamp(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
 }
 
 /** Performs now iso. */
@@ -339,6 +387,9 @@ async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
     } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return [];
+        }
         console.error(
             "[Agents] Failed to read agent sessions.json:",
             (error as Error).message
@@ -357,9 +408,7 @@ interface ActivityInfo {
 
 /** Performs summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
-    const normalizedTool = toolName.includes(".")
-        ? toolName.split(".").pop() || toolName
-        : toolName;
+    const normalizedTool = normalizeToolName(toolName);
 
     const parsed =
         typeof raw === "string"
@@ -397,8 +446,13 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
         | string
         | undefined;
-    const command = (args.command || nested.command) as string | undefined;
+    const command = (args.command || args.cmd || nested.command || nested.cmd) as
+        | string
+        | undefined;
     const action = (args.action || nested.action) as string | undefined;
+    const message = (args.message || args.text || nested.message || nested.text) as
+        | string
+        | undefined;
     const url = (args.url || nested.url) as string | undefined;
 
     // Fallback: parse partialJson/raw string if present
@@ -431,8 +485,19 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "write" && resolvedPath) {
         return `write ${resolvedPath}`;
     }
-    if (normalizedTool === "exec" && command) {
+    if (
+        (normalizedTool === "exec" ||
+            normalizedTool === "exec_command" ||
+            normalizedTool === "bash") &&
+        command
+    ) {
         return `exec ${command.slice(0, 70)}`;
+    }
+    if (normalizedTool === "message" && message) {
+        return `message ${message.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
+    }
+    if (normalizedTool === "apply_patch") {
+        return "edit files";
     }
     if (normalizedTool === "browser" && action) {
         return `browser ${action}${url ? ` ${url}` : ""}`.slice(0, 90);
@@ -446,6 +511,69 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     }
 
     return normalizedTool;
+}
+
+/** Returns a canonical un-namespaced tool name for activity filtering and labels. */
+function normalizeToolName(toolName: string): string {
+    return toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+}
+
+/** Extracts activity details from OpenClaw v4 trajectory events. */
+function getTrajectoryActivity(entry: unknown): {
+    task?: string | null;
+    activity?: string | null;
+} {
+    if (!entry || typeof entry !== "object") {
+        return {};
+    }
+
+    const record = entry as {
+        type?: string;
+        data?: {
+            prompt?: unknown;
+            name?: unknown;
+            arguments?: unknown;
+            args?: unknown;
+            input?: unknown;
+            parameters?: unknown;
+        };
+    };
+    const data = record.data || {};
+    const normalizedToolName =
+        typeof data.name === "string" ? normalizeToolName(data.name) : null;
+
+    if (record.type === "prompt.submitted" && typeof data.prompt === "string") {
+        return { task: data.prompt };
+    }
+
+    if (
+        record.type === "tool.call" &&
+        typeof data.name === "string" &&
+        normalizedToolName !== "message"
+    ) {
+        return {
+            activity: summarizeToolActivity(data.name, {
+                arguments:
+                    data.arguments || data.args || data.input || data.parameters || data,
+            }),
+        };
+    }
+
+    if (
+        record.type === "tool.result" &&
+        typeof data.name === "string" &&
+        normalizedToolName !== "message" &&
+        (data.arguments || data.args || data.input || data.parameters)
+    ) {
+        return {
+            activity: summarizeToolActivity(data.name, {
+                arguments:
+                    data.arguments || data.args || data.input || data.parameters || data,
+            }),
+        };
+    }
+
+    return {};
 }
 
 /** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
@@ -498,6 +626,23 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
         for (let i = lines.length - 1; i >= 0; i--) {
             try {
                 const entry = JSON.parse(lines[i]);
+                const trajectoryActivity = getTrajectoryActivity(entry);
+                if (!lastTask && trajectoryActivity.task) {
+                    lastTask = trajectoryActivity.task
+                        .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
+                        .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
+                        .replaceAll(/\[media attached[^\]]*\]/g, "")
+                        .replaceAll(/Conversation info[^\n]*/g, "")
+                        .replaceAll(/Sender[^\n]*/g, "")
+                        .replaceAll(/\n+/g, " ")
+                        .replaceAll(/\s+/g, " ")
+                        .trim()
+                        .slice(0, 100);
+                }
+                if (!lastActivity && trajectoryActivity.activity) {
+                    lastActivity = trajectoryActivity.activity;
+                }
+
                 const msg = entry.message || entry;
 
                 // First user message from end = current task
@@ -625,8 +770,10 @@ function findBestSessionForAgent(
     agentId: string,
     sessions: GatewaySessionSummary[]
 ): GatewaySessionSummary | undefined {
-    const prefix = `agent:${agentId}:`;
-    const matches = sessions.filter((session) => session.key.startsWith(prefix));
+    const prefix = `agent:${agentId.toLowerCase()}:`;
+    const matches = sessions.filter((session) =>
+        session.key.toLowerCase().startsWith(prefix)
+    );
 
     if (matches.length === 0) {
         return undefined;
@@ -647,10 +794,12 @@ function findBestSessionForAgent(
     ];
 
     return matches.sort((a, b) => {
-        const timeA = a.updatedAt || 0;
-        const timeB = b.updatedAt || 0;
-        const preferredA = preferredKinds.some((part) => a.key.includes(part)) ? 1 : 0;
-        const preferredB = preferredKinds.some((part) => b.key.includes(part)) ? 1 : 0;
+        const timeA = toTimestamp(a.updatedAt) || 0;
+        const timeB = toTimestamp(b.updatedAt) || 0;
+        const keyA = a.key.toLowerCase();
+        const keyB = b.key.toLowerCase();
+        const preferredA = preferredKinds.some((part) => keyA.includes(part)) ? 1 : 0;
+        const preferredB = preferredKinds.some((part) => keyB.includes(part)) ? 1 : 0;
 
         if (preferredA !== preferredB) {
             return preferredB - preferredA;
@@ -658,6 +807,54 @@ function findBestSessionForAgent(
 
         return timeB - timeA;
     })[0];
+}
+
+/** Finds a Gateway session by key using OpenClaw's case-insensitive session-key semantics. */
+function findSessionByKey(
+    sessions: GatewaySessionSummary[],
+    sessionKey: string
+): GatewaySessionSummary | undefined {
+    const normalizedKey = sessionKey.toLowerCase();
+    return sessions.find((session) => session.key.toLowerCase() === normalizedKey);
+}
+
+/** Returns whether Gateway reports a session as currently running. */
+function isGatewaySessionRunning(session: GatewaySessionSummary | undefined): boolean {
+    if (!session || toTimestamp(session.endedAt)) {
+        return false;
+    }
+
+    return (
+        session.running === true ||
+        session.isRunning === true ||
+        session.status === "running" ||
+        Boolean(session.activeRunId || session.currentRunId)
+    );
+}
+
+/** Applies live Gateway session state to a dashboard agent status. */
+function applyGatewaySessionStatus(
+    status: AgentStatus,
+    session: GatewaySessionSummary | undefined
+): void {
+    if (!session) {
+        return;
+    }
+
+    status.sessionKey = status.sessionKey || session.key;
+    status.channel = getChannelFromSessionKey(session.key);
+
+    const updatedAt = toTimestamp(session.updatedAt);
+    if (
+        updatedAt &&
+        (!status.lastActivity || updatedAt > Date.parse(status.lastActivity))
+    ) {
+        status.lastActivity = new Date(updatedAt).toISOString();
+    }
+
+    if (isGatewaySessionRunning(session)) {
+        status.status = status.currentActivity ? "active" : "thinking";
+    }
 }
 
 /** Builds one dashboard agent status by combining config, metadata, sessions, and activity hints. */
@@ -748,9 +945,15 @@ export default function agentsRoutes(app: express.Application): void {
                         agent.model?.primary || defaultModel,
                         config
                     );
-                    const matchingSession = status.sessionKey
-                        ? sessions.find((session) => session.key === status.sessionKey)
-                        : findBestSessionForAgent(agent.id, sessions);
+                    const sessionFromKey = status.sessionKey
+                        ? findSessionByKey(sessions, status.sessionKey)
+                        : undefined;
+                    const matchingSession =
+                        sessionFromKey || findBestSessionForAgent(agent.id, sessions);
+                    if (!sessionFromKey && matchingSession) {
+                        status.sessionKey = matchingSession.key;
+                    }
+                    applyGatewaySessionStatus(status, matchingSession);
                     status.model =
                         matchingSession?.model &&
                         matchingSession.model !== configuredModel
@@ -799,9 +1002,15 @@ export default function agentsRoutes(app: express.Application): void {
                 agentConfig.model?.primary || config.defaults?.model?.primary,
                 config
             );
-            const matchingSession = status.sessionKey
-                ? sessions.find((session) => session.key === status.sessionKey)
-                : findBestSessionForAgent(agentId, sessions);
+            const sessionFromKey = status.sessionKey
+                ? findSessionByKey(sessions, status.sessionKey)
+                : undefined;
+            const matchingSession =
+                sessionFromKey || findBestSessionForAgent(agentId, sessions);
+            if (!sessionFromKey && matchingSession) {
+                status.sessionKey = matchingSession.key;
+            }
+            applyGatewaySessionStatus(status, matchingSession);
             status.model =
                 matchingSession?.model && matchingSession.model !== configuredModel
                     ? matchingSession.model
