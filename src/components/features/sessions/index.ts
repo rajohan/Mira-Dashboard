@@ -3,6 +3,5 @@ export {
     getTypeSortOrder,
     SESSION_TYPES,
 } from "../../../utils/sessionUtils";
-export { LiveFeedRow } from "./LiveFeedRow";
 export { SessionActionsDropdown } from "./SessionActionsDropdown";
 export { SessionsTable } from "./SessionsTable";

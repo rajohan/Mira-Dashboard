@@ -109,25 +109,6 @@ interface PendingRequest {
     method?: string;
 }
 
-/** Represents history message. */
-interface HistoryMessage {
-    id?: number | string;
-    role?: string;
-    content?: string | Array<HistoryContentBlock>;
-    timestamp?: string | number;
-}
-
-/** Represents a structured content block returned by chat history. */
-interface HistoryContentBlock {
-    type?: string;
-    text?: string;
-    name?: string;
-    arguments?: unknown;
-    args?: unknown;
-    input?: unknown;
-    parameters?: unknown;
-}
-
 /** Represents the chat history payload. */
 interface ChatHistoryPayload {
     sessionKey?: string;
@@ -332,84 +313,6 @@ function normalizeMessageText(content: unknown): string {
         .trim();
 }
 
-/** Returns a compact display string for a structured tool-call block. */
-function summarizeHistoryToolBlock(block: Record<string, unknown>): string {
-    const name =
-        stringField(block, "name") ||
-        stringField(block, "toolName") ||
-        stringField(block, "functionName") ||
-        "tool";
-    const payload =
-        block.arguments ?? block.args ?? block.input ?? block.parameters ?? undefined;
-
-    if (payload === undefined || payload === null || payload === "") {
-        return name;
-    }
-
-    const summary =
-        typeof payload === "string" ? payload : JSON.stringify(payload, null, 0);
-    return `${name} ${summary}`.slice(0, 500);
-}
-
-/** Expands one chat-history message into visible text and tool event rows. */
-function expandHistoryMessage(message: HistoryMessage): HistoryMessage[] {
-    const timestamp = message.timestamp;
-    const baseId =
-        message.id === undefined || message.id === null ? undefined : String(message.id);
-
-    if (!Array.isArray(message.content)) {
-        return [
-            {
-                id: baseId,
-                role: message.role || "unknown",
-                content: String(message.content || ""),
-                timestamp,
-            },
-        ];
-    }
-
-    const expanded: HistoryMessage[] = [];
-    const text = normalizeMessageText(message.content);
-    if (text) {
-        expanded.push({
-            id: baseId ? `${baseId}:text` : undefined,
-            role: message.role || "unknown",
-            content: text,
-            timestamp,
-        });
-    }
-
-    let toolIndex = 0;
-    for (const block of message.content) {
-        const record = asRecord(block);
-        if (!record) {
-            continue;
-        }
-
-        const type = typeof record?.type === "string" ? record.type : "";
-        const normalizedType = type.toLowerCase().replaceAll(/[.\s-]+/g, "_");
-
-        if (
-            normalizedType === "toolcall" ||
-            normalizedType === "tool_call" ||
-            normalizedType === "tooluse" ||
-            normalizedType === "tool_use"
-        ) {
-            expanded.push({
-                id: baseId ? `${baseId}:tool:${toolIndex}` : undefined,
-                role: "tool",
-                content: summarizeHistoryToolBlock(record),
-                timestamp,
-            });
-            toolIndex += 1;
-        }
-    }
-
-    return expanded.length > 0
-        ? expanded
-        : [{ id: baseId, role: message.role || "unknown", content: "", timestamp }];
-}
-
 /** Normalizes timestamp. */
 function normalizeTimestamp(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -422,56 +325,6 @@ function normalizeTimestamp(value: unknown): number | undefined {
     }
 
     return undefined;
-}
-
-/** Creates a compact deterministic hash for fallback history ids. */
-function stableHistoryHash(value: string): string {
-    let hash = 0x811c9dc5;
-
-    for (let index = 0; index < value.length; index += 1) {
-        hash ^= value.codePointAt(index) || 0;
-        hash = Math.imul(hash, 0x01000193);
-    }
-
-    return (hash >>> 0).toString(36);
-}
-
-/** Assigns deterministic ids to history rows that Gateway returned without ids. */
-function withStableHistoryIds(
-    messages: Array<{
-        id?: number | string;
-        role: string;
-        content: string;
-        timestamp?: string;
-    }>
-): Array<{
-    id: number | string;
-    role: string;
-    content: string;
-    timestamp?: string;
-}> {
-    const seen = new Map<string, number>();
-
-    return messages.map((message) => {
-        if (
-            message.id !== undefined &&
-            message.id !== null &&
-            String(message.id).length > 0
-        ) {
-            return { ...message, id: message.id };
-        }
-
-        const fingerprint = stableHistoryHash(
-            [message.role, message.timestamp || "", message.content].join("\u001F")
-        );
-        const occurrence = seen.get(fingerprint) || 0;
-        seen.set(fingerprint, occurrence + 1);
-
-        return {
-            ...message,
-            id: `fallback:${fingerprint}:${occurrence}`,
-        };
-    });
 }
 
 /** Returns transcript path. */
@@ -1000,61 +853,11 @@ async function request(
     return sendRequestAsync(method, params);
 }
 
-/** Returns session history. */
-async function getSessionHistory(
-    sessionKey: string,
-    limit: number = 50,
-    offset: number = 0
-): Promise<{
-    messages: Array<{
-        id?: number | string;
-        role: string;
-        content: string;
-        timestamp?: string;
-    }>;
-    total: number;
-}> {
-    const result = (await sendRequestAsync("chat.history", {
-        sessionKey,
-        limit: Math.max(limit + offset, 200),
-    })) as {
-        messages?: HistoryMessage[];
-    };
-
-    const allMessages = withStableHistoryIds(
-        (result.messages || []).flatMap((msg) =>
-            expandHistoryMessage(msg).map((expanded) => ({
-                id: expanded.id,
-                role: expanded.role || "unknown",
-                content:
-                    typeof expanded.content === "string"
-                        ? expanded.content
-                        : normalizeMessageText(expanded.content),
-                timestamp:
-                    typeof expanded.timestamp === "number"
-                        ? new Date(expanded.timestamp).toISOString()
-                        : expanded.timestamp,
-            }))
-        )
-    );
-
-    const total = allMessages.length;
-    const end = Math.max(total - offset, 0);
-    const start = Math.max(end - limit, 0);
-    const messages = allMessages.slice(start, end).reverse();
-
-    return {
-        messages,
-        total,
-    };
-}
-
 /** Defines testing. */
 export const __testing = {
     transformSession,
     enrichRuntimeEventPayload,
     hydrateOmittedChatHistoryImages,
-    expandHistoryMessage,
     readRawTranscriptImageMessages,
     getTranscriptPath,
     normalizeMessageText,
@@ -1082,7 +885,6 @@ export default {
     getSessions,
     isConnected,
     getGatewayWs,
-    getSessionHistory,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,
