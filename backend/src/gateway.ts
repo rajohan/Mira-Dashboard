@@ -109,13 +109,6 @@ interface PendingRequest {
     method?: string;
 }
 
-/** Represents history message. */
-interface HistoryMessage {
-    role?: string;
-    content?: string | Array<{ type?: string; text?: string }>;
-    timestamp?: string | number;
-}
-
 /** Represents the chat history payload. */
 interface ChatHistoryPayload {
     sessionKey?: string;
@@ -530,6 +523,81 @@ function init(token: string): void {
 
     currentToken = token;
     gatewayClient?.stop();
+
+    /** Handles successful Gateway hello negotiation and subscribes to live events. */
+    function handleGatewayHelloOk(): void {
+        isGatewayConnected = true;
+        broadcast({ type: "connected", gatewayConnected: true });
+        const connectedGatewayClient = gatewayClient;
+
+        /** Subscribes to Gateway session index events for live session updates. */
+        async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
+            if (
+                !connectedGatewayClient ||
+                connectedGatewayClient !== gatewayClient ||
+                !isGatewayConnected
+            ) {
+                return;
+            }
+
+            try {
+                await connectedGatewayClient.request("sessions.subscribe", {});
+            } catch (error) {
+                if (attempt < 3) {
+                    const delayMs = 500 * 2 ** attempt;
+
+                    /** Retries the session index subscription after backoff. */
+                    function retrySessionIndexSubscription(): void {
+                        void subscribeToSessionIndexEvents(attempt + 1);
+                    }
+
+                    setTimeout(retrySessionIndexSubscription, delayMs);
+                    return;
+                }
+
+                console.warn(
+                    "[Gateway] Failed to subscribe to session index events:",
+                    error instanceof Error ? error.message : String(error)
+                );
+            }
+        }
+        void subscribeToSessionIndexEvents();
+        void refreshSessions().catch((error) => {
+            console.error(
+                "[Gateway] Failed to refresh sessions:",
+                (error as Error).message
+            );
+        });
+    }
+
+    /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
+    function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
+        broadcast({
+            type: "event",
+            event: evt.event,
+            payload: enrichRuntimeEventPayload(evt.event, evt.payload),
+        });
+        if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
+            void refreshSessions().catch((error) => {
+                console.error(
+                    "[Gateway] Failed to refresh sessions:",
+                    (error as Error).message
+                );
+            });
+        }
+    }
+
+    /** Logs Gateway connection failures. */
+    function handleGatewayConnectError(err: Error): void {
+        console.error("[Gateway] Connect failed:", err.message);
+    }
+
+    /** Marks Gateway state disconnected and informs dashboard clients. */
+    function handleGatewayClose(): void {
+        isGatewayConnected = false;
+        broadcast({ type: "disconnected", gatewayConnected: false });
+    }
+
     gatewayClient = new OpenClawGatewayClient({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
@@ -542,72 +610,10 @@ function init(token: string): void {
         platform: "node",
         deviceFamily: "server",
         deviceIdentity: loadOrCreateDashboardDeviceIdentity(),
-        onHelloOk: () => {
-            isGatewayConnected = true;
-            broadcast({ type: "connected", gatewayConnected: true });
-            const connectedGatewayClient = gatewayClient;
-
-            /** Subscribes to Gateway session index events for live session updates. */
-            async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
-                if (
-                    !connectedGatewayClient ||
-                    connectedGatewayClient !== gatewayClient ||
-                    !isGatewayConnected
-                ) {
-                    return;
-                }
-
-                try {
-                    await connectedGatewayClient.request("sessions.subscribe", {});
-                } catch (error) {
-                    if (attempt < 3) {
-                        const delayMs = 500 * 2 ** attempt;
-
-                        /** Retries the session index subscription after backoff. */
-                        function retrySessionIndexSubscription(): void {
-                            void subscribeToSessionIndexEvents(attempt + 1);
-                        }
-
-                        setTimeout(retrySessionIndexSubscription, delayMs);
-                        return;
-                    }
-
-                    console.warn(
-                        "[Gateway] Failed to subscribe to session index events:",
-                        error instanceof Error ? error.message : String(error)
-                    );
-                }
-            }
-            void subscribeToSessionIndexEvents();
-            void refreshSessions().catch((error) => {
-                console.error(
-                    "[Gateway] Failed to refresh sessions:",
-                    (error as Error).message
-                );
-            });
-        },
-        onEvent: (evt) => {
-            broadcast({
-                type: "event",
-                event: evt.event,
-                payload: enrichRuntimeEventPayload(evt.event, evt.payload),
-            });
-            if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
-                void refreshSessions().catch((error) => {
-                    console.error(
-                        "[Gateway] Failed to refresh sessions:",
-                        (error as Error).message
-                    );
-                });
-            }
-        },
-        onConnectError: (err) => {
-            console.error("[Gateway] Connect failed:", err.message);
-        },
-        onClose: () => {
-            isGatewayConnected = false;
-            broadcast({ type: "disconnected", gatewayConnected: false });
-        },
+        onHelloOk: handleGatewayHelloOk,
+        onEvent: handleGatewayEvent,
+        onConnectError: handleGatewayConnectError,
+        onClose: handleGatewayClose,
     });
 
     gatewayClient.start();
@@ -847,44 +853,6 @@ async function request(
     return sendRequestAsync(method, params);
 }
 
-/** Returns session history. */
-async function getSessionHistory(
-    sessionKey: string,
-    limit: number = 50,
-    offset: number = 0
-): Promise<{
-    messages: Array<{ role: string; content: string; timestamp?: string }>;
-    total: number;
-}> {
-    const result = (await sendRequestAsync("chat.history", {
-        sessionKey,
-        limit: Math.max(limit + offset, 200),
-    })) as {
-        messages?: HistoryMessage[];
-    };
-
-    const allMessages = (result.messages || []).map((msg) => ({
-        role: msg.role || "unknown",
-        content: Array.isArray(msg.content)
-            ? msg.content.map((block) => block?.text || "").join("")
-            : String(msg.content || ""),
-        timestamp:
-            typeof msg.timestamp === "number"
-                ? new Date(msg.timestamp).toISOString()
-                : msg.timestamp,
-    }));
-
-    const total = allMessages.length;
-    const end = Math.max(total - offset, 0);
-    const start = Math.max(end - limit, 0);
-    const messages = allMessages.slice(start, end).reverse();
-
-    return {
-        messages,
-        total,
-    };
-}
-
 /** Defines testing. */
 export const __testing = {
     transformSession,
@@ -896,9 +864,11 @@ export const __testing = {
     normalizeTimestamp,
     imageBlockHasOmittedData,
     sessionHasRunIdentifier,
+    /** Replaces the in-memory session list for focused gateway tests. */
     setSessionListForTest(sessions: Session[]): void {
         sessionList = sessions;
     },
+    /** Clears mutable gateway state between tests. */
     resetGatewayStateForTest(): void {
         subscribers.clear();
         sessionList = [];
@@ -915,7 +885,6 @@ export default {
     getSessions,
     isConnected,
     getGatewayWs,
-    getSessionHistory,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,

@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    symlink,
+    utimes,
+    writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -401,6 +410,798 @@ describe("agents routes", () => {
                 recursive: true,
                 force: true,
             });
+        }
+    });
+
+    it("shows memory search activity while still ignoring message delivery noise", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            jsonlPath,
+            [
+                JSON.stringify({
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "memory_search",
+                                arguments: { query: "old context" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "bash",
+                                arguments: { command: "npm run build" },
+                            },
+                        ],
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "functions.memory_search",
+                        arguments: { query: "latest recall" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(jsonlPath, oldTime, oldTime);
+        await utimes(trajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentActivity, "memory_search latest recall");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("does not combine a fresh task with stale activity from another session file", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const oldJsonlPath = path.join(aliasSessionsDir, "old.jsonl");
+        const freshTrajectoryPath = path.join(aliasSessionsDir, "fresh.trajectory.jsonl");
+        await writeFile(
+            oldJsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run old-task" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "old-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            freshTrajectoryPath,
+            [
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "old-run",
+                    data: {
+                        name: "browser",
+                        arguments: {
+                            action: "open",
+                            url: "http://127.0.0.1:3100/chat",
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "fresh-run",
+                    data: {
+                        prompt: "Investigate fresh agent activity",
+                        turnId: "fresh-turn",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(oldJsonlPath, oldTime, oldTime);
+        await utimes(freshTrajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.currentTask, "Investigate fresh agent activity");
+            assert.equal(response.body.currentActivity, null);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("combines fresh trajectory task with visible activity from the same session log", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            jsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "gh pr checks 55" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "fresh-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "fresh-run",
+                    data: {
+                        prompt: "Fix current activity fallback",
+                        turnId: "fresh-turn",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(jsonlPath, oldTime, oldTime);
+        await utimes(trajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentTask, "Fix current activity fallback");
+            assert.equal(response.body.currentActivity, "exec gh pr checks 55");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("does not compare trajectory run IDs against transcript turn IDs", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            trajectoryPath,
+            JSON.stringify({
+                type: "prompt.submitted",
+                runId: "fresh-run",
+                data: {
+                    prompt: "Run without explicit turn id",
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            jsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run no-turn" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "transcript-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(trajectoryPath, new Date(now), new Date(now));
+        await utimes(jsonlPath, new Date(now - 1_000), new Date(now - 1_000));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentTask, "Run without explicit turn id");
+            assert.equal(response.body.currentActivity, "exec npm run no-turn");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("ignores runless stale entries after locking onto the latest trajectory run", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "await tools.exec_command({ cmd: `npm run stale` });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "await tools.exec_command({ cmd: `npm run also-stale` });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "delivery only" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(trajectoryPath, new Date(now), new Date(now));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.currentActivity, null);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("continues within the newest session group when unrelated files are interleaved by mtime", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const activeJsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const activeTrajectoryPath = path.join(
+            aliasSessionsDir,
+            "active.trajectory.jsonl"
+        );
+        const unrelatedPath = path.join(aliasSessionsDir, "other.jsonl");
+        await writeFile(
+            activeTrajectoryPath,
+            JSON.stringify({
+                type: "prompt.submitted",
+                runId: "fresh-run",
+                data: {
+                    prompt: "Keep scanning active group",
+                    turnId: "fresh-turn",
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            unrelatedPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run unrelated" },
+                        },
+                    ],
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            activeJsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run active" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "fresh-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(activeTrajectoryPath, new Date(now), new Date(now));
+        await utimes(unrelatedPath, new Date(now - 1_000), new Date(now - 1_000));
+        await utimes(activeJsonlPath, new Date(now - 2_000), new Date(now - 2_000));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentTask, "Keep scanning active group");
+            assert.equal(response.body.currentActivity, "exec npm run active");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("uses nested Codex rollout logs for the freshest visible activity", async () => {
+        const aliasAgentDir = path.join(homeDir, ".openclaw", "agents", "alias-agent");
+        const aliasSessionsDir = path.join(aliasAgentDir, "sessions");
+        const codexSessionsDir = path.join(
+            aliasAgentDir,
+            "agent",
+            "codex-home",
+            "sessions",
+            "2026",
+            "05",
+            "16"
+        );
+        const unreadableCodexDir = path.join(
+            aliasAgentDir,
+            "agent",
+            "codex-home",
+            "sessions",
+            "unreadable"
+        );
+        await rm(aliasAgentDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await mkdir(codexSessionsDir, { recursive: true });
+        await mkdir(unreadableCodexDir, { recursive: true });
+        await chmod(unreadableCodexDir, 0);
+
+        const gatewayTrajectoryPath = path.join(
+            aliasSessionsDir,
+            "active.trajectory.jsonl"
+        );
+        const codexRolloutPath = path.join(codexSessionsDir, "rollout.jsonl");
+        await writeFile(
+            gatewayTrajectoryPath,
+            [
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "gateway-run",
+                    data: {
+                        prompt: "Use Codex rollout activity with trajectory task",
+                        turnId: "fresh-turn",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "gateway-run",
+                    data: {
+                        name: "session_status",
+                        arguments: {},
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            codexRolloutPath,
+            [
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "await tools.exec_command({ cmd: `npm run agents:test` });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: 'await tools.mcp__server__memory_search({ query: "context" });',
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: "const r = await tools.write_stdin({ session_id: 123 });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: 'await tools.message({ action: "send", message: "done" });',
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(gatewayTrajectoryPath, new Date(now - 2_000), new Date(now - 2_000));
+        await utimes(codexRolloutPath, new Date(now), new Date(now));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string | null;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(
+                response.body.currentTask,
+                "Use Codex rollout activity with trajectory task"
+            );
+            assert.equal(response.body.currentActivity, "terminal output");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await chmod(unreadableCodexDir, 0o700).catch(() => {});
+            await rm(aliasAgentDir, { recursive: true, force: true });
+        }
+    });
+
+    it("continues scanning grouped logs when one file is unreadable", async () => {
+        const aliasAgentDir = path.join(homeDir, ".openclaw", "agents", "alias-agent");
+        const aliasSessionsDir = path.join(aliasAgentDir, "sessions");
+        await rm(aliasAgentDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const unreadablePath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(unreadablePath, "not readable", "utf8");
+        await writeFile(
+            trajectoryPath,
+            JSON.stringify({
+                type: "tool.call",
+                runId: "fresh-run",
+                data: {
+                    name: "exec_command",
+                    arguments: { cmd: "npm run readable" },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(unreadablePath, new Date(now), new Date(now));
+        await utimes(trajectoryPath, new Date(now - 1_000), new Date(now - 1_000));
+        await chmod(unreadablePath, 0);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentActivity, "exec npm run readable");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await chmod(unreadablePath, 0o600).catch(() => {});
+            await rm(aliasAgentDir, { recursive: true, force: true });
         }
     });
 

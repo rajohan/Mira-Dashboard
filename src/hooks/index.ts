@@ -37,8 +37,6 @@ export {
 } from "./useCron";
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { useHealth } from "./useHealth";
-export type { FeedItem } from "./useLiveFeed";
-export { liveFeedKeys, useLiveFeed } from "./useLiveFeed";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export {
@@ -80,12 +78,7 @@ export {
     useRejectPullRequest,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
-export {
-    sessionKeys,
-    useDeleteSession,
-    useSessionAction,
-    useSessionHistory,
-} from "./useSessions";
+export { sessionKeys, useDeleteSession, useSessionAction } from "./useSessions";
 export {
     taskKeys,
     useAssignTask,
