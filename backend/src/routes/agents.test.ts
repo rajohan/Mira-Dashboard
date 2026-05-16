@@ -332,7 +332,14 @@ describe("agents routes", () => {
                     type: "tool.call",
                     data: {
                         name: "exec_command",
-                        arguments: { cmd: "npm run test -- agents" },
+                        args: { cmd: "npm run test -- agents" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "message",
+                        arguments: { message: "Lower priority status update" },
                     },
                 }),
                 JSON.stringify({
@@ -399,7 +406,7 @@ describe("agents routes", () => {
                             {
                                 key: "agent:alias-agent:old",
                                 model: "old-model",
-                                updatedAt: "2026-05-16T12:00:00.000Z",
+                                updatedAt: 1778932800000,
                             },
                             {
                                 key: "agent:alias-agent:new",
@@ -423,6 +430,43 @@ describe("agents routes", () => {
             assert.equal(response.body.sessionKey, "agent:alias-agent:new");
             assert.equal(response.body.model, "new-model");
             assert.equal(response.body.lastActivity, "2026-05-16T13:00:00.000Z");
+        } finally {
+            gateway.request = previousGatewayRequest;
+        }
+    });
+
+    it("prefers main live Gateway sessions case-insensitively", async () => {
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:scratch",
+                                model: "scratch-model",
+                                updatedAt: "2026-05-16T14:00:00.000Z",
+                            },
+                            {
+                                key: "Agent:Alias-Agent:Main",
+                                model: "main-model",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                sessionKey: string;
+                model: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
+            assert.equal(response.body.model, "main-model");
         } finally {
             gateway.request = previousGatewayRequest;
         }

@@ -530,6 +530,7 @@ function getTrajectoryActivity(entry: unknown): {
             prompt?: unknown;
             name?: unknown;
             arguments?: unknown;
+            args?: unknown;
             input?: unknown;
             parameters?: unknown;
         };
@@ -540,10 +541,15 @@ function getTrajectoryActivity(entry: unknown): {
         return { task: data.prompt };
     }
 
-    if (record.type === "tool.call" && typeof data.name === "string") {
+    if (
+        record.type === "tool.call" &&
+        typeof data.name === "string" &&
+        data.name !== "message"
+    ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments: data.arguments || data.input || data.parameters || data,
+                arguments:
+                    data.arguments || data.args || data.input || data.parameters || data,
             }),
         };
     }
@@ -551,7 +557,8 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.result" &&
         typeof data.name === "string" &&
-        (data.arguments || data.input || data.parameters)
+        data.name !== "message" &&
+        (data.arguments || data.args || data.input || data.parameters)
     ) {
         return {
             activity: summarizeToolActivity(data.name, data),
@@ -781,8 +788,10 @@ function findBestSessionForAgent(
     return matches.sort((a, b) => {
         const timeA = toTimestamp(a.updatedAt) || 0;
         const timeB = toTimestamp(b.updatedAt) || 0;
-        const preferredA = preferredKinds.some((part) => a.key.includes(part)) ? 1 : 0;
-        const preferredB = preferredKinds.some((part) => b.key.includes(part)) ? 1 : 0;
+        const keyA = a.key.toLowerCase();
+        const keyB = b.key.toLowerCase();
+        const preferredA = preferredKinds.some((part) => keyA.includes(part)) ? 1 : 0;
+        const preferredB = preferredKinds.some((part) => keyB.includes(part)) ? 1 : 0;
 
         if (preferredA !== preferredB) {
             return preferredB - preferredA;
@@ -836,8 +845,6 @@ function applyGatewaySessionStatus(
     }
 
     if (isGatewaySessionRunning(session)) {
-        status.currentActivity =
-            status.currentActivity || `thinking with ${session.model || "model"}`;
         status.status = status.currentActivity ? "active" : "thinking";
     }
 }
