@@ -150,6 +150,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
 vi.mock("../components/features/chat/ChatHeader", () => ({
     ChatHeader: ({
         agentOptions,
+        onSelectAgent,
         onSelectSession,
         onToggleThinking,
         onToggleTools,
@@ -159,6 +160,7 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
         showTools,
     }: {
         agentOptions: Array<{ label: string; value: string }>;
+        onSelectAgent: (agentId: string) => void;
         onSelectSession: (sessionKey: string) => void;
         onToggleThinking: () => void;
         onToggleTools: () => void;
@@ -177,6 +179,9 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
             </div>
             <button type="button" onClick={() => onSelectSession("session-b")}>
                 select side chat
+            </button>
+            <button type="button" onClick={() => onSelectAgent("ops")}>
+                select ops agent
             </button>
             <button type="button" onClick={onToggleThinking}>
                 thinking {String(showThinking)}
@@ -615,6 +620,24 @@ describe("Chat", () => {
         installLocalStorageMock();
         mocks.isConnected = true;
         mocks.socketError = null;
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "session-b",
+                displayLabel: "Side chat",
+                label: "side",
+                model: "kimi",
+                type: "channel",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
@@ -660,6 +683,58 @@ describe("Chat", () => {
                 isConnected: true,
             })
         );
+    });
+
+    it("groups chat sessions by agent bucket and selects the first session in a bucket", async () => {
+        const user = userEvent.setup();
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:ops:main",
+                displayLabel: "Ops",
+                label: "ops",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+            {
+                key: "",
+                agentType: "",
+                displayLabel: "Unknown",
+                label: "unknown",
+                model: "codex",
+                type: "",
+                updatedAt: "2026-05-10T22:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("ops");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("unknown");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:ops:main"
+            )
+        );
+        expect(screen.getByTestId("session-options")).toHaveTextContent("main");
     });
 
     it("filters hidden tool result rows before message virtualization", async () => {
