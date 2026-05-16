@@ -19,11 +19,15 @@ export interface FeedItem {
     timestamp: number;
 }
 
+/** Builds the query key for a specific live-feed session snapshot. */
+function createLiveFeedListKey(sessionSignature: string, updatedSignature: string) {
+    return [...liveFeedKeys.all, sessionSignature, updatedSignature] as const;
+}
+
 /** Defines live feed keys. */
 export const liveFeedKeys = {
     all: ["live-feed"] as const,
-    list: (sessionSignature: string, updatedSignature: string) =>
-        [...liveFeedKeys.all, sessionSignature, updatedSignature] as const,
+    list: createLiveFeedListKey,
 };
 
 /** Returns whether feed session. */
@@ -43,10 +47,28 @@ function getSessionFeedLabel(session: Session): string {
 
 /** Normalizes transcript roles for stable live-feed filtering. */
 function normalizeFeedRole(role: string): string {
-    const rawRole = role.toLowerCase();
-    return rawRole === "toolresult" || rawRole === "tool-result"
-        ? "tool_result"
-        : rawRole;
+    const rawRole = role.toLowerCase().replaceAll(/[.\s-]+/g, "_");
+
+    if (rawRole === "toolresult" || rawRole === "tool_result") {
+        return "tool_result";
+    }
+
+    if (
+        rawRole === "tool" ||
+        rawRole === "toolcall" ||
+        rawRole === "tool_call" ||
+        rawRole === "tooluse" ||
+        rawRole === "tool_use" ||
+        rawRole === "function_call"
+    ) {
+        return "tool";
+    }
+
+    if (rawRole === "developer") {
+        return "system";
+    }
+
+    return rawRole;
 }
 
 /** Converts one API history message into a dashboard feed item. */
@@ -78,7 +100,8 @@ async function fetchSessionFeedItems(session: Session): Promise<FeedItem[]> {
         history = await apiFetchRequired<SessionHistoryResponse>(
             `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
         );
-    } catch {
+    } catch (error) {
+        console.error("Failed to fetch feed items for session:", session.key, error);
         return [];
     }
 

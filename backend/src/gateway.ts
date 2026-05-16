@@ -112,8 +112,19 @@ interface PendingRequest {
 /** Represents history message. */
 interface HistoryMessage {
     role?: string;
-    content?: string | Array<{ type?: string; text?: string }>;
+    content?: string | Array<HistoryContentBlock>;
     timestamp?: string | number;
+}
+
+/** Represents a structured content block returned by chat history. */
+interface HistoryContentBlock {
+    type?: string;
+    text?: string;
+    name?: string;
+    arguments?: unknown;
+    args?: unknown;
+    input?: unknown;
+    parameters?: unknown;
 }
 
 /** Represents the chat history payload. */
@@ -318,6 +329,73 @@ function normalizeMessageText(content: unknown): string {
         .filter(Boolean)
         .join("\n\n")
         .trim();
+}
+
+/** Returns a compact display string for a structured tool-call block. */
+function summarizeHistoryToolBlock(block: Record<string, unknown>): string {
+    const name =
+        stringField(block, "name") ||
+        stringField(block, "toolName") ||
+        stringField(block, "functionName") ||
+        "tool";
+    const payload =
+        block.arguments ?? block.args ?? block.input ?? block.parameters ?? undefined;
+
+    if (payload === undefined || payload === null || payload === "") {
+        return name;
+    }
+
+    const summary =
+        typeof payload === "string" ? payload : JSON.stringify(payload, null, 0);
+    return `${name} ${summary}`.slice(0, 500);
+}
+
+/** Expands one chat-history message into visible text and tool event rows. */
+function expandHistoryMessage(message: HistoryMessage): HistoryMessage[] {
+    const timestamp = message.timestamp;
+
+    if (!Array.isArray(message.content)) {
+        return [
+            {
+                role: message.role || "unknown",
+                content: String(message.content || ""),
+                timestamp,
+            },
+        ];
+    }
+
+    const expanded: HistoryMessage[] = [];
+    const text = normalizeMessageText(message.content);
+    if (text) {
+        expanded.push({
+            role: message.role || "unknown",
+            content: text,
+            timestamp,
+        });
+    }
+
+    for (const block of message.content) {
+        const record = asRecord(block);
+        const type = typeof record?.type === "string" ? record.type : "";
+        const normalizedType = type.toLowerCase().replaceAll(/[.\s-]+/g, "_");
+
+        if (
+            normalizedType === "toolcall" ||
+            normalizedType === "tool_call" ||
+            normalizedType === "tooluse" ||
+            normalizedType === "tool_use"
+        ) {
+            expanded.push({
+                role: "tool",
+                content: summarizeHistoryToolBlock(record),
+                timestamp,
+            });
+        }
+    }
+
+    return expanded.length > 0
+        ? expanded
+        : [{ role: message.role || "unknown", content: "", timestamp }];
 }
 
 /** Normalizes timestamp. */
@@ -863,16 +941,19 @@ async function getSessionHistory(
         messages?: HistoryMessage[];
     };
 
-    const allMessages = (result.messages || []).map((msg) => ({
-        role: msg.role || "unknown",
-        content: Array.isArray(msg.content)
-            ? msg.content.map((block) => block?.text || "").join("")
-            : String(msg.content || ""),
-        timestamp:
-            typeof msg.timestamp === "number"
-                ? new Date(msg.timestamp).toISOString()
-                : msg.timestamp,
-    }));
+    const allMessages = (result.messages || []).flatMap((msg) =>
+        expandHistoryMessage(msg).map((expanded) => ({
+            role: expanded.role || "unknown",
+            content:
+                typeof expanded.content === "string"
+                    ? expanded.content
+                    : normalizeMessageText(expanded.content),
+            timestamp:
+                typeof expanded.timestamp === "number"
+                    ? new Date(expanded.timestamp).toISOString()
+                    : expanded.timestamp,
+        }))
+    );
 
     const total = allMessages.length;
     const end = Math.max(total - offset, 0);
@@ -890,6 +971,7 @@ export const __testing = {
     transformSession,
     enrichRuntimeEventPayload,
     hydrateOmittedChatHistoryImages,
+    expandHistoryMessage,
     readRawTranscriptImageMessages,
     getTranscriptPath,
     normalizeMessageText,

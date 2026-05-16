@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -281,6 +281,45 @@ describe("Sessions page", () => {
         expect(screen.getByTestId("sessions-table")).toHaveTextContent("sessions: 1");
     });
 
+    it("counts system and tool roles in the live feed filter", () => {
+        mockSessions({
+            feed: [
+                {
+                    id: "system-event",
+                    role: "system",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "system message",
+                    timestamp: Date.parse("2026-05-11T00:00:00.000Z"),
+                },
+                {
+                    id: "tool-call",
+                    role: "tool",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "tool call",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+                {
+                    id: "tool-result",
+                    role: "tool_result",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "tool result",
+                    timestamp: Date.parse("2026-05-11T00:02:00.000Z"),
+                },
+            ],
+        });
+
+        render(<Sessions />);
+
+        expect(screen.getByRole("option", { name: "system (1)" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "tool (1)" })).toBeInTheDocument();
+        expect(
+            screen.getByRole("option", { name: "tool_result (1)" })
+        ).toBeInTheDocument();
+    });
+
     it("shows connecting and socket error states", () => {
         const { rerender } = render(<Sessions />);
 
@@ -363,6 +402,61 @@ describe("Sessions page", () => {
         ).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "↓ Follow" }));
         expect(mocks.scrollToIndex).toHaveBeenCalled();
+    });
+
+    it("preserves the visible feed anchor when rows are backfilled while unpinned", async () => {
+        mockSessions({
+            feed: [
+                {
+                    id: "anchor",
+                    role: "assistant",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "anchor message",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        const { rerender } = render(<Sessions />);
+        const feedContainer = screen
+            .getByText("anchor message")
+            .closest("div[style]") as HTMLDivElement;
+        Object.defineProperties(feedContainer, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 400 },
+            scrollTop: { configurable: true, value: 150, writable: true },
+        });
+        fireEvent.scroll(feedContainer);
+        mocks.scrollToIndex.mockClear();
+
+        mockSessions({
+            feed: [
+                {
+                    id: "backfill",
+                    role: "user",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "backfilled message",
+                    timestamp: Date.parse("2026-05-11T00:00:00.000Z"),
+                },
+                {
+                    id: "anchor",
+                    role: "assistant",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "anchor message",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        rerender(<Sessions />);
+
+        await waitFor(() =>
+            expect(mocks.scrollToIndex).toHaveBeenCalledWith(expect.any(Number), {
+                align: "start",
+            })
+        );
+        expect(screen.getByText("backfilled message")).toBeInTheDocument();
     });
 
     it("shows delete errors from failed session removal", async () => {

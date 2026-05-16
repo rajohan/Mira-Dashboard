@@ -1,10 +1,14 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
 import { useLiveFeed } from "./useLiveFeed";
 
 describe("useLiveFeed", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it("fetches histories, normalizes roles, filters blanks and sorts newest first", async () => {
         const fetchMock = vi
             .fn()
@@ -22,6 +26,16 @@ describe("useLiveFeed", () => {
                             role: "tool-result",
                             content: "fallback timestamp",
                             timestamp: "not-a-date",
+                        },
+                        {
+                            role: "tool.call",
+                            content: "tool call",
+                            timestamp: "2026-01-01T00:00:01Z",
+                        },
+                        {
+                            role: "developer",
+                            content: "system event",
+                            timestamp: "2026-01-01T00:00:02Z",
                         },
                         { role: "assistant", content: "   " },
                     ],
@@ -57,12 +71,16 @@ describe("useLiveFeed", () => {
         await waitFor(() =>
             expect(result.current.data?.map((item) => item.content)).toEqual([
                 "newer",
+                "system event",
+                "tool call",
                 "older",
                 "fallback timestamp",
             ])
         );
-        expect(result.current.data?.[1]?.role).toBe("tool_result");
-        expect(result.current.data?.[2]).toMatchObject({
+        expect(result.current.data?.[1]?.role).toBe("system");
+        expect(result.current.data?.[2]?.role).toBe("tool");
+        expect(result.current.data?.[3]?.role).toBe("tool_result");
+        expect(result.current.data?.[4]).toMatchObject({
             sessionLabel: "One",
             sessionType: "DIRECT",
             role: "tool_result",
@@ -138,6 +156,7 @@ describe("useLiveFeed", () => {
     });
 
     it("keeps live feed working when one session history request fails", async () => {
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
@@ -176,6 +195,11 @@ describe("useLiveFeed", () => {
             expect(result.current.data?.map((item) => item.content)).toEqual([
                 "still visible",
             ])
+        );
+        expect(consoleError).toHaveBeenCalledWith(
+            "Failed to fetch feed items for session:",
+            "stale",
+            expect.any(Error)
         );
     });
 

@@ -218,6 +218,39 @@ describe("gateway state and helper utilities", () => {
         });
     });
 
+    it("expands structured chat history tool calls into feed rows", () => {
+        assert.deepEqual(
+            __testing.expandHistoryMessage({
+                role: "assistant",
+                timestamp: "2026-05-16T17:00:00.000Z",
+                content: [
+                    { type: "text", text: "Working" },
+                    {
+                        type: "toolCall",
+                        name: "exec_command",
+                        args: { cmd: "npm test" },
+                    },
+                ],
+            }),
+            [
+                {
+                    role: "assistant",
+                    content: "Working",
+                    timestamp: "2026-05-16T17:00:00.000Z",
+                },
+                {
+                    role: "tool",
+                    content: 'exec_command {"cmd":"npm test"}',
+                    timestamp: "2026-05-16T17:00:00.000Z",
+                },
+            ]
+        );
+
+        assert.deepEqual(__testing.expandHistoryMessage({ role: "system" }), [
+            { role: "system", content: "", timestamp: undefined },
+        ]);
+    });
+
     it("handles WebSocket clients and disconnected request responses", async () => {
         const ws = new FakeWebSocket();
 

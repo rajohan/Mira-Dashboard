@@ -25,6 +25,54 @@ import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 const FEED_BOTTOM_THRESHOLD_PX = 32;
 const MAX_STICKY_LIVE_FEED_ITEMS = 500;
 
+type FeedRow =
+    | { kind: "separator"; key: string; label: string }
+    | { kind: "message"; key: string; item: FeedItem };
+
+interface FeedVirtualItem {
+    end: number;
+    index: number;
+    start: number;
+}
+
+interface FeedViewportAnchor {
+    key: string;
+    offset: number;
+}
+
+/** Captures the first visible message row so unpinned readers keep their place. */
+function getFeedViewportAnchor(
+    container: HTMLDivElement | null,
+    rows: FeedRow[],
+    virtualItems: FeedVirtualItem[]
+): FeedViewportAnchor | null {
+    if (!container) {
+        return null;
+    }
+
+    const firstVisible = virtualItems.find((virtualItem) => {
+        const row = rows[virtualItem.index];
+        return row?.kind === "message" && virtualItem.end >= container.scrollTop;
+    });
+
+    if (!firstVisible) {
+        return null;
+    }
+
+    const row = rows[firstVisible.index];
+    return row?.kind === "message"
+        ? {
+              key: row.key,
+              offset: Math.max(container.scrollTop - firstVisible.start, 0),
+          }
+        : null;
+}
+
+/** Finds a feed row index by stable row key. */
+function findFeedRowIndex(rows: FeedRow[], key: string): number {
+    return rows.findIndex((row) => row.key === key);
+}
+
 /** Renders the sessions UI. */
 export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
@@ -42,6 +90,9 @@ export function Sessions() {
     const lastKnownFeedScrollTopReference = useRef(0);
     const previousFeedRowsLengthReference = useRef(0);
     const previousFeedFilterKeyReference = useRef("ALL:ALL:ALL");
+    const feedRowsReference = useRef<FeedRow[]>([]);
+    const feedVirtualItemsReference = useRef<FeedVirtualItem[]>([]);
+    const pendingFeedAnchorReference = useRef<FeedViewportAnchor | null>(null);
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
@@ -59,27 +110,6 @@ export function Sessions() {
         isConnected ? AUTO_REFRESH_MS : false
     );
 
-    useEffect(() => {
-        if (latestFeedItems.length === 0) return;
-
-        setLiveFeed((prev) => {
-            const seen = new Set(prev.map((item) => item.id));
-            const next = [...prev];
-
-            for (const item of latestFeedItems) {
-                if (!seen.has(item.id)) {
-                    next.push(item);
-                    seen.add(item.id);
-                }
-            }
-
-            const sorted = next.sort((a, b) => a.timestamp - b.timestamp);
-            return sorted.length > MAX_STICKY_LIVE_FEED_ITEMS
-                ? sorted.slice(-MAX_STICKY_LIVE_FEED_ITEMS)
-                : sorted;
-        });
-    }, [latestFeedItems]);
-
     const filteredFeed = liveFeed.filter((item) => {
         if (feedRoleFilter !== "ALL" && item.role !== feedRoleFilter) return false;
         if (feedSessionFilter !== "ALL" && item.sessionKey !== feedSessionFilter)
@@ -88,10 +118,7 @@ export function Sessions() {
         return true;
     });
 
-    const feedRows: Array<
-        | { kind: "separator"; key: string; label: string }
-        | { kind: "message"; key: string; item: FeedItem }
-    > = [];
+    const feedRows: FeedRow[] = [];
 
     let previousBucket = "";
 
@@ -121,6 +148,8 @@ export function Sessions() {
     });
 
     const feedVirtualItems = feedVirtualizer.getVirtualItems();
+    feedRowsReference.current = feedRows;
+    feedVirtualItemsReference.current = feedVirtualItems;
     const firstFeedVirtualItem = feedVirtualItems[0];
     const lastFeedVirtualItem = feedVirtualItems.at(-1);
     const feedPaddingTop = firstFeedVirtualItem?.start ?? 0;
@@ -167,6 +196,42 @@ export function Sessions() {
         setIsFeedAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
+    useEffect(() => {
+        if (latestFeedItems.length === 0) return;
+
+        if (!shouldStickFeedToBottomReference.current) {
+            pendingFeedAnchorReference.current = getFeedViewportAnchor(
+                liveFeedContainerReference.current,
+                feedRowsReference.current,
+                feedVirtualItemsReference.current
+            );
+        }
+
+        setLiveFeed((prev) => {
+            const seen = new Set(prev.map((item) => item.id));
+            const next = [...prev];
+            let hasNewItems = false;
+
+            for (const item of latestFeedItems) {
+                if (!seen.has(item.id)) {
+                    next.push(item);
+                    seen.add(item.id);
+                    hasNewItems = true;
+                }
+            }
+
+            if (!hasNewItems) {
+                pendingFeedAnchorReference.current = null;
+                return prev;
+            }
+
+            const sorted = next.sort((a, b) => a.timestamp - b.timestamp);
+            return sorted.length > MAX_STICKY_LIVE_FEED_ITEMS
+                ? sorted.slice(-MAX_STICKY_LIVE_FEED_ITEMS)
+                : sorted;
+        });
+    }, [latestFeedItems]);
+
     useLayoutEffect(() => {
         const filterKey = `${feedRoleFilter}:${feedSessionFilter}:${feedTypeFilter}`;
         const filterChanged = previousFeedFilterKeyReference.current !== filterKey;
@@ -185,8 +250,36 @@ export function Sessions() {
             return;
         }
 
-        if (!rowsWereAdded || !shouldStickFeedToBottomReference.current) {
+        if (!rowsWereAdded) {
             return;
+        }
+
+        if (!shouldStickFeedToBottomReference.current) {
+            const anchor = pendingFeedAnchorReference.current;
+            pendingFeedAnchorReference.current = null;
+
+            if (!anchor) {
+                return;
+            }
+
+            const anchorIndex = findFeedRowIndex(feedRows, anchor.key);
+            if (anchorIndex === -1) {
+                return;
+            }
+
+            feedVirtualizer.scrollToIndex(anchorIndex, { align: "start" });
+
+            const scrollFrame = requestAnimationFrame(() => {
+                const container = liveFeedContainerReference.current;
+                if (!container) {
+                    return;
+                }
+
+                container.scrollTop += anchor.offset;
+                lastKnownFeedScrollTopReference.current = container.scrollTop;
+            });
+
+            return () => cancelAnimationFrame(scrollFrame);
         }
 
         scrollFeedToBottom();
