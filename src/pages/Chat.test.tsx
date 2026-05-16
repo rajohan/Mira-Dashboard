@@ -14,6 +14,16 @@ import {
     writeStoredChatDiagnosticVisibility,
 } from "./Chat";
 
+interface MockLiveSession {
+    agentType?: string;
+    displayLabel: string;
+    key: string;
+    label: string;
+    model: string;
+    type: string;
+    updatedAt: string;
+}
+
 const mocks = vi.hoisted(() => ({
     request: vi.fn(),
     subscribe: vi.fn(),
@@ -37,7 +47,7 @@ const mocks = vi.hoisted(() => ({
             type: "channel",
             updatedAt: "2026-05-10T23:00:00.000Z",
         },
-    ],
+    ] as MockLiveSession[],
     agentsStatus: {
         agents: [
             {
