@@ -63,7 +63,8 @@ function normalizeChatAgentId(agentId: string): string {
 
 /** Returns the top-level chat agent bucket for a session. */
 function getChatAgentId(session: Session): string {
-    const [scope, agentId] = session.key.split(":");
+    const sessionKey = typeof session.key === "string" ? session.key : "";
+    const [scope = "", agentId] = sessionKey.split(":");
 
     if (scope.toLowerCase() === "agent" && agentId) {
         return normalizeChatAgentId(agentId);
@@ -74,15 +75,16 @@ function getChatAgentId(session: Session): string {
 
 /** Formats the session label inside a selected chat agent bucket. */
 function formatChatSessionLabel(session: Session, agentId: string): string {
-    const [scope, keyAgentId, ...sessionParts] = session.key.split(":");
+    const sessionKey = typeof session.key === "string" ? session.key : "";
+    const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
     if (
         scope.toLowerCase() === "agent" &&
         normalizeChatAgentId(keyAgentId || "") === agentId
     ) {
-        return sessionParts.join(":") || session.key;
+        return sessionParts.join(":") || sessionKey;
     }
 
-    return session.displayLabel || session.label || session.displayName || session.key;
+    return session.displayLabel || session.label || session.displayName || sessionKey;
 }
 
 /** Performs deleted messages storage key. */
@@ -795,9 +797,16 @@ export function Chat() {
 
     /** Selects newest/default session for selected agent. */
     const handleSelectAgent = (agentId: string) => {
-        const nextSession = sortedSessions.find(
-            (session) => getChatAgentId(session) === agentId
-        );
+        if (agentId === selectedAgentId) {
+            return;
+        }
+
+        const agentSession = agents.find((agent) => agent.id === agentId)?.sessionKey;
+        const nextSession =
+            sortedSessions.find(
+                (session) =>
+                    session.key === agentSession && getChatAgentId(session) === agentId
+            ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
         setSelectedSessionKey(nextSession?.key || "");
     };
 

@@ -190,6 +190,12 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
             <button type="button" onClick={() => onSelectSession("session-b")}>
                 select side chat
             </button>
+            <button type="button" onClick={() => onSelectSession("agent:main:scratch")}>
+                select scratch chat
+            </button>
+            <button type="button" onClick={() => onSelectAgent("main")}>
+                select main agent
+            </button>
             <button type="button" onClick={() => onSelectAgent("ops")}>
                 select ops agent
             </button>
@@ -648,6 +654,16 @@ describe("Chat", () => {
                 updatedAt: "2026-05-10T23:00:00.000Z",
             },
         ];
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "mira",
+                    currentTask: "Testing chat",
+                    sessionKey: "agent:main:main",
+                    status: "online",
+                },
+            ],
+        };
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
@@ -698,6 +714,22 @@ describe("Chat", () => {
 
     it("groups chat sessions by agent bucket and selects the first session in a bucket", async () => {
         const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "main",
+                    currentTask: "Main work",
+                    sessionKey: "agent:main:scratch",
+                    status: "online",
+                },
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:Ops:main",
+                    status: "online",
+                },
+            ],
+        };
         mocks.liveSessions = [
             {
                 key: "agent:Main:main",
@@ -748,6 +780,17 @@ describe("Chat", () => {
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
         expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
 
+        await user.click(screen.getByRole("button", { name: "select scratch chat" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:scratch"
+            )
+        );
+        await user.click(screen.getByRole("button", { name: "select main agent" }));
+        expect(screen.getByTestId("selected-session")).toHaveTextContent(
+            "agent:main:scratch"
+        );
+
         await user.click(screen.getByRole("button", { name: "select ops agent" }));
 
         await waitFor(() =>
@@ -756,6 +799,7 @@ describe("Chat", () => {
             )
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("session-options")).not.toHaveTextContent("scratch");
     });
 
     it("groups non-agent chat sessions by stable session metadata", async () => {
@@ -789,6 +833,85 @@ describe("Chat", () => {
         expect(screen.getByTestId("agent-options")).not.toHaveTextContent("session-a");
         expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
         expect(screen.getByTestId("session-options")).toHaveTextContent("Side chat");
+    });
+
+    it("selects an agent-reported active session when switching buckets", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:ops:active",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+            {
+                key: "agent:ops:scratch",
+                displayLabel: "Ops scratch",
+                label: "scratch",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:30:00.000Z",
+            },
+            {
+                key: "agent:ops:active",
+                displayLabel: "Ops active",
+                label: "active",
+                model: "codex",
+                type: "SUBAGENT",
+                updatedAt: "2026-05-10T23:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:ops:active"
+            )
+        );
+    });
+
+    it("handles sessions without a key while deriving chat buckets", async () => {
+        mocks.liveSessions = [
+            {
+                key: undefined as unknown as string,
+                agentType: "direct",
+                displayLabel: "Missing key chat",
+                label: "missing",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("agent-options")).toHaveTextContent("direct")
+        );
+        expect(screen.getByTestId("session-options")).toHaveTextContent(
+            "Missing key chat"
+        );
     });
 
     it("filters hidden tool result rows before message virtualization", async () => {
