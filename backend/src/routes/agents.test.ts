@@ -303,9 +303,89 @@ describe("agents routes", () => {
         assert.match(response.body.lastActivity, /^\d{4}-\d{2}-\d{2}T/u);
     });
 
+    it("reads OpenClaw v4 trajectory activity and live Gateway session state", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(aliasSessionsDir, "active.trajectory.jsonl"),
+            [
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    data: {
+                        prompt: [
+                            "Sender: noisy metadata",
+                            '"""json'.replaceAll('"', "`"),
+                            '{"ignore":true}',
+                            '"""'.replaceAll('"', "`"),
+                            "Fix agent activity [media attached: screenshot]",
+                        ].join("\n"),
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "bash",
+                        arguments: { command: "npm run test -- agents" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const gatewayUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "Agent:Alias-Agent:Main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: gatewayUpdatedAt,
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string;
+                sessionKey: string;
+                lastActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentTask, "Fix agent activity");
+            assert.equal(response.body.currentActivity, "exec npm run test -- agents");
+            assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
+            assert.equal(response.body.lastActivity, gatewayUpdatedAt);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("rejects symlink aliases to another agent's sessions", async () => {
         const agentsRoot = path.join(homeDir, ".openclaw", "agents");
         const aliasPath = path.join(agentsRoot, "alias-agent");
+        await rm(aliasPath, { recursive: true, force: true });
         try {
             await symlink("researcher", aliasPath, "dir");
 
@@ -322,7 +402,7 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, null);
             assert.equal(response.body.sessionKey, null);
         } finally {
-            await rm(aliasPath, { force: true });
+            await rm(aliasPath, { recursive: true, force: true });
         }
     });
 
