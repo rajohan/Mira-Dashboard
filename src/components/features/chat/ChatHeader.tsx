@@ -54,6 +54,7 @@ function DiagnosticToggle({
 /** Provides props for chat header. */
 interface ChatHeaderProps {
     selectedSession: Session | null;
+    selectedAgentId: string;
     selectedSessionKey: string;
     sessionOptions: Option[];
     agentOptions: Option[];
@@ -61,6 +62,7 @@ interface ChatHeaderProps {
     showTools: boolean;
     onToggleThinking: () => void;
     onToggleTools: () => void;
+    onSelectAgent: (agentId: string) => void;
     onSelectSession: (sessionKey: string) => void;
 }
 
@@ -78,6 +80,7 @@ function formatHeaderStatus(selectedSession: Session | null): string {
 /** Renders the chat header UI. */
 export function ChatHeader({
     selectedSession,
+    selectedAgentId,
     selectedSessionKey,
     sessionOptions,
     agentOptions,
@@ -85,6 +88,7 @@ export function ChatHeader({
     showTools,
     onToggleThinking,
     onToggleTools,
+    onSelectAgent,
     onSelectSession,
 }: ChatHeaderProps) {
     return (
@@ -120,24 +124,26 @@ export function ChatHeader({
                                 : "lg:w-[min(24rem,36vw)] xl:w-[26rem]",
                         ].join(" ")}
                     >
+                        {agentOptions.length > 0 ? (
+                            <Select
+                                value={selectedAgentId}
+                                onChange={onSelectAgent}
+                                options={agentOptions}
+                                placeholder="Select agent"
+                                ariaLabel="Agent"
+                                width="w-full"
+                                menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
+                            />
+                        ) : null}
                         <Select
                             value={selectedSessionKey}
                             onChange={onSelectSession}
                             options={sessionOptions}
                             placeholder="Select session"
+                            ariaLabel="Session"
                             width="w-full"
                             menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                         />
-                        {agentOptions.length > 0 ? (
-                            <Select
-                                value=""
-                                onChange={onSelectSession}
-                                options={agentOptions}
-                                placeholder="Jump to agent"
-                                width="w-full"
-                                menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
-                            />
-                        ) : null}
                     </div>
                 </div>
             </div>

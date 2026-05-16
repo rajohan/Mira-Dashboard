@@ -17,6 +17,7 @@ interface SelectProps {
     options: SelectOption[];
     placeholder?: string;
     icon?: React.ReactNode;
+    ariaLabel?: string;
     className?: string;
     width?: string;
     menuWidth?: string;
@@ -29,6 +30,7 @@ export function Select({
     options,
     placeholder = "Select...",
     icon,
+    ariaLabel,
     className,
     width = "min-w-[180px]",
     menuWidth,
@@ -41,6 +43,7 @@ export function Select({
             className={cn("relative inline-block", width === "w-full" && "block w-full")}
         >
             <MenuButton
+                aria-label={ariaLabel}
                 className={cn(
                     "border-primary-700 bg-primary-800 flex items-center gap-2 rounded border px-3 py-1.5 text-sm transition-colors outline-none",
                     "hover:bg-primary-700 hover:border-indigo-500 focus:outline-none data-[focus]:outline-none",

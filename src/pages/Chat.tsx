@@ -46,6 +46,7 @@ import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import type { Session } from "../types/session";
 import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
@@ -54,6 +55,30 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
+
+/** Returns the top-level chat agent bucket for a session. */
+function getChatAgentId(session: Session): string {
+    const [scope, agentId] = session.key.split(":");
+
+    if (scope === "agent" && agentId) {
+        return agentId;
+    }
+
+    if (scope) {
+        return scope;
+    }
+
+    return session.agentType || session.type || "unknown";
+}
+
+/** Formats the session label inside a selected chat agent bucket. */
+function formatChatSessionLabel(session: Session, agentId: string): string {
+    if (session.key.startsWith(`agent:${agentId}:`)) {
+        return session.key.slice(`agent:${agentId}:`.length) || session.key;
+    }
+
+    return session.displayLabel || session.label || session.displayName || session.key;
+}
 
 /** Performs deleted messages storage key. */
 function deletedMessagesStorageKey(sessionKey: string): string {
@@ -261,6 +286,10 @@ export function Chat() {
     const selectedSession = selectedSessionKey
         ? sessionMap.get(selectedSessionKey) || null
         : null;
+    const selectedAgentId = selectedSession ? getChatAgentId(selectedSession) : "";
+    const sessionsForSelectedAgent = selectedAgentId
+        ? sortedSessions.filter((session) => getChatAgentId(session) === selectedAgentId)
+        : sortedSessions;
     const selectedStream = selectedSessionKey
         ? activeStreams[selectedSessionKey]
         : undefined;
@@ -738,20 +767,34 @@ export function Chat() {
         return () => cancelAnimationFrame(scrollFrame);
     }, [chatRows.length, selectedStreamText, selectedSessionKey]);
 
-    const sessionOptions = sortedSessions.map((session) => ({
+    const sessionOptions = sessionsForSelectedAgent.map((session) => ({
         value: session.key,
-        label:
-            session.displayLabel || session.label || session.displayName || session.key,
+        label: formatChatSessionLabel(session, selectedAgentId),
         description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
     }));
 
-    const agentOptions = agents
-        .filter((agent) => agent.sessionKey)
-        .map((agent) => ({
-            value: agent.sessionKey as string,
-            label: agent.id,
-            description: agent.currentTask || agent.model || agent.status || "agent",
-        }));
+    const agentSessionCounts = new Map<string, number>();
+    for (const session of sortedSessions) {
+        const agentId = getChatAgentId(session);
+        agentSessionCounts.set(agentId, (agentSessionCounts.get(agentId) || 0) + 1);
+    }
+
+    const agentOptions = [...agentSessionCounts.entries()].map(([agentId, count]) => {
+        const agent = agents.find((entry) => entry.id === agentId);
+        return {
+            value: agentId,
+            label: agentId,
+            description: `${count} session${count === 1 ? "" : "s"}${agent?.status ? ` · ${agent.status}` : ""}`,
+        };
+    });
+
+    /** Selects newest/default session for selected agent. */
+    const handleSelectAgent = (agentId: string) => {
+        const nextSession = sortedSessions.find(
+            (session) => getChatAgentId(session) === agentId
+        );
+        setSelectedSessionKey(nextSession?.key || "");
+    };
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
 
@@ -1117,6 +1160,7 @@ export function Chat() {
                 <Card className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0">
                     <ChatHeader
                         selectedSession={selectedSession}
+                        selectedAgentId={selectedAgentId}
                         selectedSessionKey={selectedSessionKey}
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
@@ -1126,6 +1170,7 @@ export function Chat() {
                             setShowThinkingOutput((previous) => !previous)
                         }
                         onToggleTools={() => setShowToolOutput((previous) => !previous)}
+                        onSelectAgent={handleSelectAgent}
                         onSelectSession={setSelectedSessionKey}
                     />
 
