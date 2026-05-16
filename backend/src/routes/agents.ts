@@ -665,7 +665,7 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
     const input = typeof record.payload.input === "string" ? record.payload.input : "";
     if (
         /tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input) ||
-        /tools\.(?:openclaw_)?memory_search\s*\(/u.test(input)
+        /tools\.(?:mcp__[^.]+__|openclaw_)?memory_search\s*\(/u.test(input)
     ) {
         return null;
     }
@@ -778,7 +778,8 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             }
         }
 
-        const latestGroup = [...groups.values()].sort((a, b) => b.modTime - a.modTime)[0];
+        const sortedGroups = [...groups.values()].sort((a, b) => b.modTime - a.modTime);
+        const latestGroup = sortedGroups[0];
         const latestModTime = latestGroup.modTime;
         const now = Date.now();
 
@@ -807,127 +808,161 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
         let pendingTask: string | null = null;
         let pendingTaskTurnId: string | null = null;
+        let selectedActivity: string | null = null;
+        let isLatestGroup = true;
 
-        for (const file of latestGroup.files.sort((a, b) => b.mtime - a.mtime)) {
-            if (now - file.mtime > STALE_THRESHOLD) {
+        for (const group of sortedGroups) {
+            if (now - group.modTime > STALE_THRESHOLD) {
+                isLatestGroup = false;
                 continue;
             }
 
-            const content = await readTextNoFollowGuarded(guardedPath(file.path));
-            const lines = content.trim().split("\n");
-            let fileTask: string | null = null;
-            let fileTaskTurnId: string | null = null;
-            let fileActivity: string | null = null;
-            let fileRunId: string | null = null;
+            let groupTask: string | null = null;
+            let groupTaskTurnId: string | null = null;
+            let groupActivity: string | null = null;
 
-            // Scan from end to find most recent user message and visible tool use.
-            for (let i = lines.length - 1; i >= 0; i--) {
-                try {
-                    const entry = JSON.parse(lines[i]);
-                    const record = entry as { runId?: unknown; type?: string };
-                    const entryRunId =
-                        typeof record.runId === "string" ? record.runId : null;
-                    if (!fileRunId && entryRunId) {
-                        fileRunId = entryRunId;
-                    }
-                    if (fileRunId && entryRunId && entryRunId !== fileRunId) {
-                        continue;
-                    }
-                    if (
-                        fileRunId &&
-                        entryRunId === fileRunId &&
-                        record.type === "session.started"
-                    ) {
-                        break;
-                    }
-
-                    const entryTurnId = getEntryTurnId(entry);
-                    const trajectoryActivity = getTrajectoryActivity(entry);
-                    if (!fileTask && trajectoryActivity.task) {
-                        fileTask = cleanTaskText(trajectoryActivity.task);
-                        fileTaskTurnId = entryTurnId || entryRunId;
-                    }
-                    if (!fileActivity && trajectoryActivity.activity) {
-                        fileActivity = trajectoryActivity.activity;
-                    }
-
-                    const codexActivity = getCodexResponseItemActivity(entry);
-                    if (!fileActivity && codexActivity) {
-                        fileActivity = codexActivity;
-                    }
-
-                    const msg = entry.message || entry;
-
-                    // First user message from end = current task
-                    if (msg.role === "user" && msg.content && !fileTask) {
-                        const text =
-                            typeof msg.content === "string"
-                                ? msg.content
-                                : Array.isArray(msg.content)
-                                  ? msg.content
-                                        .filter(
-                                            (c: { type?: string }) => c.type === "text"
-                                        )
-                                        .map((c: { text?: string }) => c.text)
-                                        .join(" ")
-                                  : String(msg.content);
-
-                        // Clean metadata and extract actual message
-                        fileTask = cleanTaskText(text) || null;
-                        fileTaskTurnId = entryTurnId;
-                    }
-
-                    // First visible tool use from end = current activity.
-                    if (
-                        msg.role === "assistant" &&
-                        Array.isArray(msg.content) &&
-                        !fileActivity
-                    ) {
-                        const toolCall = msg.content.find(
-                            (c: { type?: string; name?: string }) =>
-                                c.type === "toolCall" &&
-                                typeof c.name === "string" &&
-                                isVisibleActivityTool(c.name)
-                        ) as
-                            | {
-                                  name?: string;
-                                  arguments?: unknown;
-                                  partialJson?: string;
-                                  [key: string]: unknown;
-                              }
-                            | undefined;
-                        const expectedTurnId = fileTaskTurnId || pendingTaskTurnId;
-                        const canUseToolCall =
-                            !expectedTurnId || entryTurnId === expectedTurnId;
-                        if (toolCall?.name && canUseToolCall) {
-                            fileActivity = summarizeToolActivity(toolCall.name, toolCall);
-                        }
-                    }
-
-                    // Stop if we found both
-                    if (fileTask && fileActivity) break;
-                } catch {
-                    // Skip malformed lines
+            for (const file of group.files.sort((a, b) => b.mtime - a.mtime)) {
+                if (now - file.mtime > STALE_THRESHOLD) {
+                    continue;
                 }
+
+                let content: string;
+                try {
+                    content = await readTextNoFollowGuarded(guardedPath(file.path));
+                } catch {
+                    continue;
+                }
+
+                const lines = content.trim().split("\n");
+                let fileTask: string | null = null;
+                let fileTaskTurnId: string | null = null;
+                let fileActivity: string | null = null;
+                let fileRunId: string | null = null;
+
+                // Scan from end to find most recent user message and visible tool use.
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    try {
+                        const entry = JSON.parse(lines[i]);
+                        const record = entry as { runId?: unknown; type?: string };
+                        const entryRunId =
+                            typeof record.runId === "string" ? record.runId : null;
+                        if (!fileRunId && entryRunId) {
+                            fileRunId = entryRunId;
+                        }
+                        if (fileRunId && entryRunId && entryRunId !== fileRunId) {
+                            continue;
+                        }
+                        if (
+                            fileRunId &&
+                            entryRunId === fileRunId &&
+                            record.type === "session.started"
+                        ) {
+                            break;
+                        }
+
+                        const entryTurnId = getEntryTurnId(entry);
+                        const trajectoryActivity = getTrajectoryActivity(entry);
+                        if (!fileTask && trajectoryActivity.task) {
+                            fileTask = cleanTaskText(trajectoryActivity.task);
+                            fileTaskTurnId = entryTurnId;
+                        }
+                        if (!fileActivity && trajectoryActivity.activity) {
+                            fileActivity = trajectoryActivity.activity;
+                        }
+
+                        const codexActivity = getCodexResponseItemActivity(entry);
+                        if (!fileActivity && codexActivity) {
+                            fileActivity = codexActivity;
+                        }
+
+                        const msg = entry.message || entry;
+
+                        // First user message from end = current task
+                        if (msg.role === "user" && msg.content && !fileTask) {
+                            const text =
+                                typeof msg.content === "string"
+                                    ? msg.content
+                                    : Array.isArray(msg.content)
+                                      ? msg.content
+                                            .filter(
+                                                (c: { type?: string }) =>
+                                                    c.type === "text"
+                                            )
+                                            .map((c: { text?: string }) => c.text)
+                                            .join(" ")
+                                      : String(msg.content);
+
+                            // Clean metadata and extract actual message
+                            fileTask = cleanTaskText(text) || null;
+                            fileTaskTurnId = entryTurnId;
+                        }
+
+                        // First visible tool use from end = current activity.
+                        if (
+                            msg.role === "assistant" &&
+                            Array.isArray(msg.content) &&
+                            !fileActivity
+                        ) {
+                            const toolCall = msg.content.find(
+                                (c: { type?: string; name?: string }) =>
+                                    c.type === "toolCall" &&
+                                    typeof c.name === "string" &&
+                                    isVisibleActivityTool(c.name)
+                            ) as
+                                | {
+                                      name?: string;
+                                      arguments?: unknown;
+                                      partialJson?: string;
+                                      [key: string]: unknown;
+                                  }
+                                | undefined;
+                            const expectedTurnId =
+                                fileTaskTurnId || groupTaskTurnId || pendingTaskTurnId;
+                            const canUseToolCall =
+                                !expectedTurnId || entryTurnId === expectedTurnId;
+                            if (toolCall?.name && canUseToolCall) {
+                                fileActivity = summarizeToolActivity(
+                                    toolCall.name,
+                                    toolCall
+                                );
+                            }
+                        }
+
+                        // Stop if we found both
+                        if (fileTask && fileActivity) break;
+                    } catch {
+                        // Skip malformed lines
+                    }
+                }
+
+                if (fileTask && !groupTask) {
+                    groupTask = fileTask;
+                    groupTaskTurnId = fileTaskTurnId;
+                }
+
+                if (fileActivity && !groupActivity) {
+                    groupActivity = fileActivity;
+                }
+
+                if (groupTask && groupActivity) break;
             }
 
-            if (fileActivity) {
-                return {
-                    task: fileTask || pendingTask,
-                    activity: fileActivity,
-                    modTime: latestModTime,
-                };
+            if (groupTask && !pendingTask) {
+                pendingTask = groupTask;
+                pendingTaskTurnId = groupTaskTurnId;
             }
 
-            if (fileTask && !pendingTask) {
-                pendingTask = fileTask;
-                pendingTaskTurnId = fileTaskTurnId;
+            if (isLatestGroup && groupActivity) {
+                selectedActivity = groupActivity;
             }
+
+            if (selectedActivity && pendingTask) break;
+            isLatestGroup = false;
         }
 
         return {
             task: pendingTask,
-            activity: null,
+            activity: selectedActivity,
             modTime: latestModTime,
         };
     } catch {

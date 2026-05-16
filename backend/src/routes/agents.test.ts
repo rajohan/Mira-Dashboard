@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+    chmod,
     mkdir,
     mkdtemp,
     readFile,
@@ -734,6 +735,90 @@ describe("agents routes", () => {
         }
     });
 
+    it("does not compare trajectory run IDs against transcript turn IDs", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            trajectoryPath,
+            JSON.stringify({
+                type: "prompt.submitted",
+                runId: "fresh-run",
+                data: {
+                    prompt: "Run without explicit turn id",
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            jsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run no-turn" },
+                        },
+                    ],
+                    __openclaw: {
+                        mirrorIdentity: "transcript-turn:tool:call",
+                    },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(trajectoryPath, new Date(now), new Date(now));
+        await utimes(jsonlPath, new Date(now - 1_000), new Date(now - 1_000));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentTask, "Run without explicit turn id");
+            assert.equal(response.body.currentActivity, "exec npm run no-turn");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("continues within the newest session group when unrelated files are interleaved by mtime", async () => {
         const aliasSessionsDir = path.join(
             homeDir,
@@ -863,14 +948,24 @@ describe("agents routes", () => {
         const codexRolloutPath = path.join(codexSessionsDir, "rollout.jsonl");
         await writeFile(
             gatewayTrajectoryPath,
-            JSON.stringify({
-                type: "tool.call",
-                runId: "gateway-run",
-                data: {
-                    name: "session_status",
-                    arguments: {},
-                },
-            }),
+            [
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "gateway-run",
+                    data: {
+                        prompt: "Use Codex rollout activity with trajectory task",
+                        turnId: "fresh-turn",
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "gateway-run",
+                    data: {
+                        name: "session_status",
+                        arguments: {},
+                    },
+                }),
+            ].join("\n"),
             "utf8"
         );
         await writeFile(
@@ -890,6 +985,14 @@ describe("agents routes", () => {
                         type: "custom_tool_call",
                         name: "exec",
                         input: "const r = await tools.write_stdin({ session_id: 123 });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: 'await tools.mcp__server__memory_search({ query: "noise" });',
                     },
                 }),
                 JSON.stringify({
@@ -929,14 +1032,78 @@ describe("agents routes", () => {
 
             const response = await requestJson<{
                 status: string;
+                currentTask: string | null;
                 currentActivity: string | null;
             }>(server, "/api/agents/alias-agent/status");
 
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "active");
+            assert.equal(
+                response.body.currentTask,
+                "Use Codex rollout activity with trajectory task"
+            );
             assert.equal(response.body.currentActivity, "terminal output");
         } finally {
             gateway.request = previousGatewayRequest;
+            await rm(aliasAgentDir, { recursive: true, force: true });
+        }
+    });
+
+    it("continues scanning grouped logs when one file is unreadable", async () => {
+        const aliasAgentDir = path.join(homeDir, ".openclaw", "agents", "alias-agent");
+        const aliasSessionsDir = path.join(aliasAgentDir, "sessions");
+        await rm(aliasAgentDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const unreadablePath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(unreadablePath, "not readable", "utf8");
+        await writeFile(
+            trajectoryPath,
+            JSON.stringify({
+                type: "tool.call",
+                runId: "fresh-run",
+                data: {
+                    name: "exec_command",
+                    arguments: { cmd: "npm run readable" },
+                },
+            }),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(unreadablePath, new Date(now), new Date(now));
+        await utimes(trajectoryPath, new Date(now - 1_000), new Date(now - 1_000));
+        await chmod(unreadablePath, 0);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.currentActivity, "exec npm run readable");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await chmod(unreadablePath, 0o600).catch(() => {});
             await rm(aliasAgentDir, { recursive: true, force: true });
         }
     });
