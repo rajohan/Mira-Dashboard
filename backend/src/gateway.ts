@@ -376,6 +376,10 @@ function expandHistoryMessage(message: HistoryMessage): HistoryMessage[] {
 
     for (const block of message.content) {
         const record = asRecord(block);
+        if (!record) {
+            continue;
+        }
+
         const type = typeof record?.type === "string" ? record.type : "";
         const normalizedType = type.toLowerCase().replaceAll(/[.\s-]+/g, "_");
 
