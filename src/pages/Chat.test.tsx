@@ -840,7 +840,7 @@ describe("Chat", () => {
         mocks.agentsStatus = {
             agents: [
                 {
-                    id: "ops",
+                    id: "Ops",
                     currentTask: "Ops work",
                     sessionKey: "agent:ops:active",
                     status: "online",
@@ -865,7 +865,7 @@ describe("Chat", () => {
                 updatedAt: "2026-05-10T23:30:00.000Z",
             },
             {
-                key: "agent:ops:active",
+                key: "agent:Ops:active",
                 displayLabel: "Ops active",
                 label: "active",
                 model: "codex",
@@ -886,7 +886,7 @@ describe("Chat", () => {
 
         await waitFor(() =>
             expect(screen.getByTestId("selected-session")).toHaveTextContent(
-                "agent:ops:active"
+                "agent:Ops:active"
             )
         );
     });

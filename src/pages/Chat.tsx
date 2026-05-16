@@ -12,6 +12,7 @@ import {
     type ActiveChatStreams,
     createChatVisibility,
     historyContainsRecoveredStream,
+    isSameSessionKey,
     shouldShowStreamRow as shouldRenderStreamRow,
     uniqueStrings,
     visibleHistoryMessages,
@@ -801,11 +802,14 @@ export function Chat() {
             return;
         }
 
-        const agentSession = agents.find((agent) => agent.id === agentId)?.sessionKey;
+        const agentSession = agents.find(
+            (agent) => normalizeChatAgentId(agent.id) === agentId
+        )?.sessionKey;
         const nextSession =
             sortedSessions.find(
                 (session) =>
-                    session.key === agentSession && getChatAgentId(session) === agentId
+                    isSameSessionKey(session.key, agentSession || undefined) &&
+                    getChatAgentId(session) === agentId
             ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
         setSelectedSessionKey(nextSession?.key || "");
     };
