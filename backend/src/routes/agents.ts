@@ -53,6 +53,42 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
     }
 }
 
+/** Returns activity log roots for an agent, including Codex-native rollout logs. */
+function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
+    if (!isValidAgentId(agentId)) {
+        return [];
+    }
+
+    const roots = [
+        { relative: Path.join(agentId, "sessions"), recursive: false },
+        {
+            relative: Path.join(agentId, "agent", "codex-home", "sessions"),
+            recursive: true,
+        },
+    ];
+
+    try {
+        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        return roots.flatMap((root) => {
+            const resolved = safePathWithinRoot(root.relative, AGENTS_DIR);
+            if (!resolved) {
+                return [];
+            }
+
+            try {
+                const expected = Path.join(realAgentsDir, root.relative);
+                return FS.realpathSync(resolved) === expected
+                    ? [{ dir: resolved, recursive: root.recursive }]
+                    : [];
+            } catch {
+                return [];
+            }
+        });
+    } catch {
+        return [];
+    }
+}
+
 // Activity thresholds (in milliseconds)
 const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
 const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
@@ -406,6 +442,88 @@ interface ActivityInfo {
     modTime: number;
 }
 
+/** Describes one activity log root to scan for an agent. */
+interface ActivityLogRoot {
+    dir: string;
+    recursive: boolean;
+}
+
+/** Describes one activity-bearing JSONL file. */
+interface ActivityLogFile {
+    name: string;
+    path: string;
+    mtime: number;
+    group: string;
+}
+
+/** Lists JSONL activity files in a root while preserving paired file grouping. */
+function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
+    const files: ActivityLogFile[] = [];
+    const pending = [{ dir: root.dir, relativeDir: "", depth: 0 }];
+    const maxDepth = root.recursive ? 6 : 0;
+
+    while (pending.length > 0) {
+        const current = pending.pop();
+        if (!current) {
+            continue;
+        }
+
+        let entries: FS.Dirent[];
+        try {
+            entries = readdirGuarded(guardedPath(current.dir), {
+                withFileTypes: true,
+            });
+        } catch {
+            continue;
+        }
+        for (const entry of entries) {
+            const fullPath = Path.join(current.dir, entry.name);
+            const relativePath = current.relativeDir
+                ? Path.join(current.relativeDir, entry.name)
+                : entry.name;
+
+            if (entry.isDirectory() && root.recursive && current.depth < maxDepth) {
+                pending.push({
+                    dir: fullPath,
+                    relativeDir: relativePath,
+                    depth: current.depth + 1,
+                });
+                continue;
+            }
+
+            if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+                continue;
+            }
+
+            try {
+                const mtime = statGuarded(guardedPath(fullPath)).mtimeMs;
+                const group = `${root.dir}:${relativePath
+                    .replace(/\.trajectory\.jsonl$/u, "")
+                    .replace(/\.jsonl$/u, "")}`;
+                files.push({ name: relativePath, path: fullPath, mtime, group });
+            } catch {
+                // Ignore files that disappear or become unreadable during scanning.
+            }
+        }
+    }
+
+    return files;
+}
+
+/** Cleans raw prompts/transcript text for dashboard task display. */
+function cleanTaskText(text: string): string {
+    return text
+        .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
+        .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
+        .replaceAll(/\[media attached[^\]]*\]/g, "")
+        .replaceAll(/Conversation info[^\n]*/g, "")
+        .replaceAll(/Sender[^\n]*/g, "")
+        .replaceAll(/\n+/g, " ")
+        .replaceAll(/\s+/g, " ")
+        .trim()
+        .slice(0, 100);
+}
+
 /** Performs summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
     const normalizedTool = normalizeToolName(toolName);
@@ -454,6 +572,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         | string
         | undefined;
     const url = (args.url || nested.url) as string | undefined;
+    const query = (args.query || nested.query) as string | undefined;
 
     // Fallback: parse partialJson/raw string if present
     let fallbackPath: string | undefined;
@@ -496,6 +615,9 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "message" && message) {
         return `message ${message.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
     }
+    if (normalizedTool === "memory_search" && query) {
+        return `memory_search ${query.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
+    }
     if (normalizedTool === "apply_patch") {
         return "edit files";
     }
@@ -515,7 +637,69 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 
 /** Returns a canonical un-namespaced tool name for activity filtering and labels. */
 function normalizeToolName(toolName: string): string {
-    return toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+    const unscoped = toolName.includes(".")
+        ? toolName.split(".").pop() || toolName
+        : toolName;
+    return unscoped.toLowerCase();
+}
+
+/** Returns whether a tool should be shown as user-facing current activity. */
+function isVisibleActivityTool(toolName: string): boolean {
+    const normalizedToolName = normalizeToolName(toolName);
+    return normalizedToolName !== "message";
+}
+
+/** Extracts nested tool activity from Codex response-item session logs. */
+function getCodexResponseItemActivity(entry: unknown): string | null {
+    if (!entry || typeof entry !== "object") {
+        return null;
+    }
+
+    const record = entry as {
+        type?: string;
+        payload?: {
+            type?: string;
+            name?: unknown;
+            input?: unknown;
+        };
+    };
+    if (
+        record.type !== "response_item" ||
+        record.payload?.type !== "custom_tool_call" ||
+        typeof record.payload.name !== "string"
+    ) {
+        return null;
+    }
+
+    const input = typeof record.payload.input === "string" ? record.payload.input : "";
+    if (/tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input)) {
+        return null;
+    }
+
+    const nestedToolMatch = input.match(/tools\.([a-zA-Z0-9_]+)\s*\(/u);
+    const nestedToolName = nestedToolMatch ? nestedToolMatch[1] : null;
+    const commandMatch = input.match(/(?:\bcmd|["']cmd["'])\s*:\s*(["'`])([\s\S]*?)\1/u);
+    if (commandMatch) {
+        return summarizeToolActivity("exec", { command: commandMatch[2] });
+    }
+
+    if (/tools\.apply_patch\s*\(/u.test(input)) {
+        return summarizeToolActivity("apply_patch", {});
+    }
+    if (/tools\.openclaw_session_status\s*\(/u.test(input)) {
+        return "session_status";
+    }
+    if (/tools\.openclaw_browser\s*\(/u.test(input)) {
+        return summarizeToolActivity("browser", { action: "activity" });
+    }
+    if (nestedToolName === "write_stdin") {
+        return "terminal output";
+    }
+    if (nestedToolName) {
+        return summarizeToolActivity(nestedToolName, { raw: input });
+    }
+
+    return summarizeToolActivity(record.payload.name, { raw: input });
 }
 
 /** Extracts activity details from OpenClaw v4 trajectory events. */
@@ -539,9 +723,6 @@ function getTrajectoryActivity(entry: unknown): {
         };
     };
     const data = record.data || {};
-    const normalizedToolName =
-        typeof data.name === "string" ? normalizeToolName(data.name) : null;
-
     if (record.type === "prompt.submitted" && typeof data.prompt === "string") {
         return { task: data.prompt };
     }
@@ -549,7 +730,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.call" &&
         typeof data.name === "string" &&
-        normalizedToolName !== "message"
+        isVisibleActivityTool(data.name)
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
@@ -562,7 +743,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.result" &&
         typeof data.name === "string" &&
-        normalizedToolName !== "message" &&
+        isVisibleActivityTool(data.name) &&
         (data.arguments || data.args || data.input || data.parameters)
     ) {
         return {
@@ -578,132 +759,220 @@ function getTrajectoryActivity(entry: unknown): {
 
 /** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
 async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo | null> {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const roots = getSafeAgentActivityRoots(agentId);
+    if (roots.length === 0) {
         return null;
     }
 
     try {
-        // Find most recently modified JSONL file
-        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-            .flatMap((entry) => {
-                const sessionPath = Path.join(sessionsDir, entry.name);
-                try {
-                    return [
-                        {
-                            name: entry.name,
-                            path: sessionPath,
-                            mtime: statGuarded(guardedPath(sessionPath)).mtimeMs,
-                        },
-                    ];
-                } catch {
-                    return [];
-                }
-            })
+        const files = roots
+            .flatMap((root) => listActivityLogFiles(root))
             .sort((a, b) => b.mtime - a.mtime);
 
         if (files.length === 0) {
             return null;
         }
 
-        const latestFile = files[0];
-        const now = Date.now();
-
-        // If file hasn't been modified in 5 minutes, agent is idle
-        if (now - latestFile.mtime > STALE_THRESHOLD) {
-            return { task: null, activity: null, modTime: latestFile.mtime };
-        }
-
-        // Read the file and find last user message and tool use
-        const content = await readTextNoFollowGuarded(guardedPath(latestFile.path));
-        const lines = content.trim().split("\n");
-
-        let lastTask: string | null = null;
-        let lastActivity: string | null = null;
-
-        // Scan from end to find most recent user message and tool use
-        for (let i = lines.length - 1; i >= 0; i--) {
-            try {
-                const entry = JSON.parse(lines[i]);
-                const trajectoryActivity = getTrajectoryActivity(entry);
-                if (!lastTask && trajectoryActivity.task) {
-                    lastTask = trajectoryActivity.task
-                        .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
-                        .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
-                        .replaceAll(/\[media attached[^\]]*\]/g, "")
-                        .replaceAll(/Conversation info[^\n]*/g, "")
-                        .replaceAll(/Sender[^\n]*/g, "")
-                        .replaceAll(/\n+/g, " ")
-                        .replaceAll(/\s+/g, " ")
-                        .trim()
-                        .slice(0, 100);
-                }
-                if (!lastActivity && trajectoryActivity.activity) {
-                    lastActivity = trajectoryActivity.activity;
-                }
-
-                const msg = entry.message || entry;
-
-                // First user message from end = current task
-                if (msg.role === "user" && msg.content && !lastTask) {
-                    let text =
-                        typeof msg.content === "string"
-                            ? msg.content
-                            : Array.isArray(msg.content)
-                              ? msg.content
-                                    .filter((c: { type?: string }) => c.type === "text")
-                                    .map((c: { text?: string }) => c.text)
-                                    .join(" ")
-                              : String(msg.content);
-
-                    // Clean metadata and extract actual message
-                    text = text
-                        .replaceAll(/```json[\s\S]*?```/g, "")
-                        .replaceAll(/```[\s\S]*?```/g, "")
-                        .replaceAll(/\[media attached[^\]]*\]/g, "")
-                        .replaceAll(/Conversation info[^\n]*/g, "")
-                        .replaceAll(/Sender[^\n]*/g, "")
-                        .replaceAll(/\n+/g, " ")
-                        .replaceAll(/\s+/g, " ")
-                        .trim()
-                        .slice(0, 100);
-
-                    lastTask = text || null;
-                }
-
-                // First tool use from end = current activity
-                if (
-                    msg.role === "assistant" &&
-                    Array.isArray(msg.content) &&
-                    !lastActivity
-                ) {
-                    const toolCalls = msg.content.filter(
-                        (c: { type?: string }) => c.type === "toolCall"
-                    );
-                    if (toolCalls.length > 0) {
-                        const toolCall = toolCalls[0] as {
-                            name?: string;
-                            arguments?: unknown;
-                            partialJson?: string;
-                            [key: string]: unknown;
-                        };
-                        const toolName = toolCall.name || "unknown";
-                        lastActivity = summarizeToolActivity(toolName, toolCall);
-                    }
-                }
-
-                // Stop if we found both
-                if (lastTask && lastActivity) break;
-            } catch {
-                // Skip malformed lines
+        const groups = new Map<string, { files: ActivityLogFile[]; modTime: number }>();
+        for (const file of files) {
+            const existing = groups.get(file.group);
+            if (existing) {
+                existing.files.push(file);
+                existing.modTime = Math.max(existing.modTime, file.mtime);
+            } else {
+                groups.set(file.group, { files: [file], modTime: file.mtime });
             }
         }
 
+        const sortedGroups = [...groups.values()].sort((a, b) => b.modTime - a.modTime);
+        const latestGroup = sortedGroups[0];
+        const latestModTime = latestGroup.modTime;
+        const now = Date.now();
+
+        // If no session file has been modified in 5 minutes, agent is idle.
+        if (now - latestModTime > STALE_THRESHOLD) {
+            return { task: null, activity: null, modTime: latestModTime };
+        }
+
+        const getEntryTurnId = (entry: unknown): string | null => {
+            if (!entry || typeof entry !== "object") return null;
+            const raw = entry as {
+                __openclaw?: { mirrorIdentity?: unknown };
+                message?: { __openclaw?: { mirrorIdentity?: unknown } };
+                data?: { turnId?: unknown };
+            };
+            if (typeof raw.data?.turnId === "string") return raw.data.turnId;
+
+            const mirrorIdentity =
+                typeof raw.__openclaw?.mirrorIdentity === "string"
+                    ? raw.__openclaw.mirrorIdentity
+                    : typeof raw.message?.__openclaw?.mirrorIdentity === "string"
+                      ? raw.message.__openclaw.mirrorIdentity
+                      : null;
+            return mirrorIdentity ? mirrorIdentity.split(":")[0] || null : null;
+        };
+
+        let pendingTask: string | null = null;
+        let pendingTaskTurnId: string | null = null;
+        let selectedActivity: string | null = null;
+        let isLatestGroup = true;
+
+        for (const group of sortedGroups) {
+            if (now - group.modTime > STALE_THRESHOLD) {
+                isLatestGroup = false;
+                continue;
+            }
+
+            let groupTask: string | null = null;
+            let groupTaskTurnId: string | null = null;
+            let groupActivity: string | null = null;
+
+            for (const file of group.files.sort((a, b) => b.mtime - a.mtime)) {
+                if (now - file.mtime > STALE_THRESHOLD) {
+                    continue;
+                }
+
+                let content: string;
+                try {
+                    content = await readTextNoFollowGuarded(guardedPath(file.path));
+                } catch {
+                    continue;
+                }
+
+                const lines = content.trim().split("\n");
+                let fileTask: string | null = null;
+                let fileTaskTurnId: string | null = null;
+                let fileActivity: string | null = null;
+                let fileRunId: string | null = null;
+
+                // Scan from end to find most recent user message and visible tool use.
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    try {
+                        const entry = JSON.parse(lines[i]);
+                        const record = entry as { runId?: unknown; type?: string };
+                        const entryRunId =
+                            typeof record.runId === "string" ? record.runId : null;
+                        if (!fileRunId && entryRunId) {
+                            fileRunId = entryRunId;
+                        }
+                        if (fileRunId && !entryRunId) {
+                            continue;
+                        }
+                        if (fileRunId && entryRunId && entryRunId !== fileRunId) {
+                            continue;
+                        }
+                        if (
+                            fileRunId &&
+                            entryRunId === fileRunId &&
+                            record.type === "session.started"
+                        ) {
+                            break;
+                        }
+
+                        const entryTurnId = getEntryTurnId(entry);
+                        const trajectoryActivity = getTrajectoryActivity(entry);
+                        if (!fileTask && trajectoryActivity.task) {
+                            fileTask = cleanTaskText(trajectoryActivity.task);
+                            fileTaskTurnId = entryTurnId;
+                        }
+                        if (!fileActivity && trajectoryActivity.activity) {
+                            fileActivity = trajectoryActivity.activity;
+                        }
+
+                        const codexActivity = getCodexResponseItemActivity(entry);
+                        if (!fileActivity && codexActivity) {
+                            fileActivity = codexActivity;
+                        }
+
+                        const msg = entry.message || entry;
+
+                        // First user message from end = current task
+                        if (msg.role === "user" && msg.content && !fileTask) {
+                            const text =
+                                typeof msg.content === "string"
+                                    ? msg.content
+                                    : Array.isArray(msg.content)
+                                      ? msg.content
+                                            .filter(
+                                                (c: { type?: string }) =>
+                                                    c.type === "text"
+                                            )
+                                            .map((c: { text?: string }) => c.text)
+                                            .join(" ")
+                                      : String(msg.content);
+
+                            // Clean metadata and extract actual message
+                            fileTask = cleanTaskText(text) || null;
+                            fileTaskTurnId = entryTurnId;
+                        }
+
+                        // First visible tool use from end = current activity.
+                        if (
+                            msg.role === "assistant" &&
+                            Array.isArray(msg.content) &&
+                            !fileActivity
+                        ) {
+                            const toolCall = msg.content.find(
+                                (c: { type?: string; name?: string }) =>
+                                    c.type === "toolCall" &&
+                                    typeof c.name === "string" &&
+                                    isVisibleActivityTool(c.name)
+                            ) as
+                                | {
+                                      name?: string;
+                                      arguments?: unknown;
+                                      partialJson?: string;
+                                      [key: string]: unknown;
+                                  }
+                                | undefined;
+                            const expectedTurnId =
+                                fileTaskTurnId || groupTaskTurnId || pendingTaskTurnId;
+                            const canUseToolCall =
+                                !expectedTurnId || entryTurnId === expectedTurnId;
+                            if (toolCall?.name && canUseToolCall) {
+                                fileActivity = summarizeToolActivity(
+                                    toolCall.name,
+                                    toolCall
+                                );
+                            }
+                        }
+
+                        // Stop if we found both
+                        if (fileTask && fileActivity) break;
+                    } catch {
+                        // Skip malformed lines
+                    }
+                }
+
+                if (fileTask && !groupTask) {
+                    groupTask = fileTask;
+                    groupTaskTurnId = fileTaskTurnId;
+                }
+
+                if (fileActivity && !groupActivity) {
+                    groupActivity = fileActivity;
+                }
+
+                if (groupTask && groupActivity) break;
+            }
+
+            if (groupTask && !pendingTask) {
+                pendingTask = groupTask;
+                pendingTaskTurnId = groupTaskTurnId;
+            }
+
+            if (isLatestGroup && groupActivity) {
+                selectedActivity = groupActivity;
+            }
+
+            if (selectedActivity && pendingTask) break;
+            isLatestGroup = false;
+        }
+
         return {
-            task: lastTask,
-            activity: lastActivity,
-            modTime: latestFile.mtime,
+            task: pendingTask,
+            activity: selectedActivity,
+            modTime: latestModTime,
         };
     } catch {
         return null;
@@ -712,29 +981,18 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
 /** Returns the modification time for a session file, or null when it cannot be read. */
 function getSessionFileModTime(agentId: string): number | null {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const roots = getSafeAgentActivityRoots(agentId);
+    if (roots.length === 0) {
         return null;
     }
 
     try {
-        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-            .map((entry) => entry.name);
         let latestModTime = 0;
-
-        for (const file of files) {
-            const filePath = Path.join(sessionsDir, file);
-            try {
-                const stat = statGuarded(guardedPath(filePath));
-                if (stat.mtimeMs > latestModTime) {
-                    latestModTime = stat.mtimeMs;
-                }
-            } catch {
-                // Ignore errors for individual files
+        for (const root of roots) {
+            for (const file of listActivityLogFiles(root)) {
+                latestModTime = Math.max(latestModTime, file.mtime);
             }
         }
-
         return latestModTime > 0 ? latestModTime : null;
     } catch {
         return null;
