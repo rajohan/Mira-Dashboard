@@ -149,56 +149,21 @@ vi.mock("../components/features/sessions", () => ({
         <article data-testid="feed-row">{item.text}</article>
     ),
     SESSION_TYPES: ["ALL", "DIRECT", "CHANNEL"],
-    SessionDetails: ({
-        onClose,
-        onCompact,
-        onDelete,
-        onReset,
-        session,
-    }: {
-        onClose: () => void;
-        onCompact: () => void;
-        onDelete: () => void;
-        onReset: () => void;
-        session: { key: string } | null;
-    }) =>
-        session ? (
-            <section data-testid="session-details">
-                details: {session.key}
-                <button type="button" onClick={onClose}>
-                    Close details
-                </button>
-                <button type="button" onClick={onCompact}>
-                    Compact selected
-                </button>
-                <button type="button" onClick={onReset}>
-                    Reset selected
-                </button>
-                <button type="button" onClick={onDelete}>
-                    Delete selected
-                </button>
-            </section>
-        ) : null,
     SessionsTable: ({
         onCompact,
         onDelete,
         onReset,
-        onSelectSession,
         sessions,
     }: {
         onCompact: (key: string) => void;
         onDelete: (session: { key: string }) => void;
         onReset: (key: string) => void;
-        onSelectSession: (session: { key: string }) => void;
         sessions: Array<{ displayLabel?: string; key: string }>;
     }) => (
         <section data-testid="sessions-table">
             sessions: {sessions.length}
             {sessions.map((session) => (
                 <div key={session.key}>
-                    <button type="button" onClick={() => onSelectSession(session)}>
-                        Select {session.displayLabel || session.key}
-                    </button>
                     <button type="button" onClick={() => onCompact(session.key)}>
                         Compact {session.key}
                     </button>
@@ -328,7 +293,7 @@ describe("Sessions page", () => {
         expect(screen.getByText("Socket failed")).toBeInTheDocument();
     });
 
-    it("runs table and detail actions, including delete confirmation", async () => {
+    it("runs table actions and delete confirmation", async () => {
         const user = userEvent.setup();
 
         render(<Sessions />);
@@ -338,22 +303,7 @@ describe("Sessions page", () => {
         expect(mocks.compact).toHaveBeenCalledWith("main");
         expect(mocks.reset).toHaveBeenCalledWith("main");
 
-        await user.click(screen.getByRole("button", { name: "Select Main session" }));
-        expect(screen.getByTestId("session-details")).toHaveTextContent("details: main");
-
-        await user.click(screen.getByRole("button", { name: "Compact selected" }));
-        expect(mocks.compact).toHaveBeenCalledWith("main");
-
-        await user.click(screen.getByRole("button", { name: "Select Main session" }));
-        await user.click(screen.getByRole("button", { name: "Reset selected" }));
-        expect(mocks.reset).toHaveBeenCalledWith("main");
-
-        await user.click(screen.getByRole("button", { name: "Select Main session" }));
-        await user.click(screen.getByRole("button", { name: "Close details" }));
-        expect(screen.queryByTestId("session-details")).not.toBeInTheDocument();
-
-        await user.click(screen.getByRole("button", { name: "Select Main session" }));
-        await user.click(screen.getByRole("button", { name: "Delete selected" }));
+        await user.click(screen.getByRole("button", { name: "Delete main" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Main session");
         await user.click(screen.getByRole("button", { name: "Confirm delete" }));
         expect(mocks.remove).toHaveBeenCalledWith("main");

@@ -52,9 +52,14 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
         queryFn: async () => {
             const historyBySession = await Promise.all(
                 feedSessionCandidates.map(async (session) => {
-                    const history = await apiFetchRequired<SessionHistoryResponse>(
-                        `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
-                    );
+                    let history: SessionHistoryResponse;
+                    try {
+                        history = await apiFetchRequired<SessionHistoryResponse>(
+                            `/sessions/${encodeURIComponent(session.key)}/history?limit=20&offset=0`
+                        );
+                    } catch {
+                        return [];
+                    }
 
                     const messages = Array.isArray(history.messages)
                         ? history.messages

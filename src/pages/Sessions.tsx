@@ -7,7 +7,6 @@ import { sessionsCollection } from "../collections/sessions";
 import {
     LiveFeedRow,
     SESSION_TYPES,
-    SessionDetails,
     SessionsTable,
 } from "../components/features/sessions";
 import { Alert } from "../components/ui/Alert";
@@ -32,7 +31,6 @@ export function Sessions() {
     const sessionActions = useSessionActions();
     const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
     const [deleteError, setDeleteError] = useState<string | null>(null);
-    const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
     const [feedRoleFilter, setFeedRoleFilter] = useState<string>("ALL");
     const [feedSessionFilter, setFeedSessionFilter] = useState<string>("ALL");
@@ -63,10 +61,6 @@ export function Sessions() {
 
     useEffect(() => {
         if (latestFeedItems.length === 0) return;
-
-        if (!shouldStickFeedToBottomReference.current) {
-            return;
-        }
 
         setLiveFeed((prev) => {
             const seen = new Set(prev.map((item) => item.id));
@@ -366,10 +360,6 @@ export function Sessions() {
             {isConnected && (
                 <SessionsTable
                     sessions={filteredSessions}
-                    onSelectSession={(session) => {
-                        setDeleteError(null);
-                        setSelectedSession(session);
-                    }}
                     onCompact={(sessionKey: string) => sessionActions.compact(sessionKey)}
                     onReset={(sessionKey: string) => sessionActions.reset(sessionKey)}
                     onDelete={setDeleteTarget}
@@ -391,29 +381,6 @@ export function Sessions() {
                 onCancel={() => setDeleteTarget(null)}
                 onConfirm={() => {
                     void handleDeleteConfirm();
-                }}
-            />
-
-            <SessionDetails
-                session={selectedSession}
-                onClose={() => setSelectedSession(null)}
-                onDelete={() => {
-                    if (selectedSession) {
-                        setDeleteTarget(selectedSession);
-                        setSelectedSession(null);
-                    }
-                }}
-                onCompact={() => {
-                    if (selectedSession) {
-                        sessionActions.compact(selectedSession.key);
-                        setSelectedSession(null);
-                    }
-                }}
-                onReset={() => {
-                    if (selectedSession) {
-                        sessionActions.reset(selectedSession.key);
-                        setSelectedSession(null);
-                    }
                 }}
             />
         </div>

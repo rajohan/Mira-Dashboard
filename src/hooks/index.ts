@@ -80,12 +80,7 @@ export {
     useRejectPullRequest,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
-export {
-    sessionKeys,
-    useDeleteSession,
-    useSessionAction,
-    useSessionHistory,
-} from "./useSessions";
+export { sessionKeys, useDeleteSession, useSessionAction } from "./useSessions";
 export {
     taskKeys,
     useAssignTask,

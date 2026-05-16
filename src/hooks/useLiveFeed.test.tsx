@@ -137,6 +137,48 @@ describe("useLiveFeed", () => {
         );
     });
 
+    it("keeps live feed working when one session history request fails", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 404,
+                json: async () => ({ error: "missing" }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    messages: [
+                        {
+                            role: "assistant",
+                            content: "still visible",
+                            timestamp: "2026-01-03T00:00:00Z",
+                        },
+                    ],
+                }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(
+            () =>
+                useLiveFeed(
+                    [
+                        { key: "stale", updatedAt: 1 },
+                        { key: "live", updatedAt: 2 },
+                    ] as never,
+                    false
+                ),
+            { wrapper: createQueryWrapper() }
+        );
+
+        await waitFor(() =>
+            expect(result.current.data?.map((item) => item.content)).toEqual([
+                "still visible",
+            ])
+        );
+    });
+
     it("uses fallbacks for sessions and messages with missing optional fields", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
