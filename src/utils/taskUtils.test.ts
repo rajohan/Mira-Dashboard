@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { Task } from "../types/task";
-import { COLUMN_CONFIG, getColumnId, getPriority } from "./taskUtils";
+import { COLUMN_CONFIG, getColumnId, getPriority, taskMatchesSearch } from "./taskUtils";
 
+/** Builds a task fixture with focused overrides for utility tests. */
 function task(overrides: Partial<Task> = {}): Task {
     return {
         number: 1,
@@ -43,6 +44,36 @@ describe("task utils", () => {
         );
         expect(getColumnId(task({ labels: [{ name: "blocked" }] }))).toBe("blocked");
         expect(getColumnId(task({ state: "CLOSED" }))).toBe("done");
+    });
+
+    it("matches task board search across task metadata", () => {
+        const searchableTask = task({
+            assignees: [{ login: "mira-2026", name: "Mira" }],
+            automation: {
+                type: "cron",
+                recurring: true,
+                cronJobId: "cron-nightly",
+                jobName: "Dashboard Autopilot",
+                scheduleSummary: "30 9,18 * * *",
+                sessionTarget: "session:dashboard-autopilot",
+                model: "codex",
+                thinking: "high",
+                lastRunStatus: "ok",
+            },
+            body: "Review dashboard friction and open a small PR.",
+            labels: [{ name: "in-progress" }, { name: "priority-medium" }],
+            number: 8,
+            title: "Autonomous improvement loop",
+        });
+
+        expect(taskMatchesSearch(searchableTask, "")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "  AUTOPILOT  ")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "friction")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "priority-medium")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "mira-2026")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "30 9")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "dashboard-autopilot")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "missing")).toBe(false);
     });
 
     it("keeps column filters aligned with task column mapping", () => {

@@ -37,7 +37,7 @@ import {
     useUpdateTaskUpdate,
 } from "../hooks";
 import type { ColumnId, Task, TaskAutomation } from "../types/task";
-import { getPriority } from "../utils/taskUtils";
+import { getPriority, taskMatchesSearch } from "../utils/taskUtils";
 
 const ASSIGNMENT_FILTERS = [
     { value: "all", label: "All" },
@@ -74,13 +74,7 @@ export function Tasks() {
         const matchesFilter =
             filter === "all" ||
             task.assignees.some((a) => (a.login || a.name) === filter);
-        const normalizedSearch = search.toLowerCase();
-        const matchesSearch =
-            search === "" ||
-            task.title.toLowerCase().includes(normalizedSearch) ||
-            task.number.toString().includes(search) ||
-            task.automation?.cronJobId.toLowerCase().includes(normalizedSearch) ||
-            task.automation?.jobName?.toLowerCase().includes(normalizedSearch);
+        const matchesSearch = taskMatchesSearch(task, search);
         return matchesFilter && matchesSearch;
     });
 
