@@ -72,6 +72,23 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
     return "low";
 }
 
+/** Returns the searchable text for one task label. */
+function getTaskLabelSearchValue(label: Task["labels"][number]): string {
+    return label.name;
+}
+
+/** Returns searchable identity fields for one task assignee. */
+function getTaskAssigneeSearchValues(
+    assignee: Task["assignees"][number]
+): Array<string | undefined> {
+    return [assignee.login, assignee.name];
+}
+
+/** Returns whether one optional task field matches the normalized search query. */
+function taskSearchValueMatches(value: string | undefined, query: string): boolean {
+    return Boolean(value?.toLowerCase().includes(query));
+}
+
 /** Returns whether a task matches task board search text. */
 export function taskMatchesSearch(task: Task, search: string): boolean {
     const query = search.trim().toLowerCase();
@@ -84,8 +101,8 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
         task.number.toString(),
         task.title,
         task.body,
-        ...task.labels.map((label) => label.name),
-        ...task.assignees.flatMap((assignee) => [assignee.login, assignee.name]),
+        ...task.labels.map(getTaskLabelSearchValue),
+        ...task.assignees.flatMap(getTaskAssigneeSearchValues),
         task.automation?.cronJobId,
         task.automation?.jobName,
         task.automation?.scheduleSummary,
@@ -95,7 +112,7 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
         task.automation?.lastRunStatus,
     ];
 
-    return searchableValues.some((value) => value?.toLowerCase().includes(query));
+    return searchableValues.some((value) => taskSearchValueMatches(value, query));
 }
 
 /** Returns column ID. */

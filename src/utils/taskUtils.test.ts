@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Task } from "../types/task";
 import { COLUMN_CONFIG, getColumnId, getPriority, taskMatchesSearch } from "./taskUtils";
 
+/** Builds a task fixture with focused overrides for utility tests. */
 function task(overrides: Partial<Task> = {}): Task {
     return {
         number: 1,
