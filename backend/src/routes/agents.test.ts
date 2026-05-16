@@ -346,6 +346,7 @@ describe("agents routes", () => {
                     type: "tool.result",
                     data: {
                         name: "exec_command",
+                        args: { cmd: "npm run result -- agents" },
                         success: true,
                     },
                 }),
@@ -391,7 +392,7 @@ describe("agents routes", () => {
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "active");
             assert.equal(response.body.currentTask, "Fix agent activity");
-            assert.equal(response.body.currentActivity, "exec npm run test -- agents");
+            assert.equal(response.body.currentActivity, "exec npm run result -- agents");
             assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
             assert.equal(response.body.lastActivity, gatewayUpdatedAt);
         } finally {
@@ -491,7 +492,7 @@ describe("agents routes", () => {
         await mkdir(aliasSessionsDir, { recursive: true });
         await writeFile(
             path.join(aliasSessionsDir, "sessions.json"),
-            JSON.stringify([{ key: "agent:alias-agent:stale", updatedAt: Date.now() }]),
+            JSON.stringify([{ key: "channel:discord:stale", updatedAt: Date.now() }]),
             "utf8"
         );
 
@@ -517,12 +518,14 @@ describe("agents routes", () => {
             const response = await requestJson<{
                 status: string;
                 sessionKey: string;
+                channel: string | null;
                 model: string;
             }>(server, "/api/agents/alias-agent/status");
 
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "thinking");
             assert.equal(response.body.sessionKey, "agent:alias-agent:main");
+            assert.equal(response.body.channel, null);
             assert.equal(response.body.model, "live-model");
         } finally {
             gateway.request = previousGatewayRequest;

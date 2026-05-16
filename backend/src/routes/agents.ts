@@ -566,7 +566,10 @@ function getTrajectoryActivity(entry: unknown): {
         (data.arguments || data.args || data.input || data.parameters)
     ) {
         return {
-            activity: summarizeToolActivity(data.name, data),
+            activity: summarizeToolActivity(data.name, {
+                arguments:
+                    data.arguments || data.args || data.input || data.parameters || data,
+            }),
         };
     }
 
@@ -839,7 +842,7 @@ function applyGatewaySessionStatus(
     }
 
     status.sessionKey = status.sessionKey || session.key;
-    status.channel = status.channel || getChannelFromSessionKey(session.key);
+    status.channel = getChannelFromSessionKey(session.key);
 
     const updatedAt = toTimestamp(session.updatedAt);
     if (
