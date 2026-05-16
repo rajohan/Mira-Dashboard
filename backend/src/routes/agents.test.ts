@@ -349,6 +349,13 @@ describe("agents routes", () => {
                         success: true,
                     },
                 }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "functions.message",
+                        arguments: { message: "Namespaced delivery noise" },
+                    },
+                }),
             ].join("\n"),
             "utf8"
         );
@@ -469,6 +476,60 @@ describe("agents routes", () => {
             assert.equal(response.body.model, "main-model");
         } finally {
             gateway.request = previousGatewayRequest;
+        }
+    });
+
+    it("falls back to the best live Gateway session when file session key is stale", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(aliasSessionsDir, "sessions.json"),
+            JSON.stringify([{ key: "agent:alias-agent:stale", updatedAt: Date.now() }]),
+            "utf8"
+        );
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "live-model",
+                                status: "running",
+                                updatedAt: "2026-05-16T13:00:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                sessionKey: string;
+                model: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.sessionKey, "agent:alias-agent:main");
+            assert.equal(response.body.model, "live-model");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
         }
     });
 

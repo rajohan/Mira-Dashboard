@@ -408,9 +408,7 @@ interface ActivityInfo {
 
 /** Performs summarize tool activity. */
 function summarizeToolActivity(toolName: string, raw: unknown): string {
-    const normalizedTool = toolName.includes(".")
-        ? toolName.split(".").pop() || toolName
-        : toolName;
+    const normalizedTool = normalizeToolName(toolName);
 
     const parsed =
         typeof raw === "string"
@@ -515,6 +513,11 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     return normalizedTool;
 }
 
+/** Returns a canonical un-namespaced tool name for activity filtering and labels. */
+function normalizeToolName(toolName: string): string {
+    return toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+}
+
 /** Extracts activity details from OpenClaw v4 trajectory events. */
 function getTrajectoryActivity(entry: unknown): {
     task?: string | null;
@@ -536,6 +539,8 @@ function getTrajectoryActivity(entry: unknown): {
         };
     };
     const data = record.data || {};
+    const normalizedToolName =
+        typeof data.name === "string" ? normalizeToolName(data.name) : null;
 
     if (record.type === "prompt.submitted" && typeof data.prompt === "string") {
         return { task: data.prompt };
@@ -544,7 +549,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.call" &&
         typeof data.name === "string" &&
-        data.name !== "message"
+        normalizedToolName !== "message"
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
@@ -557,7 +562,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.result" &&
         typeof data.name === "string" &&
-        data.name !== "message" &&
+        normalizedToolName !== "message" &&
         (data.arguments || data.args || data.input || data.parameters)
     ) {
         return {
@@ -937,9 +942,14 @@ export default function agentsRoutes(app: express.Application): void {
                         agent.model?.primary || defaultModel,
                         config
                     );
-                    const matchingSession = status.sessionKey
+                    const sessionFromKey = status.sessionKey
                         ? findSessionByKey(sessions, status.sessionKey)
-                        : findBestSessionForAgent(agent.id, sessions);
+                        : undefined;
+                    const matchingSession =
+                        sessionFromKey || findBestSessionForAgent(agent.id, sessions);
+                    if (!sessionFromKey && matchingSession) {
+                        status.sessionKey = matchingSession.key;
+                    }
                     applyGatewaySessionStatus(status, matchingSession);
                     status.model =
                         matchingSession?.model &&
@@ -989,9 +999,14 @@ export default function agentsRoutes(app: express.Application): void {
                 agentConfig.model?.primary || config.defaults?.model?.primary,
                 config
             );
-            const matchingSession = status.sessionKey
+            const sessionFromKey = status.sessionKey
                 ? findSessionByKey(sessions, status.sessionKey)
-                : findBestSessionForAgent(agentId, sessions);
+                : undefined;
+            const matchingSession =
+                sessionFromKey || findBestSessionForAgent(agentId, sessions);
+            if (!sessionFromKey && matchingSession) {
+                status.sessionKey = matchingSession.key;
+            }
             applyGatewaySessionStatus(status, matchingSession);
             status.model =
                 matchingSession?.model && matchingSession.model !== configuredModel
