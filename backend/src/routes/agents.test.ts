@@ -517,6 +517,87 @@ describe("agents routes", () => {
         }
     });
 
+    it("does not combine a fresh task with stale activity from another session file", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const oldJsonlPath = path.join(aliasSessionsDir, "old.jsonl");
+        const freshTrajectoryPath = path.join(aliasSessionsDir, "fresh.trajectory.jsonl");
+        await writeFile(
+            oldJsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "npm run old-task" },
+                        },
+                    ],
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            freshTrajectoryPath,
+            JSON.stringify({
+                type: "prompt.submitted",
+                data: { prompt: "Investigate fresh agent activity" },
+            }),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(oldJsonlPath, oldTime, oldTime);
+        await utimes(freshTrajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.currentTask, "Investigate fresh agent activity");
+            assert.equal(response.body.currentActivity, null);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("sorts live Gateway agent sessions by normalized timestamps", async () => {
         const previousGatewayRequest = gateway.request;
         try {

@@ -621,9 +621,6 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             return { task: null, activity: null, modTime: latestModTime };
         }
 
-        let lastTask: string | null = null;
-        let lastActivity: string | null = null;
-
         for (const file of files) {
             if (now - file.mtime > STALE_THRESHOLD) {
                 continue;
@@ -631,14 +628,16 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
             const content = await readTextNoFollowGuarded(guardedPath(file.path));
             const lines = content.trim().split("\n");
+            let fileTask: string | null = null;
+            let fileActivity: string | null = null;
 
             // Scan from end to find most recent user message and visible tool use.
             for (let i = lines.length - 1; i >= 0; i--) {
                 try {
                     const entry = JSON.parse(lines[i]);
                     const trajectoryActivity = getTrajectoryActivity(entry);
-                    if (!lastTask && trajectoryActivity.task) {
-                        lastTask = trajectoryActivity.task
+                    if (!fileTask && trajectoryActivity.task) {
+                        fileTask = trajectoryActivity.task
                             .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
                             .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
                             .replaceAll(/\[media attached[^\]]*\]/g, "")
@@ -649,14 +648,14 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                             .trim()
                             .slice(0, 100);
                     }
-                    if (!lastActivity && trajectoryActivity.activity) {
-                        lastActivity = trajectoryActivity.activity;
+                    if (!fileActivity && trajectoryActivity.activity) {
+                        fileActivity = trajectoryActivity.activity;
                     }
 
                     const msg = entry.message || entry;
 
                     // First user message from end = current task
-                    if (msg.role === "user" && msg.content && !lastTask) {
+                    if (msg.role === "user" && msg.content && !fileTask) {
                         let text =
                             typeof msg.content === "string"
                                 ? msg.content
@@ -681,14 +680,14 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                             .trim()
                             .slice(0, 100);
 
-                        lastTask = text || null;
+                        fileTask = text || null;
                     }
 
                     // First visible tool use from end = current activity.
                     if (
                         msg.role === "assistant" &&
                         Array.isArray(msg.content) &&
-                        !lastActivity
+                        !fileActivity
                     ) {
                         const toolCall = msg.content.find(
                             (c: { type?: string; name?: string }) =>
@@ -704,23 +703,29 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                               }
                             | undefined;
                         if (toolCall?.name) {
-                            lastActivity = summarizeToolActivity(toolCall.name, toolCall);
+                            fileActivity = summarizeToolActivity(toolCall.name, toolCall);
                         }
                     }
 
                     // Stop if we found both
-                    if (lastTask && lastActivity) break;
+                    if (fileTask && fileActivity) break;
                 } catch {
                     // Skip malformed lines
                 }
             }
 
-            if (lastTask && lastActivity) break;
+            if (fileTask || fileActivity) {
+                return {
+                    task: fileTask,
+                    activity: fileActivity,
+                    modTime: latestModTime,
+                };
+            }
         }
 
         return {
-            task: lastTask,
-            activity: lastActivity,
+            task: null,
+            activity: null,
             modTime: latestModTime,
         };
     } catch {
