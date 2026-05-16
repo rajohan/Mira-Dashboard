@@ -515,7 +515,16 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 
 /** Returns a canonical un-namespaced tool name for activity filtering and labels. */
 function normalizeToolName(toolName: string): string {
-    return toolName.includes(".") ? toolName.split(".").pop() || toolName : toolName;
+    const unscoped = toolName.includes(".")
+        ? toolName.split(".").pop() || toolName
+        : toolName;
+    return unscoped.toLowerCase();
+}
+
+/** Returns whether a tool should be shown as user-facing current activity. */
+function isVisibleActivityTool(toolName: string): boolean {
+    const normalizedToolName = normalizeToolName(toolName);
+    return normalizedToolName !== "message" && normalizedToolName !== "memory_search";
 }
 
 /** Extracts activity details from OpenClaw v4 trajectory events. */
@@ -539,9 +548,6 @@ function getTrajectoryActivity(entry: unknown): {
         };
     };
     const data = record.data || {};
-    const normalizedToolName =
-        typeof data.name === "string" ? normalizeToolName(data.name) : null;
-
     if (record.type === "prompt.submitted" && typeof data.prompt === "string") {
         return { task: data.prompt };
     }
@@ -549,7 +555,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.call" &&
         typeof data.name === "string" &&
-        normalizedToolName !== "message"
+        isVisibleActivityTool(data.name)
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
@@ -562,7 +568,7 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.result" &&
         typeof data.name === "string" &&
-        normalizedToolName !== "message" &&
+        isVisibleActivityTool(data.name) &&
         (data.arguments || data.args || data.input || data.parameters)
     ) {
         return {
@@ -607,103 +613,115 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             return null;
         }
 
-        const latestFile = files[0];
+        const latestModTime = files[0].mtime;
         const now = Date.now();
 
-        // If file hasn't been modified in 5 minutes, agent is idle
-        if (now - latestFile.mtime > STALE_THRESHOLD) {
-            return { task: null, activity: null, modTime: latestFile.mtime };
+        // If no session file has been modified in 5 minutes, agent is idle.
+        if (now - latestModTime > STALE_THRESHOLD) {
+            return { task: null, activity: null, modTime: latestModTime };
         }
-
-        // Read the file and find last user message and tool use
-        const content = await readTextNoFollowGuarded(guardedPath(latestFile.path));
-        const lines = content.trim().split("\n");
 
         let lastTask: string | null = null;
         let lastActivity: string | null = null;
 
-        // Scan from end to find most recent user message and tool use
-        for (let i = lines.length - 1; i >= 0; i--) {
-            try {
-                const entry = JSON.parse(lines[i]);
-                const trajectoryActivity = getTrajectoryActivity(entry);
-                if (!lastTask && trajectoryActivity.task) {
-                    lastTask = trajectoryActivity.task
-                        .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
-                        .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
-                        .replaceAll(/\[media attached[^\]]*\]/g, "")
-                        .replaceAll(/Conversation info[^\n]*/g, "")
-                        .replaceAll(/Sender[^\n]*/g, "")
-                        .replaceAll(/\n+/g, " ")
-                        .replaceAll(/\s+/g, " ")
-                        .trim()
-                        .slice(0, 100);
-                }
-                if (!lastActivity && trajectoryActivity.activity) {
-                    lastActivity = trajectoryActivity.activity;
-                }
-
-                const msg = entry.message || entry;
-
-                // First user message from end = current task
-                if (msg.role === "user" && msg.content && !lastTask) {
-                    let text =
-                        typeof msg.content === "string"
-                            ? msg.content
-                            : Array.isArray(msg.content)
-                              ? msg.content
-                                    .filter((c: { type?: string }) => c.type === "text")
-                                    .map((c: { text?: string }) => c.text)
-                                    .join(" ")
-                              : String(msg.content);
-
-                    // Clean metadata and extract actual message
-                    text = text
-                        .replaceAll(/```json[\s\S]*?```/g, "")
-                        .replaceAll(/```[\s\S]*?```/g, "")
-                        .replaceAll(/\[media attached[^\]]*\]/g, "")
-                        .replaceAll(/Conversation info[^\n]*/g, "")
-                        .replaceAll(/Sender[^\n]*/g, "")
-                        .replaceAll(/\n+/g, " ")
-                        .replaceAll(/\s+/g, " ")
-                        .trim()
-                        .slice(0, 100);
-
-                    lastTask = text || null;
-                }
-
-                // First tool use from end = current activity
-                if (
-                    msg.role === "assistant" &&
-                    Array.isArray(msg.content) &&
-                    !lastActivity
-                ) {
-                    const toolCalls = msg.content.filter(
-                        (c: { type?: string }) => c.type === "toolCall"
-                    );
-                    if (toolCalls.length > 0) {
-                        const toolCall = toolCalls[0] as {
-                            name?: string;
-                            arguments?: unknown;
-                            partialJson?: string;
-                            [key: string]: unknown;
-                        };
-                        const toolName = toolCall.name || "unknown";
-                        lastActivity = summarizeToolActivity(toolName, toolCall);
-                    }
-                }
-
-                // Stop if we found both
-                if (lastTask && lastActivity) break;
-            } catch {
-                // Skip malformed lines
+        for (const file of files) {
+            if (now - file.mtime > STALE_THRESHOLD) {
+                continue;
             }
+
+            const content = await readTextNoFollowGuarded(guardedPath(file.path));
+            const lines = content.trim().split("\n");
+
+            // Scan from end to find most recent user message and visible tool use.
+            for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                    const entry = JSON.parse(lines[i]);
+                    const trajectoryActivity = getTrajectoryActivity(entry);
+                    if (!lastTask && trajectoryActivity.task) {
+                        lastTask = trajectoryActivity.task
+                            .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
+                            .replaceAll(/[`]{3}[\s\S]*?[`]{3}/g, "")
+                            .replaceAll(/\[media attached[^\]]*\]/g, "")
+                            .replaceAll(/Conversation info[^\n]*/g, "")
+                            .replaceAll(/Sender[^\n]*/g, "")
+                            .replaceAll(/\n+/g, " ")
+                            .replaceAll(/\s+/g, " ")
+                            .trim()
+                            .slice(0, 100);
+                    }
+                    if (!lastActivity && trajectoryActivity.activity) {
+                        lastActivity = trajectoryActivity.activity;
+                    }
+
+                    const msg = entry.message || entry;
+
+                    // First user message from end = current task
+                    if (msg.role === "user" && msg.content && !lastTask) {
+                        let text =
+                            typeof msg.content === "string"
+                                ? msg.content
+                                : Array.isArray(msg.content)
+                                  ? msg.content
+                                        .filter(
+                                            (c: { type?: string }) => c.type === "text"
+                                        )
+                                        .map((c: { text?: string }) => c.text)
+                                        .join(" ")
+                                  : String(msg.content);
+
+                        // Clean metadata and extract actual message
+                        text = text
+                            .replaceAll(/```json[\s\S]*?```/g, "")
+                            .replaceAll(/```[\s\S]*?```/g, "")
+                            .replaceAll(/\[media attached[^\]]*\]/g, "")
+                            .replaceAll(/Conversation info[^\n]*/g, "")
+                            .replaceAll(/Sender[^\n]*/g, "")
+                            .replaceAll(/\n+/g, " ")
+                            .replaceAll(/\s+/g, " ")
+                            .trim()
+                            .slice(0, 100);
+
+                        lastTask = text || null;
+                    }
+
+                    // First visible tool use from end = current activity.
+                    if (
+                        msg.role === "assistant" &&
+                        Array.isArray(msg.content) &&
+                        !lastActivity
+                    ) {
+                        const toolCall = msg.content.find(
+                            (c: { type?: string; name?: string }) =>
+                                c.type === "toolCall" &&
+                                typeof c.name === "string" &&
+                                isVisibleActivityTool(c.name)
+                        ) as
+                            | {
+                                  name?: string;
+                                  arguments?: unknown;
+                                  partialJson?: string;
+                                  [key: string]: unknown;
+                              }
+                            | undefined;
+                        if (toolCall?.name) {
+                            lastActivity = summarizeToolActivity(toolCall.name, toolCall);
+                        }
+                    }
+
+                    // Stop if we found both
+                    if (lastTask && lastActivity) break;
+                } catch {
+                    // Skip malformed lines
+                }
+            }
+
+            if (lastTask && lastActivity) break;
         }
 
         return {
             task: lastTask,
             activity: lastActivity,
-            modTime: latestFile.mtime,
+            modTime: latestModTime,
         };
     } catch {
         return null;

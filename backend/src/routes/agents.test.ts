@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    symlink,
+    utimes,
+    writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -395,6 +403,111 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, "exec npm run result -- agents");
             assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
             assert.equal(response.body.lastActivity, gatewayUpdatedAt);
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
+    it("ignores message and memory search noise when newer session files have no visible activity", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            jsonlPath,
+            [
+                JSON.stringify({
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "memory_search",
+                                arguments: { query: "old context" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "bash",
+                                arguments: { command: "npm run build" },
+                            },
+                        ],
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "tool.call",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "functions.memory_search",
+                        arguments: { query: "latest recall" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(jsonlPath, oldTime, oldTime);
+        await utimes(trajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentActivity, "exec npm run build");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
