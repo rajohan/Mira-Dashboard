@@ -51,7 +51,7 @@ describe("GitOverviewCard", () => {
                         {
                             key: "workspace",
                             name: "Mira Workspace",
-                            branch: "master",
+                            branch: "main",
                             remote: null,
                             dirty: false,
                             statusSummary: {
@@ -98,7 +98,48 @@ describe("GitOverviewCard", () => {
         expect(screen.getByText("Mira Dashboard")).toBeInTheDocument();
         expect(screen.getByText("Clean")).toBeInTheDocument();
         expect(screen.getByText("Dirty")).toBeInTheDocument();
-        expect(container).toHaveTextContent("master · no changes");
+        expect(container).toHaveTextContent("main · no changes");
         expect(container).toHaveTextContent("unknown branch · 3 changes");
+    });
+
+    it("flags clean repos that are checked out away from main", () => {
+        hooks.useCacheEntry.mockReturnValue({
+            data: {
+                data: {
+                    repos: [
+                        {
+                            key: "dashboard",
+                            name: "Mira Dashboard",
+                            branch: "feature-branch",
+                            remote: null,
+                            dirty: false,
+                            statusSummary: {
+                                staged: 0,
+                                modified: 0,
+                                deleted: 0,
+                                untracked: 0,
+                                renamed: 0,
+                                conflicted: 0,
+                                total: 0,
+                            },
+                        },
+                    ],
+                    dirtyRepos: [],
+                    dirtyCount: 0,
+                    missingRepos: [],
+                    checkedAt: "2026-05-16T08:00:00.000Z",
+                },
+            },
+            isError: false,
+            isLoading: false,
+        });
+
+        const { container } = render(<GitOverviewCard />);
+
+        const offMainRow = screen.getByText("Repos off main").parentElement!;
+        expect(within(offMainRow).getByText("1")).toHaveClass("text-yellow-300");
+        expect(screen.getByText("Off main")).toBeInTheDocument();
+        expect(screen.getByText("Clean")).toBeInTheDocument();
+        expect(container).toHaveTextContent("feature-branch · no changes");
     });
 });

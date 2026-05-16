@@ -4,6 +4,8 @@ import { useCacheEntry } from "../../../hooks/useCache";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
+const DEFAULT_BRANCH = "main";
+
 /** Represents git repo summary. */
 interface GitRepoSummary {
     key: string;
@@ -41,6 +43,9 @@ export function GitOverviewCard() {
     const git = data?.data;
     const repos = git?.repos || [];
     const dirtyRepos = repos.filter((repo) => repo.dirty);
+    const offMainRepos = repos.filter(
+        (repo) => repo.branch && repo.branch !== DEFAULT_BRANCH
+    );
 
     return (
         <Card>
@@ -77,6 +82,19 @@ export function GitOverviewCard() {
                         </span>
                     </div>
 
+                    <div className="flex items-center justify-between">
+                        <span>Repos off main</span>
+                        <span
+                            className={
+                                offMainRepos.length > 0
+                                    ? "font-semibold text-yellow-300"
+                                    : "font-semibold text-green-300"
+                            }
+                        >
+                            {offMainRepos.length}
+                        </span>
+                    </div>
+
                     <div className="space-y-2">
                         {repos.map((repo) => (
                             <div
@@ -88,9 +106,16 @@ export function GitOverviewCard() {
                                         <GitCommitHorizontal className="text-primary-400 h-3.5 w-3.5 shrink-0" />
                                         <span className="truncate">{repo.name}</span>
                                     </div>
-                                    <Badge variant={repo.dirty ? "warning" : "success"}>
-                                        {repo.dirty ? "Dirty" : "Clean"}
-                                    </Badge>
+                                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                                        {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
+                                            <Badge variant="warning">Off main</Badge>
+                                        ) : null}
+                                        <Badge
+                                            variant={repo.dirty ? "warning" : "success"}
+                                        >
+                                            {repo.dirty ? "Dirty" : "Clean"}
+                                        </Badge>
+                                    </div>
                                 </div>
                                 <div className="text-primary-400 text-xs break-words">
                                     {repo.branch || "unknown branch"}
