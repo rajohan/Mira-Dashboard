@@ -43,6 +43,12 @@ export interface FeedViewportAnchor {
     offset: number;
 }
 
+/** Represents the result of merging newly fetched feed items into retained state. */
+export interface FeedMergeResult {
+    items: FeedItem[];
+    changed: boolean;
+}
+
 /** Captures the first visible message row so unpinned readers keep their place. */
 export function getFeedViewportAnchor(
     container: HTMLDivElement | null,
@@ -85,6 +91,61 @@ export function trimLiveFeedItems(items: FeedItem[]): FeedItem[] {
         : items;
 }
 
+/** Returns whether two feed items contain the same rendered data. */
+function isSameFeedItem(left: FeedItem, right: FeedItem): boolean {
+    return (
+        left.content === right.content &&
+        left.role === right.role &&
+        left.sessionKey === right.sessionKey &&
+        left.sessionLabel === right.sessionLabel &&
+        left.sessionType === right.sessionType &&
+        left.timestamp === right.timestamp
+    );
+}
+
+/** Merges incoming feed items while preserving updates to existing live rows. */
+export function mergeLiveFeedItems(
+    previousItems: FeedItem[],
+    incomingItems: FeedItem[]
+): FeedMergeResult {
+    const byId = new Map<string, FeedItem>();
+    let changed = false;
+
+    for (const item of previousItems) {
+        byId.set(item.id, item);
+    }
+
+    for (const item of incomingItems) {
+        const previous = byId.get(item.id);
+        if (!previous || !isSameFeedItem(previous, item)) {
+            changed = true;
+            byId.set(item.id, item);
+        }
+    }
+
+    if (!changed) {
+        return { items: previousItems, changed: false };
+    }
+
+    const sorted = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
+    return { items: trimLiveFeedItems(sorted), changed: true };
+}
+
+/** Builds a compact signature that changes when rendered feed row identity changes. */
+export function getFeedRowsSignature(rows: FeedRow[]): string {
+    const parts: string[] = [];
+
+    for (const row of rows) {
+        parts.push(
+            row.kind === "separator"
+                ? row.key
+                : `${row.key}:${row.item.role}:${row.item.timestamp}:${row.item.content}`
+        );
+    }
+
+    return parts.join("|");
+}
+
 /** Restores the captured intra-row scroll offset after virtualizer alignment. */
 export function restoreFeedViewportOffset(
     container: HTMLDivElement | null,
@@ -96,6 +157,19 @@ export function restoreFeedViewportOffset(
 
     container.scrollTop += anchor.offset;
     return container.scrollTop;
+}
+
+/** Counts retained feed items for one normalized role filter. */
+function countFeedRole(items: FeedItem[], role: string): number {
+    let count = 0;
+
+    for (const item of items) {
+        if (item.role === role) {
+            count += 1;
+        }
+    }
+
+    return count;
 }
 
 /** Renders the sessions UI. */
@@ -113,7 +187,7 @@ export function Sessions() {
     const liveFeedContainerReference = useRef<HTMLDivElement | null>(null);
     const shouldStickFeedToBottomReference = useRef(true);
     const lastKnownFeedScrollTopReference = useRef(0);
-    const previousFeedRowsLengthReference = useRef(0);
+    const previousFeedRowsSignatureReference = useRef("");
     const previousFeedFilterKeyReference = useRef("ALL:ALL:ALL");
     const feedRowsReference = useRef<FeedRow[]>([]);
     const feedVirtualItemsReference = useRef<FeedVirtualItem[]>([]);
@@ -161,13 +235,34 @@ export function Sessions() {
 
         feedRows.push({ kind: "message", key: item.id, item });
     }
+    const feedRowsSignature = getFeedRowsSignature(feedRows);
+
+    /** Returns the stable virtualizer key for one feed row index. */
+    function getFeedItemKey(index: number): string {
+        return feedRows[index]?.key ?? `row-${index}`;
+    }
+
+    /** Returns the live-feed scroll container for the virtualizer. */
+    function getFeedScrollElement(): HTMLDivElement | null {
+        return liveFeedContainerReference.current;
+    }
+
+    /** Estimates row height by row kind before measurement is available. */
+    function estimateFeedSize(index: number): number {
+        return feedRows[index]?.kind === "separator" ? 28 : 112;
+    }
+
+    /** Measures the actual rendered row height for the virtualizer. */
+    function measureFeedElement(element: Element): number {
+        return element.getBoundingClientRect().height;
+    }
 
     const feedVirtualizer = useVirtualizer({
         count: feedRows.length,
-        getItemKey: (index) => feedRows[index]?.key ?? `row-${index}`,
-        getScrollElement: () => liveFeedContainerReference.current,
-        estimateSize: (index) => (feedRows[index]?.kind === "separator" ? 28 : 112),
-        measureElement: (element) => element.getBoundingClientRect().height,
+        getItemKey: getFeedItemKey,
+        getScrollElement: getFeedScrollElement,
+        estimateSize: estimateFeedSize,
+        measureElement: measureFeedElement,
         overscan: 8,
         useAnimationFrameWithResizeObserver: true,
     });
@@ -233,35 +328,25 @@ export function Sessions() {
         }
 
         setLiveFeed((prev) => {
-            const seen = new Set(prev.map((item) => item.id));
-            const next = [...prev];
-            let hasNewItems = false;
+            const next = mergeLiveFeedItems(prev, latestFeedItems);
 
-            for (const item of latestFeedItems) {
-                if (!seen.has(item.id)) {
-                    next.push(item);
-                    seen.add(item.id);
-                    hasNewItems = true;
-                }
-            }
-
-            if (!hasNewItems) {
+            if (!next.changed) {
                 pendingFeedAnchorReference.current = null;
                 return prev;
             }
 
-            const sorted = next.sort((a, b) => a.timestamp - b.timestamp);
-            return trimLiveFeedItems(sorted);
+            return next.items;
         });
     }, [latestFeedItems]);
 
     useLayoutEffect(() => {
         const filterKey = `${feedRoleFilter}:${feedSessionFilter}:${feedTypeFilter}`;
         const filterChanged = previousFeedFilterKeyReference.current !== filterKey;
-        const rowsWereAdded = feedRows.length > previousFeedRowsLengthReference.current;
+        const feedChanged =
+            previousFeedRowsSignatureReference.current !== feedRowsSignature;
 
         previousFeedFilterKeyReference.current = filterKey;
-        previousFeedRowsLengthReference.current = feedRows.length;
+        previousFeedRowsSignatureReference.current = feedRowsSignature;
 
         if (feedRows.length === 0) {
             return;
@@ -273,7 +358,7 @@ export function Sessions() {
             return;
         }
 
-        if (!rowsWereAdded) {
+        if (!feedChanged) {
             return;
         }
 
@@ -311,6 +396,7 @@ export function Sessions() {
         return;
     }, [
         feedRows.length,
+        feedRowsSignature,
         feedVirtualizer,
         feedRoleFilter,
         feedSessionFilter,
@@ -318,17 +404,22 @@ export function Sessions() {
         scrollFeedToBottom,
     ]);
 
-    /** Counts retained feed items for one normalized role filter. */
-    const roleCount = (role: string) =>
-        liveFeed.filter((item) => item.role === role).length;
-
     const feedRoleOptions = [
-        { value: "ALL", label: `All roles (${liveFeed.length})` },
-        { value: "assistant", label: `assistant (${roleCount("assistant")})` },
-        { value: "user", label: `user (${roleCount("user")})` },
-        { value: "system", label: `system (${roleCount("system")})` },
-        { value: "tool", label: `tool (${roleCount("tool")})` },
-        { value: "tool_result", label: `tool_result (${roleCount("tool_result")})` },
+        { value: "ALL", label: "All roles (" + liveFeed.length + ")" },
+        {
+            value: "assistant",
+            label: "assistant (" + countFeedRole(liveFeed, "assistant") + ")",
+        },
+        { value: "user", label: "user (" + countFeedRole(liveFeed, "user") + ")" },
+        {
+            value: "system",
+            label: "system (" + countFeedRole(liveFeed, "system") + ")",
+        },
+        { value: "tool", label: "tool (" + countFeedRole(liveFeed, "tool") + ")" },
+        {
+            value: "tool_result",
+            label: "tool_result (" + countFeedRole(liveFeed, "tool_result") + ")",
+        },
     ];
 
     const feedTypeOptions = [

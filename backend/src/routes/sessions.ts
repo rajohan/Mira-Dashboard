@@ -4,7 +4,7 @@ import gateway, { type Session } from "../gateway.js";
 
 /** Represents history message. */
 interface HistoryMessage {
-    id: string;
+    id: number | string;
     role: string;
     content: string;
     timestamp?: string;
@@ -71,6 +71,7 @@ export default function sessionsRoutes(app: express.Application): void {
             const messages = history.messages.map(
                 (
                     msg: {
+                        id?: number | string;
                         role?: string;
                         content?: string | Array<{ type?: string; text?: string }>;
                         timestamp?: string | number;
@@ -95,7 +96,7 @@ export default function sessionsRoutes(app: express.Application): void {
                         : undefined;
 
                     return {
-                        id: `${offset + idx}`,
+                        id: msg.id ?? `${offset + idx}`,
                         role: msg.role || "unknown",
                         content,
                         timestamp,

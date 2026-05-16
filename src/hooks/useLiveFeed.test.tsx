@@ -18,21 +18,25 @@ describe("useLiveFeed", () => {
                 json: async () => ({
                     messages: [
                         {
+                            id: "older",
                             role: "toolResult",
                             content: "older",
                             timestamp: "2026-01-01T00:00:00Z",
                         },
                         {
+                            id: "fallback",
                             role: "tool-result",
                             content: "fallback timestamp",
                             timestamp: "not-a-date",
                         },
                         {
+                            id: "tool-call",
                             role: "tool.call",
                             content: "tool call",
                             timestamp: "2026-01-01T00:00:01Z",
                         },
                         {
+                            id: "system-event",
                             role: "developer",
                             content: "system event",
                             timestamp: "2026-01-01T00:00:02Z",
@@ -47,6 +51,7 @@ describe("useLiveFeed", () => {
                 json: async () => ({
                     messages: [
                         {
+                            id: "newer",
                             role: "user",
                             content: "newer",
                             timestamp: "2026-01-02T00:00:00Z",
@@ -81,6 +86,7 @@ describe("useLiveFeed", () => {
         expect(result.current.data?.[2]?.role).toBe("tool");
         expect(result.current.data?.[3]?.role).toBe("tool_result");
         expect(result.current.data?.[4]).toMatchObject({
+            id: "s1-fallback",
             sessionLabel: "One",
             sessionType: "DIRECT",
             role: "tool_result",

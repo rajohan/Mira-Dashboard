@@ -221,6 +221,7 @@ describe("gateway state and helper utilities", () => {
     it("expands structured chat history tool calls into feed rows", () => {
         assert.deepEqual(
             __testing.expandHistoryMessage({
+                id: "msg-1",
                 role: "assistant",
                 timestamp: "2026-05-16T17:00:00.000Z",
                 content: [
@@ -234,11 +235,13 @@ describe("gateway state and helper utilities", () => {
             }),
             [
                 {
+                    id: "msg-1:text",
                     role: "assistant",
                     content: "Working",
                     timestamp: "2026-05-16T17:00:00.000Z",
                 },
                 {
+                    id: "msg-1:tool:0",
                     role: "tool",
                     content: 'exec_command {"cmd":"npm test"}',
                     timestamp: "2026-05-16T17:00:00.000Z",
@@ -247,7 +250,7 @@ describe("gateway state and helper utilities", () => {
         );
 
         assert.deepEqual(__testing.expandHistoryMessage({ role: "system" }), [
-            { role: "system", content: "", timestamp: undefined },
+            { id: undefined, role: "system", content: "", timestamp: undefined },
         ]);
     });
 

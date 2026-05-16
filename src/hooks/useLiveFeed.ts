@@ -5,7 +5,12 @@ import { apiFetchRequired } from "./useApi";
 
 /** Represents the session history API response. */
 interface SessionHistoryResponse {
-    messages: Array<{ role: string; content: string; timestamp?: string }>;
+    messages: Array<{
+        id?: number | string;
+        role: string;
+        content: string;
+        timestamp?: string;
+    }>;
 }
 
 /** Represents feed item. */
@@ -81,9 +86,10 @@ function toFeedItem(
     const parsedTimestamp = message.timestamp
         ? new Date(message.timestamp).getTime()
         : fallbackTimestamp;
+    const messageId = message.id ?? index;
 
     return {
-        id: `${session.key}-${index}-${parsedTimestamp}`,
+        id: `${session.key}-${messageId}`,
         sessionKey: session.key,
         sessionLabel: getSessionFeedLabel(session),
         sessionType: (session.type || "unknown").toUpperCase(),
@@ -130,11 +136,16 @@ export function useLiveFeed(sessions: Session[], refreshInterval: number | false
     const sessionSignature = feedSessionCandidates.map((s) => s.key).join("|");
     const updatedSignature = feedSessionCandidates.map((s) => s.updatedAt || 0).join("|");
 
+    /** Fetches live-feed items for the current candidate session snapshot. */
+    function queryLiveFeedItems(): Promise<FeedItem[]> {
+        return fetchLiveFeedItems(feedSessionCandidates);
+    }
+
     return useQuery({
         queryKey: liveFeedKeys.list(sessionSignature, updatedSignature),
         enabled: feedSessionCandidates.length > 0,
         refetchInterval: refreshInterval,
         staleTime: 2_000,
-        queryFn: () => fetchLiveFeedItems(feedSessionCandidates),
+        queryFn: queryLiveFeedItems,
     });
 }

@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     type FeedRow,
     findFeedRowIndex,
+    getFeedRowsSignature,
     getFeedViewportAnchor,
+    mergeLiveFeedItems,
     restoreFeedViewportOffset,
     Sessions,
     trimLiveFeedItems,
@@ -14,8 +16,10 @@ import {
 const mocks = vi.hoisted(() => ({
     compact: vi.fn(),
     liveFeed: [] as Array<{
+        content?: string;
         id: string;
         role: string;
+        sessionLabel?: string;
         sessionKey: string;
         sessionType: string;
         text: string;
@@ -152,8 +156,8 @@ vi.mock("../components/ui/Select", () => ({
 }));
 
 vi.mock("../components/features/sessions", () => ({
-    LiveFeedRow: ({ item }: { item: { text: string } }) => (
-        <article data-testid="feed-row">{item.text}</article>
+    LiveFeedRow: ({ item }: { item: { content?: string; text: string } }) => (
+        <article data-testid="feed-row">{item.content || item.text}</article>
     ),
     SESSION_TYPES: ["ALL", "DIRECT", "CHANNEL"],
     SessionsTable: ({
@@ -186,6 +190,7 @@ vi.mock("../components/features/sessions", () => ({
     ),
 }));
 
+/** Resets mocked session, feed, socket, and action hook state for one test case. */
 function mockSessions(overrides = {}) {
     mocks.sessions = [
         {
@@ -203,16 +208,20 @@ function mockSessions(overrides = {}) {
     ];
     mocks.liveFeed = [
         {
+            content: "assistant message",
             id: "feed-1",
             role: "assistant",
+            sessionLabel: "Main session",
             sessionKey: "main",
             sessionType: "direct",
             text: "assistant message",
             timestamp: Date.parse("2026-05-11T00:00:00.000Z"),
         },
         {
+            content: "user message",
             id: "feed-2",
             role: "user",
+            sessionLabel: "Channel session",
             sessionKey: "channel-1",
             sessionType: "channel",
             text: "user message",
@@ -303,6 +312,63 @@ describe("Sessions page", () => {
         expect(trimLiveFeedItems(items)).toHaveLength(500);
         expect(trimLiveFeedItems(items)[0]?.id).toBe("feed-1");
         expect(trimLiveFeedItems(items.slice(0, 2))).toHaveLength(2);
+    });
+
+    it("merges updated live feed rows with stable ids", () => {
+        const previous = [
+            {
+                content: "memory_search",
+                id: "main-0",
+                role: "tool",
+                sessionKey: "main",
+                sessionLabel: "Main",
+                sessionType: "DIRECT",
+                timestamp: 1,
+            },
+        ];
+        const updated = [{ ...previous[0], content: "exec gh pr checks 54" }];
+
+        expect(mergeLiveFeedItems(previous, previous)).toEqual({
+            changed: false,
+            items: previous,
+        });
+        expect(mergeLiveFeedItems(previous, updated)).toEqual({
+            changed: true,
+            items: updated,
+        });
+    });
+
+    it("tracks feed row changes when retained row count is unchanged", () => {
+        const firstRows: FeedRow[] = [
+            {
+                kind: "message",
+                key: "main-0",
+                item: {
+                    content: "memory_search",
+                    id: "main-0",
+                    role: "tool",
+                    sessionKey: "main",
+                    sessionLabel: "Main",
+                    sessionType: "DIRECT",
+                    timestamp: 1,
+                },
+            },
+        ];
+        const firstMessage = firstRows[0] as Extract<FeedRow, { kind: "message" }>;
+        const secondRows: FeedRow[] = [
+            {
+                kind: "message",
+                key: firstMessage.key,
+                item: {
+                    ...firstMessage.item,
+                    content: "exec gh pr checks 54",
+                },
+            },
+        ];
+
+        expect(getFeedRowsSignature(secondRows)).not.toBe(
+            getFeedRowsSignature(firstRows)
+        );
     });
 
     it("renders live feed and connected sessions", async () => {
@@ -515,6 +581,99 @@ describe("Sessions page", () => {
         );
         expect(screen.getByText("backfilled message")).toBeInTheDocument();
         expect(feedContainer.scrollTop).toBe(200);
+    });
+
+    it("restores the anchor when capped feed updates keep row count unchanged", async () => {
+        vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+            callback(0);
+            return 1;
+        });
+        vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+        const firstFeed = Array.from({ length: 500 }, (_, index) => ({
+            content: index === 499 ? "anchor message" : `message ${index}`,
+            id: `feed-${index}`,
+            role: "assistant",
+            sessionLabel: "Main session",
+            sessionKey: "main",
+            sessionType: "direct",
+            text: index === 499 ? "anchor message" : `message ${index}`,
+            timestamp: Date.parse("2026-05-11T00:00:00.000Z") + index,
+        }));
+        mockSessions({ feed: firstFeed });
+        const { rerender } = render(<Sessions />);
+        const feedContainer = screen
+            .getByText("anchor message")
+            .closest("div[style]") as HTMLDivElement;
+        Object.defineProperties(feedContainer, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 20_000 },
+            scrollTop: { configurable: true, value: 250, writable: true },
+        });
+        fireEvent.scroll(feedContainer);
+        mocks.scrollToIndex.mockClear();
+
+        mockSessions({
+            feed: [
+                ...firstFeed,
+                {
+                    content: "new capped message",
+                    id: "feed-500",
+                    role: "assistant",
+                    sessionLabel: "Main session",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "new capped message",
+                    timestamp: Date.parse("2026-05-11T00:00:00.000Z") + 500,
+                },
+            ],
+        });
+        rerender(<Sessions />);
+
+        await waitFor(() =>
+            expect(mocks.scrollToIndex).toHaveBeenCalledWith(expect.any(Number), {
+                align: "start",
+            })
+        );
+        expect(screen.getByText("new capped message")).toBeInTheDocument();
+        expect(feedContainer.scrollTop).toBe(300);
+    });
+
+    it("updates retained live feed rows when streamed content changes in place", () => {
+        mockSessions({
+            feed: [
+                {
+                    content: "memory_search",
+                    id: "active-row",
+                    role: "tool",
+                    sessionLabel: "Main session",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "memory_search",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        const { rerender } = render(<Sessions />);
+        expect(screen.getByText("memory_search")).toBeInTheDocument();
+
+        mockSessions({
+            feed: [
+                {
+                    content: "exec gh pr checks 54",
+                    id: "active-row",
+                    role: "tool",
+                    sessionLabel: "Main session",
+                    sessionKey: "main",
+                    sessionType: "direct",
+                    text: "exec gh pr checks 54",
+                    timestamp: Date.parse("2026-05-11T00:01:00.000Z"),
+                },
+            ],
+        });
+        rerender(<Sessions />);
+
+        expect(screen.getByText("exec gh pr checks 54")).toBeInTheDocument();
+        expect(screen.queryByText("memory_search")).not.toBeInTheDocument();
     });
 
     it("leaves an unpinned feed alone when no visible anchor can be captured", () => {
