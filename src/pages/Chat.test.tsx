@@ -699,7 +699,7 @@ describe("Chat", () => {
         const user = userEvent.setup();
         mocks.liveSessions = [
             {
-                key: "agent:main:main",
+                key: "agent:Main:main",
                 displayLabel: "Main chat",
                 label: "main",
                 model: "codex",
@@ -707,7 +707,15 @@ describe("Chat", () => {
                 updatedAt: "2026-05-11T00:00:00.000Z",
             },
             {
-                key: "agent:ops:main",
+                key: "agent:main:scratch",
+                displayLabel: "Scratch",
+                label: "scratch",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-10T23:30:00.000Z",
+            },
+            {
+                key: "agent:Ops:main",
                 displayLabel: "Ops",
                 label: "ops",
                 model: "codex",
@@ -729,19 +737,21 @@ describe("Chat", () => {
 
         await waitFor(() =>
             expect(screen.getByTestId("selected-session")).toHaveTextContent(
-                "agent:main:main"
+                "agent:Main:main"
             )
         );
         expect(screen.getByTestId("agent-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("Main");
         expect(screen.getByTestId("agent-options")).toHaveTextContent("ops");
         expect(screen.getByTestId("agent-options")).toHaveTextContent("unknown");
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
 
         await user.click(screen.getByRole("button", { name: "select ops agent" }));
 
         await waitFor(() =>
             expect(screen.getByTestId("selected-session")).toHaveTextContent(
-                "agent:ops:main"
+                "agent:Ops:main"
             )
         );
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");

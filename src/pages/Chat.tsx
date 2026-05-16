@@ -56,25 +56,34 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2_000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 
+/** Normalizes chat agent IDs for case-insensitive session bucketing. */
+function normalizeChatAgentId(agentId: string): string {
+    return agentId.toLowerCase();
+}
+
 /** Returns the top-level chat agent bucket for a session. */
 function getChatAgentId(session: Session): string {
     const [scope, agentId] = session.key.split(":");
 
-    if (scope === "agent" && agentId) {
-        return agentId;
+    if (scope.toLowerCase() === "agent" && agentId) {
+        return normalizeChatAgentId(agentId);
     }
 
     if (scope) {
-        return scope;
+        return normalizeChatAgentId(scope);
     }
 
-    return session.agentType || session.type || "unknown";
+    return normalizeChatAgentId(session.agentType || session.type || "unknown");
 }
 
 /** Formats the session label inside a selected chat agent bucket. */
 function formatChatSessionLabel(session: Session, agentId: string): string {
-    if (session.key.startsWith(`agent:${agentId}:`)) {
-        return session.key.slice(`agent:${agentId}:`.length) || session.key;
+    const [scope, keyAgentId, ...sessionParts] = session.key.split(":");
+    if (
+        scope.toLowerCase() === "agent" &&
+        normalizeChatAgentId(keyAgentId || "") === agentId
+    ) {
+        return sessionParts.join(":") || session.key;
     }
 
     return session.displayLabel || session.label || session.displayName || session.key;
