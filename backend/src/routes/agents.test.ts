@@ -625,6 +625,103 @@ describe("agents routes", () => {
         }
     });
 
+    it("combines fresh trajectory task with visible activity from the same session log", async () => {
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await rm(aliasSessionsDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+
+        const jsonlPath = path.join(aliasSessionsDir, "active.jsonl");
+        const trajectoryPath = path.join(aliasSessionsDir, "active.trajectory.jsonl");
+        await writeFile(
+            jsonlPath,
+            JSON.stringify({
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "bash",
+                            arguments: { command: "gh pr checks 55" },
+                        },
+                    ],
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            trajectoryPath,
+            [
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "fresh-run",
+                    data: { prompt: "Fix current activity fallback" },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const oldTime = new Date(Date.now() - 2_000);
+        const newTime = new Date(Date.now());
+        await utimes(jsonlPath, oldTime, oldTime);
+        await utimes(trajectoryPath, newTime, newTime);
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: newTime.toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentTask: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentTask, "Fix current activity fallback");
+            assert.equal(response.body.currentActivity, "exec gh pr checks 55");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
+                recursive: true,
+                force: true,
+            });
+        }
+    });
+
     it("sorts live Gateway agent sessions by normalized timestamps", async () => {
         const previousGatewayRequest = gateway.request;
         try {

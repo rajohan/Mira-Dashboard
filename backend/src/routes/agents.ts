@@ -621,9 +621,23 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             return { task: null, activity: null, modTime: latestModTime };
         }
 
+        let pendingTask: string | null = null;
+        let pendingGroup: string | null = null;
+        const getFileGroup = (name: string): string =>
+            name.replace(/\.trajectory\.jsonl$/u, "").replace(/\.jsonl$/u, "");
+
         for (const file of files) {
             if (now - file.mtime > STALE_THRESHOLD) {
                 continue;
+            }
+
+            const fileGroup = getFileGroup(file.name);
+            if (pendingTask && pendingGroup && fileGroup !== pendingGroup) {
+                return {
+                    task: pendingTask,
+                    activity: null,
+                    modTime: latestModTime,
+                };
             }
 
             const content = await readTextNoFollowGuarded(guardedPath(file.path));
@@ -732,17 +746,22 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                 }
             }
 
-            if (fileTask || fileActivity) {
+            if (fileActivity) {
                 return {
-                    task: fileTask,
+                    task: fileTask || (pendingGroup === fileGroup ? pendingTask : null),
                     activity: fileActivity,
                     modTime: latestModTime,
                 };
             }
+
+            if (fileTask) {
+                pendingTask = fileTask;
+                pendingGroup = fileGroup;
+            }
         }
 
         return {
-            task: null,
+            task: pendingTask,
             activity: null,
             modTime: latestModTime,
         };
