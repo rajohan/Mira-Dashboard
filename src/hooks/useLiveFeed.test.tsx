@@ -115,6 +115,7 @@ describe("useLiveFeed", () => {
 
         await waitFor(() =>
             expect(result.current.data?.[0]).toMatchObject({
+                id: "s3-0-7",
                 sessionLabel: "s3",
                 sessionType: "UNKNOWN",
                 role: "unknown",

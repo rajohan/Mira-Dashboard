@@ -41,11 +41,13 @@ export function SessionsTable({
     const columns = [
         columnHelper.accessor("type", {
             header: "Type",
+            /** Renders the formatted session type badge. */
             cell: (info) => (
                 <Badge variant={getSessionTypeVariant(info.getValue())}>
                     {formatSessionType(info.row.original)}
                 </Badge>
             ),
+            /** Sorts session types by the dashboard's preferred type order. */
             sortingFn: (a, b) => {
                 const orderA = getTypeSortOrder(a.original.type);
                 const orderB = getTypeSortOrder(b.original.type);
@@ -57,6 +59,7 @@ export function SessionsTable({
             {
                 id: "name",
                 header: "Name",
+                /** Renders the best available session display name. */
                 cell: (info) => (
                     <span className="text-primary-200 block max-w-xs truncate text-sm">
                         {info.getValue()?.slice(0, 40) || "unknown"}
@@ -66,6 +69,7 @@ export function SessionsTable({
         ),
         columnHelper.accessor("model", {
             header: "Model",
+            /** Renders the model name fallback for sparse session rows. */
             cell: (info) => (
                 <span className="text-primary-300 text-sm">
                     {info.getValue() || "Unknown"}
@@ -74,6 +78,7 @@ export function SessionsTable({
         }),
         columnHelper.accessor("tokenCount", {
             header: "Tokens",
+            /** Renders token usage text and progress for the session row. */
             cell: (info) => {
                 const current = info.getValue() || 0;
                 const max = info.row.original.maxTokens || 200_000;
@@ -90,6 +95,7 @@ export function SessionsTable({
         }),
         columnHelper.accessor("updatedAt", {
             header: "Last Active",
+            /** Renders the relative session activity age. */
             cell: (info) => (
                 <span className="text-primary-400 text-sm">
                     {formatDuration(info.getValue())}
@@ -99,6 +105,7 @@ export function SessionsTable({
         columnHelper.display({
             id: "actions",
             header: "",
+            /** Renders the row action menu without selecting the row. */
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <SessionActionsDropdown

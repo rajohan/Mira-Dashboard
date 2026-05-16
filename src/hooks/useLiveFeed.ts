@@ -86,17 +86,37 @@ function toFeedItem(
     const parsedTimestamp = message.timestamp
         ? new Date(message.timestamp).getTime()
         : fallbackTimestamp;
-    const messageId = message.id ?? index;
+    const timestamp = Number.isFinite(parsedTimestamp)
+        ? parsedTimestamp
+        : fallbackTimestamp;
 
     return {
-        id: `${session.key}-${messageId}`,
+        id: getFeedMessageId(session, message, index, timestamp),
         sessionKey: session.key,
         sessionLabel: getSessionFeedLabel(session),
         sessionType: (session.type || "unknown").toUpperCase(),
         role: normalizeFeedRole(String(message.role || "unknown")),
         content: String(message.content || "").trim(),
-        timestamp: Number.isFinite(parsedTimestamp) ? parsedTimestamp : fallbackTimestamp,
+        timestamp,
     };
+}
+
+/** Builds a stable row id, falling back to timestamped indexes when history lacks ids. */
+function getFeedMessageId(
+    session: Session,
+    message: SessionHistoryResponse["messages"][number],
+    index: number,
+    timestamp: number
+): string {
+    if (
+        message.id !== undefined &&
+        message.id !== null &&
+        String(message.id).length > 0
+    ) {
+        return `${session.key}-${message.id}`;
+    }
+
+    return `${session.key}-${index}-${timestamp}`;
 }
 
 /** Fetches recent feed items for one session, returning an empty list on failure. */

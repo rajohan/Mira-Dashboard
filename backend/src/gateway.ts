@@ -407,7 +407,7 @@ function expandHistoryMessage(message: HistoryMessage): HistoryMessage[] {
 
     return expanded.length > 0
         ? expanded
-        : [{ role: message.role || "unknown", content: "", timestamp }];
+        : [{ id: baseId, role: message.role || "unknown", content: "", timestamp }];
 }
 
 /** Normalizes timestamp. */

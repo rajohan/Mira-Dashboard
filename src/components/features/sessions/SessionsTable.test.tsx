@@ -42,6 +42,7 @@ const sessions: Session[] = [
     },
 ];
 
+/** Renders the sessions table with default action spies and optional props. */
 function renderTable(overrides = {}) {
     const handlers = {
         onCompact: vi.fn(),
@@ -51,6 +52,13 @@ function renderTable(overrides = {}) {
 
     render(<SessionsTable sessions={sessions} {...handlers} {...overrides} />);
     return handlers;
+}
+
+/** Returns the rendered action menu trigger buttons. */
+function getActionMenuButtons() {
+    return screen
+        .getAllByRole("button")
+        .filter((button) => button.getAttribute("aria-haspopup") === "menu");
 }
 
 describe("SessionsTable", () => {
@@ -73,16 +81,11 @@ describe("SessionsTable", () => {
         const user = userEvent.setup();
         const handlers = renderTable();
 
-        const actionButtons = () =>
-            screen
-                .getAllByRole("button")
-                .filter((button) => button.getAttribute("aria-haspopup") === "menu");
-
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Reset" }));
-        await user.click(actionButtons()[0]);
+        await user.click(getActionMenuButtons()[0]);
         await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
         expect(handlers.onCompact).toHaveBeenCalledWith("agent:main:main");
