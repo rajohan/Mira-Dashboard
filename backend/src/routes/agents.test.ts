@@ -840,6 +840,99 @@ describe("agents routes", () => {
         }
     });
 
+    it("uses nested Codex rollout logs for the freshest visible activity", async () => {
+        const aliasAgentDir = path.join(homeDir, ".openclaw", "agents", "alias-agent");
+        const aliasSessionsDir = path.join(aliasAgentDir, "sessions");
+        const codexSessionsDir = path.join(
+            aliasAgentDir,
+            "agent",
+            "codex-home",
+            "sessions",
+            "2026",
+            "05",
+            "16"
+        );
+        await rm(aliasAgentDir, { recursive: true, force: true });
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await mkdir(codexSessionsDir, { recursive: true });
+
+        const gatewayTrajectoryPath = path.join(
+            aliasSessionsDir,
+            "active.trajectory.jsonl"
+        );
+        const codexRolloutPath = path.join(codexSessionsDir, "rollout.jsonl");
+        await writeFile(
+            gatewayTrajectoryPath,
+            JSON.stringify({
+                type: "tool.call",
+                runId: "gateway-run",
+                data: {
+                    name: "session_status",
+                    arguments: {},
+                },
+            }),
+            "utf8"
+        );
+        await writeFile(
+            codexRolloutPath,
+            [
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: 'await tools.exec_command({ cmd: "npm run agents:test" });',
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
+                        input: 'await tools.message({ action: "send", message: "done" });',
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+
+        const now = Date.now();
+        await utimes(gatewayTrajectoryPath, new Date(now - 2_000), new Date(now - 2_000));
+        await utimes(codexRolloutPath, new Date(now), new Date(now));
+
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                key: "agent:alias-agent:main",
+                                model: "openai-codex/gpt-5.5",
+                                status: "running",
+                                updatedAt: new Date(now).toISOString(),
+                            },
+                        ],
+                    };
+                }
+
+                throw new Error("Unexpected gateway method: " + method);
+            };
+
+            const response = await requestJson<{
+                status: string;
+                currentActivity: string | null;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "active");
+            assert.equal(response.body.currentActivity, "exec npm run agents:test");
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await rm(aliasAgentDir, { recursive: true, force: true });
+        }
+    });
+
     it("sorts live Gateway agent sessions by normalized timestamps", async () => {
         const previousGatewayRequest = gateway.request;
         try {

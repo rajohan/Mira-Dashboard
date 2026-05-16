@@ -53,6 +53,42 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
     }
 }
 
+/** Returns activity log roots for an agent, including Codex-native rollout logs. */
+function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
+    if (!isValidAgentId(agentId)) {
+        return [];
+    }
+
+    const roots = [
+        { relative: Path.join(agentId, "sessions"), recursive: false },
+        {
+            relative: Path.join(agentId, "agent", "codex-home", "sessions"),
+            recursive: true,
+        },
+    ];
+
+    try {
+        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        return roots.flatMap((root) => {
+            const resolved = safePathWithinRoot(root.relative, AGENTS_DIR);
+            if (!resolved) {
+                return [];
+            }
+
+            try {
+                const expected = Path.join(realAgentsDir, root.relative);
+                return FS.realpathSync(resolved) === expected
+                    ? [{ dir: resolved, recursive: root.recursive }]
+                    : [];
+            } catch {
+                return [];
+            }
+        });
+    } catch {
+        return [];
+    }
+}
+
 // Activity thresholds (in milliseconds)
 const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
 const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
@@ -406,6 +442,69 @@ interface ActivityInfo {
     modTime: number;
 }
 
+/** Describes one activity log root to scan for an agent. */
+interface ActivityLogRoot {
+    dir: string;
+    recursive: boolean;
+}
+
+/** Describes one activity-bearing JSONL file. */
+interface ActivityLogFile {
+    name: string;
+    path: string;
+    mtime: number;
+    group: string;
+}
+
+/** Lists JSONL activity files in a root while preserving paired file grouping. */
+function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
+    const files: ActivityLogFile[] = [];
+    const pending = [{ dir: root.dir, relativeDir: "", depth: 0 }];
+    const maxDepth = root.recursive ? 6 : 0;
+
+    while (pending.length > 0) {
+        const current = pending.pop();
+        if (!current) {
+            continue;
+        }
+
+        const entries = readdirGuarded(guardedPath(current.dir), {
+            withFileTypes: true,
+        });
+        for (const entry of entries) {
+            const fullPath = Path.join(current.dir, entry.name);
+            const relativePath = current.relativeDir
+                ? Path.join(current.relativeDir, entry.name)
+                : entry.name;
+
+            if (entry.isDirectory() && root.recursive && current.depth < maxDepth) {
+                pending.push({
+                    dir: fullPath,
+                    relativeDir: relativePath,
+                    depth: current.depth + 1,
+                });
+                continue;
+            }
+
+            if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+                continue;
+            }
+
+            try {
+                const mtime = statGuarded(guardedPath(fullPath)).mtimeMs;
+                const group = `${root.dir}:${relativePath
+                    .replace(/\.trajectory\.jsonl$/u, "")
+                    .replace(/\.jsonl$/u, "")}`;
+                files.push({ name: relativePath, path: fullPath, mtime, group });
+            } catch {
+                // Ignore files that disappear or become unreadable during scanning.
+            }
+        }
+    }
+
+    return files;
+}
+
 /** Cleans raw prompts/transcript text for dashboard task display. */
 function cleanTaskText(text: string): string {
     return text
@@ -541,6 +640,54 @@ function isVisibleActivityTool(toolName: string): boolean {
     return normalizedToolName !== "message" && normalizedToolName !== "memory_search";
 }
 
+/** Extracts nested tool activity from Codex response-item session logs. */
+function getCodexResponseItemActivity(entry: unknown): string | null {
+    if (!entry || typeof entry !== "object") {
+        return null;
+    }
+
+    const record = entry as {
+        type?: string;
+        payload?: {
+            type?: string;
+            name?: unknown;
+            input?: unknown;
+        };
+    };
+    if (
+        record.type !== "response_item" ||
+        record.payload?.type !== "custom_tool_call" ||
+        typeof record.payload.name !== "string"
+    ) {
+        return null;
+    }
+
+    const input = typeof record.payload.input === "string" ? record.payload.input : "";
+    if (
+        /tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input) ||
+        /tools\.(?:openclaw_)?memory_search\s*\(/u.test(input)
+    ) {
+        return null;
+    }
+
+    const commandMatch = input.match(/\bcmd\s*:\s*(["'])([\s\S]*?)\1/u);
+    if (commandMatch) {
+        return summarizeToolActivity("exec", { command: commandMatch[2] });
+    }
+
+    if (/tools\.apply_patch\s*\(/u.test(input)) {
+        return summarizeToolActivity("apply_patch", {});
+    }
+    if (/tools\.openclaw_session_status\s*\(/u.test(input)) {
+        return "session_status";
+    }
+    if (/tools\.openclaw_browser\s*\(/u.test(input)) {
+        return summarizeToolActivity("browser", { action: "activity" });
+    }
+
+    return summarizeToolActivity(record.payload.name, { raw: input });
+}
+
 /** Extracts activity details from OpenClaw v4 trajectory events. */
 function getTrajectoryActivity(entry: unknown): {
     task?: string | null;
@@ -598,46 +745,28 @@ function getTrajectoryActivity(entry: unknown): {
 
 /** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
 async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo | null> {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const roots = getSafeAgentActivityRoots(agentId);
+    if (roots.length === 0) {
         return null;
     }
 
     try {
-        // Find most recently modified JSONL file
-        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-            .flatMap((entry) => {
-                const sessionPath = Path.join(sessionsDir, entry.name);
-                try {
-                    return [
-                        {
-                            name: entry.name,
-                            path: sessionPath,
-                            mtime: statGuarded(guardedPath(sessionPath)).mtimeMs,
-                        },
-                    ];
-                } catch {
-                    return [];
-                }
-            })
+        const files = roots
+            .flatMap((root) => listActivityLogFiles(root))
             .sort((a, b) => b.mtime - a.mtime);
 
         if (files.length === 0) {
             return null;
         }
 
-        const getFileGroup = (name: string): string =>
-            name.replace(/\.trajectory\.jsonl$/u, "").replace(/\.jsonl$/u, "");
-        const groups = new Map<string, { files: typeof files; modTime: number }>();
+        const groups = new Map<string, { files: ActivityLogFile[]; modTime: number }>();
         for (const file of files) {
-            const group = getFileGroup(file.name);
-            const existing = groups.get(group);
+            const existing = groups.get(file.group);
             if (existing) {
                 existing.files.push(file);
                 existing.modTime = Math.max(existing.modTime, file.mtime);
             } else {
-                groups.set(group, { files: [file], modTime: file.mtime });
+                groups.set(file.group, { files: [file], modTime: file.mtime });
             }
         }
 
@@ -712,6 +841,11 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                     }
                     if (!fileActivity && trajectoryActivity.activity) {
                         fileActivity = trajectoryActivity.activity;
+                    }
+
+                    const codexActivity = getCodexResponseItemActivity(entry);
+                    if (!fileActivity && codexActivity) {
+                        fileActivity = codexActivity;
                     }
 
                     const msg = entry.message || entry;
@@ -795,29 +929,18 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
 /** Returns the modification time for a session file, or null when it cannot be read. */
 function getSessionFileModTime(agentId: string): number | null {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const roots = getSafeAgentActivityRoots(agentId);
+    if (roots.length === 0) {
         return null;
     }
 
     try {
-        const files = readdirGuarded(guardedPath(sessionsDir), { withFileTypes: true })
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-            .map((entry) => entry.name);
         let latestModTime = 0;
-
-        for (const file of files) {
-            const filePath = Path.join(sessionsDir, file);
-            try {
-                const stat = statGuarded(guardedPath(filePath));
-                if (stat.mtimeMs > latestModTime) {
-                    latestModTime = stat.mtimeMs;
-                }
-            } catch {
-                // Ignore errors for individual files
+        for (const root of roots) {
+            for (const file of listActivityLogFiles(root)) {
+                latestModTime = Math.max(latestModTime, file.mtime);
             }
         }
-
         return latestModTime > 0 ? latestModTime : null;
     } catch {
         return null;
