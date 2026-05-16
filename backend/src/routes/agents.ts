@@ -630,11 +630,29 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             const lines = content.trim().split("\n");
             let fileTask: string | null = null;
             let fileActivity: string | null = null;
+            let fileRunId: string | null = null;
 
             // Scan from end to find most recent user message and visible tool use.
             for (let i = lines.length - 1; i >= 0; i--) {
                 try {
                     const entry = JSON.parse(lines[i]);
+                    const record = entry as { runId?: unknown; type?: string };
+                    const entryRunId =
+                        typeof record.runId === "string" ? record.runId : null;
+                    if (!fileRunId && entryRunId) {
+                        fileRunId = entryRunId;
+                    }
+                    if (fileRunId && entryRunId && entryRunId !== fileRunId) {
+                        continue;
+                    }
+                    if (
+                        fileRunId &&
+                        entryRunId === fileRunId &&
+                        record.type === "session.started"
+                    ) {
+                        break;
+                    }
+
                     const trajectoryActivity = getTrajectoryActivity(entry);
                     if (!fileTask && trajectoryActivity.task) {
                         fileTask = trajectoryActivity.task

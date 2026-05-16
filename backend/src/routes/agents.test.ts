@@ -548,10 +548,37 @@ describe("agents routes", () => {
         );
         await writeFile(
             freshTrajectoryPath,
-            JSON.stringify({
-                type: "prompt.submitted",
-                data: { prompt: "Investigate fresh agent activity" },
-            }),
+            [
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "old-run",
+                    data: {
+                        name: "browser",
+                        arguments: {
+                            action: "open",
+                            url: "http://127.0.0.1:3100/chat",
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    type: "session.started",
+                    runId: "fresh-run",
+                    data: {},
+                }),
+                JSON.stringify({
+                    type: "prompt.submitted",
+                    runId: "fresh-run",
+                    data: { prompt: "Investigate fresh agent activity" },
+                }),
+                JSON.stringify({
+                    type: "tool.call",
+                    runId: "fresh-run",
+                    data: {
+                        name: "message",
+                        arguments: { message: "latest delivery update" },
+                    },
+                }),
+            ].join("\n"),
             "utf8"
         );
 
