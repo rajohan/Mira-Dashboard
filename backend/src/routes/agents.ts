@@ -670,7 +670,9 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
         return null;
     }
 
-    const commandMatch = input.match(/\bcmd\s*:\s*(["'`])([\s\S]*?)\1/u);
+    const nestedToolMatch = input.match(/tools\.([a-zA-Z0-9_]+)\s*\(/u);
+    const nestedToolName = nestedToolMatch ? nestedToolMatch[1] : null;
+    const commandMatch = input.match(/(?:\bcmd|["']cmd["'])\s*:\s*(["'`])([\s\S]*?)\1/u);
     if (commandMatch) {
         return summarizeToolActivity("exec", { command: commandMatch[2] });
     }
@@ -683,6 +685,12 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
     }
     if (/tools\.openclaw_browser\s*\(/u.test(input)) {
         return summarizeToolActivity("browser", { action: "activity" });
+    }
+    if (nestedToolName === "write_stdin") {
+        return "terminal output";
+    }
+    if (nestedToolName) {
+        return summarizeToolActivity(nestedToolName, { raw: input });
     }
 
     return summarizeToolActivity(record.payload.name, { raw: input });

@@ -889,6 +889,14 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
+                        input: "const r = await tools.write_stdin({ session_id: 123 });",
+                    },
+                }),
+                JSON.stringify({
+                    type: "response_item",
+                    payload: {
+                        type: "custom_tool_call",
+                        name: "exec",
                         input: 'await tools.message({ action: "send", message: "done" });',
                     },
                 }),
@@ -926,7 +934,7 @@ describe("agents routes", () => {
 
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "active");
-            assert.equal(response.body.currentActivity, "exec npm run agents:test");
+            assert.equal(response.body.currentActivity, "terminal output");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(aliasAgentDir, { recursive: true, force: true });
