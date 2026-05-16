@@ -448,8 +448,13 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
         | string
         | undefined;
-    const command = (args.command || nested.command) as string | undefined;
+    const command = (args.command || args.cmd || nested.command || nested.cmd) as
+        | string
+        | undefined;
     const action = (args.action || nested.action) as string | undefined;
+    const message = (args.message || args.text || nested.message || nested.text) as
+        | string
+        | undefined;
     const url = (args.url || nested.url) as string | undefined;
 
     // Fallback: parse partialJson/raw string if present
@@ -482,8 +487,19 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "write" && resolvedPath) {
         return `write ${resolvedPath}`;
     }
-    if ((normalizedTool === "exec" || normalizedTool === "bash") && command) {
+    if (
+        (normalizedTool === "exec" ||
+            normalizedTool === "exec_command" ||
+            normalizedTool === "bash") &&
+        command
+    ) {
         return `exec ${command.slice(0, 70)}`;
+    }
+    if (normalizedTool === "message" && message) {
+        return `message ${message.replaceAll(/\s+/g, " ").trim().slice(0, 70)}`;
+    }
+    if (normalizedTool === "apply_patch") {
+        return "edit files";
     }
     if (normalizedTool === "browser" && action) {
         return `browser ${action}${url ? ` ${url}` : ""}`.slice(0, 90);
@@ -529,6 +545,16 @@ function getTrajectoryActivity(entry: unknown): {
             activity: summarizeToolActivity(data.name, {
                 arguments: data.arguments || data.input || data.parameters || data,
             }),
+        };
+    }
+
+    if (
+        record.type === "tool.result" &&
+        typeof data.name === "string" &&
+        (data.arguments || data.input || data.parameters)
+    ) {
+        return {
+            activity: summarizeToolActivity(data.name, data),
         };
     }
 
@@ -810,6 +836,8 @@ function applyGatewaySessionStatus(
     }
 
     if (isGatewaySessionRunning(session)) {
+        status.currentActivity =
+            status.currentActivity || `thinking with ${session.model || "model"}`;
         status.status = status.currentActivity ? "active" : "thinking";
     }
 }

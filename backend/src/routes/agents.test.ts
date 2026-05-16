@@ -331,8 +331,15 @@ describe("agents routes", () => {
                 JSON.stringify({
                     type: "tool.call",
                     data: {
-                        name: "bash",
-                        arguments: { command: "npm run test -- agents" },
+                        name: "exec_command",
+                        arguments: { cmd: "npm run test -- agents" },
+                    },
+                }),
+                JSON.stringify({
+                    type: "tool.result",
+                    data: {
+                        name: "exec_command",
+                        success: true,
                     },
                 }),
             ].join("\n"),

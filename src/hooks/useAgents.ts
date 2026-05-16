@@ -41,8 +41,8 @@ export function useAgentsStatus() {
     return useQuery<AgentsStatusResponse>({
         queryKey: ["agents", "status"],
         queryFn: () => apiFetchRequired<AgentsStatusResponse>("/agents/status"),
-        refetchInterval: 5000,
-        staleTime: 4000,
+        refetchInterval: 2000,
+        staleTime: 1000,
     });
 }
 
@@ -74,7 +74,7 @@ export function useAgentStatus(agentId: string) {
         queryKey: ["agents", "status", agentId],
         queryFn: () =>
             apiFetchRequired<Agent>(`/agents/${encodeURIComponent(agentId)}/status`),
-        refetchInterval: 5000,
-        staleTime: 4000,
+        refetchInterval: 2000,
+        staleTime: 1000,
     });
 }
