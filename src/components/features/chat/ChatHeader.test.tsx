@@ -92,9 +92,9 @@ describe("ChatHeader", () => {
         expect(screen.getByText(/codex/u)).toBeInTheDocument();
         expect(screen.getByText(/Thinking: high/u)).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Session" }));
+        await user.click(screen.getByRole("button", { name: "Session: main" }));
         await user.click(await screen.findByRole("menuitem", { name: "Scratch" }));
-        await user.click(screen.getByRole("button", { name: "Agent" }));
+        await user.click(screen.getByRole("button", { name: "Agent: main" }));
         await user.click(await screen.findByRole("menuitem", { name: "coder" }));
 
         expect(onSelectSession).toHaveBeenNthCalledWith(1, "scratch");
