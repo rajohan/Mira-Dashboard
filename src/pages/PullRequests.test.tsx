@@ -28,9 +28,11 @@ const hooks = vi.hoisted(() => ({
             changedFiles: 2,
             deletions: 1,
             headRefName: "add-tests",
+            isDraft: false,
             mergeStateStatus: "CLEAN",
             mergeable: "MERGEABLE",
             number: 10,
+            reviewDecision: "APPROVED",
             statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
             title: "Add dashboard tests",
             updatedAt: "2026-05-11T00:00:00.000Z",
@@ -162,6 +164,7 @@ describe("PullRequests page", () => {
         expect(screen.getByText("Pull requests")).toBeInTheDocument();
         expect(screen.getByText("Add dashboard tests")).toBeInTheDocument();
         expect(screen.getByText("Checks passed")).toBeInTheDocument();
+        expect(screen.getByText("Review approved")).toBeInTheDocument();
         expect(screen.getByText("Ready to deploy")).toBeInTheDocument();
         expect(screen.getByText("restart-scheduled")).toBeInTheDocument();
     });
@@ -269,6 +272,32 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
 
+    it("blocks merge actions for draft Mira PRs", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        isDraft: true,
+                        reviewDecision: "REVIEW_REQUIRED",
+                        title: "Draft dashboard change",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Draft")).toBeInTheDocument();
+        expect(screen.getByText("Review required")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
     it("blocks production actions when checkout is off main", () => {
         mockPullRequests({
             checkout: {
@@ -325,6 +354,7 @@ describe("PullRequests page", () => {
                         mergeStateStatus: "BLOCKED",
                         mergeable: "CONFLICTING",
                         number: 11,
+                        reviewDecision: "CHANGES_REQUESTED",
                         statusCheckRollup: [{ conclusion: "FAILURE", name: "ci" }],
                         title: "Needs work",
                     },
@@ -333,6 +363,7 @@ describe("PullRequests page", () => {
                         mergeStateStatus: "UNKNOWN",
                         mergeable: "UNKNOWN",
                         number: 12,
+                        reviewDecision: "REVIEW_REQUIRED",
                         statusCheckRollup: [{ status: "IN_PROGRESS", name: "ci" }],
                         title: "Still running",
                     },
@@ -361,6 +392,8 @@ describe("PullRequests page", () => {
         expect(screen.getByText("Checks failed")).toBeInTheDocument();
         expect(screen.getByText("Checks running")).toBeInTheDocument();
         expect(screen.getByText("No CI checks")).toBeInTheDocument();
+        expect(screen.getByText("Changes requested")).toBeInTheDocument();
+        expect(screen.getByText("Review required")).toBeInTheDocument();
         expect(screen.getByText("CONFLICTING")).toBeInTheDocument();
         expect(screen.getByText("BLOCKED")).toBeInTheDocument();
     });

@@ -75,6 +75,30 @@ function statusVariant(value: string | undefined) {
     return "default" as const;
 }
 
+/** Performs review decision variant. */
+function reviewDecisionVariant(value: string | undefined) {
+    const normalized = (value || "").toUpperCase();
+    if (normalized === "APPROVED") return "success" as const;
+    if (normalized === "CHANGES_REQUESTED") return "error" as const;
+    if (normalized === "REVIEW_REQUIRED") return "warning" as const;
+    return "default" as const;
+}
+
+/** Performs review decision label. */
+function reviewDecisionLabel(value: string | undefined) {
+    const normalized = (value || "").toUpperCase();
+    switch (normalized) {
+        case "APPROVED":
+            return "Review approved";
+        case "CHANGES_REQUESTED":
+            return "Changes requested";
+        case "REVIEW_REQUIRED":
+            return "Review required";
+        default:
+            return value ? value.replaceAll("_", " ") : "Review pending";
+    }
+}
+
 /** Performs summarize checks. */
 function summarizeChecks(checks: unknown[] | undefined) {
     if (!checks?.length) {
@@ -258,6 +282,10 @@ function PullRequestCard({
                         {pr.mergeStateStatus || "state unknown"}
                     </Badge>
                     <Badge variant={checks.variant}>{checks.label}</Badge>
+                    {pr.isDraft ? <Badge variant="warning">Draft</Badge> : null}
+                    <Badge variant={reviewDecisionVariant(pr.reviewDecision)}>
+                        {reviewDecisionLabel(pr.reviewDecision)}
+                    </Badge>
                 </div>
             </div>
 
@@ -490,7 +518,13 @@ export function PullRequests() {
                                                     }
                                                     disabled={
                                                         isActionPending ||
-                                                        isProductionActionBlocked
+                                                        isProductionActionBlocked ||
+                                                        pr.isDraft
+                                                    }
+                                                    title={
+                                                        pr.isDraft
+                                                            ? "Draft pull requests cannot be merged from the dashboard"
+                                                            : undefined
                                                     }
                                                 >
                                                     <Rocket className="h-4 w-4" />
@@ -506,7 +540,13 @@ export function PullRequests() {
                                                     }
                                                     disabled={
                                                         isActionPending ||
-                                                        isProductionActionBlocked
+                                                        isProductionActionBlocked ||
+                                                        pr.isDraft
+                                                    }
+                                                    title={
+                                                        pr.isDraft
+                                                            ? "Draft pull requests cannot be merged from the dashboard"
+                                                            : undefined
                                                     }
                                                 >
                                                     <GitMerge className="h-4 w-4" />
