@@ -236,6 +236,40 @@ describe("TaskDetailModal", () => {
         expect(screen.getByText("1h 1m")).toBeInTheDocument();
     });
 
+    it("renders completed automation fallbacks and cancels progress edit mode", async () => {
+        const user = userEvent.setup();
+        const onEditUpdate = vi.fn(async () => {});
+        renderModal({
+            onEditUpdate,
+            task: makeTask({
+                automation: {
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "job-complete",
+                    enabled: true,
+                    lastDurationMs: 11_000,
+                    lastRunStatus: "completed",
+                },
+            }),
+        });
+
+        expect(await screen.findByText("COMPLETED")).toBeInTheDocument();
+        expect(screen.getByText("job-complete")).toBeInTheDocument();
+        expect(screen.getByText("11s")).toBeInTheDocument();
+
+        const updateCard = screen
+            .getByText("Added component coverage.")
+            .closest("div")!.parentElement!;
+        await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
+        fireEvent.change(within(updateCard).getByRole("textbox"), {
+            target: { value: "Discard this edit" },
+        });
+        await user.click(within(updateCard).getByRole("button", { name: "Cancel" }));
+
+        expect(onEditUpdate).not.toHaveBeenCalled();
+        expect(screen.getByText("Added component coverage.")).toBeInTheDocument();
+    });
+
     it("ignores blank progress edits and saves automation metadata", async () => {
         const user = userEvent.setup();
         const onAddUpdate = vi.fn(async () => {});
