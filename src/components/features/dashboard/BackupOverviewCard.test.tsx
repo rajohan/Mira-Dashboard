@@ -241,6 +241,54 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("0")).toBeInTheDocument();
     });
 
+    it("formats known Kopia source paths and custom paths", () => {
+        hooks.useCacheEntry.mockImplementation((key: string) => {
+            if (key === "backup.walg.status") {
+                return {
+                    data: { data: { ok: true }, status: "fresh" },
+                    isLoading: false,
+                };
+            }
+
+            return {
+                data: {
+                    data: {
+                        ok: true,
+                        snapshotsByPath: [
+                            {
+                                latest: null,
+                                path: "/source/projects",
+                                snapshotCount: 1,
+                                snapshots: [],
+                            },
+                            {
+                                latest: null,
+                                path: "/source/openclaw",
+                                snapshotCount: 1,
+                                snapshots: [],
+                            },
+                            {
+                                latest: null,
+                                path: "/mnt/custom",
+                                snapshotCount: 1,
+                                snapshots: [],
+                            },
+                        ],
+                        stale: [],
+                    },
+                    status: "fresh",
+                },
+                isLoading: false,
+            };
+        });
+
+        render(<BackupOverviewCard />);
+
+        expect(screen.getByText("Projects")).toBeInTheDocument();
+        expect(screen.getByText("OpenClaw")).toBeInTheDocument();
+        expect(screen.getByText("/mnt/custom")).toBeInTheDocument();
+    });
+
     it("renders backup cache errors", () => {
         hooks.useCacheEntry.mockImplementation((key: string) => ({
             data: {

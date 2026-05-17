@@ -178,4 +178,48 @@ describe("ServiceActionsCard", () => {
         expect(screen.getByText(/exit code 0/u)).toBeInTheDocument();
         expect(hooks.refreshCache).toHaveBeenCalledWith("system.host");
     });
+
+    it("renders completed empty output without a version warning", async () => {
+        setupHooks();
+        const user = userEvent.setup();
+        hooks.useCacheEntry.mockReturnValue({
+            data: {
+                data: {
+                    version: {
+                        current: "2026.5.5",
+                        latest: null,
+                        updateAvailable: false,
+                    },
+                },
+            },
+        });
+        hooks.startAction.mockResolvedValue({ jobId: "job-cleanup" });
+        hooks.useExecJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: 0,
+                      endedAt: Date.UTC(2026, 4, 10, 19, 0, 0),
+                      jobId,
+                      startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
+                      status: "done",
+                      stderr: "",
+                      stdout: "",
+                  }
+                : null,
+        }));
+
+        render(<ServiceActionsCard />);
+
+        expect(
+            screen.queryByText(/New OpenClaw version available/u)
+        ).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Cleanup system/u }));
+        await user.click(screen.getByRole("button", { name: "Run system cleanup" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("No output")).toBeInTheDocument();
+        });
+        expect(screen.getByText(/Last run: Cleanup system/u)).toBeInTheDocument();
+    });
 });

@@ -373,6 +373,74 @@ describe("ChatMessagesList", () => {
         );
         await waitFor(() => expect(onTtsError).toHaveBeenCalledWith("TTS failed"));
     });
+
+    it("omits TTS controls for blank messages and handles speech fallbacks", async () => {
+        const user = userEvent.setup();
+        const onTtsError = vi.fn();
+        const rows = makeRows();
+        rows[1]!.message.text = "   ";
+
+        const { rerender } = renderMessages({
+            chatRows: rows,
+            messagesVirtualizer: makeVirtualizer(rows.length),
+            onTtsError,
+        });
+
+        expect(
+            screen.queryByRole("button", { name: "Read assistant message aloud" })
+        ).not.toBeInTheDocument();
+
+        rows[1]!.message.text = "Hi Raymond";
+        (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            json: async () => {
+                throw new Error("invalid json");
+            },
+            ok: false,
+            status: 503,
+        });
+        rerender(
+            <ChatMessagesList
+                {...makeProps({
+                    chatRows: rows,
+                    messagesVirtualizer: makeVirtualizer(rows.length),
+                    onTtsError,
+                })}
+            />
+        );
+
+        await user.click(
+            screen.getByRole("button", { name: "Read assistant message aloud" })
+        );
+        await waitFor(() =>
+            expect(onTtsError).toHaveBeenCalledWith("Failed to generate speech")
+        );
+    });
+
+    it("reports generated audio playback errors", async () => {
+        const user = userEvent.setup();
+        const onTtsError = vi.fn();
+        let errorListener: (() => void) | undefined;
+        class ErrorAudio {
+            addEventListener = vi.fn((type: string, listener: () => void) => {
+                if (type === "error") errorListener = listener;
+            });
+            pause = vi.fn();
+            play = vi.fn().mockResolvedValue(null);
+        }
+        vi.stubGlobal("Audio", ErrorAudio);
+
+        renderMessages({ onTtsError });
+
+        await user.click(
+            screen.getByRole("button", { name: "Read assistant message aloud" })
+        );
+        await waitFor(() => expect(errorListener).toBeDefined());
+
+        errorListener?.();
+
+        expect(onTtsError).toHaveBeenCalledWith("Failed to play generated speech.");
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:audio");
+    });
 });
 
 /** Dispatches an image load event for the first image matching alt text. */

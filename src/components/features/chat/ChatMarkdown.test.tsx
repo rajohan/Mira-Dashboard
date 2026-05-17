@@ -138,4 +138,40 @@ describe("ChatMarkdown", () => {
         expect(block).toHaveAttribute("data-language", "text");
         expect(block).toHaveTextContent("[not valid");
     });
+
+    it("handles additional language aliases and JSONC fences", () => {
+        const { rerender } = render(
+            <ChatMarkdown text={'```jsonc\n{"ok": true, // yes\n}\n```'} />
+        );
+
+        expect(screen.getByText("jsonc")).toBeInTheDocument();
+        expect(screen.getByTestId("json-block")).toHaveTextContent(
+            JSON.stringify({ ok: true })
+        );
+
+        rerender(<ChatMarkdown text={"```py\nprint('hi')\n```"} />);
+        expect(screen.getByTestId("syntax-block")).toHaveAttribute(
+            "data-language",
+            "python"
+        );
+
+        rerender(<ChatMarkdown text={"```rs\nfn main() {}\n```"} />);
+        expect(screen.getByTestId("syntax-block")).toHaveAttribute(
+            "data-language",
+            "rust"
+        );
+
+        rerender(<ChatMarkdown text={"```yml\nok: true\n```"} />);
+        expect(screen.getByTestId("syntax-block")).toHaveAttribute(
+            "data-language",
+            "yaml"
+        );
+    });
+
+    it("renders raw pre blocks and ignores images without sources", () => {
+        render(<ChatMarkdown text={["<pre>raw pre</pre>", "", "![]()"].join("\n")} />);
+
+        expect(screen.getByText("<pre>raw pre</pre>")).toBeInTheDocument();
+        expect(screen.queryByRole("link", { name: "" })).not.toBeInTheDocument();
+    });
 });

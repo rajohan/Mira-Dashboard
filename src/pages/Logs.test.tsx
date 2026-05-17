@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -337,6 +337,69 @@ describe("Logs page", () => {
         mockLogs({ liveLogs: null, logFiles: { data: null } });
         rerender(<Logs />);
         expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+    });
+
+    it("keeps selected files stable across identical file snapshot refreshes", async () => {
+        const user = userEvent.setup();
+        const files = [
+            { name: "openclaw-2099-01-02.log" },
+            { name: "openclaw-2099-01-01.log" },
+        ];
+        mockLogs({ logFiles: { data: files } });
+
+        const { rerender } = render(<Logs />);
+
+        expect(await screen.findByText("2 of 2 entries")).toBeInTheDocument();
+        expect(screen.getAllByLabelText("select")[0]).toHaveValue(
+            "openclaw-2099-01-02.log"
+        );
+        await user.selectOptions(
+            screen.getAllByLabelText("select")[0]!,
+            "openclaw-2099-01-01.log"
+        );
+
+        mockLogs({ logFiles: { data: [...files] } });
+        rerender(<Logs />);
+
+        expect(screen.getAllByLabelText("select")[0]).toHaveValue(
+            "openclaw-2099-01-01.log"
+        );
+    });
+
+    it("ignores stale log reload responses", async () => {
+        const user = userEvent.setup();
+        let resolveFirstReload: (value: { data: string }) => void = () => {};
+
+        render(<Logs />);
+
+        await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalled());
+        mocks.refetchContent.mockReset();
+        mocks.writeInsert.mockClear();
+        mocks.refetchContent
+            .mockReturnValueOnce(
+                new Promise((resolve) => {
+                    resolveFirstReload = resolve;
+                })
+            )
+            .mockResolvedValueOnce({ data: "ERROR fresh reload" });
+
+        await user.click(screen.getByRole("button", { name: "Reload" }));
+        await user.click(screen.getByRole("button", { name: "Reload" }));
+        await waitFor(() =>
+            expect(mocks.writeInsert).toHaveBeenCalledWith(
+                expect.objectContaining({ raw: "ERROR fresh reload" })
+            )
+        );
+
+        mocks.writeInsert.mockClear();
+        await act(async () => {
+            resolveFirstReload({ data: "INFO stale reload" });
+            await Promise.resolve();
+        });
+
+        expect(mocks.writeInsert).not.toHaveBeenCalledWith(
+            expect.objectContaining({ raw: "INFO stale reload" })
+        );
     });
 
     it("handles socket and load-content edge cases", async () => {
