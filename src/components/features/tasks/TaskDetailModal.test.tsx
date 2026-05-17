@@ -62,6 +62,40 @@ describe("TaskDetailModal", () => {
         ).not.toBeInTheDocument();
     });
 
+    it("opens cleanly after rendering with no selected task", async () => {
+        const props: React.ComponentProps<typeof TaskDetailModal> = {
+            task: null,
+            onClose: vi.fn(),
+            onMove: vi.fn(async () => {}),
+            onAssign: vi.fn(async () => {}),
+            onDelete: vi.fn(async () => {}),
+            onUpdate: vi
+                .fn()
+                .mockImplementation(async (next) => ({ ...makeTask(), ...next })),
+            updates,
+            onAddUpdate: vi.fn(async () => {}),
+            onEditUpdate: vi.fn(async () => {}),
+            onDeleteUpdate: vi.fn(async () => {}),
+        };
+
+        const { rerender } = render(<TaskDetailModal {...props} />);
+
+        expect(
+            screen.queryByText(/Review dashboard task coverage/)
+        ).not.toBeInTheDocument();
+
+        rerender(
+            <TaskDetailModal
+                {...props}
+                task={makeTask({ title: "Opened after idle state" })}
+            />
+        );
+
+        expect(
+            await screen.findByText("#88: Opened after idle state")
+        ).toBeInTheDocument();
+    });
+
     it("renders task details, markdown body, updates, and automation state", async () => {
         renderModal({
             task: makeTask({

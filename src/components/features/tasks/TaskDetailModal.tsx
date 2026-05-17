@@ -97,6 +97,23 @@ export function TaskDetailModal({
     const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
 
+    useEffect(() => {
+        if (!task) {
+            setIsEditingTask(false);
+            setProgressMessage("");
+            setEditingUpdateId(null);
+            setEditingUpdateMessage("");
+            return;
+        }
+
+        setEditTitle(task.title);
+        setEditBody(task.body || "");
+        setEditPriority(getPriority(task.labels || []));
+        setEditCronJobId(task.automation?.cronJobId || "");
+        setEditScheduleSummary(task.automation?.scheduleSummary || "");
+        setEditSessionTarget(task.automation?.sessionTarget || "");
+    }, [task]);
+
     if (!task) {
         return null;
     }
@@ -119,15 +136,6 @@ export function TaskDetailModal({
         : automation?.enabled === false
           ? "default"
           : getCronStatusVariant(automation?.lastRunStatus || "");
-
-    useEffect(() => {
-        setEditTitle(task.title);
-        setEditBody(task.body || "");
-        setEditPriority(getPriority(task.labels || []));
-        setEditCronJobId(task.automation?.cronJobId || "");
-        setEditScheduleSummary(task.automation?.scheduleSummary || "");
-        setEditSessionTarget(task.automation?.sessionTarget || "");
-    }, [task, assigneeLogin]);
 
     const assigneeProfileUrl =
         assigneeLogin === TASK_ASSIGNEES.mira.id
