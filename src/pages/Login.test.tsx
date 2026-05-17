@@ -60,14 +60,15 @@ describe("Login page", () => {
         resolveLogin(jsonResponse({ ok: true }));
 
         await waitFor(() => {
-            expect(mocks.fetch).toHaveBeenCalledWith(
-                "/api/auth/login",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({ username: "raymond", password: "secret" }),
-                })
-            );
+            expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
         });
+        expect(mocks.fetch).toHaveBeenCalledWith(
+            "/api/auth/login",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ username: "raymond", password: "secret" }),
+            })
+        );
         expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
         expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
     });
@@ -109,18 +110,20 @@ describe("Login page", () => {
         resolveBootstrap(jsonResponse({ ok: true }));
 
         await waitFor(() => {
-            expect(mocks.fetch).toHaveBeenCalledWith(
-                "/api/auth/register-first-user",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({
-                        username: "mira",
-                        password: "secret",
-                        gatewayToken: "token",
-                    }),
-                })
-            );
+            expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
         });
+        expect(mocks.fetch).toHaveBeenCalledWith(
+            "/api/auth/register-first-user",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({
+                    username: "mira",
+                    password: "secret",
+                    gatewayToken: "token",
+                }),
+            })
+        );
+        expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
     });
 
     it("shows bootstrap load errors", async () => {

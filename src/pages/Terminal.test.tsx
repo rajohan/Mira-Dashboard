@@ -242,6 +242,27 @@ describe("Terminal page", () => {
         expect(output.scrollTop).toBe(500);
     });
 
+    it("keeps the follow control hidden when already at the bottom", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<Terminal />);
+        const output = container.querySelector(".overflow-auto") as HTMLDivElement;
+
+        Object.defineProperties(output, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 120 },
+            scrollTop: { configurable: true, value: 0, writable: true },
+        });
+
+        await user.click(screen.getByPlaceholderText("Enter command..."));
+        act(() => {
+            output.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
+
+        expect(
+            screen.queryByRole("button", { name: "↓ Follow" })
+        ).not.toBeInTheDocument();
+    });
+
     it("shows cwd outside home and completed job updates without duplicate history writes", async () => {
         const user = userEvent.setup();
         terminal.changeDirectory.mockResolvedValueOnce({
@@ -397,6 +418,33 @@ describe("Terminal page", () => {
         });
 
         await user.click(await screen.findByRole("button", { name: /Stop/ }));
+        expect(terminal.stopTerminalJob).toHaveBeenCalledWith("job-1");
+    });
+
+    it("ignores stop failures for already-finished jobs", async () => {
+        const user = userEvent.setup();
+        terminal.stopTerminalJob.mockRejectedValueOnce(new Error("already stopped"));
+        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: null,
+                      endedAt: null,
+                      stderr: "",
+                      stdout: "still running",
+                      status: "running",
+                  }
+                : null,
+        }));
+
+        render(<Terminal />);
+
+        await user.type(
+            screen.getByPlaceholderText("Enter command..."),
+            "tail -f app.log"
+        );
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        await user.click(await screen.findByRole("button", { name: /Stop/ }));
+
         expect(terminal.stopTerminalJob).toHaveBeenCalledWith("job-1");
     });
 

@@ -305,10 +305,20 @@ describe("Settings helpers", () => {
             const setSuccess = vi.fn();
 
             patchSuccess(setSuccess, "Saved once", timerRef);
-            expect(timerRef.current).not.toBeNull();
+            const firstTimer = timerRef.current;
+            expect(firstTimer).not.toBeNull();
+
+            vi.advanceTimersByTime(1000);
 
             patchSuccess(setSuccess, "Saved twice", timerRef);
-            vi.advanceTimersByTime(3000);
+            expect(timerRef.current).not.toBe(firstTimer);
+
+            setSuccess.mockClear();
+            vi.advanceTimersByTime(2000);
+
+            expect(setSuccess).not.toHaveBeenCalledWith(null);
+
+            vi.advanceTimersByTime(1000);
 
             expect(setSuccess).toHaveBeenLastCalledWith(null);
             expect(timerRef.current).toBeNull();
