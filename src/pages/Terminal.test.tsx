@@ -163,11 +163,15 @@ describe("Terminal page", () => {
         });
 
         render(<Terminal />);
+        const input = screen.getByPlaceholderText("Enter command...");
+        const runButton = screen.getByRole("button", { name: /Run/ });
 
-        await user.click(screen.getByRole("button", { name: /Run/ }));
+        await user.type(input, "ls -la");
+        await user.click(runButton);
 
-        expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
+        expect(runButton).toBeDisabled();
         expect(terminal.startCommand).not.toHaveBeenCalled();
+        expect(terminal.addCommand).not.toHaveBeenCalled();
     });
 
     it("starts remote commands and records the job id", async () => {
