@@ -1854,45 +1854,57 @@ describe("Chat", () => {
         }
     });
 
-    it("ignores cancelled history loads and live refreshes", async () => {
-        const intervalCallbacks: Array<() => void> = [];
-        const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
-            .mockImplementation((callback: TimerHandler) => {
-                intervalCallbacks.push(callback as () => void);
-                return intervalCallbacks.length as unknown as ReturnType<
-                    typeof setInterval
-                >;
-            });
-        let resolveHistory: (value: unknown) => void = () => {};
-        mocks.request.mockImplementation((method: string) =>
-            method === "chat.history"
-                ? new Promise((resolve) => {
-                      resolveHistory = resolve;
-                  })
-                : Promise.resolve({ models: [] })
+    it("ignores stale history responses after switching sessions", async () => {
+        const user = userEvent.setup();
+        const historyRequests: Array<{
+            params: Record<string, unknown> | undefined;
+            resolve: (value: unknown) => void;
+        }> = [];
+        mocks.request.mockImplementation(
+            (method: string, params?: Record<string, unknown>) =>
+                method === "chat.history"
+                    ? new Promise((resolve) => {
+                          historyRequests.push({ params, resolve });
+                      })
+                    : Promise.resolve({ models: [] })
         );
 
-        try {
-            const { unmount } = render(<Chat />);
-            await waitFor(() =>
-                expect(mocks.request).toHaveBeenCalledWith("chat.history", {
-                    limit: 1000,
-                    sessionKey: "session-a",
-                })
-            );
+        render(<Chat />);
+        await waitFor(() =>
+            expect(
+                historyRequests.some(
+                    (request) => request.params?.sessionKey === "session-a"
+                )
+            ).toBe(true)
+        );
 
-            unmount();
-            await act(async () => {
-                resolveHistory({
-                    messages: [{ role: "assistant", text: "late history" }],
+        await user.click(screen.getByRole("button", { name: "select side chat" }));
+        await waitFor(() =>
+            expect(
+                historyRequests.some(
+                    (request) => request.params?.sessionKey === "session-b"
+                )
+            ).toBe(true)
+        );
+
+        await act(async () => {
+            for (const request of historyRequests) {
+                request.resolve({
+                    messages: [
+                        {
+                            role: "assistant",
+                            text:
+                                request.params?.sessionKey === "session-b"
+                                    ? "side history"
+                                    : "late history",
+                        },
+                    ],
                 });
-            });
+            }
+        });
 
-            expect(screen.queryByText("late history")).not.toBeInTheDocument();
-        } finally {
-            setIntervalSpy.mockRestore();
-        }
+        expect(screen.queryByText("late history")).not.toBeInTheDocument();
+        expect(await screen.findByText("side history")).toBeInTheDocument();
     });
 
     it("limits attachment batches and surfaces recorder startup failures", async () => {

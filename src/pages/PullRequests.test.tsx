@@ -169,6 +169,16 @@ describe("PullRequests page", () => {
         expect(screen.getByText("restart-scheduled")).toBeInTheDocument();
     });
 
+    it("refreshes pull requests from the page action", async () => {
+        const user = userEvent.setup();
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+        expect(hooks.refetch).toHaveBeenCalledTimes(1);
+    });
+
     it("shows loading, error retry, and empty states", async () => {
         const user = userEvent.setup();
         const { rerender } = render(<PullRequests />);
@@ -463,7 +473,7 @@ describe("PullRequests page", () => {
                         additions: null,
                         author: { login: "app/dependabot" },
                         baseRefName: "main",
-                        body: "Line one\nLine two",
+                        body: String.raw`[Docs](https://example.com)\nLine two`,
                         changedFiles: null,
                         deletions: null,
                         headRefName: "deps/react",
@@ -494,6 +504,11 @@ describe("PullRequests page", () => {
         render(<PullRequests />);
 
         expect(screen.getByText("Dependency / external PRs")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute(
+            "target",
+            "_blank"
+        );
+        expect(screen.getByText("Line two")).toBeInTheDocument();
         expect(screen.getByText("Dependabot")).toBeInTheDocument();
         expect(screen.getByText("Unknown author")).toBeInTheDocument();
         expect(screen.getByText("DIRTY")).toBeInTheDocument();

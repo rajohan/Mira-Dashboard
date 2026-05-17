@@ -167,4 +167,11 @@ describe("ChatMarkdown", () => {
             "yaml"
         );
     });
+
+    it("renders raw pre blocks and ignores images without sources", () => {
+        render(<ChatMarkdown text={["<pre>raw pre</pre>", "", "![]()"].join("\n")} />);
+
+        expect(screen.getByText("<pre>raw pre</pre>")).toBeInTheDocument();
+        expect(screen.queryByRole("link", { name: "" })).not.toBeInTheDocument();
+    });
 });
