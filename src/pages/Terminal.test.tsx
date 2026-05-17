@@ -124,10 +124,18 @@ describe("Terminal page", () => {
     it("handles successful and failed cd commands locally", async () => {
         const user = userEvent.setup();
         terminal.changeDirectory
+            .mockResolvedValueOnce({ newCwd: "/home/ubuntu", success: true })
             .mockResolvedValueOnce({ newCwd: "/home/ubuntu/projects", success: true })
             .mockResolvedValueOnce({ error: "No such directory", success: false });
 
         render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "cd");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.changeDirectory).toHaveBeenCalledWith(
+            "/home/ubuntu",
+            "/home/ubuntu"
+        );
 
         await user.type(screen.getByPlaceholderText("Enter command..."), "cd projects");
         await user.click(screen.getByRole("button", { name: /Run/ }));
@@ -145,6 +153,21 @@ describe("Terminal page", () => {
                 stderr: "No such directory",
             })
         );
+    });
+
+    it("does not submit while a command is pending", async () => {
+        const user = userEvent.setup();
+        terminal.useStartTerminalCommand.mockReturnValue({
+            isPending: true,
+            mutateAsync: terminal.startCommand,
+        });
+
+        render(<Terminal />);
+
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+
+        expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
+        expect(terminal.startCommand).not.toHaveBeenCalled();
     });
 
     it("starts remote commands and records the job id", async () => {
