@@ -298,6 +298,7 @@ describe("Settings helpers", () => {
 
     it("clears stored success timer refs", () => {
         vi.useFakeTimers();
+        const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
         try {
             const timerRef: { current: ReturnType<typeof setTimeout> | null } = {
                 current: null,
@@ -311,6 +312,7 @@ describe("Settings helpers", () => {
             vi.advanceTimersByTime(1000);
 
             patchSuccess(setSuccess, "Saved twice", timerRef);
+            expect(clearTimeoutSpy).toHaveBeenCalledWith(firstTimer);
             expect(timerRef.current).not.toBe(firstTimer);
 
             setSuccess.mockClear();
@@ -323,6 +325,7 @@ describe("Settings helpers", () => {
             expect(setSuccess).toHaveBeenLastCalledWith(null);
             expect(timerRef.current).toBeNull();
         } finally {
+            clearTimeoutSpy.mockRestore();
             vi.useRealTimers();
         }
     });

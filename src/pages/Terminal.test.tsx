@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -157,17 +157,19 @@ describe("Terminal page", () => {
 
     it("does not submit while a command is pending", async () => {
         const user = userEvent.setup();
+
+        const { rerender } = render(<Terminal />);
+        const input = screen.getByPlaceholderText("Enter command...");
+        await user.type(input, "ls -la");
+
         terminal.useStartTerminalCommand.mockReturnValue({
             isPending: true,
             mutateAsync: terminal.startCommand,
         });
+        rerender(<Terminal />);
 
-        render(<Terminal />);
-        const input = screen.getByPlaceholderText("Enter command...");
         const runButton = screen.getByRole("button", { name: /Run/ });
-
-        await user.type(input, "ls -la");
-        await user.click(runButton);
+        fireEvent.submit(input.closest("form")!);
 
         expect(runButton).toBeDisabled();
         expect(terminal.startCommand).not.toHaveBeenCalled();

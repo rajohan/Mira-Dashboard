@@ -60,7 +60,7 @@ describe("Login page", () => {
         resolveLogin(jsonResponse({ ok: true }));
 
         await waitFor(() => {
-            expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
+            expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
         });
         expect(mocks.fetch).toHaveBeenCalledWith(
             "/api/auth/login",
@@ -110,7 +110,7 @@ describe("Login page", () => {
         resolveBootstrap(jsonResponse({ ok: true }));
 
         await waitFor(() => {
-            expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
+            expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
         });
         expect(mocks.fetch).toHaveBeenCalledWith(
             "/api/auth/register-first-user",

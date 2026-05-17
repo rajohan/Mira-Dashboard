@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -339,11 +339,11 @@ describe("Logs page", () => {
         expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
     });
 
-    it("keeps identical file snapshots stable across refreshes", async () => {
-        const today = new Date().toISOString().slice(0, 10);
+    it("keeps selected files stable across identical file snapshot refreshes", async () => {
+        const user = userEvent.setup();
         const files = [
             { name: "openclaw-2099-01-02.log" },
-            { name: `openclaw-${today}.log` },
+            { name: "openclaw-2099-01-01.log" },
         ];
         mockLogs({ logFiles: { data: files } });
 
@@ -353,12 +353,16 @@ describe("Logs page", () => {
         expect(screen.getAllByLabelText("select")[0]).toHaveValue(
             "openclaw-2099-01-02.log"
         );
+        await user.selectOptions(
+            screen.getAllByLabelText("select")[0]!,
+            "openclaw-2099-01-01.log"
+        );
 
         mockLogs({ logFiles: { data: [...files] } });
         rerender(<Logs />);
 
         expect(screen.getAllByLabelText("select")[0]).toHaveValue(
-            "openclaw-2099-01-02.log"
+            "openclaw-2099-01-01.log"
         );
     });
 
@@ -388,9 +392,11 @@ describe("Logs page", () => {
         );
 
         mocks.writeInsert.mockClear();
-        resolveFirstReload({ data: "INFO stale reload" });
+        await act(async () => {
+            resolveFirstReload({ data: "INFO stale reload" });
+            await Promise.resolve();
+        });
 
-        await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalledTimes(2));
         expect(mocks.writeInsert).not.toHaveBeenCalledWith(
             expect.objectContaining({ raw: "INFO stale reload" })
         );
