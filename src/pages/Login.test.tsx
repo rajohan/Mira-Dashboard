@@ -36,11 +36,16 @@ describe("Login page", () => {
 
     it("loads standard login mode and submits credentials", async () => {
         const user = userEvent.setup();
+        let resolveLogin: (value: Response) => void = () => {};
         mocks.fetch
             .mockResolvedValueOnce(
                 jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
             )
-            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+            .mockReturnValueOnce(
+                new Promise<Response>((resolve) => {
+                    resolveLogin = resolve;
+                })
+            );
 
         render(<Login />);
 
@@ -51,6 +56,8 @@ describe("Login page", () => {
         await user.type(screen.getByPlaceholderText("Enter your username"), " raymond ");
         await user.type(screen.getByPlaceholderText("Enter your password"), "secret");
         await user.click(screen.getByRole("button", { name: "Log in" }));
+        expect(screen.getByRole("button", { name: "Logging in..." })).toBeDisabled();
+        resolveLogin(jsonResponse({ ok: true }));
 
         await waitFor(() => {
             expect(mocks.fetch).toHaveBeenCalledWith(
@@ -67,11 +74,16 @@ describe("Login page", () => {
 
     it("loads bootstrap mode and submits the gateway token", async () => {
         const user = userEvent.setup();
+        let resolveBootstrap: (value: Response) => void = () => {};
         mocks.fetch
             .mockResolvedValueOnce(
                 jsonResponse({ bootstrapRequired: true, hasGatewayToken: false })
             )
-            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+            .mockReturnValueOnce(
+                new Promise<Response>((resolve) => {
+                    resolveBootstrap = resolve;
+                })
+            );
 
         render(<Login />);
 
@@ -91,6 +103,10 @@ describe("Login page", () => {
             " token "
         );
         await user.click(screen.getByRole("button", { name: "Create first user" }));
+        expect(
+            screen.getByRole("button", { name: "Creating account..." })
+        ).toBeDisabled();
+        resolveBootstrap(jsonResponse({ ok: true }));
 
         await waitFor(() => {
             expect(mocks.fetch).toHaveBeenCalledWith(
@@ -111,6 +127,14 @@ describe("Login page", () => {
         mocks.fetch.mockResolvedValueOnce(
             jsonResponse({ error: "nope" }, { status: 500 })
         );
+
+        render(<Login />);
+
+        expect(await screen.findByText("Failed to load auth state")).toBeInTheDocument();
+    });
+
+    it("shows fallback bootstrap load errors for non-error rejections", async () => {
+        mocks.fetch.mockRejectedValueOnce("offline");
 
         render(<Login />);
 

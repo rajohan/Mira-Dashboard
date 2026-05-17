@@ -39,15 +39,20 @@ vi.mock("../components/ui/Modal", () => ({
     Modal: ({
         children,
         isOpen,
+        onClose,
         title,
     }: {
         children: React.ReactNode;
         isOpen: boolean;
+        onClose: () => void;
         title: string;
     }) =>
         isOpen ? (
             <section data-testid="modal">
                 <h2>{title}</h2>
+                <button type="button" onClick={onClose}>
+                    Close modal
+                </button>
                 {children}
             </section>
         ) : null,
@@ -290,6 +295,27 @@ describe("Settings helpers", () => {
             vi.useRealTimers();
         }
     });
+
+    it("clears stored success timer refs", () => {
+        vi.useFakeTimers();
+        try {
+            const timerRef: { current: ReturnType<typeof setTimeout> | null } = {
+                current: null,
+            };
+            const setSuccess = vi.fn();
+
+            patchSuccess(setSuccess, "Saved once", timerRef);
+            expect(timerRef.current).not.toBeNull();
+
+            patchSuccess(setSuccess, "Saved twice", timerRef);
+            vi.advanceTimersByTime(3000);
+
+            expect(setSuccess).toHaveBeenLastCalledWith(null);
+            expect(timerRef.current).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 describe("Settings page", () => {
@@ -373,6 +399,10 @@ describe("Settings page", () => {
 
             await user.click(screen.getByRole("button", { name: "Restart" }));
             expect(screen.getByTestId("modal")).toHaveTextContent("Restart Gateway");
+            await user.click(screen.getByRole("button", { name: "Close modal" }));
+            expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: "Restart" }));
             await user.click(screen.getByRole("button", { name: "Cancel" }));
             expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 

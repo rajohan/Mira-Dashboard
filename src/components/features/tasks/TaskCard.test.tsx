@@ -1,16 +1,20 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Task } from "../../../types/task";
 import { TaskCard } from "./TaskCard";
+
+const sortable = vi.hoisted(() => ({
+    transform: null as { x: number; y: number; scaleX: number; scaleY: number } | null,
+}));
 
 vi.mock("@dnd-kit/sortable", () => ({
     useSortable: () => ({
         attributes: { "aria-describedby": "sortable-task" },
         listeners: { onPointerDown: vi.fn() },
         setNodeRef: vi.fn(),
-        transform: null,
+        transform: sortable.transform,
     }),
 }));
 
@@ -31,6 +35,10 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 describe("TaskCard", () => {
+    beforeEach(() => {
+        sortable.transform = null;
+    });
+
     it("renders task metadata and calls onClick", async () => {
         const onClick = vi.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
@@ -58,6 +66,8 @@ describe("TaskCard", () => {
     });
 
     it("shows recurring marker, fallback avatar, and dragging styling", () => {
+        sortable.transform = { x: 8, y: 12, scaleX: 1, scaleY: 1 };
+
         render(
             <TaskCard
                 isDragging
@@ -79,5 +89,25 @@ describe("TaskCard", () => {
             screen.getByText("Expand dashboard test coverage").closest("div")
                 ?.parentElement
         ).toHaveClass("cursor-grabbing");
+    });
+
+    it("renders without an assignee and falls back to unknown avatar initials", () => {
+        const { rerender } = render(
+            <TaskCard task={makeTask({ assignees: [] })} onClick={vi.fn()} />
+        );
+
+        expect(screen.queryByText("Recurring")).not.toBeInTheDocument();
+        expect(screen.queryByAltText("mira-2026")).not.toBeInTheDocument();
+
+        rerender(
+            <TaskCard
+                task={makeTask({
+                    assignees: [{}],
+                })}
+                onClick={vi.fn()}
+            />
+        );
+
+        expect(screen.getByText("?")).toBeInTheDocument();
     });
 });
