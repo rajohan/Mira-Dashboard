@@ -61,6 +61,7 @@ const mocks = vi.hoisted(() => ({
     runtimeEventsOptions: null as {
         connectionId: number;
         isConnected: boolean;
+        liveHistoryRefreshTimerReference: { current: number | null };
         updateActiveStreams: (
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
@@ -126,6 +127,7 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
         (options: {
             connectionId: number;
             isConnected: boolean;
+            liveHistoryRefreshTimerReference: { current: number | null };
             updateActiveStreams: (
                 updater: (previous: Record<string, unknown>) => Record<string, unknown>
             ) => void;
@@ -1074,6 +1076,7 @@ describe("Chat", () => {
     it("renders runtime stream rows and clears them when disconnected", async () => {
         const { rerender } = render(<Chat />);
         await screen.findByText("old user message");
+        const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
 
         act(() => {
             mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
@@ -1097,12 +1100,17 @@ describe("Chat", () => {
         expect(await screen.findByText("streaming answer")).toBeInTheDocument();
         expect(screen.getByText("Using tools")).toBeInTheDocument();
 
+        const liveRefreshTimer = window.setTimeout(vi.fn(), 1000);
+        mocks.runtimeEventsOptions!.liveHistoryRefreshTimerReference.current =
+            liveRefreshTimer;
         mocks.isConnected = false;
         rerender(<Chat />);
 
         await waitFor(() =>
             expect(screen.queryByText("streaming answer")).not.toBeInTheDocument()
         );
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(liveRefreshTimer);
+        clearTimeoutSpy.mockRestore();
     });
 
     it("persists deleted message keys and can open attachment previews", async () => {
@@ -1110,6 +1118,16 @@ describe("Chat", () => {
 
         render(<Chat />);
         await screen.findByText("old user message");
+
+        await user.click(
+            screen.getByRole("button", {
+                name: /delete user::2026-05-11T00:00:00.000Z.*old user message/,
+            })
+        );
+        await user.click(screen.getByRole("button", { name: "cancel delete" }));
+        expect(
+            screen.queryByRole("dialog", { name: "Delete message" })
+        ).not.toBeInTheDocument();
 
         await user.click(
             screen.getByRole("button", {
@@ -1213,6 +1231,35 @@ describe("Chat", () => {
             "chat.send",
             expect.objectContaining({ message: "/model codex" })
         );
+    });
+
+    it("ignores empty attachment and send submissions", async () => {
+        render(<Chat />);
+        await screen.findByText("old user message");
+        mocks.request.mockClear();
+
+        fireEvent.change(screen.getByLabelText("Attach file"), {
+            target: { files: null },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.request).not.toHaveBeenCalledWith("chat.send", expect.any(Object));
+    });
+
+    it("ignores sends before a session is selected", async () => {
+        mocks.liveSessions = [];
+
+        render(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
+
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "No session yet" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.request).not.toHaveBeenCalledWith("chat.send", expect.any(Object));
     });
 
     it("sends unknown slash commands as normal chat messages", async () => {
@@ -1364,6 +1411,33 @@ describe("Chat", () => {
         fireEvent.change(voiceInput, { target: { files: [] } });
     });
 
+    it("appends transcribed voice text to an existing draft", async () => {
+        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+            json: async () => ({ text: "second line" }),
+            ok: true,
+        } as Response);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "first line  " },
+        });
+
+        const voiceInput = document.querySelector<HTMLInputElement>(
+            'input[accept="audio/*"]'
+        )!;
+        fireEvent.change(voiceInput, {
+            target: {
+                files: [new File(["voice"], "voice.webm", { type: "audio/webm" })],
+            },
+        });
+
+        await waitFor(() =>
+            expect(screen.getByLabelText("Draft")).toHaveValue("first line\nsecond line")
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("uses generic transcription errors when the response body is unavailable", async () => {
         const fetchMock = vi.mocked(fetch).mockResolvedValue({
             json: async () => {
@@ -1471,6 +1545,73 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(screen.getByLabelText("Draft")).toHaveValue("recorded text")
         );
+    });
+
+    it("ignores empty recorder chunks before transcribing captured audio", async () => {
+        const user = userEvent.setup();
+        const stopTrack = vi.fn();
+        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+            json: async () => ({ text: "non-empty chunk" }),
+            ok: true,
+        } as Response);
+        let recorder: {
+            listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
+            mimeType: string;
+            stop: () => void;
+        } | null = null;
+        const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
+            recorder = {
+                listeners: {},
+                mimeType: "audio/webm",
+                stop: () => {
+                    for (const listener of recorder?.listeners.dataavailable || []) {
+                        listener({ data: new Blob([], { type: "audio/webm" }) });
+                        listener({ data: new Blob(["audio"], { type: "audio/webm" }) });
+                    }
+
+                    for (const listener of recorder?.listeners.stop || []) listener();
+                },
+            };
+            Object.assign(this as object, recorder, {
+                addEventListener: (
+                    type: string,
+                    listener: (event?: { data: Blob }) => void
+                ) => {
+                    recorder!.listeners[type] = [
+                        ...(recorder!.listeners[type] || []),
+                        listener,
+                    ];
+                },
+                start: vi.fn(),
+            });
+        });
+        Object.assign(MediaRecorderMock, {
+            isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/webm"),
+        });
+        Object.defineProperty(navigator, "mediaDevices", {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn().mockResolvedValue({
+                    getTracks: () => [{ stop: stopTrack }],
+                }),
+            },
+        });
+        Object.defineProperty(window, "MediaRecorder", {
+            configurable: true,
+            value: MediaRecorderMock,
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+        await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+        await waitFor(() =>
+            expect(screen.getByLabelText("Draft")).toHaveValue("non-empty chunk")
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(stopTrack).toHaveBeenCalledTimes(1);
     });
 
     it("reports an empty recording when no audio chunks are captured", async () => {
@@ -1635,6 +1776,120 @@ describe("Chat", () => {
                     sessionKey: "session-a",
                 })
             );
+        } finally {
+            setIntervalSpy.mockRestore();
+        }
+    });
+
+    it("skips live history polling while hidden, unfollowed, or already refreshing", async () => {
+        const intervalCallbacks: Array<() => void> = [];
+        const setIntervalSpy = vi
+            .spyOn(window, "setInterval")
+            .mockImplementation((callback: TimerHandler) => {
+                intervalCallbacks.push(callback as () => void);
+                return intervalCallbacks.length as unknown as ReturnType<
+                    typeof setInterval
+                >;
+            });
+        const originalVisibility = Object.getOwnPropertyDescriptor(
+            document,
+            "visibilityState"
+        );
+        let resolveHistory: (value: unknown) => void = () => {};
+
+        try {
+            render(<Chat />);
+            await screen.findByText("old user message");
+            await waitFor(() => expect(intervalCallbacks.length).toBeGreaterThan(0));
+            mocks.request.mockClear();
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "hidden",
+            });
+            await act(async () => {
+                intervalCallbacks[0]!();
+            });
+            expect(mocks.request).not.toHaveBeenCalled();
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "visible",
+            });
+            const messagePane = screen.getByLabelText("chat messages");
+            Object.defineProperties(messagePane, {
+                clientHeight: { configurable: true, value: 100 },
+                scrollHeight: { configurable: true, value: 1000 },
+                scrollTop: { configurable: true, value: 0, writable: true },
+            });
+            fireEvent.scroll(messagePane);
+            await act(async () => {
+                intervalCallbacks[0]!();
+            });
+            expect(mocks.request).not.toHaveBeenCalled();
+
+            fireEvent.click(screen.getByRole("button", { name: "follow bottom" }));
+            mocks.request.mockImplementation((method: string) =>
+                method === "chat.history"
+                    ? new Promise((resolve) => {
+                          resolveHistory = resolve;
+                      })
+                    : Promise.resolve({ models: [] })
+            );
+
+            await act(async () => {
+                intervalCallbacks[0]!();
+                intervalCallbacks[0]!();
+            });
+            expect(mocks.request).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                resolveHistory({ messages: [] });
+            });
+        } finally {
+            setIntervalSpy.mockRestore();
+            if (originalVisibility) {
+                Object.defineProperty(document, "visibilityState", originalVisibility);
+            }
+        }
+    });
+
+    it("ignores cancelled history loads and live refreshes", async () => {
+        const intervalCallbacks: Array<() => void> = [];
+        const setIntervalSpy = vi
+            .spyOn(window, "setInterval")
+            .mockImplementation((callback: TimerHandler) => {
+                intervalCallbacks.push(callback as () => void);
+                return intervalCallbacks.length as unknown as ReturnType<
+                    typeof setInterval
+                >;
+            });
+        let resolveHistory: (value: unknown) => void = () => {};
+        mocks.request.mockImplementation((method: string) =>
+            method === "chat.history"
+                ? new Promise((resolve) => {
+                      resolveHistory = resolve;
+                  })
+                : Promise.resolve({ models: [] })
+        );
+
+        try {
+            const { unmount } = render(<Chat />);
+            await waitFor(() =>
+                expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                    limit: 1000,
+                    sessionKey: "session-a",
+                })
+            );
+
+            unmount();
+            await act(async () => {
+                resolveHistory({
+                    messages: [{ role: "assistant", text: "late history" }],
+                });
+            });
+
+            expect(screen.queryByText("late history")).not.toBeInTheDocument();
         } finally {
             setIntervalSpy.mockRestore();
         }
