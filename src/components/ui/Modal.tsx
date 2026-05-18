@@ -51,6 +51,7 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
                             <Button
                                 variant="ghost"
                                 size="sm"
+                                aria-label={`Close ${title}`}
                                 onClick={onClose}
                                 className="text-primary-400 hover:text-primary-200"
                             >

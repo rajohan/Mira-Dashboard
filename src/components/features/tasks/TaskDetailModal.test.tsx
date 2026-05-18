@@ -137,6 +137,16 @@ describe("TaskDetailModal", () => {
         expect(screen.getByText("Added component coverage.")).toBeInTheDocument();
     });
 
+    it("labels the icon-only close button", async () => {
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        renderModal({ onClose });
+
+        await user.click(screen.getByRole("button", { name: "Close task details" }));
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it("moves, assigns, deletes, adds, edits, and deletes progress updates", async () => {
         const user = userEvent.setup();
         const props = renderModal({
