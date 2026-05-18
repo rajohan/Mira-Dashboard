@@ -36,7 +36,6 @@ reviews:
     - "!coverage/**"
     - "!backend/coverage/**"
     - "**/package.json"
-    - "**/package-lock.json"
 code_generation:
   docstrings:
     path_instructions: []
