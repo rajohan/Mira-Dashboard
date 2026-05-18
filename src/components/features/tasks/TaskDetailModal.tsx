@@ -331,7 +331,12 @@ export function TaskDetailModal({
                             </h2>
                         )}
                     </div>
-                    <Button variant="ghost" size="sm" onClick={onClose}>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Close task details"
+                        onClick={onClose}
+                    >
                         <X className="h-5 w-5" />
                     </Button>
                 </div>

@@ -74,6 +74,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                         variant="ghost"
                         size="sm"
                         type="button"
+                        aria-label="Close new task modal"
                         onClick={onClose}
                         className="text-primary-400 hover:text-primary-200"
                     >
