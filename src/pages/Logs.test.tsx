@@ -234,6 +234,9 @@ describe("Logs page", () => {
 
         await user.click(screen.getByRole("button", { name: "Hide error" }));
         expect(screen.getByText("No logs match your filter.")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Show error" }));
+        expect(screen.getByText("1 of 2 entries")).toBeInTheDocument();
     });
 
     it("changes selected file and requested line count", async () => {

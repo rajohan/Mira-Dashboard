@@ -26,6 +26,7 @@ export function RefreshButton({
             variant={variant}
             size={size}
             onClick={onClick}
+            aria-label={label || "Refresh"}
             disabled={disabled || isLoading}
             className="gap-2"
         >

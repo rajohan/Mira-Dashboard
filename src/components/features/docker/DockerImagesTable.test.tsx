@@ -65,6 +65,16 @@ describe("DockerImagesTable", () => {
 
         expect(onPruneUnused).toHaveBeenCalledTimes(1);
         expect(onDelete).toHaveBeenCalledWith("image-unused", "orphan:<none>");
+
+        const mobileDeleteButton = screen
+            .getAllByRole("button", { name: "Delete" })
+            .find(
+                (button) =>
+                    !button.hasAttribute("disabled") &&
+                    button.className.includes("w-full")
+            );
+        await userEvent.click(mobileDeleteButton!);
+        expect(onDelete).toHaveBeenLastCalledWith("image-unused", "orphan:<none>");
     });
 
     it("shows pruning state", () => {

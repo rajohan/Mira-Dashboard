@@ -105,8 +105,14 @@ describe("SessionsTable", () => {
             .find((button) => button.getAttribute("aria-haspopup") === "menu")!;
         await user.click(tableActionButton);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
+        await user.click(tableActionButton);
+        await user.click(await screen.findByRole("menuitem", { name: "Reset" }));
+        await user.click(tableActionButton);
+        await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
         expect(handlers.onCompact).toHaveBeenCalled();
+        expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
+        expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
     });
 
     it("handles fallback labels", () => {

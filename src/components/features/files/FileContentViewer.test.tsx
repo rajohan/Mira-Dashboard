@@ -131,14 +131,17 @@ describe("FileContentViewer", () => {
         );
     });
 
-    it("uses textarea editing for code files when code edit mode is enabled", () => {
-        renderViewer({
+    it("uses textarea editing for code files when code edit mode is enabled", async () => {
+        const user = userEvent.setup();
+        const { onContentChange } = renderViewer({
             codeEditMode: true,
             editedContent: "const ok = true;",
             fileContent: { ...baseFile, path: "/workspace/index.ts", size: 16 },
         });
 
-        expect(screen.getByDisplayValue("const ok = true;")).toBeInTheDocument();
+        await user.type(screen.getByDisplayValue("const ok = true;"), "\n");
+
+        expect(onContentChange).toHaveBeenCalled();
     });
 
     it("loads markdown, JSON, and code previews", async () => {

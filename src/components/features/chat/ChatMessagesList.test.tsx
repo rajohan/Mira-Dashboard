@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -436,7 +436,9 @@ describe("ChatMessagesList", () => {
         );
         await waitFor(() => expect(errorListener).toBeDefined());
 
-        errorListener?.();
+        act(() => {
+            errorListener?.();
+        });
 
         expect(onTtsError).toHaveBeenCalledWith("Failed to play generated speech.");
         expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:audio");
