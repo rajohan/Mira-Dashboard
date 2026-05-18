@@ -35,8 +35,8 @@ reviews:
     - "!node_modules/**"
     - "!coverage/**"
     - "!backend/coverage/**"
-    - "package-lock.json"
-    - "backend/package-lock.json"
+    - "**/package.json"
+    - "**/package-lock.json"
 code_generation:
   docstrings:
     path_instructions: []
