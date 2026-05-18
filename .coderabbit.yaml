@@ -31,13 +31,13 @@ reviews:
     auto_pause_after_reviewed_commits: 0
     ignore_usernames: []
   path_filters:
+    - "**/*"
     - "!dist/**"
     - "!node_modules/**"
     - "!coverage/**"
     - "!backend/coverage/**"
     - "!package-lock.json"
     - "!backend/package-lock.json"
-    - "**/package.json"
 code_generation:
   docstrings:
     path_instructions: []

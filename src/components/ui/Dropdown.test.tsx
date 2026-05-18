@@ -32,6 +32,7 @@ describe("Dropdown", () => {
         render(
             <Dropdown
                 align="left"
+                ariaLabel="More actions"
                 variant="primary"
                 size="md"
                 icon={<span data-testid="more-icon" />}
@@ -39,9 +40,10 @@ describe("Dropdown", () => {
             />
         );
 
-        const button = screen.getByTestId("more-icon").closest("button");
+        const button = screen.getByRole("button", { name: "More actions" });
+        expect(screen.getByTestId("more-icon")).toBeInTheDocument();
         expect(button).toHaveClass("bg-accent-500", "px-4");
-        await userEvent.click(button!);
+        await userEvent.click(button);
         expect(await screen.findByRole("menuitem", { name: "Open" })).toBeInTheDocument();
     });
 
