@@ -178,16 +178,16 @@ describe("Dashboard page", () => {
 
     it("updates the weather clock on an interval", () => {
         vi.useFakeTimers();
-        vi.setSystemTime(new Date("2026-05-11T10:00:00.000Z"));
+        vi.setSystemTime(new Date(2026, 4, 11, 10, 0, 0));
 
         render(<Dashboard />);
+        expect(screen.getByText("10:00:00")).toBeInTheDocument();
 
         act(() => {
-            vi.setSystemTime(new Date("2026-05-11T10:00:01.000Z"));
             vi.advanceTimersByTime(1000);
         });
 
-        expect(screen.getByText("Spydeberg")).toBeInTheDocument();
+        expect(screen.getByText("10:00:01")).toBeInTheDocument();
     });
 
     it.each([

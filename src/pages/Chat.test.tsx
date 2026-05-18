@@ -1564,8 +1564,11 @@ describe("Chat", () => {
                 listeners: {},
                 mimeType: "audio/webm",
                 stop: () => {
+                    const emptySizedChunk = new Blob(["empty"], { type: "audio/webm" });
+                    Object.defineProperty(emptySizedChunk, "size", { value: 0 });
+
                     for (const listener of recorder?.listeners.dataavailable || []) {
-                        listener({ data: new Blob([], { type: "audio/webm" }) });
+                        listener({ data: emptySizedChunk });
                         listener({ data: new Blob(["audio"], { type: "audio/webm" }) });
                     }
 
@@ -1611,7 +1614,9 @@ describe("Chat", () => {
             expect(screen.getByLabelText("Draft")).toHaveValue("non-empty chunk")
         );
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(((fetchMock.mock.calls[0]?.[1] as RequestInit).body as Blob).size).toBe(5);
+        const uploadedBlob = (fetchMock.mock.calls[0]?.[1] as RequestInit).body as Blob;
+        expect(uploadedBlob.size).toBe(5);
+        expect(await uploadedBlob.text()).toBe("audio");
         expect(stopTrack).toHaveBeenCalledTimes(1);
     });
 

@@ -110,7 +110,7 @@ describe("SessionsTable", () => {
         await user.click(tableActionButton);
         await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
-        expect(handlers.onCompact).toHaveBeenCalled();
+        expect(handlers.onCompact).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
         expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
     });

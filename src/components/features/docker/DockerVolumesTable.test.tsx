@@ -64,6 +64,7 @@ describe("DockerVolumesTable", () => {
 
         expect(onPruneUnused).toHaveBeenCalledTimes(1);
         expect(onDelete).toHaveBeenCalledWith("unused-volume");
+        expect(onDelete).toHaveBeenCalledTimes(1);
 
         const mobileDeleteButton = screen
             .getAllByRole("button", { name: "Delete" })
@@ -74,6 +75,7 @@ describe("DockerVolumesTable", () => {
             );
         await userEvent.click(mobileDeleteButton!);
         expect(onDelete).toHaveBeenLastCalledWith("unused-volume");
+        expect(onDelete).toHaveBeenCalledTimes(2);
     });
 
     it("shows pruning state", () => {
