@@ -63,4 +63,14 @@ describe("NewTaskModal", () => {
         await user.click(screen.getByRole("button", { name: "Cancel" }));
         expect(onClose).toHaveBeenCalledTimes(1);
     });
+
+    it("labels the icon-only close button", async () => {
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        render(<NewTaskModal isOpen onClose={onClose} onSubmit={vi.fn()} />);
+
+        await user.click(screen.getByRole("button", { name: "Close new task modal" }));
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
 });
