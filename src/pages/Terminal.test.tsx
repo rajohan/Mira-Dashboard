@@ -423,7 +423,7 @@ describe("Terminal page", () => {
         expect(terminal.stopTerminalJob).toHaveBeenCalledWith("job-1");
     });
 
-    it("ignores stop failures for already-finished jobs", async () => {
+    it("ignores stop failures when running jobs finish before stop resolves", async () => {
         const user = userEvent.setup();
         terminal.stopTerminalJob.mockRejectedValueOnce(new Error("already stopped"));
         terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({

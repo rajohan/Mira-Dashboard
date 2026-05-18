@@ -1611,6 +1611,7 @@ describe("Chat", () => {
             expect(screen.getByLabelText("Draft")).toHaveValue("non-empty chunk")
         );
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(((fetchMock.mock.calls[0]?.[1] as RequestInit).body as Blob).size).toBe(5);
         expect(stopTrack).toHaveBeenCalledTimes(1);
     });
 
@@ -1887,24 +1888,30 @@ describe("Chat", () => {
             ).toBe(true)
         );
 
+        const freshRequest = historyRequests.find(
+            (request) => request.params?.sessionKey === "session-b"
+        );
+        const staleRequests = historyRequests.filter(
+            (request) => request.params?.sessionKey !== "session-b"
+        );
+
         await act(async () => {
-            for (const request of historyRequests) {
+            freshRequest?.resolve({
+                messages: [{ role: "assistant", text: "side history" }],
+            });
+        });
+        expect(await screen.findByText("side history")).toBeInTheDocument();
+
+        await act(async () => {
+            for (const request of staleRequests) {
                 request.resolve({
-                    messages: [
-                        {
-                            role: "assistant",
-                            text:
-                                request.params?.sessionKey === "session-b"
-                                    ? "side history"
-                                    : "late history",
-                        },
-                    ],
+                    messages: [{ role: "assistant", text: "late history" }],
                 });
             }
         });
 
         expect(screen.queryByText("late history")).not.toBeInTheDocument();
-        expect(await screen.findByText("side history")).toBeInTheDocument();
+        expect(screen.getByText("side history")).toBeInTheDocument();
     });
 
     it("limits attachment batches and surfaces recorder startup failures", async () => {
