@@ -17,7 +17,7 @@ describe("Modal", () => {
         expect(screen.getByText("Modal body")).toBeInTheDocument();
         expect(screen.getByRole("dialog").querySelector(".max-w-lg")).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Close Settings" }));
 
         expect(onClose).toHaveBeenCalledTimes(1);
     });
