@@ -15,6 +15,7 @@ export interface DropdownItem {
 /** Provides props for dropdown. */
 interface DropdownProps {
     label?: string;
+    ariaLabel?: string;
     icon?: React.ReactNode;
     items?: DropdownItem[];
     content?: React.ReactNode;
@@ -26,6 +27,7 @@ interface DropdownProps {
 /** Renders the dropdown UI. */
 export function Dropdown({
     label,
+    ariaLabel,
     icon,
     items = [],
     content,
@@ -48,6 +50,7 @@ export function Dropdown({
     return (
         <Menu as="div">
             <MenuButton
+                aria-label={ariaLabel}
                 className={cn(
                     "inline-flex items-center justify-center gap-1 rounded-lg font-medium outline-none",
                     "focus:outline-none data-[focus]:outline-none",

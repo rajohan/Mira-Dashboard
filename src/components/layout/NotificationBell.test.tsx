@@ -77,7 +77,11 @@ describe("NotificationBell", () => {
         render(<NotificationBell />);
 
         expect(screen.getByText("1")).toBeInTheDocument();
-        await user.click(screen.getByRole("button"));
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open notifications, 1 unread",
+            })
+        );
 
         expect(screen.getByText("Backup stale")).toBeInTheDocument();
         expect(screen.getByText("Cache refreshed")).toBeInTheDocument();
@@ -106,7 +110,7 @@ describe("NotificationBell", () => {
 
         render(<NotificationBell />);
 
-        await user.click(screen.getByRole("button"));
+        await user.click(screen.getByRole("button", { name: "Open notifications" }));
 
         expect(screen.getByText("No notifications for this filter.")).toBeInTheDocument();
         expect(screen.getByText("Clear read").closest("button")).toBeDisabled();

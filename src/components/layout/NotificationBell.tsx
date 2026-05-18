@@ -27,6 +27,10 @@ export function NotificationBell() {
 
     const items = notifications?.items || [];
     const unreadCount = notifications?.unreadCount || 0;
+    const notificationMenuLabel =
+        unreadCount === 0
+            ? "Open notifications"
+            : `Open notifications, ${unreadCount} unread`;
 
     const sortedItems = [...items].sort(
         (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
@@ -41,6 +45,7 @@ export function NotificationBell() {
     return (
         <Dropdown
             align="right"
+            ariaLabel={notificationMenuLabel}
             variant="ghost"
             icon={
                 <span className="relative inline-flex">
