@@ -80,6 +80,9 @@ vi.mock("../components/features/cron", () => ({
             <button type="button" onClick={() => onEditModeChange(true)}>
                 Edit
             </button>
+            <button type="button" onClick={() => onEditModeChange(false)}>
+                Cancel edit
+            </button>
             <button type="button" onClick={() => onNameDraftChange("Updated job")}>
                 Rename
             </button>
@@ -261,9 +264,43 @@ describe("Cron page", () => {
 
         render(<Cron />);
 
+        await user.click(screen.getByRole("button", { name: "Edit" }));
         await user.click(screen.getByRole("button", { name: "Invalid schedule" }));
         expect(screen.getByText("invalid: true")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Save" }));
         expect(await screen.findByText(/Unexpected token/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Cancel edit" }));
+        expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
+    });
+
+    it("ignores actions when the current job has no identifier", async () => {
+        const user = userEvent.setup();
+        mockCronJobs({
+            data: [
+                {
+                    enabled: true,
+                    name: "Missing id",
+                    payload: { kind: "systemEvent" },
+                    schedule: { kind: "every", everyMs: 60_000 },
+                },
+            ],
+        });
+
+        render(<Cron />);
+
+        expect(await screen.findByTestId("cron-details")).toHaveTextContent(
+            "job: Missing id"
+        );
+        hooks.toggleJob.mockClear();
+        hooks.runNow.mockClear();
+        hooks.updateJob.mockClear();
+        await user.click(screen.getByRole("button", { name: "Disable" }));
+        await user.click(screen.getByRole("button", { name: "Run now" }));
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        expect(hooks.toggleJob).not.toHaveBeenCalled();
+        expect(hooks.runNow).not.toHaveBeenCalled();
+        expect(hooks.updateJob).not.toHaveBeenCalled();
     });
 });

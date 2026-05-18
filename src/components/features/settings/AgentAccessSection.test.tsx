@@ -85,4 +85,29 @@ describe("AgentAccessSection", () => {
         expect(await screen.findByRole("button", { name: /Coder/u })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
     });
+
+    it("adds disabled tools to deny-list agents", async () => {
+        const user = userEvent.setup();
+        const onSave = vi.fn(async () => {});
+
+        render(
+            <AgentAccessSection
+                agents={[{ id: "main", name: "Mira", tools: { deny: [] } }]}
+                onSave={onSave}
+                saving={false}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: /Agent access control/u }));
+
+        const execSwitch = within(
+            screen.getByText("Shell Commands").parentElement!.parentElement!
+        ).getByRole("switch");
+        await user.click(execSwitch);
+        await user.click(screen.getByRole("button", { name: "Save access control" }));
+
+        expect(onSave).toHaveBeenCalledWith([
+            { id: "main", name: "Mira", tools: { deny: ["exec"] } },
+        ]);
+    });
 });

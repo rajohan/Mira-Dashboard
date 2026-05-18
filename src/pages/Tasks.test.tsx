@@ -362,6 +362,16 @@ describe("Tasks page", () => {
         expect(hooks.refetch).toHaveBeenCalledTimes(1);
     });
 
+    it("refreshes tasks from the toolbar", async () => {
+        const user = userEvent.setup();
+
+        render(<Tasks />);
+
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+        expect(hooks.refetch).toHaveBeenCalledTimes(1);
+    });
+
     it("filters tasks by search and assignee", async () => {
         const user = userEvent.setup();
 

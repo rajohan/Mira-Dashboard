@@ -49,6 +49,21 @@ describe("FileTreeItem", () => {
         expect(screen.getAllByText("{ }")).toHaveLength(1);
     });
 
+    it("uses the generic file icon for unknown file extensions", () => {
+        render(
+            <FileTreeItem
+                node={{ name: "archive.bin", path: "/repo/archive.bin", type: "file" }}
+                selectedPath={null}
+                expandedPaths={new Set()}
+                onSelect={vi.fn()}
+                onToggle={vi.fn()}
+            />
+        );
+
+        expect(screen.getByText("archive.bin")).toBeInTheDocument();
+        expect(screen.queryByText("BIN")).not.toBeInTheDocument();
+    });
+
     it("sorts directories before files and shows loading directories", () => {
         const loadingDirectory: FileNode = {
             loaded: false,

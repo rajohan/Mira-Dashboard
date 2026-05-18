@@ -190,6 +190,24 @@ describe("chat utils", () => {
         expect(dedupeMessages([first, second])).toEqual([first, second]);
     });
 
+    it("builds fallback diagnostic identities for anonymous tool results", () => {
+        const item = message({
+            role: "tool_result",
+            text: "",
+            timestamp: "2026-05-10T10:00:00.000Z",
+            toolResult: {
+                content: "  anonymous output  ",
+            },
+        });
+
+        expect(messageIdentity(item)).toBe(
+            "tool_result::tool-result::no-id-2026-05-10T10:00:00.000Z::tool::anonymous output"
+        );
+        expect(messageDeleteKey(item)).toContain(
+            "tool-result::no-id-2026-05-10T10:00:00.000Z::tool::anonymous output"
+        );
+    });
+
     it("covers merge edge cases and timestamp ordering", () => {
         vi.spyOn(Date, "now").mockReturnValue(
             new Date("2026-05-10T10:02:00.000Z").getTime()
@@ -327,6 +345,23 @@ describe("chat utils", () => {
         ).toEqual(["response is still streaming", "exact recovered text", "short"]);
     });
 
+    it("drops exact assistant text recovered in refreshed history", () => {
+        vi.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-05-10T10:02:00.000Z").getTime()
+        );
+
+        const previous = [
+            message({
+                role: "assistant",
+                text: "same assistant response",
+                timestamp: "2026-05-10T10:01:30.000Z",
+            }),
+        ];
+        const next = [message({ role: "assistant", text: "same assistant response" })];
+
+        expect(mergeWithRecentOptimisticMessages(previous, next)).toEqual(next);
+    });
+
     it("orders missing messages with invalid timestamps after dated insertions", () => {
         vi.spyOn(Date, "now").mockReturnValue(
             new Date("2026-05-10T10:02:00.000Z").getTime()
@@ -404,6 +439,13 @@ describe("chat utils", () => {
                     this.dispatchEvent(new Event("error"));
                 }
             }
+            class EmptyErrorFileReader extends EventTarget {
+                result: string | null = null;
+                error: Error | null = null;
+                readAsDataURL() {
+                    this.dispatchEvent(new Event("error"));
+                }
+            }
 
             vi.stubGlobal("FileReader", NonStringFileReader);
             await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
@@ -413,6 +455,11 @@ describe("chat utils", () => {
             vi.stubGlobal("FileReader", ErrorFileReader);
             await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
                 "reader failed"
+            );
+
+            vi.stubGlobal("FileReader", EmptyErrorFileReader);
+            await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
+                "Could not read bad.bin"
             );
         } finally {
             vi.stubGlobal("FileReader", OriginalFileReader);

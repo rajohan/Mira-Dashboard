@@ -773,6 +773,57 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
     });
 
+    it("coalesces queued Gateway v4 deltas onto one flush timer", async () => {
+        const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-v4"],
+                    runId: "run-v4",
+                    sessionKey: "session-a",
+                    statusText: "Still thinking",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        try {
+            act(() => {
+                emit({
+                    event: "chat",
+                    payload: {
+                        deltaText: "Hel",
+                        runId: "run-v4",
+                        sessionKey: "session-a",
+                        state: "delta",
+                    },
+                    type: "event",
+                });
+                emit({
+                    event: "chat",
+                    payload: {
+                        deltaText: "lo",
+                        runId: "run-v4",
+                        sessionKey: "session-a",
+                        state: "delta",
+                    },
+                    type: "event",
+                });
+            });
+
+            expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(80);
+            });
+
+            expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
+        } finally {
+            setTimeoutSpy.mockRestore();
+        }
+    });
+
     it("flushes queued chat deltas before applying Gateway v4 transcript messages", async () => {
         const { emit, result } = renderRuntimeEvents();
 
@@ -840,6 +891,58 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.message?.toolCalls).toEqual([
             expect.objectContaining({ id: "tool-1", name: "functions.exec" }),
         ]);
+    });
+
+    it("uses fallback transcript tool and message payload fields", () => {
+        const { emit, result } = renderRuntimeEvents({ showToolOutput: true });
+
+        act(() => {
+            emit({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { text: "fallback tool detail" },
+                        phase: "start",
+                    },
+                    sessionKey: "session-a",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages[0]?.toolCalls?.[0]).toEqual(
+            expect.objectContaining({
+                arguments: { text: "fallback tool detail" },
+                name: "tool",
+            })
+        );
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "session-a",
+                statusText: "Tool: fallback tool detail",
+            })
+        );
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    content: "Content transcript",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                message: expect.objectContaining({ text: "Content transcript" }),
+                runId: "session-a",
+                text: "Content transcript",
+            })
+        );
     });
 
     it("ignores empty Gateway v4 transcript text and clears pure transcript status", () => {
@@ -1252,6 +1355,93 @@ describe("useChatRuntimeEvents", () => {
         });
 
         expect(result.current.sendError).toBe("boom");
+    });
+
+    it("uses buffered text for hidden final payloads and ignores remote errors", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-hidden"],
+                    runId: "run-hidden",
+                    sessionKey: "session-a",
+                    text: "Buffered final text",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+                "session-b": {
+                    aliases: ["run-remote"],
+                    runId: "run-remote",
+                    sessionKey: "session-b",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: "hidden tool result",
+                        role: "tool",
+                        text: "hidden tool result",
+                    },
+                    runId: "run-hidden",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages.map((message) => message.text)).toContain(
+            "Buffered final text"
+        );
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    errorMessage: "remote boom",
+                    runId: "run-remote",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.sendError).toBeNull();
+        expect(result.current.activeStreams["session-b"]).toBeUndefined();
+    });
+
+    it("clears empty aborted streams without appending text", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-empty"],
+                    runId: "run-empty",
+                    sessionKey: "session-a",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    runId: "run-empty",
+                    sessionKey: "session-a",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([]);
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
 
     it("ignores malformed, empty, and irrelevant events", async () => {

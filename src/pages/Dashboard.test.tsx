@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Dashboard } from "./Dashboard";
@@ -103,6 +103,7 @@ function mockDashboardData(overrides = {}) {
 
 describe("Dashboard page", () => {
     beforeEach(() => {
+        vi.useRealTimers();
         hooks.useMetrics.mockReset();
         hooks.useOpenClawSocket.mockReset();
         hooks.useQuotas.mockReset();
@@ -173,6 +174,20 @@ describe("Dashboard page", () => {
         expect(screen.getByTestId("metric-memory")).toHaveTextContent("Loading...");
         expect(screen.getByTestId("metric-disk")).toHaveTextContent("Loading...");
         expect(screen.getByTestId("quota-card")).toHaveTextContent("empty");
+    });
+
+    it("updates the weather clock on an interval", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 4, 11, 10, 0, 0));
+
+        render(<Dashboard />);
+        expect(screen.getByText("10:00:00")).toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(1000);
+        });
+
+        expect(screen.getByText("10:00:01")).toBeInTheDocument();
     });
 
     it.each([

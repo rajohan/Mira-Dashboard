@@ -468,6 +468,9 @@ describe("Docker page", () => {
 
         await user.click(screen.getByRole("button", { name: "Update now" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Update web");
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Update now" }));
         await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
         expect(docker.manualUpdate).toHaveBeenCalledWith(7);
         expect(await screen.findByText(/updated=1 failed=0/)).toBeInTheDocument();
@@ -475,6 +478,9 @@ describe("Docker page", () => {
         await user.click(screen.getByRole("button", { name: "Prune images" }));
         expect(docker.prune).toHaveBeenCalledWith("images");
 
+        await user.click(screen.getByRole("button", { name: "Delete image nginx" }));
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Delete image nginx" }));
         await user.click(screen.getByRole("button", { name: "Delete" }));
         expect(docker.deleteImage).toHaveBeenCalledWith("img-1");
@@ -486,6 +492,12 @@ describe("Docker page", () => {
 
     it("opens details, logs, and console modals", async () => {
         const user = userEvent.setup();
+        const refetchLogs = vi.fn();
+        docker.useDockerContainerLogs.mockReturnValue({
+            data: "container log line",
+            isFetching: false,
+            refetch: refetchLogs,
+        });
 
         render(<Docker />);
 
@@ -498,6 +510,8 @@ describe("Docker page", () => {
         expect(screen.getByText("container log line")).toBeInTheDocument();
         await user.selectOptions(screen.getByLabelText("select"), "500");
         expect(screen.getByLabelText("select")).toHaveValue("500");
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+        expect(refetchLogs).toHaveBeenCalledTimes(1);
 
         await user.click(screen.getByRole("button", { name: "Console web" }));
         await user.type(
