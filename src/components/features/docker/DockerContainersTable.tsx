@@ -337,7 +337,8 @@ export function DockerContainersTable({
                             key={row.id}
                             role="button"
                             tabIndex={0}
-                            className="border-primary-700 bg-primary-900/40 hover:bg-primary-800/50 w-full rounded-lg border p-3 text-left"
+                            aria-label={`Open details for ${container.name}`}
+                            className="border-primary-700 bg-primary-900/40 hover:bg-primary-800/50 focus-visible:ring-accent-500 w-full rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:outline-none"
                             onClick={() => onDetails(container.id)}
                             onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
