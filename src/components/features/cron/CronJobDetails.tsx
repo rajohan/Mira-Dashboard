@@ -16,6 +16,11 @@ import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { Textarea } from "../../ui/Textarea";
 
+const nameInputId = "cron-job-name";
+const scheduleTextareaId = "cron-job-schedule";
+const payloadTextareaId = "cron-job-payload";
+const deliveryTextareaId = "cron-job-delivery";
+
 /** Represents JSON valIDation state. */
 interface JsonValidationState {
     valid: boolean;
@@ -207,10 +212,14 @@ export function CronJobDetails({
                 {isEditMode ? (
                     <>
                         <div>
-                            <label className="text-primary-300 mb-1 block text-xs">
+                            <label
+                                className="text-primary-300 mb-1 block text-xs"
+                                htmlFor={nameInputId}
+                            >
                                 Name
                             </label>
                             <Input
+                                id={nameInputId}
                                 value={nameDraft}
                                 onChange={(event) =>
                                     onNameDraftChange(event.target.value)
@@ -221,10 +230,14 @@ export function CronJobDetails({
 
                         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={scheduleTextareaId}
+                                >
                                     Schedule (JSON)
                                 </label>
                                 <Textarea
+                                    id={scheduleTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={scheduleDraft}
                                     onChange={(event) =>
@@ -244,10 +257,14 @@ export function CronJobDetails({
                                 </p>
                             </div>
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={payloadTextareaId}
+                                >
                                     Payload (JSON)
                                 </label>
                                 <Textarea
+                                    id={payloadTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={payloadDraft}
                                     onChange={(event) =>
@@ -267,10 +284,14 @@ export function CronJobDetails({
                                 </p>
                             </div>
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={deliveryTextareaId}
+                                >
                                     Delivery (JSON)
                                 </label>
                                 <Textarea
+                                    id={deliveryTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={deliveryDraft}
                                     onChange={(event) =>

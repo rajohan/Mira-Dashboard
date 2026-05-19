@@ -112,11 +112,11 @@ describe("CronJobDetails", () => {
         expect(screen.getByText("Update failed")).toBeInTheDocument();
         expect(screen.getAllByText("Valid JSON")).toHaveLength(3);
 
-        await user.clear(screen.getByPlaceholderText("Job name"));
-        await user.type(screen.getByPlaceholderText("Job name"), "Updated autopilot");
-        await user.type(screen.getByDisplayValue(/30 9,18/u), " ");
-        await user.type(screen.getByDisplayValue(/Improve the dashboard/u), " ");
-        await user.type(screen.getByDisplayValue(/"mode": "none"/u), " ");
+        await user.clear(screen.getByLabelText("Name"));
+        await user.type(screen.getByLabelText("Name"), "Updated autopilot");
+        await user.type(screen.getByLabelText("Schedule (JSON)"), " ");
+        await user.type(screen.getByLabelText("Payload (JSON)"), " ");
+        await user.type(screen.getByLabelText("Delivery (JSON)"), " ");
         await user.click(screen.getByRole("button", { name: "Save edits" }));
 
         expect(onNameDraftChange).toHaveBeenCalled();
