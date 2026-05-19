@@ -182,7 +182,7 @@ export function ChatComposer({
                             <button
                                 type="button"
                                 onClick={() => onRemoveAttachment(attachment.id)}
-                                className="text-primary-400 hover:bg-primary-700 hover:text-primary-100 rounded p-1"
+                                className="text-primary-400 hover:bg-primary-700 hover:text-primary-100 focus:ring-accent-500 rounded p-1 focus:ring-2 focus:outline-none"
                                 aria-label={`Remove ${attachment.fileName}`}
                             >
                                 <X className="h-3.5 w-3.5" />
