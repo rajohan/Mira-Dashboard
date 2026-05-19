@@ -115,6 +115,28 @@ describe("DockerContainersTable", () => {
         expect(onRestart).toHaveBeenCalledWith("container-1");
     });
 
+    it("labels mobile cards and keeps nested actions scoped", async () => {
+        const user = userEvent.setup();
+        const onDetails = vi.fn();
+        const onLogs = vi.fn();
+
+        renderTable(containers, { onDetails, onLogs });
+
+        const card = screen.getByRole("button", {
+            name: "Open details for comet",
+        });
+
+        card.focus();
+        await user.keyboard("{Enter}");
+        await user.keyboard(" ");
+        await user.click(screen.getByRole("button", { name: "Show logs for comet" }));
+
+        expect(onDetails).toHaveBeenCalledTimes(2);
+        expect(onDetails).toHaveBeenCalledWith("container-1");
+        expect(onLogs).toHaveBeenCalledTimes(1);
+        expect(onLogs).toHaveBeenCalledWith("container-1");
+    });
+
     it("renders state, health, ports, service metadata, and memory fallbacks", () => {
         renderTable([
             makeContainer({
