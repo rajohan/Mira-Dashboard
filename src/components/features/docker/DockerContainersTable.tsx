@@ -264,8 +264,8 @@ export function DockerContainersTable({
                         <Button
                             size="sm"
                             variant="secondary"
-                            title="Logs"
-                            aria-label="Logs"
+                            title={`Show logs for ${container.name}`}
+                            aria-label={`Show logs for ${container.name}`}
                             onClick={() => onLogs(container.id)}
                         >
                             <FileText className="h-4 w-4" />
@@ -273,8 +273,8 @@ export function DockerContainersTable({
                         <Button
                             size="sm"
                             variant="secondary"
-                            title="Console"
-                            aria-label="Console"
+                            title={`Open console for ${container.name}`}
+                            aria-label={`Open console for ${container.name}`}
                             onClick={() => onConsole(container.id)}
                         >
                             <SquareTerminal className="h-4 w-4" />
@@ -282,8 +282,8 @@ export function DockerContainersTable({
                         <Button
                             size="sm"
                             variant="secondary"
-                            title="Restart"
-                            aria-label="Restart"
+                            title={`Restart ${container.name}`}
+                            aria-label={`Restart ${container.name}`}
                             onClick={() => onRestart(container.id)}
                         >
                             <RotateCcw className="h-4 w-4" />
