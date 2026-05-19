@@ -140,61 +140,54 @@ export function ChatComposer({
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
-                        <button
+                        <div
                             key={attachment.id}
-                            type="button"
-                            onClick={() =>
-                                onPreview({
-                                    title: attachment.fileName,
-                                    mimeType: attachment.mimeType,
-                                    kind: attachment.kind,
-                                    url:
-                                        attachment.dataUrl ||
-                                        `data:${attachment.mimeType};base64,${attachment.contentBase64}`,
-                                    text:
-                                        attachment.kind === "text"
-                                            ? base64ToText(attachment.contentBase64)
-                                            : undefined,
-                                    sizeBytes: attachment.sizeBytes,
-                                })
-                            }
-                            className="group border-primary-700 bg-primary-800 text-primary-100 hover:border-primary-500 hover:bg-primary-700 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-left text-xs"
+                            className="group border-primary-700 bg-primary-800 text-primary-100 hover:border-primary-500 hover:bg-primary-700 flex max-w-full min-w-0 items-center gap-1 rounded-lg border p-1 text-left text-xs"
                         >
-                            {attachment.kind === "image" && attachment.dataUrl ? (
-                                <img
-                                    src={attachment.dataUrl}
-                                    alt=""
-                                    className="h-8 w-8 shrink-0 rounded object-cover"
-                                />
-                            ) : (
-                                <Paperclip className="text-primary-400 h-4 w-4" />
-                            )}
-                            <div className="min-w-0 flex-1">
-                                <div className="truncate">{attachment.fileName}</div>
-                                <div className="text-primary-400">
-                                    {formatSize(attachment.sizeBytes)}
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    onPreview({
+                                        title: attachment.fileName,
+                                        mimeType: attachment.mimeType,
+                                        kind: attachment.kind,
+                                        url:
+                                            attachment.dataUrl ||
+                                            `data:${attachment.mimeType};base64,${attachment.contentBase64}`,
+                                        text:
+                                            attachment.kind === "text"
+                                                ? base64ToText(attachment.contentBase64)
+                                                : undefined,
+                                        sizeBytes: attachment.sizeBytes,
+                                    })
+                                }
+                                className="focus:ring-accent-500 flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left focus:ring-2 focus:outline-none"
+                            >
+                                {attachment.kind === "image" && attachment.dataUrl ? (
+                                    <img
+                                        src={attachment.dataUrl}
+                                        alt=""
+                                        className="h-8 w-8 shrink-0 rounded object-cover"
+                                    />
+                                ) : (
+                                    <Paperclip className="text-primary-400 h-4 w-4" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                    <div className="truncate">{attachment.fileName}</div>
+                                    <div className="text-primary-400">
+                                        {formatSize(attachment.sizeBytes)}
+                                    </div>
                                 </div>
-                            </div>
-                            <span
-                                role="button"
-                                tabIndex={0}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    onRemoveAttachment(attachment.id);
-                                }}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        onRemoveAttachment(attachment.id);
-                                    }
-                                }}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onRemoveAttachment(attachment.id)}
                                 className="text-primary-400 hover:bg-primary-700 hover:text-primary-100 rounded p-1"
                                 aria-label={`Remove ${attachment.fileName}`}
                             >
                                 <X className="h-3.5 w-3.5" />
-                            </span>
-                        </button>
+                            </button>
+                        </div>
                     ))}
                 </div>
             ) : null}

@@ -120,7 +120,13 @@ describe("ChatComposer", () => {
             onRemoveAttachment,
         });
 
-        await user.click(screen.getByRole("button", { name: /^photo\.png 11 B$/ }));
+        const previewButton = screen.getByRole("button", { name: /^photo\.png 11 B$/ });
+        const removeButton = screen.getByRole("button", { name: "Remove photo.png" });
+
+        expect(removeButton.tagName).toBe("BUTTON");
+        expect(previewButton).not.toContainElement(removeButton);
+
+        await user.click(previewButton);
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({
                 kind: "image",
@@ -130,7 +136,7 @@ describe("ChatComposer", () => {
             })
         );
 
-        screen.getByRole("button", { name: "Remove photo.png" }).focus();
+        removeButton.focus();
         await user.keyboard("{Enter}");
         await user.keyboard(" ");
         expect(onRemoveAttachment).toHaveBeenCalledTimes(2);
@@ -148,7 +154,7 @@ describe("ChatComposer", () => {
             onRemoveAttachment,
         });
 
-        await user.click(screen.getAllByRole("button", { name: /notes.txt/ })[0]);
+        await user.click(screen.getByRole("button", { name: /^notes\.txt 16 B$/ }));
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({
                 kind: "text",
