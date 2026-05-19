@@ -1,4 +1,5 @@
 import { Play } from "lucide-react";
+import { useId } from "react";
 
 import type { CronJob } from "../../../hooks";
 import {
@@ -77,6 +78,12 @@ export function CronJobDetails({
     onSave,
     formatDate,
 }: CronJobDetailsProps) {
+    const fieldId = useId();
+    const nameInputId = `${fieldId}-name`;
+    const scheduleTextareaId = `${fieldId}-schedule`;
+    const payloadTextareaId = `${fieldId}-payload`;
+    const deliveryTextareaId = `${fieldId}-delivery`;
+
     return (
         <Card variant="bordered" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -207,10 +214,14 @@ export function CronJobDetails({
                 {isEditMode ? (
                     <>
                         <div>
-                            <label className="text-primary-300 mb-1 block text-xs">
+                            <label
+                                className="text-primary-300 mb-1 block text-xs"
+                                htmlFor={nameInputId}
+                            >
                                 Name
                             </label>
                             <Input
+                                id={nameInputId}
                                 value={nameDraft}
                                 onChange={(event) =>
                                     onNameDraftChange(event.target.value)
@@ -221,10 +232,14 @@ export function CronJobDetails({
 
                         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={scheduleTextareaId}
+                                >
                                     Schedule (JSON)
                                 </label>
                                 <Textarea
+                                    id={scheduleTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={scheduleDraft}
                                     onChange={(event) =>
@@ -244,10 +259,14 @@ export function CronJobDetails({
                                 </p>
                             </div>
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={payloadTextareaId}
+                                >
                                     Payload (JSON)
                                 </label>
                                 <Textarea
+                                    id={payloadTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={payloadDraft}
                                     onChange={(event) =>
@@ -267,10 +286,14 @@ export function CronJobDetails({
                                 </p>
                             </div>
                             <div>
-                                <label className="text-primary-300 mb-1 block text-xs">
+                                <label
+                                    className="text-primary-300 mb-1 block text-xs"
+                                    htmlFor={deliveryTextareaId}
+                                >
                                     Delivery (JSON)
                                 </label>
                                 <Textarea
+                                    id={deliveryTextareaId}
                                     className="h-40 font-mono text-xs sm:h-48"
                                     value={deliveryDraft}
                                     onChange={(event) =>
