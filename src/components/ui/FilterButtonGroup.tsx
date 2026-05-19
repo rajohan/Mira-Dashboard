@@ -28,6 +28,7 @@ export function FilterButtonGroup<T extends string>({
                     key={option.value}
                     variant={value === option.value ? "primary" : "secondary"}
                     size="sm"
+                    aria-pressed={value === option.value}
                     onClick={() => onChange(option.value)}
                 >
                     {option.label}

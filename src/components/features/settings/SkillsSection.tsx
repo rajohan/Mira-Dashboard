@@ -81,6 +81,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                                         ? "border-accent-500 bg-accent-500/10 text-accent-200"
                                         : "border-primary-700 text-primary-400 hover:border-primary-600"
                                 )}
+                                aria-pressed={statusFilter === filter}
                             >
                                 {filter}
                             </button>
@@ -102,6 +103,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                                     ? "border-accent-500 bg-accent-500/10 text-accent-200"
                                     : "border-primary-700 bg-primary-900/40 text-primary-300 hover:border-primary-600"
                             )}
+                            aria-pressed={sourceFilter === filter}
                         >
                             <div className="font-medium">
                                 {filter === "all" ? "All" : sourceLabels[filter]}

@@ -32,6 +32,14 @@ describe("FilterButtonGroup", () => {
         );
 
         expect(screen.getByRole("button", { name: "All" })).toHaveClass("bg-accent-500");
+        expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
+        expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
         await userEvent.click(screen.getByRole("button", { name: "Open" }));
 
         expect(onChange).toHaveBeenCalledWith("open");

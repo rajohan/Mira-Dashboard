@@ -34,8 +34,20 @@ describe("SkillsSection", () => {
         await userEvent.click(screen.getByRole("button", { name: /Skills/u }));
         expect(screen.getByText("1/3 enabled")).toBeInTheDocument();
         expect(screen.getByText("Browser automation helpers")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "all" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
 
         await userEvent.click(screen.getByRole("button", { name: "enabled" }));
+        expect(screen.getByRole("button", { name: "enabled" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
+        expect(screen.getByRole("button", { name: "all" })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
         expect(screen.getByText("browser-automation")).toBeInTheDocument();
         expect(screen.queryByText("task-tracking")).not.toBeInTheDocument();
 
@@ -47,6 +59,14 @@ describe("SkillsSection", () => {
         expect(screen.getAllByText("Extra").length).toBeGreaterThan(0);
 
         await userEvent.click(screen.getByRole("button", { name: /Workspace/u }));
+        expect(screen.getByRole("button", { name: /Workspace/u })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
+        expect(screen.getByRole("button", { name: /^All/u })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
         expect(screen.queryByText("custom-skill")).not.toBeInTheDocument();
 
         await userEvent.click(screen.getByRole("switch"));
