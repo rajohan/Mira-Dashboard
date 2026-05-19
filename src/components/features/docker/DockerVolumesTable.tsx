@@ -88,8 +88,8 @@ export function DockerVolumesTable({
                     <Button
                         size="sm"
                         variant="danger"
-                        title="Delete"
-                        aria-label="Delete"
+                        title={`Delete ${volume.name}`}
+                        aria-label={`Delete ${volume.name}`}
                         disabled={volume.usedBy.length > 0}
                         onClick={(event) => {
                             event.stopPropagation();
@@ -176,6 +176,7 @@ export function DockerVolumesTable({
                             <Button
                                 size="sm"
                                 variant="danger"
+                                aria-label={`Delete ${volume.name}`}
                                 disabled={volume.usedBy.length > 0}
                                 onClick={() => onDelete(volume.name)}
                                 className="mt-3 w-full"
