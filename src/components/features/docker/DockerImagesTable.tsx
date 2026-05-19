@@ -91,19 +91,17 @@ export function DockerImagesTable({
             header: "Actions",
             cell: (info) => {
                 const image = info.row.original;
+                const label = `${image.repository}:${image.tag || "<none>"}`;
                 return (
                     <Button
                         size="sm"
                         variant="danger"
-                        title="Delete"
-                        aria-label="Delete"
+                        title={`Delete ${label}`}
+                        aria-label={`Delete ${label}`}
                         disabled={image.inUseBy.length > 0}
                         onClick={(event) => {
                             event.stopPropagation();
-                            onDelete(
-                                image.id,
-                                `${image.repository}:${image.tag || "<none>"}`
-                            );
+                            onDelete(image.id, label);
                         }}
                     >
                         <Trash2 className="h-4 w-4" />
@@ -185,6 +183,7 @@ export function DockerImagesTable({
                             <Button
                                 size="sm"
                                 variant="danger"
+                                aria-label={`Delete ${label}`}
                                 disabled={image.inUseBy.length > 0}
                                 onClick={() => onDelete(image.id, label)}
                                 className="mt-3 w-full"

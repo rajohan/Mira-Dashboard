@@ -59,7 +59,7 @@ describe("DockerImagesTable", () => {
         await userEvent.click(within(table).getByText("Used by"));
         await userEvent.click(screen.getByRole("button", { name: "Remove unused (1)" }));
         const enabledDeleteButton = within(table)
-            .getAllByRole("button", { name: "Delete" })
+            .getAllByRole("button", { name: "Delete orphan:<none>" })
             .find((button) => !button.hasAttribute("disabled"));
         await userEvent.click(enabledDeleteButton!);
 
@@ -68,7 +68,7 @@ describe("DockerImagesTable", () => {
         expect(onDelete).toHaveBeenCalledTimes(1);
 
         const mobileDeleteButton = screen
-            .getAllByRole("button", { name: "Delete" })
+            .getAllByRole("button", { name: "Delete orphan:<none>" })
             .find(
                 (button) =>
                     !button.hasAttribute("disabled") &&
