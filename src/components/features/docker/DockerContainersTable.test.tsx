@@ -94,16 +94,21 @@ describe("DockerContainersTable", () => {
 
         await userEvent.click(screen.getByRole("button", { name: "Restart stack" }));
         await userEvent.click(screen.getAllByText("comet")[0]);
-        await userEvent.click(
-            screen.getByRole("button", { name: "Show logs for comet" })
-        );
-        await userEvent.click(
-            screen.getByRole("button", { name: "Open console for comet" })
-        );
-        await userEvent.click(screen.getByRole("button", { name: "Restart comet" }));
-        await userEvent.click(screen.getByRole("button", { name: "Logs" }));
-        await userEvent.click(screen.getByRole("button", { name: "Console" }));
-        await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+        const logButtons = screen.getAllByRole("button", {
+            name: "Show logs for comet",
+        });
+        const consoleButtons = screen.getAllByRole("button", {
+            name: "Open console for comet",
+        });
+        const restartButtons = screen.getAllByRole("button", {
+            name: "Restart comet",
+        });
+        await userEvent.click(logButtons[0]!);
+        await userEvent.click(consoleButtons[0]!);
+        await userEvent.click(restartButtons[0]!);
+        await userEvent.click(logButtons[1]!);
+        await userEvent.click(consoleButtons[1]!);
+        await userEvent.click(restartButtons[1]!);
 
         expect(onRestartStack).toHaveBeenCalledTimes(1);
         expect(onDetails).toHaveBeenCalledWith("container-1");
@@ -129,7 +134,9 @@ describe("DockerContainersTable", () => {
         card.focus();
         await user.keyboard("{Enter}");
         await user.keyboard(" ");
-        await user.click(screen.getByRole("button", { name: "Show logs for comet" }));
+        await user.click(
+            screen.getAllByRole("button", { name: "Show logs for comet" })[0]!
+        );
 
         expect(onDetails).toHaveBeenCalledTimes(2);
         expect(onDetails).toHaveBeenCalledWith("container-1");
