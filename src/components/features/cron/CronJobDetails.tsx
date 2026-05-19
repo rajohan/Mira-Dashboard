@@ -1,4 +1,5 @@
 import { Play } from "lucide-react";
+import { useId } from "react";
 
 import type { CronJob } from "../../../hooks";
 import {
@@ -15,11 +16,6 @@ import { Card, CardTitle } from "../../ui/Card";
 import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { Textarea } from "../../ui/Textarea";
-
-const nameInputId = "cron-job-name";
-const scheduleTextareaId = "cron-job-schedule";
-const payloadTextareaId = "cron-job-payload";
-const deliveryTextareaId = "cron-job-delivery";
 
 /** Represents JSON valIDation state. */
 interface JsonValidationState {
@@ -82,6 +78,12 @@ export function CronJobDetails({
     onSave,
     formatDate,
 }: CronJobDetailsProps) {
+    const fieldId = useId();
+    const nameInputId = `${fieldId}-name`;
+    const scheduleTextareaId = `${fieldId}-schedule`;
+    const payloadTextareaId = `${fieldId}-payload`;
+    const deliveryTextareaId = `${fieldId}-delivery`;
+
     return (
         <Card variant="bordered" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
