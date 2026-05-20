@@ -85,12 +85,24 @@ describe("NotificationBell", () => {
 
         expect(screen.getByText("Backup stale")).toBeInTheDocument();
         expect(screen.getByText("Cache refreshed")).toBeInTheDocument();
+        expect(screen.getByRole("menuitemradio", { name: "All" })).toHaveAttribute(
+            "aria-checked",
+            "true"
+        );
 
-        await user.click(screen.getByText("Unread"));
+        await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
+        expect(screen.getByRole("menuitemradio", { name: "Unread" })).toHaveAttribute(
+            "aria-checked",
+            "true"
+        );
         expect(screen.getByText("Backup stale")).toBeInTheDocument();
         expect(screen.queryByText("Cache refreshed")).not.toBeInTheDocument();
 
-        await user.click(screen.getByText("Warning"));
+        await user.click(screen.getByRole("menuitemradio", { name: "Warning" }));
+        expect(screen.getByRole("menuitemradio", { name: "Warning" })).toHaveAttribute(
+            "aria-checked",
+            "true"
+        );
         expect(screen.getByText("Backup stale")).toBeInTheDocument();
 
         await user.click(screen.getByText("Mark read"));
