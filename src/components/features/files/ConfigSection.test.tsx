@@ -15,11 +15,22 @@ describe("ConfigSection", () => {
         expect(screen.queryByText("jobs.json")).not.toBeInTheDocument();
         expect(screen.queryByText("agentmail.ts")).not.toBeInTheDocument();
 
-        await user.click(screen.getByText("cron"));
-        await user.click(screen.getByText("jobs.json"));
-        await user.click(screen.getByText("hooks"));
-        await user.click(screen.getByText("agentmail.ts"));
-        await user.click(screen.getByText("openclaw.json"));
+        const cronButton = screen.getByRole("button", { name: "cron" });
+        const hooksButton = screen.getByRole("button", { name: "hooks" });
+        const openclawButton = screen.getByRole("button", { name: "openclaw.json" });
+
+        expect(cronButton).toHaveAttribute("aria-expanded", "false");
+        expect(hooksButton).toHaveAttribute("aria-expanded", "false");
+        expect(openclawButton).toHaveAttribute("aria-current", "true");
+
+        await user.click(cronButton);
+        expect(cronButton).toHaveAttribute("aria-expanded", "true");
+        await user.click(screen.getByRole("button", { name: "jobs.json" }));
+
+        await user.click(hooksButton);
+        expect(hooksButton).toHaveAttribute("aria-expanded", "true");
+        await user.click(screen.getByRole("button", { name: "agentmail.ts" }));
+        await user.click(openclawButton);
 
         expect(screen.getByText("transforms")).toBeInTheDocument();
         expect(onSelect).toHaveBeenNthCalledWith(1, "config:cron/jobs.json");
@@ -28,5 +39,25 @@ describe("ConfigSection", () => {
             "config:hooks/transforms/agentmail.ts"
         );
         expect(onSelect).toHaveBeenNthCalledWith(3, "config:openclaw.json");
+    });
+
+    it("supports keyboard activation for config groups and files", async () => {
+        const user = userEvent.setup();
+        const onSelect = vi.fn();
+
+        render(<ConfigSection selectedPath={null} onSelect={onSelect} />);
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "cron" })).toHaveFocus();
+        await user.keyboard("{Enter}");
+        expect(screen.getByRole("button", { name: "cron" })).toHaveAttribute(
+            "aria-expanded",
+            "true"
+        );
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "jobs.json" })).toHaveFocus();
+        await user.keyboard(" ");
+        expect(onSelect).toHaveBeenCalledWith("config:cron/jobs.json");
     });
 });
