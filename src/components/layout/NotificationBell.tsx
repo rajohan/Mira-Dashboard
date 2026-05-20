@@ -103,6 +103,8 @@ export function NotificationBell() {
                                         ? "bg-accent-500 text-white"
                                         : "border-primary-600 text-primary-300 hover:bg-primary-700 border"
                                 }`}
+                                role="menuitemradio"
+                                aria-checked={filter === value}
                                 onClick={() => setFilter(value)}
                             >
                                 {label}
