@@ -39,14 +39,53 @@ describe("FileTreeItem", () => {
             />
         );
 
-        await user.click(screen.getByText("repo"));
-        await user.click(screen.getByText("package.json"));
+        await user.click(screen.getByRole("button", { name: "repo" }));
+        await user.click(screen.getByRole("button", { name: "package.json" }));
 
         expect(onToggle).toHaveBeenCalledWith("/repo");
         expect(onSelect).toHaveBeenCalledWith("/repo/package.json");
+        expect(screen.getByRole("button", { name: "repo" })).toHaveAttribute(
+            "aria-expanded",
+            "true"
+        );
+        expect(screen.getByRole("button", { name: "package.json" })).toHaveAttribute(
+            "aria-current",
+            "true"
+        );
         expect(screen.getByText("TS")).toBeInTheDocument();
         expect(screen.getByText("MD")).toBeInTheDocument();
         expect(screen.getAllByText("{ }")).toHaveLength(1);
+    });
+
+    it("supports keyboard activation for tree rows", async () => {
+        const user = userEvent.setup();
+        const onSelect = vi.fn();
+        const onToggle = vi.fn();
+
+        render(
+            <FileTreeItem
+                node={tree}
+                selectedPath={null}
+                expandedPaths={new Set(["/repo"])}
+                onSelect={onSelect}
+                onToggle={onToggle}
+            />
+        );
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "repo" })).toHaveFocus();
+        await user.keyboard("{Enter}");
+        expect(onToggle).toHaveBeenCalledWith("/repo");
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "src" })).toHaveFocus();
+        await user.keyboard(" ");
+        expect(onToggle).toHaveBeenCalledWith("/repo/src");
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "package.json" })).toHaveFocus();
+        await user.keyboard("{Enter}");
+        expect(onSelect).toHaveBeenCalledWith("/repo/package.json");
     });
 
     it("uses the generic file icon for unknown file extensions", () => {

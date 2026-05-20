@@ -17,8 +17,11 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
     return (
         <div className="p-2">
             {/* cron/ subdirectory */}
-            <div
-                className="text-primary-200 hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm sm:py-1"
+            <button
+                type="button"
+                aria-label="cron"
+                aria-expanded={cronDirExpanded}
+                className="text-primary-200 hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1"
                 onClick={() => setCronDirExpanded(!cronDirExpanded)}
             >
                 {cronDirExpanded ? (
@@ -28,15 +31,18 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="min-w-0 truncate">cron</span>
-            </div>
+            </button>
             {cronDirExpanded &&
                 CRON_DIR_FILES.map((file) => {
                     const isSelected = selectedPath === file.path;
                     return (
-                        <div
+                        <button
+                            type="button"
                             key={file.path}
+                            aria-label={file.label}
+                            aria-current={isSelected ? "true" : undefined}
                             className={
-                                "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
+                                "hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1 " +
                                 (isSelected
                                     ? "bg-accent-500/20 text-accent-400"
                                     : "text-primary-200")
@@ -48,13 +54,16 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                             <span className="min-w-0 truncate font-mono">
                                 {file.label}
                             </span>
-                        </div>
+                        </button>
                     );
                 })}
 
             {/* hooks/ subdirectory */}
-            <div
-                className="text-primary-200 hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-sm sm:py-1"
+            <button
+                type="button"
+                aria-label="hooks"
+                aria-expanded={hooksDirExpanded}
+                className="text-primary-200 hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1"
                 onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
             >
                 {hooksDirExpanded ? (
@@ -64,7 +73,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 )}
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="min-w-0 truncate">hooks</span>
-            </div>
+            </button>
             {hooksDirExpanded && (
                 <>
                     <div
@@ -78,10 +87,13 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                     {HOOKS_DIR_FILES.map((file) => {
                         const isSelected = selectedPath === file.path;
                         return (
-                            <div
+                            <button
+                                type="button"
                                 key={file.path}
+                                aria-label={file.label}
+                                aria-current={isSelected ? "true" : undefined}
                                 className={
-                                    "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
+                                    "hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1 " +
                                     (isSelected
                                         ? "bg-accent-500/20 text-accent-400"
                                         : "text-primary-200")
@@ -96,7 +108,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                                 <span className="min-w-0 truncate font-mono">
                                     {file.label}
                                 </span>
-                            </div>
+                            </button>
                         );
                     })}
                 </>
@@ -106,10 +118,13 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
             {CONFIG_TOP_FILES.map((file) => {
                 const isSelected = selectedPath === file.path;
                 return (
-                    <div
+                    <button
+                        type="button"
                         key={file.path}
+                        aria-label={file.label}
+                        aria-current={isSelected ? "true" : undefined}
                         className={
-                            "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm sm:py-1 " +
+                            "hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1 " +
                             (isSelected
                                 ? "bg-accent-500/20 text-accent-400"
                                 : "text-primary-200")
@@ -119,7 +134,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                     >
                         <File size={14} className="text-primary-400 flex-shrink-0" />
                         <span className="min-w-0 truncate font-mono">{file.label}</span>
-                    </div>
+                    </button>
                 );
             })}
         </div>

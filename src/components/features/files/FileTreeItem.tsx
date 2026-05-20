@@ -82,9 +82,13 @@ export function FileTreeItem({
 
     return (
         <div>
-            <div
+            <button
+                type="button"
+                aria-label={node.name}
+                aria-current={isSelected ? "true" : undefined}
+                aria-expanded={node.type === "directory" ? isExpanded : undefined}
                 className={
-                    "hover:bg-primary-700/50 flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 sm:py-1 " +
+                    "hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left focus:ring-2 focus:outline-none sm:py-1 " +
                     (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")
                 }
                 style={{ paddingLeft: depth * 12 + 8 }}
@@ -127,7 +131,7 @@ export function FileTreeItem({
                     </>
                 )}
                 <span className="min-w-0 truncate text-sm">{node.name}</span>
-            </div>
+            </button>
             {node.type === "directory" && isExpanded && node.children && (
                 <div>
                     {node.children
