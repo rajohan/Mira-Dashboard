@@ -37,6 +37,12 @@ export function SessionsTable({
 }: SessionsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const tableSessions = Array.isArray(sessions) ? sessions : [];
+    const getSessionName = (session: Session, fallback = "unknown") =>
+        session.displayLabel ||
+        session.label ||
+        session.displayName ||
+        session.id ||
+        fallback;
 
     const columns = [
         columnHelper.accessor("type", {
@@ -109,6 +115,7 @@ export function SessionsTable({
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <SessionActionsDropdown
+                        ariaLabel={`Actions for ${getSessionName(row.original, "session")}`}
                         onCompact={() => onCompact(row.original.key)}
                         onReset={() => onReset(row.original.key)}
                         onDelete={() => onDelete(row.original)}
@@ -144,12 +151,7 @@ export function SessionsTable({
                     const current = session.tokenCount || 0;
                     const max = session.maxTokens || 200_000;
                     const percent = getTokenPercent(current, max);
-                    const name =
-                        session.displayLabel ||
-                        session.label ||
-                        session.displayName ||
-                        session.id ||
-                        "unknown";
+                    const name = getSessionName(session);
 
                     return (
                         <div
@@ -170,6 +172,7 @@ export function SessionsTable({
                                     onClick={(event) => event.stopPropagation()}
                                 >
                                     <SessionActionsDropdown
+                                        ariaLabel={`Actions for ${name}`}
                                         onCompact={() => onCompact(session.key)}
                                         onReset={() => onReset(session.key)}
                                         onDelete={() => onDelete(session)}
