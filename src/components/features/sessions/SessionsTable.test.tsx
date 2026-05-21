@@ -141,6 +141,22 @@ describe("SessionsTable", () => {
         expect(screen.getAllByText("0.0k / 200k").length).toBeGreaterThan(0);
     });
 
+    it("uses the same action label fallback across responsive views", () => {
+        const unnamedSession: Session = {
+            ...sessions[0],
+            displayLabel: "",
+            displayName: "",
+            id: "",
+            key: "unnamed-key",
+            label: "",
+        };
+        renderTable({ sessions: [unnamedSession] });
+
+        expect(
+            screen.getAllByRole("button", { name: "Actions for unknown" }).length
+        ).toBeGreaterThan(0);
+    });
+
     it("treats non-array session data as empty", () => {
         renderTable({ sessions: null as unknown as Session[] });
 

@@ -115,7 +115,7 @@ export function SessionsTable({
             cell: ({ row }) => (
                 <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <SessionActionsDropdown
-                        ariaLabel={`Actions for ${getSessionName(row.original, "session")}`}
+                        ariaLabel={`Actions for ${getSessionName(row.original, "unknown")}`}
                         onCompact={() => onCompact(row.original.key)}
                         onReset={() => onReset(row.original.key)}
                         onDelete={() => onDelete(row.original)}
