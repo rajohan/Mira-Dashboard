@@ -562,8 +562,9 @@ export function Chat() {
                 }
             };
 
-            const refreshTasks = [async () => {}, refreshWhenFollowing] as const;
-            await refreshTasks[Number(shouldStickToBottomReference.current)]!();
+            if (shouldStickToBottomReference.current) {
+                await refreshWhenFollowing();
+            }
         };
 
         void refreshHistory();

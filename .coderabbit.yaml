@@ -1,45 +1,45 @@
 reviews:
-  profile: chill
-  high_level_summary: true
-  high_level_summary_in_walkthrough: true
-  collapse_walkthrough: true
-  changed_files_summary: true
-  estimate_code_review_effort: true
-  assess_linked_issues: true
-  review_status: true
-  commit_status: true
-  fail_commit_status: false
-  pre_merge_checks:
-    docstrings:
-      mode: warning
-      threshold: 100
-    title:
-      mode: warning
-      requirements: "Content"
-    description:
-      mode: warning
-    issue_assessment:
-      mode: warning
-  finishing_touches:
-    docstrings:
-      enabled: true
-    unit_tests:
-      enabled: true
-  auto_review:
-    enabled: true
-    auto_incremental_review: true
-    auto_pause_after_reviewed_commits: 0
-    ignore_usernames: []
-  path_filters:
-    - "**/*"
-    - "!dist/**"
-    - "!node_modules/**"
-    - "!coverage/**"
-    - "!backend/coverage/**"
-    - "!package-lock.json"
-    - "!backend/package-lock.json"
+    profile: chill
+    high_level_summary: true
+    high_level_summary_in_walkthrough: true
+    collapse_walkthrough: true
+    changed_files_summary: true
+    estimate_code_review_effort: true
+    assess_linked_issues: true
+    review_status: true
+    commit_status: true
+    fail_commit_status: false
+    pre_merge_checks:
+        docstrings:
+            mode: error
+            threshold: 100
+        title:
+            mode: warning
+            requirements: "Content"
+        description:
+            mode: warning
+        issue_assessment:
+            mode: warning
+    finishing_touches:
+        docstrings:
+            enabled: true
+        unit_tests:
+            enabled: true
+    auto_review:
+        enabled: true
+        auto_incremental_review: true
+        auto_pause_after_reviewed_commits: 0
+        ignore_usernames: []
+    path_filters:
+        - "**/*"
+        - "!dist/**"
+        - "!node_modules/**"
+        - "!coverage/**"
+        - "!backend/coverage/**"
+        - "!package-lock.json"
+        - "!backend/package-lock.json"
 code_generation:
-  docstrings:
-    path_instructions: []
-  unit_tests:
-    path_instructions: []
+    docstrings:
+        path_instructions: []
+    unit_tests:
+        path_instructions: []
