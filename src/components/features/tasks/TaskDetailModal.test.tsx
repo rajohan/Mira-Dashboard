@@ -200,6 +200,15 @@ describe("TaskDetailModal", () => {
         expect(props.onUpdate).not.toHaveBeenCalled();
     });
 
+    it("uses the new column for tasks without a column label", async () => {
+        renderModal({ task: makeTask({ labels: [{ name: "priority-high" }] }) });
+
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Move to New" })
+        ).not.toBeInTheDocument();
+    });
+
     it("renders closed tasks and scheduled/disabled automation fallbacks", async () => {
         renderModal({
             task: makeTask({

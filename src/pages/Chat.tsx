@@ -79,7 +79,11 @@ function getChatAgentId(session: Session): string {
 function formatChatSessionLabel(session: Session, agentId: string): string {
     const sessionKey = typeof session.key === "string" ? session.key : "";
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
-    if (scope.toLowerCase() === "agent" && normalizeChatAgentId(keyAgentId) === agentId) {
+    if (
+        scope.toLowerCase() === "agent" &&
+        keyAgentId &&
+        normalizeChatAgentId(keyAgentId) === agentId
+    ) {
         return sessionParts.join(":") || sessionKey;
     }
 
@@ -364,11 +368,7 @@ export function Chat() {
             sendInFlightReference.current = false;
             setIsSending(false);
 
-            updateActiveStreams((previous) => {
-                const next = { ...previous };
-                delete next[String(selectedSessionKey)];
-                return next;
-            });
+            updateActiveStreams(() => ({}));
 
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
@@ -501,7 +501,7 @@ export function Chat() {
 
         /** Performs refresh history. */
         const refreshHistory = async () => {
-            const refreshWhenFollowing = async () => {
+            const refreshVisibleHistory = async () => {
                 try {
                     const result = (await request("chat.history", {
                         sessionKey: selectedSessionKey,
@@ -547,7 +547,7 @@ export function Chat() {
                             return previous;
                         }
 
-                        setIsAtBottom(true);
+                        setIsAtBottom(shouldStickToBottomReference.current);
                         return mergeWithRecentOptimisticMessages(previous, nextMessages);
                     });
                     if (recoveredStreamInHistory) {
@@ -562,9 +562,7 @@ export function Chat() {
                 }
             };
 
-            if (shouldStickToBottomReference.current) {
-                await refreshWhenFollowing();
-            }
+            await refreshVisibleHistory();
         };
 
         void refreshHistory();

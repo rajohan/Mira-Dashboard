@@ -208,6 +208,26 @@ describe("ChatComposer", () => {
         });
     });
 
+    it("ignores emoji insertion when the textarea selection is unavailable", async () => {
+        const user = userEvent.setup();
+        const onChangeDraft = vi.fn();
+
+        renderComposer({ draft: "Hi ", onChangeDraft });
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        Object.defineProperties(textarea, {
+            selectionEnd: { configurable: true, value: undefined },
+            selectionStart: { configurable: true, value: undefined },
+        });
+
+        await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        await user.click(screen.getByRole("button", { name: "Insert 😀" }));
+
+        expect(onChangeDraft).not.toHaveBeenCalled();
+        expect(screen.getByText("Emoji")).toBeInTheDocument();
+    });
+
     it("handles file attachment and voice controls", async () => {
         const user = userEvent.setup();
         const onAttachFiles = vi.fn();

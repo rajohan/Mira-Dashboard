@@ -788,6 +788,14 @@ describe("Chat", () => {
                 updatedAt: "2026-05-10T23:00:00.000Z",
             },
             {
+                key: "agent",
+                displayLabel: "",
+                label: "",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-10T22:30:00.000Z",
+            },
+            {
                 key: "",
                 agentType: "",
                 displayLabel: "Unknown",
@@ -811,6 +819,7 @@ describe("Chat", () => {
         expect(screen.getByTestId("agent-options")).toHaveTextContent("unknown");
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
         expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("agent");
 
         await user.click(screen.getByRole("button", { name: "select scratch chat" }));
         await waitFor(() =>
@@ -1291,6 +1300,19 @@ describe("Chat", () => {
                     text: "streaming answer",
                     updatedAt: "2026-05-11T00:02:00.000Z",
                 },
+                "session-b": {
+                    aliases: ["run-side"],
+                    message: {
+                        content: "side stream",
+                        role: "assistant",
+                        text: "side stream",
+                    },
+                    runId: "run-side",
+                    sessionKey: "session-b",
+                    statusText: "Still live",
+                    text: "side stream",
+                    updatedAt: "2026-05-11T00:03:00.000Z",
+                },
             }));
         });
 
@@ -1306,6 +1328,13 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(screen.queryByText("streaming answer")).not.toBeInTheDocument()
         );
+        act(() => {
+            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                ...previous,
+                "session-b": previous["session-b"],
+            }));
+        });
+        expect(screen.queryByText("side stream")).not.toBeInTheDocument();
         expect(clearTimeoutSpy).toHaveBeenCalledWith(liveRefreshTimer);
         clearTimeoutSpy.mockRestore();
     });

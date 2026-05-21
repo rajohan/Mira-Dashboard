@@ -33,6 +33,11 @@ describe("chat utils", () => {
         expect(dataUrlToBase64("data:text/plain;base64,aGVsbG8=")).toBe("aGVsbG8=");
         expect(dataUrlToBase64("raw-base64")).toBe("raw-base64");
         expect(base64ToText("aGVsbG8=")).toBe("hello");
+        const codePointAtSpy = vi
+            .spyOn(String.prototype, "codePointAt")
+            .mockImplementationOnce(() => void 0);
+        expect(base64ToText("QQ==")).toBe("\u0000");
+        codePointAtSpy.mockRestore();
         expect(chatErrorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
         );

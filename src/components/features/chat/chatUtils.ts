@@ -30,7 +30,7 @@ export function dataUrlToBase64(dataUrl: string): string {
 /** Performs base64 to text. */
 export function base64ToText(base64: string): string {
     const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0)!);
+    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
     return new TextDecoder().decode(bytes);
 }
 
