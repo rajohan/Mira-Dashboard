@@ -650,7 +650,7 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
 
-                setIsAtBottom(true);
+                setIsAtBottom(shouldStickToBottomReference.current);
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch {
                 // Opportunistic live refresh; WebSocket events remain the primary path.

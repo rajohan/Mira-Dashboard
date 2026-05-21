@@ -1431,21 +1431,23 @@ describe("Chat", () => {
                         aliases: ["run-live"],
                         runId: "run-live",
                         sessionKey: "session-a",
-                        text: "quiet recovered answer",
+                        text: "quiet stream placeholder",
                         updatedAt: "2026-05-11T00:00:00.000Z",
                     },
                 }));
             });
-            expect(await screen.findByText("quiet recovered answer")).toBeInTheDocument();
+            expect(
+                await screen.findByText("quiet stream placeholder")
+            ).toBeInTheDocument();
 
             mocks.request.mockImplementation(async (method: string) => {
                 if (method === "chat.history") {
                     return {
                         messages: [
                             {
-                                content: "quiet recovered answer",
+                                content: "persisted recovered answer",
                                 role: "assistant",
-                                text: "quiet recovered answer",
+                                text: "persisted recovered answer",
                                 timestamp: "2026-05-11T00:04:00.000Z",
                             },
                         ],
@@ -1467,9 +1469,14 @@ describe("Chat", () => {
 
             rerender(<Chat />);
 
-            await waitFor(() =>
-                expect(screen.queryByText("quiet recovered answer")).toBeInTheDocument()
-            );
+            await waitFor(() => {
+                expect(
+                    screen.queryByText("quiet stream placeholder")
+                ).not.toBeInTheDocument();
+                expect(
+                    screen.getByText("persisted recovered answer")
+                ).toBeInTheDocument();
+            });
             expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
         } finally {
             nowSpy.mockRestore();
@@ -1669,8 +1676,11 @@ describe("Chat", () => {
         expect(
             screen.queryByRole("button", { name: "confirm delete" })
         ).not.toBeInTheDocument();
+        expect(mocks.confirmModalHandlers).toEqual(
+            expect.objectContaining({ isOpen: false })
+        );
         act(() => {
-            mocks.confirmModalHandlers?.onConfirm();
+            mocks.confirmModalHandlers!.onConfirm();
         });
 
         expect(screen.getByText("old user message")).toBeInTheDocument();
