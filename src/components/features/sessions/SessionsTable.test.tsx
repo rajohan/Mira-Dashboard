@@ -154,7 +154,7 @@ describe("SessionsTable", () => {
 
         expect(
             screen.getAllByRole("button", { name: "Actions for unknown" }).length
-        ).toBeGreaterThan(0);
+        ).toBe(2);
     });
 
     it("treats non-array session data as empty", () => {
