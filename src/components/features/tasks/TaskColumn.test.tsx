@@ -65,4 +65,17 @@ describe("TaskColumn", () => {
             "border-accent-500/50"
         );
     });
+
+    it("renders nothing for unknown column ids", () => {
+        const { container } = render(
+            <TaskColumn
+                id={"archived" as never}
+                tasks={[]}
+                isOver={false}
+                onTaskClick={vi.fn()}
+            />
+        );
+
+        expect(container).toBeEmptyDOMElement();
+    });
 });

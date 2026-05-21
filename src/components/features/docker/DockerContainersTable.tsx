@@ -33,14 +33,14 @@ function parseMemoryUsedMiB(value: string | undefined): number {
         return -1;
     }
 
-    const used = value.split("/")[0]?.trim() || "";
+    const used = value.split("/")[0]!.trim();
     const match = used.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]i?B|B)$/i);
     if (!match) {
         return -1;
     }
 
-    const amount = Number.parseFloat(match[1] || "0");
-    const unit = (match[2] || "B").toUpperCase();
+    const amount = Number.parseFloat(match[1]!);
+    const unit = match[2]!.toUpperCase();
     const factors: Record<string, number> = {
         B: 1 / (1024 * 1024),
         KIB: 1 / 1024,
@@ -53,7 +53,7 @@ function parseMemoryUsedMiB(value: string | undefined): number {
         TB: 1024 * 1024,
     };
 
-    return amount * (factors[unit] || 1);
+    return amount * factors[unit]!;
 }
 
 /** Formats memory used mb for display. */

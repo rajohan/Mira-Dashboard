@@ -48,9 +48,8 @@ export function Terminal() {
     // Check if user is near bottom (within 30px)
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        if (!outputRef.current) return true;
-        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
-        return scrollHeight - scrollTop - clientHeight < 30;
+        const output = outputRef.current!;
+        return output.scrollHeight - output.scrollTop - output.clientHeight < 30;
     };
 
     // Auto-scroll only when user is at bottom
@@ -70,10 +69,8 @@ export function Terminal() {
     // Scroll to bottom manually
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        if (outputRef.current) {
-            outputRef.current.scrollTop = outputRef.current.scrollHeight;
-            setIsAtBottom(true);
-        }
+        outputRef.current!.scrollTop = outputRef.current!.scrollHeight;
+        setIsAtBottom(true);
     };
 
     // Update command status when job data changes - only if actually different

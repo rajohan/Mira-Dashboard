@@ -134,6 +134,7 @@ describe("DockerContainersTable", () => {
         card.focus();
         await user.keyboard("{Enter}");
         await user.keyboard(" ");
+        await user.keyboard("a");
         await user.click(
             screen.getAllByRole("button", { name: "Show logs for comet" })[0]!
         );

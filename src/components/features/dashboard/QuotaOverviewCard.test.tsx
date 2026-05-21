@@ -141,6 +141,7 @@ describe("QuotaOverviewCard", () => {
             <QuotaOverviewCard
                 quotas={{
                     ...quotas,
+                    elevenlabs: { status: "error" },
                     openai: { status: "error" },
                     openrouter: { status: "not_configured" },
                     synthetic: { status: "error" },
@@ -149,7 +150,7 @@ describe("QuotaOverviewCard", () => {
             />
         );
 
-        expect(screen.getAllByText("error")).toHaveLength(2);
+        expect(screen.getAllByText("error")).toHaveLength(3);
         expect(screen.getAllByText("not configured")).toHaveLength(2);
         expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });

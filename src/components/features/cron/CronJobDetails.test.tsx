@@ -163,4 +163,30 @@ describe("CronJobDetails", () => {
         await user.click(screen.getByRole("button", { name: "Cancel" }));
         expect(onEditModeChange).toHaveBeenCalledWith(false);
     });
+
+    it("renders parse-error fallbacks and empty read-only config", () => {
+        const emptyConfigJob = {
+            ...job,
+            delivery: undefined,
+            payload: undefined,
+            schedule: undefined,
+        } as CronJob;
+        const { container, rerender, props } = renderDetails({
+            job: emptyConfigJob,
+        });
+
+        expect(container).toHaveTextContent("{}");
+
+        rerender(
+            <CronJobDetails
+                {...props}
+                job={emptyConfigJob}
+                isEditMode
+                deliveryValidation={{ valid: false, error: null }}
+                scheduleValidation={{ valid: false, error: null }}
+            />
+        );
+
+        expect(screen.getAllByText("Invalid JSON: parse error")).toHaveLength(2);
+    });
 });

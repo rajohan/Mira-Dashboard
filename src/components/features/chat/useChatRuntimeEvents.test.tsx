@@ -137,6 +137,7 @@ describe("runtime event formatting helpers", () => {
         expect(detailFromArgs("raw detail")).toBe("raw detail");
         expect(detailFromArgs({ unused: "nope" })).toBeUndefined();
         expect(detailFromArgs({ message: " hello " })).toBe("hello");
+        expect(normalizeRuntimeStream(null)).toBe("");
         expect(normalizeRuntimeStream("command_output")).toBe("command-output");
         expect(normalizeRuntimeStream("tool")).toBe("tool");
     });
@@ -645,6 +646,68 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
+    it("uses Gateway v4 transcript payload fallbacks and preserves existing message state", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-existing"],
+                    message: {
+                        role: "assistant",
+                        content: "Existing message",
+                        text: "Existing message",
+                    },
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    text: "Existing message",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    content: "Content fallback",
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.message?.text).toBe(
+            "Content fallback"
+        );
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    deltaText: "Delta text fallback",
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+            emit({
+                event: "session.message",
+                payload: {
+                    runId: 123,
+                    sessionKey: "session-a",
+                    stream: "message",
+                    text: "Text fallback",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Text fallback");
+        expect(result.current.activeStreams["session-a"]?.runId).toBe("run-existing");
+    });
+
     it("uses Gateway v4 deltaText replacements for live chat deltas", async () => {
         const { emit, result } = renderRuntimeEvents();
 
@@ -705,6 +768,191 @@ describe("useChatRuntimeEvents", () => {
 
             expect(result.current.activeStreams["session-a"]?.text).toBe(value);
         }
+    });
+
+    it("uses session-key run fallbacks and keeps existing status for empty queued deltas", async () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["session-a"],
+                    runId: "session-a",
+                    sessionKey: "session-a",
+                    statusText: "Still working",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "session-a",
+                statusText: "Still working",
+                text: "",
+            })
+        );
+    });
+
+    it("keeps existing status for queued thinking-only deltas on the same run", async () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-existing"],
+                    message: {
+                        content: "previous visible text",
+                        role: "assistant",
+                        text: "previous visible text",
+                    },
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    statusText: "Still working",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [{ text: "hidden", type: "thinking" }],
+                        role: "assistant",
+                    },
+                    runId: "run-existing",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "run-existing",
+                statusText: undefined,
+                text: "hidden",
+            })
+        );
+    });
+
+    it("clears existing queued status when an empty delta starts a new run", async () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-old"],
+                    runId: "run-old",
+                    sessionKey: "session-a",
+                    statusText: "Previous work",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [{ text: "thinking", type: "thinking" }],
+                        role: "assistant",
+                    },
+                    runId: "run-new",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "run-new",
+                statusText: undefined,
+                text: "thinking",
+            })
+        );
+    });
+
+    it("starts a fresh runtime transcript message without merging old message state", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-old"],
+                    message: {
+                        content: "old visible text",
+                        role: "assistant",
+                        text: "old visible text",
+                    },
+                    runId: "run-old",
+                    sessionKey: "session-a",
+                    text: "old visible text",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "new visible text",
+                        role: "assistant",
+                    },
+                    runId: "run-new",
+                    sessionKey: "session-a",
+                    stream: "message",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]?.message?.text).toBe(
+            "new visible text"
+        );
+    });
+
+    it("uses the session key as the run id for queued deltas without run ids", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "No run id",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                aliases: ["session-a"],
+                runId: "session-a",
+                text: "No run id",
+            })
+        );
     });
 
     it("drops stale aliases when Gateway v4 replacement starts a new run", () => {
@@ -1238,6 +1486,31 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.messages).toEqual([]);
     });
 
+    it("handles runtime events with missing stream and run identifiers", () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        act(() => {
+            emit({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Message without run id",
+                        role: "assistant",
+                    },
+                    sessionKey: "session-a",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "session-a",
+                text: "Message without run id",
+            })
+        );
+    });
+
     it("preserves status text or falls back to thinking for work events without text", () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
@@ -1415,6 +1688,35 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-b"]).toBeUndefined();
     });
 
+    it("clears empty finals without appending a fallback message", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-empty-final"],
+                    runId: "run-empty-final",
+                    sessionKey: "session-a",
+                    text: "",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    runId: "run-empty-final",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.messages).toEqual([]);
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+    });
+
     it("clears empty aborted streams without appending text", () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
@@ -1479,6 +1781,16 @@ describe("useChatRuntimeEvents", () => {
                     data: { args: "npm test", name: "functions.exec", phase: "start" },
                     sessionKey: "session-a",
                     stream: "tool",
+                },
+                type: "event",
+            });
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "Done", role: "assistant" },
+                    runId: "run-1",
+                    sessionKey: "session-a",
+                    state: "final",
                 },
                 type: "event",
             });
@@ -1568,6 +1880,35 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.historyLoadVersion).toBe(0);
     });
 
+    it("does not surface remote stream errors for non-selected sessions", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-b": {
+                    aliases: ["run-b"],
+                    runId: "run-b",
+                    sessionKey: "session-b",
+                    text: "Remote partial",
+                    updatedAt: "2026-05-11T00:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    errorMessage: "Remote failed",
+                    runId: "run-b",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.sendError).toBeNull();
+        expect(result.current.activeStreams["session-b"]).toBeUndefined();
+    });
+
     it("keeps remote buffered aborts local to their stream and uses fallback errors", async () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
@@ -1605,6 +1946,35 @@ describe("useChatRuntimeEvents", () => {
 
         expect(result.current.messages).toEqual([]);
         expect(result.current.sendError).toBe("Chat request failed");
+    });
+
+    it("ignores unknown chat terminal states", () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["run-local"],
+                    runId: "run-local",
+                    sessionKey: "session-a",
+                    text: "Partial",
+                    updatedAt: "2026-05-11T00:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    runId: "run-local",
+                    sessionKey: "session-a",
+                    state: "unknown",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.sendError).toBeNull();
+        expect(result.current.activeStreams["session-a"]?.text).toBe("Partial");
     });
 
     it("handles runtime aliases, refresh failures, and command final messages", async () => {

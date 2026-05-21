@@ -126,7 +126,8 @@ describe("Terminal page", () => {
         terminal.changeDirectory
             .mockResolvedValueOnce({ newCwd: "/home/ubuntu", success: true })
             .mockResolvedValueOnce({ newCwd: "/home/ubuntu/projects", success: true })
-            .mockResolvedValueOnce({ error: "No such directory", success: false });
+            .mockResolvedValueOnce({ error: "No such directory", success: false })
+            .mockResolvedValueOnce({ success: false });
 
         render(<Terminal />);
 
@@ -151,6 +152,16 @@ describe("Terminal page", () => {
                 command: "cd missing",
                 code: 1,
                 stderr: "No such directory",
+            })
+        );
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "cd failed");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.addCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+                command: "cd failed",
+                code: 1,
+                stderr: "cd failed",
             })
         );
     });
@@ -198,7 +209,11 @@ describe("Terminal page", () => {
 
     it("uses tab completion and command history navigation", async () => {
         const user = userEvent.setup();
-        terminal.history = [makeHistoryEntry("npm test"), makeHistoryEntry("git status")];
+        terminal.history = [
+            makeHistoryEntry("npm test"),
+            makeHistoryEntry("git status"),
+            makeHistoryEntry(undefined as never),
+        ];
         terminal.getCompletions.mockResolvedValue({
             commonPrefix: "git status",
             completions: [{ completion: "git status" }, { completion: "git stash" }],
@@ -212,11 +227,11 @@ describe("Terminal page", () => {
         await waitFor(() => expect(input).toHaveValue("git status"));
 
         await user.keyboard("{ArrowUp}");
-        expect(input).toHaveValue("git status");
+        expect(input).toHaveValue("");
         await user.keyboard("{ArrowUp}");
-        expect(input).toHaveValue("npm test");
-        await user.keyboard("{ArrowDown}");
         expect(input).toHaveValue("git status");
+        await user.keyboard("{ArrowDown}");
+        expect(input).toHaveValue("");
     });
 
     it("handles empty tab, empty history navigation, scrolling, and follow button", async () => {
@@ -344,6 +359,39 @@ describe("Terminal page", () => {
         expect(screen.getByText("Command failed to start")).toBeInTheDocument();
         expect(screen.getByText("Exit code: unknown")).toBeInTheDocument();
         expect(screen.queryByText("detached stdout")).not.toBeInTheDocument();
+    });
+
+    it("renders current job output before history attaches it", async () => {
+        const user = userEvent.setup();
+        terminal.addCommand.mockImplementation(() => "detached-entry");
+        terminal.updateCommand.mockImplementation(() => {});
+        terminal.useTerminalHistory.mockImplementation(() => ({
+            addCommand: terminal.addCommand,
+            clearHistory: terminal.clearHistory,
+            history: [],
+            updateCommand: terminal.updateCommand,
+        }));
+        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: null,
+                      endedAt: null,
+                      stderr: "detached stderr",
+                      stdout: "detached stdout",
+                      status: "running",
+                  }
+                : null,
+        }));
+
+        const { rerender } = render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "npm run dev");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        rerender(<Terminal />);
+
+        expect(await screen.findByText("detached stdout")).toBeInTheDocument();
+        expect(screen.getByText("detached stderr")).toBeInTheDocument();
+        expect(screen.getByText("Running...")).toBeInTheDocument();
     });
 
     it("clears command history", async () => {

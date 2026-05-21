@@ -11,19 +11,16 @@ import { cn } from "../../../utils/cn";
 const JSON_LANGUAGES = new Set(["json", "json5", "jsonc"]);
 
 /** Performs children to text. */
-function childrenToText(children: ReactNode): string {
+export function childrenToText(children: ReactNode): string {
     if (typeof children === "string" || typeof children === "number") {
         return String(children);
     }
-
     if (Array.isArray(children)) {
         return children.map(childrenToText).join("");
     }
-
     if (isValidElement<{ children?: ReactNode }>(children)) {
         return childrenToText(children.props.children);
     }
-
     return "";
 }
 
@@ -73,13 +70,13 @@ function parseJsonBlock(code: string): object | null {
 }
 
 /** Returns pre code block. */
-function getPreCodeBlock(children: ReactNode): { code: string; language: string } | null {
+export function getPreCodeBlock(
+    children: ReactNode
+): { code: string; language: string } | null {
     const child = Children.toArray(children)[0];
-
     if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) {
         return null;
     }
-
     return {
         code: childrenToText(child.props.children).replace(/\n$/, ""),
         language: codeLanguageFromClassName(child.props.className),
@@ -144,7 +141,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     );
 }
 
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
     a(props) {
         const { node, className, ...anchorProps } = props;
         void node;
@@ -216,7 +213,6 @@ const markdownComponents: Components = {
         if (codeBlock) {
             return <ChatCodeBlock code={codeBlock.code} language={codeBlock.language} />;
         }
-
         return (
             <pre
                 {...preProps}

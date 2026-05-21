@@ -50,6 +50,7 @@ vi.mock("@tanstack/react-virtual", () => ({
         estimateSize();
         if (count > 0) getItemKey(0);
         if (count > 1) getItemKey(1);
+        if (count > 0) getItemKey(count);
         measureElement({ getBoundingClientRect: () => ({ height: 22.2 }) } as Element);
         return {
             getTotalSize: () => count * 22,
@@ -181,6 +182,9 @@ describe("Logs helpers", () => {
                 compareLogFileNamesDescending
             )
         ).toEqual([{ name: "c.log" }, { name: "a.log" }, { name: undefined }]);
+        expect(
+            compareLogFileNamesDescending({ name: undefined }, { name: undefined })
+        ).toBe(0);
     });
 });
 
@@ -301,6 +305,57 @@ describe("Logs page", () => {
         expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:logs");
     });
 
+    it("exports message-only logs after clearing the selected file", async () => {
+        const user = userEvent.setup();
+        const anchor = document.createElement("a");
+        let createElementSpy: { mockRestore: () => void } | undefined;
+        mocks.liveLogs = [
+            {
+                id: "msg-only",
+                level: "info",
+                msg: "message only",
+            },
+        ];
+        mocks.useLogFiles.mockReturnValue({ data: [] });
+
+        try {
+            render(<Logs />);
+
+            fireEvent.change(screen.getAllByLabelText("select")[0]!, {
+                target: { value: "" },
+            });
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            createElementSpy = vi
+                .spyOn(document, "createElement")
+                .mockReturnValueOnce(anchor);
+            await user.click(screen.getByRole("button", { name: "Export" }));
+
+            expect(anchor.download).toMatch(/\.txt$/u);
+            expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
+        } finally {
+            createElementSpy?.mockRestore();
+        }
+    });
+
+    it("filters and exports non-string message fallbacks", async () => {
+        const user = userEvent.setup();
+        mocks.liveLogs = [
+            {
+                id: "numeric",
+                level: "info",
+                msg: 404,
+            },
+        ];
+
+        render(<Logs />);
+
+        await user.type(screen.getByPlaceholderText("Search logs..."), "404");
+        expect(screen.getByText("404")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Export" }));
+
+        expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
+    });
+
     it("shows follow control when scrolled away from the bottom", async () => {
         const user = userEvent.setup();
 
@@ -323,6 +378,61 @@ describe("Logs page", () => {
         expect(
             screen.queryByRole("button", { name: "↓ Follow" })
         ).not.toBeInTheDocument();
+    });
+
+    it("keeps manual scroll position when log rows change away from the bottom", async () => {
+        const user = userEvent.setup();
+        const animationFrames: FrameRequestCallback[] = [];
+        const requestAnimationFrameSpy = vi
+            .spyOn(window, "requestAnimationFrame")
+            .mockImplementation((callback) => {
+                animationFrames.push(callback);
+                return animationFrames.length;
+            });
+        const cancelAnimationFrameSpy = vi
+            .spyOn(window, "cancelAnimationFrame")
+            .mockImplementation(() => {});
+
+        try {
+            const { rerender } = render(<Logs />);
+            const container = screen
+                .getByText("INFO first info")
+                .closest(".overflow-y-auto") as HTMLDivElement;
+            Object.defineProperties(container, {
+                clientHeight: { configurable: true, value: 200 },
+                scrollHeight: { configurable: true, value: 1000 },
+            });
+            container.scrollTop = 123;
+
+            fireEvent.scroll(container);
+            fireEvent.scroll(container);
+            mockLogs({
+                liveLogs: [
+                    ...mocks.liveLogs,
+                    {
+                        id: "3",
+                        level: "warn",
+                        msg: "new warning",
+                        raw: "WARN new warning",
+                    },
+                ],
+            });
+            rerender(<Logs />);
+
+            expect(container.scrollTop).toBe(123);
+
+            await user.click(await screen.findByRole("button", { name: "↓ Follow" }));
+            act(() => {
+                for (const callback of animationFrames) {
+                    callback(performance.now());
+                }
+            });
+
+            expect(container.scrollTop).toBe(1000);
+        } finally {
+            requestAnimationFrameSpy.mockRestore();
+            cancelAnimationFrameSpy.mockRestore();
+        }
     });
 
     it("retains previous log files and handles non-array data", () => {
@@ -420,6 +530,9 @@ describe("Logs page", () => {
             mockLogs();
             rerender(<Logs />);
             await waitFor(() => expect(consoleError).toHaveBeenCalled());
+            mocks.request.mockClear();
+            rerender(<Logs />);
+            expect(mocks.request).not.toHaveBeenCalled();
 
             mocks.logsReady = false;
             mocks.refetchContent.mockResolvedValueOnce({ data: "INFO skipped" });
@@ -428,6 +541,13 @@ describe("Logs page", () => {
             expect(mocks.writeInsert).not.toHaveBeenCalledWith(
                 expect.objectContaining({ raw: "INFO skipped" })
             );
+
+            mocks.logsReady = true;
+            mocks.refetchContent.mockResolvedValueOnce({});
+            mocks.writeDelete.mockClear();
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            await waitFor(() => expect(mocks.refetchContent).toHaveBeenCalled());
+            expect(mocks.writeDelete).toHaveBeenCalled();
         } finally {
             consoleError.mockRestore();
         }
@@ -436,7 +556,11 @@ describe("Logs page", () => {
     it("renders loading and fallback log values", async () => {
         const user = userEvent.setup();
         mockLogs({
-            liveLogs: [{ id: "3", level: null, msg: "fallback msg" }],
+            liveLogs: [
+                { id: "3", level: null, msg: "fallback msg" },
+                { id: "4", level: null, msg: "" },
+            ],
+            logFiles: { data: [] },
             logContent: { isFetching: true, refetch: mocks.refetchContent },
         });
 

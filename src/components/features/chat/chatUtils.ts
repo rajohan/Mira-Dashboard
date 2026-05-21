@@ -9,6 +9,11 @@ export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
+/** Returns a displayable error message with a stable fallback. */
+export function chatErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error && error.message ? error.message : fallback;
+}
+
 /** Represents chat model option. */
 export interface ChatModelOption {
     id?: string;
@@ -25,7 +30,7 @@ export function dataUrlToBase64(dataUrl: string): string {
 /** Performs base64 to text. */
 export function base64ToText(base64: string): string {
     const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
+    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0)!);
     return new TextDecoder().decode(bytes);
 }
 
@@ -90,18 +95,12 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
 }
 
 /** Performs assistant text looks recovered. */
-function assistantTextLooksRecovered(left: string, right: string): boolean {
+export function assistantTextLooksRecovered(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();
-
     if (!normalizedLeft || !normalizedRight) {
         return false;
     }
-
-    if (normalizedLeft === normalizedRight) {
-        return true;
-    }
-
     if (normalizedLeft.length < 20 || normalizedRight.length < 20) {
         return false;
     }

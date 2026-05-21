@@ -96,6 +96,7 @@ describe("chat type normalizers", () => {
             timestamp: 1778407200000,
             content:
                 "hello\nMEDIA:   \nMEDIA:/tmp/archive.unknown\nMEDIA:/tmp/picture.png\n" +
+                "MEDIA:/tmp/README\n" +
                 '<file name="note.txt" mime="text/plain">hello</file>' +
                 '<file name="photo.svg" mime="image/svg+xml"><<<EXTERNAL_UNTRUSTED_CONTENT test>>>\n---\n<svg /><<<END_EXTERNAL_UNTRUSTED_CONTENT test>>></file>',
         });
@@ -120,6 +121,13 @@ describe("chat type normalizers", () => {
                 mimeType: "image/png",
                 dataUrl: "/api/media?path=%2Ftmp%2Fpicture.png",
                 kind: "image",
+            },
+            {
+                id: "media-/tmp/README-2",
+                fileName: "README",
+                mimeType: "application/octet-stream",
+                dataUrl: undefined,
+                kind: "file",
             },
             {
                 id: "inline-note.txt-0",
@@ -235,10 +243,12 @@ describe("chat type normalizers", () => {
     it("normalizes text from common content shapes", () => {
         expect(normalizeText("hello")).toBe("hello");
         expect(normalizeText({ text: "object text" })).toBe("object text");
+        expect(normalizeText(42)).toBe("");
         expect(normalizeText(["a", { text: "b" }, { type: "image" }, null])).toBe(
             "a\n\nb\n\n[image]"
         );
         expect(normalizeText({ nope: true })).toBe("");
+        expect(normalizeChatHistoryMessage({ role: "assistant" }).content).toBe("");
     });
 
     it("filters visible history and carries hidden tool media to assistant replies", () => {

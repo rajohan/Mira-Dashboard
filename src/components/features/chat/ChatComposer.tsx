@@ -115,9 +115,9 @@ export function ChatComposer({
 
     /** Performs insert emoji. */
     const insertEmoji = (emoji: string) => {
-        const textarea = textareaReference.current;
-        const selectionStart = textarea?.selectionStart ?? draft.length;
-        const selectionEnd = textarea?.selectionEnd ?? draft.length;
+        const textarea = textareaReference.current!;
+        const selectionStart = textarea.selectionStart;
+        const selectionEnd = textarea.selectionEnd;
         const nextDraft = `${draft.slice(0, selectionStart)}${emoji}${draft.slice(
             selectionEnd
         )}`;
@@ -267,9 +267,7 @@ export function ChatComposer({
                                 slashCommandSuggestions.length > 0
                             ) {
                                 event.preventDefault();
-                                onApplySlashSuggestion(
-                                    slashCommandSuggestions[0]?.value || draft
-                                );
+                                onApplySlashSuggestion(slashCommandSuggestions[0]!.value);
                                 return;
                             }
 

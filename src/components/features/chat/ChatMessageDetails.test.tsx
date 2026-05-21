@@ -28,6 +28,17 @@ describe("ChatMessageDetails", () => {
         expect(container).toBeEmptyDOMElement();
     });
 
+    it("hides empty diagnostic arrays even when visibility is enabled", () => {
+        const { container } = render(
+            <ChatMessageDetails
+                message={{ content: [], role: "assistant", text: "", thinking: [] }}
+                visibility={{ showThinking: true, showTools: true }}
+            />
+        );
+
+        expect(container).toBeEmptyDOMElement();
+    });
+
     it("renders thinking, tool calls, empty arguments, and tool results", () => {
         render(
             <ChatMessageDetails
@@ -70,7 +81,7 @@ describe("ChatMessageDetails", () => {
     });
 
     it("renders tool result fallbacks and errors", () => {
-        render(
+        const { rerender } = render(
             <ChatMessageDetails
                 message={{
                     content: [],
@@ -84,5 +95,19 @@ describe("ChatMessageDetails", () => {
 
         expect(screen.getByText("Tool result · exec")).toBeInTheDocument();
         expect(screen.getByText("No text output")).toBeInTheDocument();
+
+        rerender(
+            <ChatMessageDetails
+                message={{
+                    content: [],
+                    role: "tool",
+                    text: "",
+                    toolResult: { content: "plain output" },
+                }}
+                visibility={{ showThinking: false, showTools: true }}
+            />
+        );
+        expect(screen.getByText("Tool result")).toBeInTheDocument();
+        expect(screen.getByText("plain output")).toBeInTheDocument();
     });
 });

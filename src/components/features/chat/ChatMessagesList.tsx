@@ -20,6 +20,7 @@ import type {
     ChatRow,
     ChatVisibilitySettings,
 } from "./chatTypes";
+import { chatErrorMessage } from "./chatUtils";
 
 /** Provides props for chat messages list. */
 interface ChatMessagesListProps {
@@ -55,10 +56,7 @@ export function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDispl
 export function base64ToText(base64: string): string | undefined {
     try {
         const binary = window.atob(base64);
-        const bytes = Uint8Array.from(
-            binary,
-            (character) => character.codePointAt(0) ?? 0
-        );
+        const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0)!);
         return new TextDecoder().decode(bytes);
     } catch {
         return undefined;
@@ -75,10 +73,7 @@ export function previewFromAttachment(
 
     const mimeType = attachment.mimeType || "application/octet-stream";
     const url =
-        attachment.dataUrl ||
-        (attachment.contentBase64
-            ? `data:${mimeType};base64,${attachment.contentBase64}`
-            : undefined);
+        attachment.dataUrl ?? `data:${mimeType};base64,${attachment.contentBase64!}`;
 
     return {
         title: attachment.fileName,
@@ -186,7 +181,6 @@ function TtsButton({
 }) {
     const isLoading = loadingMessageKey === messageKey;
     const isPlaying = playingMessageKey === messageKey;
-
     if (!text.trim()) {
         return null;
     }
@@ -327,7 +321,7 @@ export function ChatMessagesList({
             await audio.play();
         } catch (error_) {
             stopAudio();
-            onTtsError((error_ as Error).message || "Failed to read message aloud");
+            onTtsError(chatErrorMessage(error_, "Failed to read message aloud"));
         } finally {
             setLoadingMessageKey(null);
         }
@@ -401,7 +395,7 @@ export function ChatMessagesList({
                             !isUser &&
                             normalizedRole === "assistant" &&
                             row.kind === "message" &&
-                            Boolean(row.message.text.trim());
+                            Boolean(row.message.text);
                         const isToolResult =
                             normalizedRole === "tool" ||
                             normalizedRole === "toolresult" ||
@@ -520,13 +514,11 @@ export function ChatMessagesList({
                                                             key={`${row.key}-${attachment.id}`}
                                                             type="button"
                                                             onClick={() => {
-                                                                const preview =
+                                                                onPreview(
                                                                     previewFromAttachment(
                                                                         attachment
-                                                                    );
-                                                                if (preview) {
-                                                                    onPreview(preview);
-                                                                }
+                                                                    )!
+                                                                );
                                                             }}
                                                             className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
                                                             title={`Open ${attachment.fileName}`}

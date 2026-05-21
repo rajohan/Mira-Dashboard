@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     configuredChannels,
+    errorMessage,
     numberFromDuration,
+    optionalFormValue,
     patchSuccess,
     Settings,
 } from "./Settings";
@@ -103,6 +105,9 @@ vi.mock("../components/features/settings", () => ({
             heartbeat: {every}:{target}
             <button type="button" onClick={() => void onSave(1800, "ops-check")}>
                 Save heartbeat
+            </button>
+            <button type="button" onClick={() => void onSave(45, "")}>
+                Save heartbeat seconds
             </button>
         </section>
     ),
@@ -276,9 +281,16 @@ describe("Settings helpers", () => {
         expect(numberFromDuration(42, 5)).toBe(42);
         expect(numberFromDuration(null, 5)).toBe(5);
         expect(numberFromDuration("bad", 5)).toBe(5);
+        expect(numberFromDuration("2m", 5)).toBe(120);
         expect(numberFromDuration("2h", 5)).toBe(7200);
         expect(numberFromDuration("3d", 5)).toBe(259200);
         expect(numberFromDuration("15", 5)).toBe(15);
+        expect(errorMessage(new Error("Specific failure"), "Fallback")).toBe(
+            "Specific failure"
+        );
+        expect(errorMessage("bad", "Fallback")).toBe("Fallback");
+        expect(optionalFormValue("value")).toBe("value");
+        expect(optionalFormValue("")).toBeUndefined();
     });
 
     it("clears success messages after the timeout", () => {
@@ -558,6 +570,73 @@ describe("Settings page", () => {
         expect(hooks.updateConfig).toHaveBeenCalledWith({
             heartbeat: { every: 1800, target: "ops-check" },
         });
+    });
+
+    it("saves heartbeat fallback config when agents are absent", async () => {
+        const user = userEvent.setup();
+        mockSettings({
+            config: {
+                data: {
+                    heartbeat: { every: "45s", target: "" },
+                },
+                isLoading: false,
+            },
+        });
+
+        render(<Settings />);
+
+        await user.click(screen.getByRole("button", { name: "Save heartbeat" }));
+
+        expect(hooks.updateConfig).toHaveBeenCalledWith({
+            heartbeat: { every: 1800, target: "ops-check" },
+        });
+    });
+
+    it("saves second-based ops heartbeat settings", async () => {
+        const user = userEvent.setup();
+        mockSettings({
+            config: {
+                data: {
+                    agents: {
+                        list: [{ id: "ops" }, { id: "main" }],
+                    },
+                    heartbeat: { every: "45s", target: "" },
+                },
+                isLoading: false,
+            },
+            systemHost: { data: { data: { version: {} } } },
+        });
+
+        render(<Settings />);
+
+        await user.click(screen.getByRole("button", { name: "Save heartbeat seconds" }));
+
+        expect(hooks.updateConfig).toHaveBeenCalledWith({
+            agents: {
+                list: [
+                    { heartbeat: { every: "45s", target: undefined }, id: "ops" },
+                    { id: "main" },
+                ],
+            },
+        });
+        expect(screen.getAllByText("Unknown")).toHaveLength(3);
+    });
+
+    it("renders empty heartbeat defaults when no heartbeat config exists", () => {
+        mockSettings({
+            config: {
+                data: {
+                    agents: { list: [{ id: "ops" }] },
+                },
+                isLoading: false,
+            },
+        });
+
+        render(<Settings />);
+
+        expect(screen.getByTestId("heartbeat-section")).toHaveTextContent(
+            "heartbeat: 60:"
+        );
     });
 
     it("shows backup, restart, skill, and section-specific errors", async () => {

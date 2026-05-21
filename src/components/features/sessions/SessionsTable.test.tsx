@@ -105,6 +105,7 @@ describe("SessionsTable", () => {
         const table = screen.getByRole("table");
 
         await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
+        await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
 
         const tableActionButton = within(table)
             .getAllByRole("button")
@@ -116,9 +117,9 @@ describe("SessionsTable", () => {
         await user.click(tableActionButton);
         await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
-        expect(handlers.onCompact).toHaveBeenCalledWith("agent:main:main");
-        expect(handlers.onReset).toHaveBeenCalledWith("agent:main:main");
-        expect(handlers.onDelete).toHaveBeenCalledWith(sessions[0]);
+        expect(handlers.onCompact).toHaveBeenCalledWith("agent:research:main");
+        expect(handlers.onReset).toHaveBeenCalledWith("agent:research:main");
+        expect(handlers.onDelete).toHaveBeenCalledWith(sessions[1]);
     });
 
     it("handles fallback labels", () => {

@@ -75,7 +75,11 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : null,
+        ) : (
+            <button type="button" onClick={onConfirm}>
+                Force closed confirm {title}
+            </button>
+        ),
 }));
 
 vi.mock("../components/ui/Modal", () => ({
@@ -490,6 +494,38 @@ describe("Docker page", () => {
         expect(docker.deleteVolume).toHaveBeenCalledWith("app-data");
     });
 
+    it("ignores closed manual update confirmations without a selected target", async () => {
+        const user = userEvent.setup();
+
+        render(<Docker />);
+
+        await user.click(
+            screen.getByRole("button", {
+                name: "Force closed confirm Run manual update",
+            })
+        );
+
+        expect(docker.manualUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps an open manual update confirmation while update is pending", async () => {
+        const user = userEvent.setup();
+
+        const { rerender } = render(<Docker />);
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Update web");
+
+        docker.useDockerManualUpdate.mockReturnValue({
+            isPending: true,
+            mutateAsync: docker.manualUpdate,
+        });
+        rerender(<Docker />);
+
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.getByTestId("confirm-modal")).toBeInTheDocument();
+    });
+
     it("opens details, logs, and console modals", async () => {
         const user = userEvent.setup();
         const refetchLogs = vi.fn();
@@ -497,6 +533,9 @@ describe("Docker page", () => {
             data: "container log line",
             isFetching: false,
             refetch: refetchLogs,
+        });
+        docker.useDockerExecJob.mockReturnValue({
+            data: { status: "running", stderr: "exec warning", stdout: "exec output" },
         });
 
         render(<Docker />);
@@ -520,7 +559,8 @@ describe("Docker page", () => {
         );
         await user.click(screen.getByRole("button", { name: "Run" }));
         expect(docker.startExec).toHaveBeenCalledWith("c1", "printenv");
-        expect(screen.getByText("exec output")).toBeInTheDocument();
+        expect(screen.getByText(/exec output/u)).toBeInTheDocument();
+        expect(screen.getByText(/exec warning/u)).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Stop" }));
         expect(docker.stopExec).toHaveBeenCalledWith("job-1");
     });
@@ -577,6 +617,10 @@ describe("Docker page", () => {
         rerender(<Docker />);
         await user.click(screen.getByRole("button", { name: "Logs web" }));
         expect(screen.getByText("No logs")).toBeInTheDocument();
+
+        docker.useDockerExecJob.mockReturnValue({ data: null });
+        await user.click(screen.getByRole("button", { name: "Console web" }));
+        expect(screen.getByText("Run a command to see output.")).toBeInTheDocument();
     });
 
     it("reports action failures", async () => {
@@ -602,16 +646,53 @@ describe("Docker page", () => {
             isPending: true,
             mutateAsync: docker.runUpdater,
         });
+        docker.useDockerUpdaterServices.mockReturnValue({
+            data: {
+                services: [
+                    {
+                        currentDigest: "sha256:old",
+                        currentTag: "1.0.0",
+                        id: 7,
+                        imageRepo: "nginx",
+                        lastCheckedAt: "2026-05-11T00:00:00.000Z",
+                        lastStatus: "",
+                        latestDigest: "sha256:new",
+                        latestTag: "1.1.0",
+                        policy: "auto",
+                        serviceName: "web",
+                        updateAvailable: true,
+                    },
+                ],
+                summary: {
+                    autoPolicy: 1,
+                    failed: 0,
+                    notifyPolicy: 0,
+                    total: 1,
+                    updateAvailable: 1,
+                },
+            },
+            isLoading: false,
+        });
 
         render(<Docker />);
 
         expect(screen.getByText(/"last": true/)).toBeInTheDocument();
+        expect(screen.getByText("Status: —")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
 
         await user.click(screen.getByRole("button", { name: "Restart web" }));
         expect(await screen.findByText("restart completed.")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Dismiss" }));
         expect(screen.queryByText("restart completed.")).not.toBeInTheDocument();
+
+        vi.mocked(fetch).mockResolvedValueOnce({
+            json: async () => ({}),
+            ok: true,
+        } as Response);
+        await user.click(screen.getByRole("button", { name: "Restart stack" }));
+        expect(
+            await screen.findByText("Docker stack restart completed.")
+        ).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Update now" }));
         await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
@@ -714,7 +795,7 @@ describe("Docker page", () => {
     it("reports stack, updater, manual update, prune, and delete failures", async () => {
         const user = userEvent.setup();
         vi.mocked(fetch).mockResolvedValueOnce({
-            json: async () => ({ error: "compose failed" }),
+            json: async () => ({}),
             ok: false,
         } as Response);
         docker.runUpdater.mockRejectedValueOnce("updater boom");
@@ -728,7 +809,7 @@ describe("Docker page", () => {
         expect(
             await screen.findByText(/Failed to restart Docker stack/)
         ).toBeInTheDocument();
-        expect(screen.getByText(/compose failed/)).toBeInTheDocument();
+        expect(screen.getByText(/Failed to restart stack/)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Run updater now" }));
         expect(await screen.findByText(/Docker updater failed/)).toBeInTheDocument();

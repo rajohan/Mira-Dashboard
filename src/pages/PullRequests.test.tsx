@@ -425,6 +425,7 @@ describe("PullRequests page", () => {
                     isProductionRoot: false,
                     isSafeForDeploy: false,
                     root: "/tmp/wrong",
+                    upstream: "",
                 },
                 error: null,
             },
@@ -432,6 +433,7 @@ describe("PullRequests page", () => {
         rerender(<PullRequests />);
         expect(screen.getByText("Wrong root")).toBeInTheDocument();
         expect(screen.getByText(/not operating on/)).toBeInTheDocument();
+        expect(screen.getByText("Upstream: none")).toBeInTheDocument();
 
         mockPullRequests({
             checkout: { data: undefined, error: new Error("Checkout unavailable") },
@@ -480,7 +482,8 @@ describe("PullRequests page", () => {
                         mergeStateStatus: "UNSTABLE",
                         mergeable: "DIRTY",
                         number: 20,
-                        statusCheckRollup: [null, "bad", { status: "QUEUED" }],
+                        reviewDecision: "REVIEW_DISMISSED",
+                        statusCheckRollup: [null, "bad", {}, { status: "QUEUED" }],
                         title: "Bump React",
                         updatedAt: "2026-05-11T00:00:00.000Z",
                         url: "https://github.com/rajohan/Mira-Dashboard/pull/20",
@@ -488,9 +491,10 @@ describe("PullRequests page", () => {
                     {
                         ...hooks.pullRequests[0],
                         author: null,
-                        mergeStateStatus: "MYSTERY",
+                        mergeStateStatus: undefined,
                         mergeable: undefined,
                         number: 21,
+                        reviewDecision: undefined,
                         statusCheckRollup: undefined,
                         title: "External unknown author",
                     },
@@ -514,7 +518,9 @@ describe("PullRequests page", () => {
         expect(screen.getByText("DIRTY")).toBeInTheDocument();
         expect(screen.getByText("UNSTABLE")).toBeInTheDocument();
         expect(screen.getByText("mergeable unknown")).toBeInTheDocument();
-        expect(screen.getByText("MYSTERY")).toBeInTheDocument();
+        expect(screen.getByText("state unknown")).toBeInTheDocument();
+        expect(screen.getByText("REVIEW DISMISSED")).toBeInTheDocument();
+        expect(screen.getByText("Review pending")).toBeInTheDocument();
         expect(screen.getByText("Checks running")).toBeInTheDocument();
         expect(screen.getByText("deploy-ok")).toBeInTheDocument();
         expect(screen.getByText("failed")).toBeInTheDocument();

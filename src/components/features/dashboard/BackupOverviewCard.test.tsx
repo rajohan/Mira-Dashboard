@@ -162,6 +162,29 @@ describe("BackupOverviewCard", () => {
         for (const button of screen.getAllByRole("button", { name: "Running..." })) {
             expect(button).toBeDisabled();
         }
+
+        hooks.useKopiaBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 30_000,
+                    status: "running",
+                    stdout: "",
+                },
+            },
+        });
+        hooks.useWalgBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 45_000,
+                    status: "running",
+                    stdout: "",
+                },
+            },
+        });
+        render(<BackupOverviewCard />);
+        expect(screen.getAllByText(/backup is running/iu).length).toBeGreaterThanOrEqual(
+            2
+        );
     });
 
     it("renders loading and empty states", () => {
@@ -208,10 +231,22 @@ describe("BackupOverviewCard", () => {
                                 snapshots: [
                                     {
                                         description: null,
-                                        endTime: null,
+                                        endTime: "2026-05-10T10:00:00.000Z",
                                         errorCount: null,
                                         fileCount: null,
                                         id: null,
+                                        ignoredErrorCount: null,
+                                        path: null,
+                                        retentionReason: ["latest"],
+                                        startTime: null,
+                                        totalSize: null,
+                                    },
+                                    {
+                                        description: null,
+                                        endTime: null,
+                                        errorCount: null,
+                                        fileCount: null,
+                                        id: "snapshot-without-retention",
                                         ignoredErrorCount: null,
                                         path: null,
                                         retentionReason: [],
@@ -237,6 +272,8 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("1 snapshot")).toBeInTheDocument();
         expect(screen.getByText("OK")).toBeInTheDocument();
         expect(screen.getByText("Unnamed snapshot")).toBeInTheDocument();
+        expect(screen.getByText("snapshot-without-retention")).toBeInTheDocument();
+        expect(screen.getByText("latest")).toBeInTheDocument();
         expect(screen.getAllByText("Unknown").length).toBeGreaterThanOrEqual(4);
         expect(screen.getByText("0")).toBeInTheDocument();
     });

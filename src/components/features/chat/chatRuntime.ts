@@ -62,8 +62,8 @@ function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null 
     }
 
     return {
-        agentId: match[1]?.toLowerCase() || "",
-        rest: match[2]?.toLowerCase() || "",
+        agentId: match[1]!.toLowerCase(),
+        rest: match[2]!.toLowerCase(),
     };
 }
 

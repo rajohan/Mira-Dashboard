@@ -20,6 +20,14 @@ describe("TaskHistorySidebar", () => {
         expect(screen.getByText("No completed tasks yet")).toBeInTheDocument();
     });
 
+    it("renders empty state while history data is absent", () => {
+        useAgentTaskHistoryMock.mockReturnValueOnce({ data: undefined });
+
+        render(<TaskHistorySidebar />);
+
+        expect(screen.getByText("No completed tasks yet")).toBeInTheDocument();
+    });
+
     it("renders completed task timeline items", () => {
         useAgentTaskHistoryMock.mockReturnValueOnce({
             data: {

@@ -47,6 +47,7 @@ describe("chat runtime helpers", () => {
         expect(isSameSessionKey("agent:main:main", "agent:main:MAIN")).toBe(true);
         expect(isSameSessionKey("agent:main:main", "agent:ops:main")).toBe(false);
         expect(isSameSessionKey(undefined, "main")).toBe(false);
+        expect(isSameSessionKey("agent:main", "main")).toBe(false);
     });
 
     it("normalizes assistant payloads and final stream messages", () => {
@@ -57,6 +58,10 @@ describe("chat runtime helpers", () => {
         expect(normalizeAssistantPayload({ role: "user", text: "hello" })).toMatchObject({
             role: "user",
             text: "hello",
+        });
+        expect(normalizeAssistantPayload({ nope: true })).toMatchObject({
+            role: "assistant",
+            text: "",
         });
 
         const finalMessage = finalMessageFromPayload({ runId: "run-1", text: "done" });
@@ -91,6 +96,23 @@ describe("chat runtime helpers", () => {
             toolCalls: next.toolCalls,
             runId: "run-2",
         });
+
+        expect(
+            mergeStreamMessage(
+                undefined,
+                message({
+                    text: "fresh",
+                    images: [{ type: "image", data: "new" }],
+                    attachments: [{ id: "b", fileName: "b.txt", kind: "text" }],
+                    thinking: [{ text: "new thought" }],
+                }),
+                "fresh"
+            )
+        ).toMatchObject({
+            images: [{ type: "image", data: "new" }],
+            attachments: [{ id: "b", fileName: "b.txt", kind: "text" }],
+            thinking: [{ text: "new thought" }],
+        });
     });
 
     it("detects command payloads and creates local system messages", () => {
@@ -121,6 +143,18 @@ describe("chat runtime helpers", () => {
                 "answer"
             )
         ).toBe(false);
+        expect(
+            historyContainsRecoveredStream(
+                [message({ role: "assistant", text: "same answer" })],
+                "same answer"
+            )
+        ).toBe(true);
+        expect(
+            historyContainsRecoveredStream(
+                [message({ role: "assistant", text: "short answer" })],
+                "longer short answer with context"
+            )
+        ).toBe(true);
     });
 
     it("wraps chat visibility and stream-row visibility decisions", () => {

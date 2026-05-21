@@ -183,6 +183,8 @@ describe("ChatComposer", () => {
         expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        fireEvent.keyDown(document, { key: "a" });
+        expect(screen.getByText("Emoji")).toBeInTheDocument();
         fireEvent.keyDown(document, { key: "Escape" });
         expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
 

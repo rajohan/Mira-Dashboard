@@ -19,7 +19,7 @@ interface MockLiveSession {
     displayLabel: string;
     key?: string;
     label: string;
-    model: string;
+    model?: string;
     type: string;
     updatedAt: string;
 }
@@ -57,7 +57,16 @@ const mocks = vi.hoisted(() => ({
                 status: "online",
             },
         ],
-    },
+    } as
+        | {
+              agents: Array<{
+                  id: string;
+                  currentTask: string;
+                  sessionKey: string;
+                  status: string;
+              }>;
+          }
+        | undefined,
     runtimeEventsOptions: null as {
         connectionId: number;
         isConnected: boolean;
@@ -65,6 +74,15 @@ const mocks = vi.hoisted(() => ({
         updateActiveStreams: (
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
+    } | null,
+    skipComposerFileInputRef: false,
+    skipMessagesContainerRef: false,
+    virtualizerOptions: null as {
+        count: number;
+        estimateSize: (index: number) => number;
+        getItemKey: (index: number) => string;
+        getScrollElement: () => Element | null;
+        onChange: (_instance: unknown, sync: boolean) => void;
     } | null,
 }));
 
@@ -77,17 +95,15 @@ vi.mock("@tanstack/react-db", () => ({
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-    useVirtualizer: ({
-        count,
-        estimateSize,
-        getItemKey,
-        getScrollElement,
-    }: {
+    useVirtualizer: (options: {
         count: number;
         estimateSize: (index: number) => number;
         getItemKey: (index: number) => string;
         getScrollElement: () => Element | null;
+        onChange: (_instance: unknown, sync: boolean) => void;
     }) => {
+        const { count, estimateSize, getItemKey, getScrollElement } = options;
+        mocks.virtualizerOptions = options;
         getScrollElement();
 
         return {
@@ -171,23 +187,27 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
         showThinking,
         showTools,
     }: {
-        agentOptions: Array<{ label: string; value: string }>;
+        agentOptions: Array<{ description?: string; label: string; value: string }>;
         onSelectAgent: (agentId: string) => void;
         onSelectSession: (sessionKey: string) => void;
         onToggleThinking: () => void;
         onToggleTools: () => void;
         selectedSessionKey: string;
-        sessionOptions: Array<{ label: string; value: string }>;
+        sessionOptions: Array<{ description?: string; label: string; value: string }>;
         showThinking: boolean;
         showTools: boolean;
     }) => (
         <header>
             <div data-testid="selected-session">{selectedSessionKey || "none"}</div>
             <div data-testid="session-options">
-                {sessionOptions.map((option) => option.label).join(",")}
+                {sessionOptions
+                    .map((option) => `${option.label}:${option.description ?? ""}`)
+                    .join(",")}
             </div>
             <div data-testid="agent-options">
-                {agentOptions.map((option) => option.label).join(",")}
+                {agentOptions
+                    .map((option) => `${option.label}:${option.description ?? ""}`)
+                    .join(",")}
             </div>
             <button type="button" onClick={() => onSelectSession("session-b")}>
                 select side chat
@@ -238,7 +258,7 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
         visibility: { showThinking: boolean; showTools: boolean };
     }) => (
         <section
-            ref={messagesContainerReference}
+            ref={mocks.skipMessagesContainerRef ? undefined : messagesContainerReference}
             aria-label="chat messages"
             onScroll={onScroll}
         >
@@ -280,6 +300,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
         attachments,
         canSend,
         draft,
+        fileInputReference,
         isConnected,
         isRecording,
         isTranscribing,
@@ -294,6 +315,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
         attachments: Array<{ id: string; fileName: string }>;
         canSend: boolean;
         draft: string;
+        fileInputReference: React.RefObject<HTMLInputElement | null>;
         isConnected: boolean;
         isRecording: boolean;
         isTranscribing: boolean;
@@ -326,6 +348,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
                 Attach file
                 <input
                     aria-label="Attach file"
+                    ref={mocks.skipComposerFileInputRef ? undefined : fileInputReference}
                     type="file"
                     multiple
                     onChange={(event) => onAttachFiles(event.target.files)}
@@ -381,7 +404,11 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     confirm delete
                 </button>
             </div>
-        ) : null,
+        ) : (
+            <button type="button" onClick={onConfirm}>
+                force closed confirm {title}
+            </button>
+        ),
 }));
 
 /** Installs an isolated localStorage mock for chat page tests. */
@@ -670,6 +697,9 @@ describe("Chat", () => {
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
         mocks.runtimeEventsOptions = null;
+        mocks.skipComposerFileInputRef = false;
+        mocks.skipMessagesContainerRef = false;
+        mocks.virtualizerOptions = null;
         setupRequest();
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
@@ -804,6 +834,22 @@ describe("Chat", () => {
         expect(screen.getByTestId("session-options")).not.toHaveTextContent("scratch");
     });
 
+    it("falls back for loading session and agent data", async () => {
+        mocks.agentsStatus = undefined;
+        mocks.liveSessions = undefined as unknown as MockLiveSession[];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("models.list", {
+                view: "configured",
+            })
+        );
+        expect(screen.getByTestId("selected-session")).toHaveTextContent("none");
+        expect(screen.getByTestId("agent-options")).toHaveTextContent("");
+        expect(screen.getByTestId("session-options")).toHaveTextContent("");
+    });
+
     it("groups non-agent chat sessions by stable session metadata", async () => {
         mocks.liveSessions = [
             {
@@ -835,6 +881,28 @@ describe("Chat", () => {
         expect(screen.getByTestId("agent-options")).not.toHaveTextContent("session-a");
         expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat");
         expect(screen.getByTestId("session-options")).toHaveTextContent("Side chat");
+    });
+
+    it("formats sparse agent session labels and model descriptions", async () => {
+        mocks.liveSessions = [
+            {
+                key: "agent:main",
+                displayLabel: "",
+                label: "",
+                model: "",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("agent:main")
+        );
+        expect(screen.getByTestId("session-options")).toHaveTextContent(
+            "agent:main:MAIN · Unknown"
+        );
     });
 
     it("selects an agent-reported active session when switching buckets", async () => {
@@ -939,6 +1007,64 @@ describe("Chat", () => {
                 "agent:ops:fallback"
             )
         );
+    });
+
+    it("clears selected session details when the selected session disappears", async () => {
+        const user = userEvent.setup();
+        const { rerender } = render(<Chat />);
+
+        await screen.findByText("old user message");
+        await user.click(screen.getByRole("button", { name: "select side chat" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-b")
+        );
+
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+        rerender(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat")
+        );
+        expect(screen.getByTestId("selected-session")).toHaveTextContent("session-b");
+    });
+
+    it("uses an empty model list response fallback", async () => {
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "models.list") {
+                return {};
+            }
+
+            if (method === "chat.history") {
+                return {
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                };
+            }
+
+            return {};
+        });
+
+        render(<Chat />);
+
+        await screen.findByText("old user message");
+        expect(mocks.request).toHaveBeenCalledWith("models.list", {
+            view: "configured",
+        });
     });
 
     it("handles sessions without a key while deriving chat buckets", async () => {
@@ -1073,6 +1199,39 @@ describe("Chat", () => {
         expect(screen.queryByText("verbose unavailable")).not.toBeInTheDocument();
     });
 
+    it("skips verbose diagnostics patch when the selected session is already full", async () => {
+        const user = userEvent.setup();
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+                verboseLevel: "full",
+            } as MockLiveSession,
+        ];
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+        mocks.request.mockClear();
+
+        await user.type(screen.getByLabelText("Draft"), "Already verbose");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "Already verbose" })
+            )
+        );
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "sessions.patch",
+            expect.any(Object)
+        );
+    });
+
     it("renders runtime stream rows and clears them when disconnected", async () => {
         const { rerender } = render(<Chat />);
         await screen.findByText("old user message");
@@ -1111,6 +1270,330 @@ describe("Chat", () => {
         );
         expect(clearTimeoutSpy).toHaveBeenCalledWith(liveRefreshTimer);
         clearTimeoutSpy.mockRestore();
+    });
+
+    it("computes virtual row keys, sizes typing rows, and follows bottom changes", async () => {
+        const requestAnimationFrameSpy = vi
+            .spyOn(window, "requestAnimationFrame")
+            .mockImplementation((callback: FrameRequestCallback) => {
+                callback(0);
+                return 1;
+            });
+
+        try {
+            render(<Chat />);
+            await screen.findByText("old user message");
+
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        statusText: "Using tools",
+                        text: "",
+                        updatedAt: "2026-05-11T00:02:00.000Z",
+                    },
+                }));
+            });
+
+            await screen.findByText("Using tools");
+
+            expect(mocks.virtualizerOptions?.getItemKey(0)).toMatch(/^user::/u);
+            expect(mocks.virtualizerOptions?.getItemKey(999)).toBe("row-999");
+            expect(mocks.virtualizerOptions?.estimateSize(0)).toBe(160);
+            expect(mocks.virtualizerOptions?.estimateSize(2)).toBe(76);
+
+            act(() => {
+                mocks.virtualizerOptions?.onChange({}, false);
+                mocks.virtualizerOptions?.onChange({}, false);
+                mocks.virtualizerOptions?.onChange({}, true);
+            });
+
+            expect(requestAnimationFrameSpy).toHaveBeenCalled();
+        } finally {
+            requestAnimationFrameSpy.mockRestore();
+        }
+    });
+
+    it("shows default typing status for quiet streams without visible text", async () => {
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        act(() => {
+            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                ...previous,
+                "session-a": {
+                    aliases: ["run-thinking"],
+                    runId: "run-thinking",
+                    sessionKey: "session-a",
+                    text: "",
+                    updatedAt: "2026-05-11T00:02:00.000Z",
+                },
+            }));
+        });
+
+        expect(await screen.findByText("Thinking")).toBeInTheDocument();
+        expect(mocks.virtualizerOptions?.getItemKey(2)).toBe("typing-session-a-working");
+    });
+
+    it("recovers quiet active streams from refreshed history", async () => {
+        const nowSpy = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
+        try {
+            const { rerender } = render(<Chat />);
+            await screen.findByText("old user message");
+
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        text: "quiet recovered answer",
+                        updatedAt: "2026-05-11T00:00:00.000Z",
+                    },
+                }));
+            });
+            expect(await screen.findByText("quiet recovered answer")).toBeInTheDocument();
+
+            mocks.request.mockImplementation(async (method: string) => {
+                if (method === "chat.history") {
+                    return {
+                        messages: [
+                            {
+                                content: "quiet recovered answer",
+                                role: "assistant",
+                                text: "quiet recovered answer",
+                                timestamp: "2026-05-11T00:04:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                return method === "models.list" ? { models: [] } : {};
+            });
+            mocks.liveSessions = [
+                {
+                    key: "session-a",
+                    displayLabel: "Main chat",
+                    label: "main",
+                    model: "codex",
+                    type: "direct",
+                    updatedAt: "2026-05-11T00:05:00.000Z",
+                },
+            ];
+
+            rerender(<Chat />);
+
+            await waitFor(() =>
+                expect(screen.queryByText("quiet recovered answer")).toBeInTheDocument()
+            );
+            expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+        } finally {
+            nowSpy.mockRestore();
+        }
+    });
+
+    it("recovers quiet textless streams when history has a newer assistant message", async () => {
+        const nowSpy = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
+        try {
+            const { rerender } = render(<Chat />);
+            await screen.findByText("old user message");
+
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        text: "",
+                        updatedAt: "2026-05-11T00:00:00.000Z",
+                    },
+                }));
+            });
+            expect(await screen.findByText("Thinking")).toBeInTheDocument();
+
+            mocks.request.mockImplementation(async (method: string) => {
+                if (method === "chat.history") {
+                    return {
+                        messages: [
+                            {
+                                content: "newer persisted answer",
+                                role: "assistant",
+                                text: "newer persisted answer",
+                                timestamp: "2026-05-11T00:04:00.000Z",
+                            },
+                        ],
+                    };
+                }
+
+                return method === "models.list" ? { models: [] } : {};
+            });
+            mocks.liveSessions = [
+                {
+                    key: "session-a",
+                    displayLabel: "Main chat",
+                    label: "main",
+                    model: "codex",
+                    type: "direct",
+                    updatedAt: "2026-05-11T00:05:00.000Z",
+                },
+            ];
+
+            rerender(<Chat />);
+
+            expect(await screen.findByText("newer persisted answer")).toBeInTheDocument();
+            await waitFor(() =>
+                expect(screen.queryByText("Thinking")).not.toBeInTheDocument()
+            );
+        } finally {
+            nowSpy.mockRestore();
+        }
+    });
+
+    it("tracks when the user scrolls away from the bottom", async () => {
+        const { rerender } = render(<Chat />);
+        await screen.findByText("old user message");
+        const messagePane = screen.getByLabelText("chat messages");
+        Object.defineProperties(messagePane, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: { configurable: true, value: 0, writable: true },
+        });
+        fireEvent.scroll(messagePane);
+        await waitFor(() =>
+            expect(screen.getByTestId("bottom-state")).toHaveTextContent("false")
+        );
+        mocks.request.mockClear();
+        await userEvent.click(
+            screen.getByRole("button", { name: "dynamic content loaded" })
+        );
+
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:06:00.000Z",
+            },
+        ];
+        rerender(<Chat />);
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                limit: 1000,
+                sessionKey: "session-a",
+            })
+        );
+
+        mocks.request.mockClear();
+        Object.defineProperty(messagePane, "scrollTop", {
+            configurable: true,
+            value: 0,
+            writable: true,
+        });
+        fireEvent.scroll(messagePane);
+        await waitFor(() =>
+            expect(screen.getByTestId("bottom-state")).toHaveTextContent("false")
+        );
+        mocks.liveSessions = [
+            {
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:07:00.000Z",
+            },
+        ];
+        rerender(<Chat />);
+
+        await userEvent.click(screen.getByRole("button", { name: "thinking false" }));
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                limit: 1000,
+                sessionKey: "session-a",
+            })
+        );
+    });
+
+    it("keeps scroll fallback stable without a messages container", async () => {
+        mocks.skipMessagesContainerRef = true;
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        fireEvent.scroll(screen.getByLabelText("chat messages"));
+        act(() => {
+            mocks.virtualizerOptions?.onChange({}, false);
+        });
+
+        expect(screen.getByTestId("bottom-state")).toHaveTextContent("true");
+    });
+
+    it("leaves acknowledged sends alone when the optimistic stream was already cleared", async () => {
+        const user = userEvent.setup();
+        let resolveSend: (value: { runId: string }) => void = () => {};
+        mocks.request.mockImplementation((method: string) => {
+            if (method === "models.list") {
+                return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
+            }
+
+            if (method === "chat.history") {
+                return Promise.resolve({
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+
+            if (method === "chat.send") {
+                return new Promise((resolve) => {
+                    resolveSend = resolve;
+                });
+            }
+
+            return Promise.resolve({});
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+        await user.type(screen.getByLabelText("Draft"), "ack later");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await screen.findByText("ack later");
+
+        act(() => {
+            mocks.runtimeEventsOptions?.updateActiveStreams(() => ({}));
+        });
+        await act(async () => {
+            resolveSend({ runId: "run-after-clear" });
+        });
+
+        expect(screen.getByText("ack later")).toBeInTheDocument();
+    });
+
+    it("ignores closed delete confirmations without a pending message", async () => {
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "force closed confirm Delete message" })
+        );
+
+        expect(screen.getByText("old user message")).toBeInTheDocument();
+        expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
     });
 
     it("persists deleted message keys and can open attachment previews", async () => {
@@ -1234,6 +1717,7 @@ describe("Chat", () => {
     });
 
     it("ignores empty attachment and send submissions", async () => {
+        mocks.skipComposerFileInputRef = true;
         render(<Chat />);
         await screen.findByText("old user message");
         mocks.request.mockClear();
@@ -1241,6 +1725,13 @@ describe("Chat", () => {
         fireEvent.change(screen.getByLabelText("Attach file"), {
             target: { files: null },
         });
+        fireEvent.change(screen.getByLabelText("Attach file"), {
+            target: {
+                files: [new File(["hello"], "orphan.txt", { type: "text/plain" })],
+            },
+        });
+        await screen.findByRole("button", { name: "remove orphan.txt" });
+        fireEvent.click(screen.getByRole("button", { name: "remove orphan.txt" }));
         fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
 
         expect(mocks.request).not.toHaveBeenCalledWith("chat.send", expect.any(Object));
@@ -1369,6 +1860,11 @@ describe("Chat", () => {
                 json: async () => ({ error: "speech service unavailable" }),
                 ok: false,
                 status: 503,
+            } as Response)
+            .mockResolvedValueOnce({
+                json: async () => ({}),
+                ok: false,
+                status: 418,
             } as Response);
 
         render(<Chat />);
@@ -1400,6 +1896,17 @@ describe("Chat", () => {
             target: { files: [new File(["bad"], "bad.webm", { type: "audio/webm" })] },
         });
         expect(await screen.findByText("speech service unavailable")).toBeInTheDocument();
+
+        fireEvent.change(voiceInput, {
+            target: { files: [new File(["bad"], "bad.wav", { type: "" })] },
+        });
+        expect(await screen.findByText("HTTP 418")).toBeInTheDocument();
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            "/api/stt/transcribe",
+            expect.objectContaining({
+                headers: { "Content-Type": "audio/webm" },
+            })
+        );
 
         const oversizedFile = new File(["x"], "too-big.webm", { type: "audio/webm" });
         Object.defineProperty(oversizedFile, "size", { value: 21 * 1024 * 1024 });
@@ -1461,6 +1968,36 @@ describe("Chat", () => {
 
         expect(await screen.findByText("Failed to transcribe audio")).toBeInTheDocument();
         expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("cleans up voice file input safely after unmount", async () => {
+        let resolveFetch: (value: Response) => void = () => {};
+        vi.mocked(fetch).mockReturnValue(
+            new Promise((resolve) => {
+                resolveFetch = resolve;
+            }) as Promise<Response>
+        );
+
+        const { unmount } = render(<Chat />);
+        await screen.findByText("old user message");
+        const voiceInput = document.querySelector<HTMLInputElement>(
+            'input[accept="audio/*"]'
+        )!;
+
+        fireEvent.change(voiceInput, {
+            target: {
+                files: [new File(["voice"], "voice.webm", { type: "audio/webm" })],
+            },
+        });
+        unmount();
+
+        await act(async () => {
+            resolveFetch({
+                json: async () => ({ text: "late voice" }),
+                ok: true,
+            } as Response);
+            await Promise.resolve();
+        });
     });
 
     it("records direct microphone audio and transcribes the stopped recording", async () => {
@@ -1702,6 +2239,40 @@ describe("Chat", () => {
         }
     });
 
+    it("shows the generic recording fallback in secure unsupported contexts", async () => {
+        const user = userEvent.setup();
+        const originalIsSecureContextDescriptor = Object.getOwnPropertyDescriptor(
+            window,
+            "isSecureContext"
+        );
+
+        try {
+            Object.defineProperty(window, "isSecureContext", {
+                configurable: true,
+                value: true,
+            });
+
+            render(<Chat />);
+            await screen.findByText("old user message");
+
+            await user.click(screen.getByRole("button", { name: "toggle recording" }));
+
+            expect(
+                await screen.findByText(/Direct voice recording is not supported here/u)
+            ).toBeInTheDocument();
+        } finally {
+            if (originalIsSecureContextDescriptor) {
+                Object.defineProperty(
+                    window,
+                    "isSecureContext",
+                    originalIsSecureContextDescriptor
+                );
+            } else {
+                Reflect.deleteProperty(window, "isSecureContext");
+            }
+        }
+    });
+
     it("switches sessions, reloads history, and clears queued attachments", async () => {
         const user = userEvent.setup();
         const file = new File(["hello"], "queued.txt", {
@@ -1860,17 +2431,63 @@ describe("Chat", () => {
         }
     });
 
+    it("ignores live history polling responses after unmount", async () => {
+        const intervalCallbacks: Array<() => void> = [];
+        const setIntervalSpy = vi
+            .spyOn(window, "setInterval")
+            .mockImplementation((callback: TimerHandler) => {
+                intervalCallbacks.push(callback as () => void);
+                return intervalCallbacks.length as unknown as ReturnType<
+                    typeof setInterval
+                >;
+            });
+        let resolveHistory: (value: unknown) => void = () => {};
+        mocks.request.mockImplementation((method: string) =>
+            method === "chat.history"
+                ? new Promise((resolve) => {
+                      resolveHistory = resolve;
+                  })
+                : Promise.resolve({ models: [] })
+        );
+
+        try {
+            const { unmount } = render(<Chat />);
+            await waitFor(() => expect(intervalCallbacks.length).toBeGreaterThan(0));
+
+            await act(async () => {
+                intervalCallbacks[0]!();
+            });
+            unmount();
+
+            await act(async () => {
+                resolveHistory({
+                    messages: [
+                        {
+                            content: "late response",
+                            role: "assistant",
+                            text: "late response",
+                        },
+                    ],
+                });
+            });
+            expect(screen.queryByText("late response")).not.toBeInTheDocument();
+        } finally {
+            setIntervalSpy.mockRestore();
+        }
+    });
+
     it("ignores stale history responses after switching sessions", async () => {
         const user = userEvent.setup();
         const historyRequests: Array<{
             params: Record<string, unknown> | undefined;
+            reject: (error: Error) => void;
             resolve: (value: unknown) => void;
         }> = [];
         mocks.request.mockImplementation(
             (method: string, params?: Record<string, unknown>) =>
                 method === "chat.history"
-                    ? new Promise((resolve) => {
-                          historyRequests.push({ params, resolve });
+                    ? new Promise((resolve, reject) => {
+                          historyRequests.push({ params, reject, resolve });
                       })
                     : Promise.resolve({ models: [] })
         );
@@ -1882,6 +2499,14 @@ describe("Chat", () => {
                     (request) => request.params?.sessionKey === "session-a"
                 )
             ).toBe(true)
+        );
+        await user.click(screen.getByRole("button", { name: "thinking false" }));
+        await waitFor(() =>
+            expect(
+                historyRequests.filter(
+                    (request) => request.params?.sessionKey === "session-a"
+                ).length
+            ).toBeGreaterThan(1)
         );
 
         await user.click(screen.getByRole("button", { name: "select side chat" }));
@@ -1908,7 +2533,11 @@ describe("Chat", () => {
         expect(await screen.findByText("side history")).toBeInTheDocument();
 
         await act(async () => {
-            for (const request of staleRequests) {
+            staleRequests[0]?.resolve({
+                messages: [{ role: "assistant", text: "late history" }],
+            });
+            staleRequests[1]?.reject(new Error("late rejected history"));
+            for (const request of staleRequests.slice(2)) {
                 request.resolve({
                     messages: [{ role: "assistant", text: "late history" }],
                 });
@@ -1916,7 +2545,64 @@ describe("Chat", () => {
         });
 
         expect(screen.queryByText("late history")).not.toBeInTheDocument();
+        expect(screen.queryByText("late rejected history")).not.toBeInTheDocument();
         expect(screen.getByText("side history")).toBeInTheDocument();
+    });
+
+    it("ignores rejected history responses after unmount", async () => {
+        let rejectHistory: (error: Error) => void = () => {};
+        mocks.request.mockImplementation((method: string) =>
+            method === "chat.history"
+                ? new Promise((_resolve, reject) => {
+                      rejectHistory = reject;
+                  })
+                : Promise.resolve({ models: [] })
+        );
+
+        const { unmount } = render(<Chat />);
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                limit: 1000,
+                sessionKey: "session-a",
+            })
+        );
+
+        unmount();
+
+        await act(async () => {
+            rejectHistory(new Error("late history failure"));
+        });
+
+        expect(screen.queryByText("late history failure")).not.toBeInTheDocument();
+    });
+
+    it("ignores resolved history responses after unmount", async () => {
+        let resolveHistory: (value: unknown) => void = () => {};
+        mocks.request.mockImplementation((method: string) =>
+            method === "chat.history"
+                ? new Promise((resolve) => {
+                      resolveHistory = resolve;
+                  })
+                : Promise.resolve({ models: [] })
+        );
+
+        const { unmount } = render(<Chat />);
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith("chat.history", {
+                limit: 1000,
+                sessionKey: "session-a",
+            })
+        );
+
+        unmount();
+
+        await act(async () => {
+            resolveHistory({
+                messages: [{ role: "assistant", text: "late resolved history" }],
+            });
+        });
+
+        expect(screen.queryByText("late resolved history")).not.toBeInTheDocument();
     });
 
     it("limits attachment batches and surfaces recorder startup failures", async () => {

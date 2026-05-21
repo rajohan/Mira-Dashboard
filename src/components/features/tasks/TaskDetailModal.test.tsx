@@ -229,21 +229,85 @@ describe("TaskDetailModal", () => {
     });
 
     it("renders scheduled automation duration fallbacks", async () => {
-        renderModal({
+        const baseProps: React.ComponentProps<typeof TaskDetailModal> = {
             task: makeTask({
+                labels: [],
                 automation: {
                     type: "cron",
                     recurring: true,
                     cronJobId: "job-scheduled",
                     enabled: true,
-                    lastDurationMs: 3_661_000,
+                    lastDurationMs: 60_000,
                 },
             }),
             updates: [],
-        });
+            onClose: vi.fn(),
+            onMove: vi.fn(),
+            onAssign: vi.fn(),
+            onDelete: vi.fn(),
+            onUpdate: vi.fn(),
+            onAddUpdate: vi.fn(),
+            onEditUpdate: vi.fn(),
+            onDeleteUpdate: vi.fn(),
+        };
+        const { rerender } = render(<TaskDetailModal {...baseProps} />);
 
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
         expect(await screen.findByText("SCHEDULED")).toBeInTheDocument();
-        expect(screen.getByText("1h 1m")).toBeInTheDocument();
+        expect(screen.getByText("1m")).toBeInTheDocument();
+
+        rerender(
+            <TaskDetailModal
+                {...baseProps}
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-hour",
+                        enabled: true,
+                        lastDurationMs: 3_600_000,
+                    },
+                })}
+                updates={[]}
+            />
+        );
+        expect(await screen.findByText("1h")).toBeInTheDocument();
+    });
+
+    it("renders whole-hour durations and Raymond-authored updates", async () => {
+        render(
+            <TaskDetailModal
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-hour",
+                        enabled: true,
+                        lastDurationMs: 3_660_000,
+                    },
+                })}
+                onClose={vi.fn()}
+                onMove={vi.fn(async () => {})}
+                onAssign={vi.fn(async () => {})}
+                onDelete={vi.fn(async () => {})}
+                onUpdate={vi.fn(async () => makeTask())}
+                updates={[
+                    {
+                        id: 32,
+                        taskId: 88,
+                        author: "rajohan",
+                        messageMd: "Reviewed by Raymond.",
+                        createdAt: "2026-05-10T10:00:00.000Z",
+                    },
+                ]}
+                onAddUpdate={vi.fn(async () => {})}
+                onEditUpdate={vi.fn(async () => {})}
+                onDeleteUpdate={vi.fn(async () => {})}
+            />
+        );
+
+        expect(await screen.findByText("1h 1m")).toBeInTheDocument();
+        expect(screen.getByText("Reviewed by Raymond.")).toBeInTheDocument();
     });
 
     it("renders completed automation fallbacks and cancels progress edit mode", async () => {

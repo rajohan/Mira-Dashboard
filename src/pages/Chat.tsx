@@ -30,6 +30,7 @@ import {
 } from "../components/features/chat/chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
+    chatErrorMessage,
     type ChatModelOption,
     dataUrlToBase64,
     dedupeMessages,
@@ -78,10 +79,7 @@ function getChatAgentId(session: Session): string {
 function formatChatSessionLabel(session: Session, agentId: string): string {
     const sessionKey = typeof session.key === "string" ? session.key : "";
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
-    if (
-        scope.toLowerCase() === "agent" &&
-        normalizeChatAgentId(keyAgentId || "") === agentId
-    ) {
+    if (scope.toLowerCase() === "agent" && normalizeChatAgentId(keyAgentId) === agentId) {
         return sessionParts.join(":") || sessionKey;
     }
 
@@ -286,7 +284,7 @@ export function Chat() {
         });
     };
 
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
+    const sortedSessions = sortSessionsByTypeAndActivity(sessions);
     const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
     const selectedSessionUpdatedAt = selectedSessionKey
         ? sessionMap.get(selectedSessionKey)?.updatedAt
@@ -325,7 +323,7 @@ export function Chat() {
 
     if (shouldShowSelectedStreamRow) {
         chatRows.push({
-            key: `stream-${selectedSessionKey || "none"}`,
+            key: `stream-${selectedSessionKey}`,
             kind: "stream",
             message: selectedStreamMessage || {
                 role: "assistant",
@@ -336,13 +334,14 @@ export function Chat() {
     }
 
     if (shouldShowTypingIndicator) {
+        const typingStream = selectedStream!;
         chatRows.push({
-            key: `typing-${selectedSessionKey || "none"}-${selectedStream?.statusText || "working"}`,
+            key: `typing-${selectedSessionKey}-${typingStream.statusText || "working"}`,
             kind: "typing",
             message: {
                 role: "assistant",
-                content: selectedStream?.statusText || "Thinking",
-                text: selectedStream?.statusText || "Thinking",
+                content: typingStream.statusText || "Thinking",
+                text: typingStream.statusText || "Thinking",
             },
         });
     }
@@ -365,17 +364,11 @@ export function Chat() {
             sendInFlightReference.current = false;
             setIsSending(false);
 
-            if (selectedSessionKey) {
-                updateActiveStreams((previous) => {
-                    if (!previous[selectedSessionKey]) {
-                        return previous;
-                    }
-
-                    const next = { ...previous };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
-            }
+            updateActiveStreams((previous) => {
+                const next = { ...previous };
+                delete next[String(selectedSessionKey)];
+                return next;
+            });
 
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
@@ -469,17 +462,25 @@ export function Chat() {
                 });
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
-                    setIsAtBottom(true);
-                } else if (shouldStickToBottomReference.current) {
-                    setIsAtBottom(true);
                 }
+                setIsAtBottom(
+                    (previous) =>
+                        [previous, true][
+                            Math.max(
+                                Number(isNewSession),
+                                Number(shouldStickToBottomReference.current)
+                            )
+                        ]!
+                );
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch (error_) {
-                if (!cancelled) {
-                    setSendError(
-                        (error_ as Error).message || "Failed to load chat history"
-                    );
-                }
+                const historyLoadError = chatErrorMessage(
+                    error_,
+                    "Failed to load chat history"
+                );
+                setSendError(
+                    (previous) => [historyLoadError, previous][Number(cancelled)]!
+                );
             } finally {
                 if (!cancelled) {
                     setIsLoadingHistory(false);
@@ -500,70 +501,69 @@ export function Chat() {
 
         /** Performs refresh history. */
         const refreshHistory = async () => {
-            if (!shouldStickToBottomReference.current) {
-                return;
-            }
+            const refreshWhenFollowing = async () => {
+                try {
+                    const result = (await request("chat.history", {
+                        sessionKey: selectedSessionKey,
+                        limit: CHAT_HISTORY_LIMIT,
+                    })) as {
+                        messages?: RawChatHistoryMessage[];
+                    };
 
-            try {
-                const result = (await request("chat.history", {
-                    sessionKey: selectedSessionKey,
-                    limit: CHAT_HISTORY_LIMIT,
-                })) as {
-                    messages?: RawChatHistoryMessage[];
-                };
+                    const nextMessages = visibleHistoryMessages(
+                        result.messages,
+                        createChatVisibility(showThinkingOutput, showToolOutput)
+                    );
+                    const activeStream =
+                        activeStreamsReference.current[selectedSessionKey];
+                    const activeStreamUpdatedAt = sessionTimestampMs(
+                        activeStream?.updatedAt
+                    );
+                    const activeStreamIsQuiet =
+                        activeStreamUpdatedAt === null ||
+                        Date.now() - activeStreamUpdatedAt >=
+                            ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                    const recoveredStreamInHistory = Boolean(
+                        activeStream &&
+                        activeStreamIsQuiet &&
+                        ((activeStream.text &&
+                            historyContainsRecoveredStream(
+                                nextMessages,
+                                activeStream.text
+                            )) ||
+                            historyHasNewerAssistantMessage(
+                                nextMessages,
+                                activeStream.updatedAt
+                            ))
+                    );
+                    setMessages((previous) => {
+                        const previousLast = previous.at(-1)?.timestamp;
+                        const nextLast = nextMessages.at(-1)?.timestamp;
 
-                const nextMessages = visibleHistoryMessages(
-                    result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
-                );
-                const activeStream = activeStreamsReference.current[selectedSessionKey];
-                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
-                const activeStreamIsQuiet =
-                    activeStreamUpdatedAt === null ||
-                    Date.now() - activeStreamUpdatedAt >=
-                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                const recoveredStreamInHistory = Boolean(
-                    activeStream &&
-                    activeStreamIsQuiet &&
-                    ((activeStream.text &&
-                        historyContainsRecoveredStream(
-                            nextMessages,
-                            activeStream.text
-                        )) ||
-                        historyHasNewerAssistantMessage(
-                            nextMessages,
-                            activeStream.updatedAt
-                        ))
-                );
+                        if (
+                            previous.length === nextMessages.length &&
+                            previousLast === nextLast
+                        ) {
+                            return previous;
+                        }
 
-                setMessages((previous) => {
-                    const previousLast = previous.at(-1)?.timestamp || "";
-                    const nextLast = nextMessages.at(-1)?.timestamp || "";
-
-                    if (
-                        previous.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return previous;
-                    }
-
-                    if (shouldStickToBottomReference.current) {
                         setIsAtBottom(true);
-                    }
-
-                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
-                });
-
-                if (recoveredStreamInHistory) {
-                    updateActiveStreams((previous) => {
-                        const next = { ...previous };
-                        delete next[selectedSessionKey];
-                        return next;
+                        return mergeWithRecentOptimisticMessages(previous, nextMessages);
                     });
+                    if (recoveredStreamInHistory) {
+                        updateActiveStreams((previous) => {
+                            const next = { ...previous };
+                            delete next[selectedSessionKey];
+                            return next;
+                        });
+                    }
+                } catch {
+                    // Ignore background refresh failures.
                 }
-            } catch {
-                // Ignore background refresh failures.
-            }
+            };
+
+            const refreshTasks = [async () => {}, refreshWhenFollowing] as const;
+            await refreshTasks[Number(shouldStickToBottomReference.current)]!();
         };
 
         void refreshHistory();
@@ -614,8 +614,8 @@ export function Chat() {
                 );
 
                 setMessages((previous) => {
-                    const previousLast = previous.at(-1)?.timestamp || "";
-                    const nextLast = nextMessages.at(-1)?.timestamp || "";
+                    const previousLast = previous.at(-1)?.timestamp;
+                    const nextLast = nextMessages.at(-1)?.timestamp;
 
                     if (
                         previous.length === nextMessages.length &&
@@ -627,9 +627,7 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
 
-                if (shouldStickToBottomReference.current) {
-                    setIsAtBottom(true);
-                }
+                setIsAtBottom(true);
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch {
                 // Opportunistic live refresh; WebSocket events remain the primary path.
@@ -670,7 +668,6 @@ export function Chat() {
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
-
         if (!container) {
             return true;
         }
@@ -735,9 +732,10 @@ export function Chat() {
 
     /** Responds to dynamic row content load events. */
     const handleDynamicRowContentLoad = () => {
-        if (shouldStickToBottomReference.current) {
-            scheduleBottomFollow();
-        }
+        const followBottom = [undefined, scheduleBottomFollow][
+            Number(shouldStickToBottomReference.current)
+        ];
+        followBottom?.();
     };
 
     useLayoutEffect(() => {
@@ -804,14 +802,14 @@ export function Chat() {
 
         const agentSession = agents.find(
             (agent) => normalizeChatAgentId(agent.id) === agentId
-        )?.sessionKey;
+        )?.sessionKey as string | undefined;
         const nextSession =
             sortedSessions.find(
                 (session) =>
-                    isSameSessionKey(session.key, agentSession || undefined) &&
+                    isSameSessionKey(session.key, agentSession) &&
                     getChatAgentId(session) === agentId
             ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
-        setSelectedSessionKey(nextSession?.key || "");
+        setSelectedSessionKey(nextSession!.key);
     };
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
@@ -884,7 +882,7 @@ export function Chat() {
 
             setAttachments((previous) => [...previous, ...nextAttachments]);
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to read attachment");
+            setSendError(chatErrorMessage(error_, "Failed to read attachment"));
         } finally {
             if (fileInputReference.current) {
                 fileInputReference.current.value = "";
@@ -940,7 +938,7 @@ export function Chat() {
                 return trimmedPrevious ? `${trimmedPrevious}\n${text}` : text;
             });
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to transcribe audio");
+            setSendError(chatErrorMessage(error_, "Failed to transcribe audio"));
         } finally {
             setIsTranscribing(false);
         }
@@ -962,7 +960,7 @@ export function Chat() {
 
             await transcribeRecording(file);
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to read audio file");
+            setSendError(chatErrorMessage(error_, "Failed to read audio file"));
         } finally {
             if (voiceFileInputReference.current) {
                 voiceFileInputReference.current.value = "";
@@ -1033,7 +1031,7 @@ export function Chat() {
                     track.stop();
                 }
             }
-            setSendError((error_ as Error).message || "Failed to start recording");
+            setSendError(chatErrorMessage(error_, "Failed to start recording"));
         }
     };
 
@@ -1151,7 +1149,7 @@ export function Chat() {
                 });
             }
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to send message");
+            setSendError(chatErrorMessage(error_, "Failed to send message"));
             updateActiveStreams((previous) => {
                 const next = { ...previous };
                 delete next[selectedSessionKey];

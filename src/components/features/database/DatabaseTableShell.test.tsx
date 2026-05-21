@@ -71,6 +71,24 @@ describe("DatabaseTableShell", () => {
         expect(screen.queryByText(/Mobile/u)).not.toBeInTheDocument();
     });
 
+    it("renders non-sortable display headers", () => {
+        render(
+            <DatabaseTableShell
+                data={rows}
+                columns={[
+                    columnHelper.display({
+                        id: "status",
+                        header: "Status",
+                        cell: () => "OK",
+                    }),
+                ]}
+            />
+        );
+
+        expect(screen.getByText("Status")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Status" })).not.toBeInTheDocument();
+    });
+
     it("activates mobile rows by keyboard when a row click handler is provided", async () => {
         const onRowClick = vi.fn();
         renderShell({
@@ -82,9 +100,11 @@ describe("DatabaseTableShell", () => {
         mobileAlpha.focus();
         await userEvent.keyboard("{Enter}");
         await userEvent.keyboard(" ");
+        await userEvent.keyboard("a");
 
         expect(onRowClick).toHaveBeenNthCalledWith(1, { name: "Alpha", value: 1 });
         expect(onRowClick).toHaveBeenNthCalledWith(2, { name: "Alpha", value: 1 });
+        expect(onRowClick).toHaveBeenCalledTimes(2);
     });
 
     it("activates desktop rows by keyboard when a row click handler is provided", async () => {
@@ -96,9 +116,11 @@ describe("DatabaseTableShell", () => {
         desktopAlpha?.focus();
         await userEvent.keyboard("{Enter}");
         await userEvent.keyboard(" ");
+        await userEvent.keyboard("a");
 
         expect(onRowClick).toHaveBeenNthCalledWith(1, { name: "Alpha", value: 1 });
         expect(onRowClick).toHaveBeenNthCalledWith(2, { name: "Alpha", value: 1 });
+        expect(onRowClick).toHaveBeenCalledTimes(2);
     });
 
     it("sorts rows from sortable column headers", async () => {

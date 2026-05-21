@@ -129,6 +129,29 @@ describe("FileContentViewer", () => {
             "src",
             "data:image/png;base64,iVBORw0KGgo="
         );
+
+        rerender(
+            <FileContentViewer
+                codeEditMode={false}
+                editedContent=""
+                fileContent={{
+                    ...baseFile,
+                    content: "iVBORw0KGgo=",
+                    isBinary: true,
+                    isImage: true,
+                    mimeType: "image/png",
+                    path: "",
+                }}
+                isEditable={false}
+                jsonPreview={false}
+                largeFileWarning={false}
+                markdownPreview={false}
+                onContentChange={vi.fn()}
+                syntaxClass="text-primary-300"
+            />
+        );
+
+        expect(screen.getByRole("img", { name: "Image" })).toBeInTheDocument();
     });
 
     it("uses textarea editing for code files when code edit mode is enabled", async () => {

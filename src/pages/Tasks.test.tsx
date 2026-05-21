@@ -586,6 +586,10 @@ describe("Tasks page", () => {
                 await handlers.onDragEnd({ active: { id: "1" }, over: null });
                 await handlers.onDragEnd({ active: { id: "1" }, over: { id: "1" } });
                 await handlers.onDragEnd({
+                    active: { id: "1" },
+                    over: { id: "missing" },
+                });
+                await handlers.onDragEnd({
                     active: { id: "missing" },
                     over: { id: "done" },
                 });
