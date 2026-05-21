@@ -208,6 +208,20 @@ describe("chat type normalizers", () => {
                 },
             ],
         });
+
+        expect(
+            normalizeChatHistoryMessage({
+                content: "MEDIA:/tmp/output/",
+            }).attachments
+        ).toEqual([
+            {
+                id: "media-/tmp/output/-0",
+                fileName: "/tmp/output/",
+                mimeType: "application/octet-stream",
+                dataUrl: undefined,
+                kind: "file",
+            },
+        ]);
     });
 
     it("normalizes tool result messages", () => {

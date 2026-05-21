@@ -50,12 +50,12 @@ vi.mock("@tanstack/react-virtual", () => ({
         estimateSize();
         if (count > 0) getItemKey(0);
         if (count > 1) getItemKey(1);
-        if (count > 0) getItemKey(count);
+        if (count > 0) getItemKey(count - 1);
         measureElement({ getBoundingClientRect: () => ({ height: 22.2 }) } as Element);
         return {
             getTotalSize: () => count * 22,
             getVirtualItems: () =>
-                Array.from({ length: count + (count > 0 ? 1 : 0) }, (_, index) => ({
+                Array.from({ length: count }, (_, index) => ({
                     index,
                     key: `row-${index}`,
                     start: index * 22,

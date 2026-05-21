@@ -251,7 +251,8 @@ export function optimisticAttachmentDisplay(
 
 /** Performs file name from path. */
 function fileNameFromPath(path: string): string {
-    return path.split(/[\\/]/).pop()!;
+    const fileName = path.split(/[\\/]/).pop();
+    return fileName || path;
 }
 
 /** Performs mime type from path. */

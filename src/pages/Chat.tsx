@@ -234,6 +234,7 @@ export function Chat() {
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const liveHistoryRefreshTimerReference = useRef<number | null>(null);
+    const backgroundHistoryRefreshAbortReference = useRef<AbortController | null>(null);
     const mediaRecorderReference = useRef<MediaRecorder | null>(null);
     const recordingChunksReference = useRef<Blob[]>([]);
     const voiceFileInputReference = useRef<HTMLInputElement | null>(null);
@@ -351,10 +352,14 @@ export function Chat() {
     }
 
     useEffect(() => {
-        if (
-            sortedSessions.length > 0 &&
-            (!selectedSessionKey || !sessionMap.has(selectedSessionKey))
-        ) {
+        if (sortedSessions.length === 0) {
+            if (selectedSessionKey) {
+                setSelectedSessionKey("");
+            }
+            return;
+        }
+
+        if (!selectedSessionKey || !sessionMap.has(selectedSessionKey)) {
             setSelectedSessionKey(sortedSessions[0]?.key || "");
         }
     }, [selectedSessionKey, sessionMap, sortedSessions]);
@@ -502,23 +507,33 @@ export function Chat() {
             return;
         }
 
+        const requestSessionKey = selectedSessionKey;
+        const abortController = new AbortController();
+        backgroundHistoryRefreshAbortReference.current?.abort();
+        backgroundHistoryRefreshAbortReference.current = abortController;
+        let cancelled = false;
+
         /** Performs refresh history. */
         const refreshHistory = async () => {
             const refreshVisibleHistory = async () => {
                 try {
                     const result = (await request("chat.history", {
-                        sessionKey: selectedSessionKey,
+                        sessionKey: requestSessionKey,
                         limit: CHAT_HISTORY_LIMIT,
                     })) as {
                         messages?: RawChatHistoryMessage[];
                     };
+
+                    if (cancelled || abortController.signal.aborted) {
+                        return;
+                    }
 
                     const nextMessages = visibleHistoryMessages(
                         result.messages,
                         createChatVisibility(showThinkingOutput, showToolOutput)
                     );
                     const activeStream =
-                        activeStreamsReference.current[selectedSessionKey];
+                        activeStreamsReference.current[requestSessionKey];
                     const activeStreamUpdatedAt = sessionTimestampMs(
                         activeStream?.updatedAt
                     );
@@ -556,7 +571,7 @@ export function Chat() {
                     if (recoveredStreamInHistory) {
                         updateActiveStreams((previous) => {
                             const next = { ...previous };
-                            delete next[selectedSessionKey];
+                            delete next[requestSessionKey];
                             return next;
                         });
                     }
@@ -569,6 +584,12 @@ export function Chat() {
         };
 
         void refreshHistory();
+
+        return () => {
+            cancelled = true;
+            abortController.abort();
+            backgroundHistoryRefreshAbortReference.current = null;
+        };
     }, [
         isLoadingHistory,
         request,

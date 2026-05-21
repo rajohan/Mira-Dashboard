@@ -190,7 +190,7 @@ export function Logs() {
         getScrollElement: () => logContainerRef.current,
         estimateSize: () => 22,
         overscan: 15,
-        getItemKey: (index) => filteredLogs[index]?.id ?? index,
+        getItemKey: (index) => filteredLogs[index]!.id,
         measureElement: (element) => Math.ceil(element.getBoundingClientRect().height),
     });
 
@@ -370,8 +370,7 @@ export function Logs() {
                             }}
                         >
                             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                                const log = filteredLogs[virtualRow.index];
-                                if (!log) return null;
+                                const log = filteredLogs[virtualRow.index]!;
 
                                 return (
                                     <div

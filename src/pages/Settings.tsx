@@ -85,7 +85,12 @@ export function numberFromDuration(value: unknown, fallback: number): number {
 
 /** Returns a displayable error message with a stable fallback. */
 export function errorMessage(error: unknown, fallback: string): string {
-    return error instanceof Error ? error.message : fallback;
+    if (!(error instanceof Error)) {
+        return fallback;
+    }
+
+    const message = error.message.trim();
+    return message || fallback;
 }
 
 /** Returns undefined for empty form values before writing config patches. */

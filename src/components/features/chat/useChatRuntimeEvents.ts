@@ -61,6 +61,11 @@ function isNonWorkToolName(value: string): boolean {
     return NON_WORK_TOOL_NAMES.has(normalizedToolName(value).toLowerCase());
 }
 
+/** Returns whether a queued delta used its session key as a provisional run id. */
+function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
+    return runId === streamSessionKey;
+}
+
 /** Performs compact status text. */
 export function compactStatusText(value: string): string {
     const normalized = value.replaceAll(/\s+/g, " ").trim();
@@ -486,7 +491,14 @@ export function useChatRuntimeEvents({
         ) => {
             const existingPending =
                 pendingDeltaUpdatesReference.current[streamSessionKey];
-            if (isNewRunForStream(existingPending, runId)) {
+            const migratesProvisionalRun =
+                existingPending &&
+                isProvisionalRunId(streamSessionKey, existingPending.runId) &&
+                !isProvisionalRunId(streamSessionKey, runId);
+
+            if (migratesProvisionalRun) {
+                existingPending.runId = runId;
+            } else if (isNewRunForStream(existingPending, runId)) {
                 flushPendingDeltaUpdates();
             }
 

@@ -1085,6 +1085,13 @@ describe("Chat", () => {
             expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat")
         );
         expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a");
+
+        mocks.liveSessions = [];
+        rerender(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
     });
 
     it("uses an empty model list response fallback", async () => {
