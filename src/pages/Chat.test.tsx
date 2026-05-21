@@ -699,6 +699,7 @@ describe("Chat", () => {
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
+        mocks.confirmModalHandlers = null;
         mocks.runtimeEventsOptions = null;
         mocks.skipComposerFileInputRef = false;
         mocks.skipMessagesContainerRef = false;
