@@ -146,6 +146,21 @@ describe("AppHeader", () => {
         expect(onOpenSidebar).toHaveBeenCalledTimes(1);
     });
 
+    it("labels the mobile navigation toggle as close when the sidebar is open", () => {
+        render(
+            <AppHeader
+                title="Dashboard"
+                isSidebarOpen={true}
+                sidebarId="sidebar"
+                onOpenSidebar={vi.fn()}
+            />
+        );
+
+        expect(
+            screen.getByRole("button", { name: "Close navigation menu" })
+        ).toHaveAttribute("aria-expanded", "true");
+    });
+
     it("calls logout and navigates to login on log out click", async () => {
         const user = userEvent.setup();
 
