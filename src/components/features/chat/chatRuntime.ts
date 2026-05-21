@@ -54,7 +54,15 @@ interface ParsedAgentSessionKey {
     rest: string;
 }
 
-/** Parses agent session key. */
+/**
+ * Extracts the agent identifier and the remaining portion from an agent session key.
+ *
+ * Matches session keys of the form `agent:<agentId>:<rest>` (case-insensitive) and returns
+ * the captured `agentId` and `rest`, both converted to lowercase.
+ *
+ * @param sessionKey - Session key expected to follow the `agent:<agentId>:<rest>` format
+ * @returns An object with `agentId` and `rest` in lowercase when the input matches the agent pattern, `null` otherwise
+ */
 function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
     const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
     if (!match) {

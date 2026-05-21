@@ -27,7 +27,15 @@ function parsePercent(value: string | undefined): number {
     return match ? Number.parseFloat(match[0]) : -1;
 }
 
-/** Parses memory used mi b. */
+/**
+ * Parse the "used" portion of a Docker memory string and return its size in MiB.
+ *
+ * Accepts strings like "123MiB/456MiB", "1.5 GiB / 4GiB", "512KB/1MB" and parses the left side before `/`.
+ * Recognized units: B, KiB/KB, MiB/MB, GiB/GB, TiB/TB, PiB/PB (case-insensitive; optional `i`).
+ *
+ * @param value - The memory string to parse; may contain a used/total pair separated by `/`
+ * @returns The parsed size in mebibytes (MiB), or `-1` if `value` is missing or cannot be parsed
+ */
 function parseMemoryUsedMiB(value: string | undefined): number {
     if (!value) {
         return -1;
@@ -58,7 +66,13 @@ function parseMemoryUsedMiB(value: string | undefined): number {
     return amount * factors[unit]!;
 }
 
-/** Formats memory used mb for display. */
+/**
+ * Formats a raw Docker memory string into a human-readable MB or GB string.
+ *
+ * @param value - Raw memory usage string (for example `"64MiB/1GiB"`); may be undefined.
+ * @returns `"-"` if the input is missing or cannot be parsed; otherwise a string formatted as
+ * `"NN MB"` when the value is less than 1024 MB or `"N.NN GB"` when it is 1024 MB or greater.
+ */
 function formatMemoryUsedMb(value: string | undefined): string {
     const usedMiB = parseMemoryUsedMiB(value);
     if (!Number.isFinite(usedMiB) || usedMiB < 0) {

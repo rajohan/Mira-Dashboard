@@ -45,7 +45,13 @@ const ASSIGNMENT_FILTERS = [
     { value: TASK_ASSIGNEES.raymond.id, label: TASK_ASSIGNEES.raymond.label },
 ] as const;
 
-/** Renders the tasks UI. */
+/**
+ * Render the full tasks page including search/filtering, a drag-and-drop kanban board, task detail and new-task modals, progress-update handling, and deletion confirmations.
+ *
+ * The component fetches and derives task lists, manages drag state for column moves, and wires mutation handlers for creating, moving, assigning, updating, and deleting tasks and task updates. It also renders loading, error, and refresh UI.
+ *
+ * @returns The rendered React element for the tasks page.
+ */
 export function Tasks() {
     const { data: tasks = [], isLoading, error, refetch } = useTasks();
     const moveTask = useMoveTask();

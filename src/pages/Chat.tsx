@@ -75,7 +75,18 @@ function getChatAgentId(session: Session): string {
     return normalizeChatAgentId(session.agentType || session.type || "unknown");
 }
 
-/** Formats the session label inside a selected chat agent bucket. */
+/**
+ * Produce the label to display for a session within a selected agent bucket.
+ *
+ * If the session key is of the form `agent:<agentId>:...` and `<agentId>` (case-insensitive)
+ * matches the provided `agentId`, the label is the remainder of the key (joined by `":"`)
+ * or the raw session key if the remainder is empty. Otherwise the label is chosen from
+ * `session.displayLabel`, `session.label`, `session.displayName`, or the raw session key.
+ *
+ * @param session - The session whose label should be formatted
+ * @param agentId - The normalized agent id for the selected agent bucket (lowercased)
+ * @returns The formatted session label to display in the agent-specific session list
+ */
 function formatChatSessionLabel(session: Session, agentId: string): string {
     const sessionKey = typeof session.key === "string" ? session.key : "";
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");

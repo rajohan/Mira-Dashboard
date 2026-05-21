@@ -56,7 +56,20 @@ interface ChatComposerProps {
     onToggleRecording: () => void;
 }
 
-/** Renders the chat composer UI. */
+/**
+ * Renders the chat composer UI with attachments, emoji picker, slash-command suggestions, voice/attach/send controls, and the message textarea.
+ *
+ * The component manages local UI state for the emoji picker and textarea focus, and delegates all data changes and actions to the provided callbacks (draft updates, sending, attaching, previewing/removing attachments, toggling recording, and applying slash suggestions).
+ *
+ * Behavior highlights:
+ * - Displays removable attachment chips with preview and remove actions.
+ * - Shows slash-command suggestions above the textarea and applies the first suggestion when Tab is pressed.
+ * - Opens an emoji picker that inserts an emoji at the current cursor position, focuses the textarea, and closes on outside pointer down or Escape.
+ * - Pressing Enter (without Shift and when not composing) sends the message via `onSend`.
+ * - Hidden file input forwards selected files to `onAttachFiles`.
+ *
+ * @returns The JSX element for the chat composer UI.
+ */
 export function ChatComposer({
     attachments,
     canSend,

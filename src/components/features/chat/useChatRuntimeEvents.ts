@@ -90,7 +90,12 @@ export function formatToolName(value: string): string {
         : normalized;
 }
 
-/** Performs detail from args. */
+/**
+ * Extracts a concise detail string from a value or from common fields on an object.
+ *
+ * @param value - Any value or an object that may contain detail keys such as `command`, `cmd`, `query`, `url`, `path`, `filePath`, `message`, `text`, `title`, or `name`
+ * @returns The first non-empty trimmed string found on the object under those keys, or a trimmed string representation of `value` when `value` is not an object; `undefined` if no usable string is found
+ */
 export function detailFromArgs(value: unknown): string | undefined {
     if (!isRecord(value)) {
         return stringValue(value);
@@ -119,7 +124,12 @@ export function detailFromArgs(value: unknown): string | undefined {
     return undefined;
 }
 
-/** Normalizes runtime stream. */
+/**
+ * Normalize a runtime stream identifier into a canonical stream name.
+ *
+ * @param value - The incoming stream identifier; may be any value.
+ * @returns The normalized stream name: `"command-output"` when `value` is `"command_output"`, the original string when `value` is a string other than `"command_output"`, or an empty string when `value` is not a string.
+ */
 export function normalizeRuntimeStream(value: unknown): string {
     if (typeof value !== "string") {
         return "";
@@ -401,7 +411,19 @@ interface UseChatRuntimeEventsParams {
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
 }
 
-/** Provides chat runtime events. */
+/**
+ * Wires runtime chat transcript and stream events into local UI state.
+ *
+ * Subscribes to runtime events and integrates them into:
+ * - active streaming rows (via `updateActiveStreams` and `activeStreamsReference`),
+ * - transient tool and assistant messages (`setMessages`),
+ * - opportunistic history refreshes (`chat.history` via `request` and `setHistoryLoadVersion`),
+ * - and error reporting (`setSendError`).
+ *
+ * The hook batches and debounces streaming delta updates, handles terminal and non-terminal
+ * stream states, merges deltas into active stream rows, and ensures visible history is
+ * refreshed when appropriate. It requires the parameters defined by `UseChatRuntimeEventsParams`.
+ */
 export function useChatRuntimeEvents({
     connectionId,
     isConnected,

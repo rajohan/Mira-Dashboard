@@ -9,7 +9,13 @@ export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
-/** Returns a displayable error message with a stable fallback. */
+/**
+ * Produce a user-facing error message, using a stable fallback when the error has no message.
+ *
+ * @param error - The value that may be an Error; if it is an Error with a non-empty `message`, that message is used.
+ * @param fallback - The string to return when `error` has no usable message
+ * @returns The error's `message` if available and non-empty, otherwise `fallback`
+ */
 export function chatErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -27,7 +33,12 @@ export function dataUrlToBase64(dataUrl: string): string {
     return commaIndex === -1 ? dataUrl : dataUrl.slice(commaIndex + 1);
 }
 
-/** Performs base64 to text. */
+/**
+ * Decode a base64-encoded string into UTF-8 text.
+ *
+ * @param base64 - The base64-encoded input (for example the portion after a data URL comma)
+ * @returns The decoded UTF-8 string
+ */
 export function base64ToText(base64: string): string {
     const binary = window.atob(base64);
     const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0)!);
@@ -83,7 +94,12 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     return `${role}::${identity || ""}`;
 }
 
-/** Performs message delete key. */
+/**
+ * Constructs a stable deletion key for a chat message.
+ *
+ * @param message - The chat message whose identifying components are used. The key is built from: the message role (lowercased), the message timestamp or `"no-time"`, the `runId` or `"no-run"`, and either a diagnostic identity (if present) or the trimmed message text or `"no-text"`.
+ * @returns The deletion key string in the form `role::timestampOrNoTime::runIdOrNoRun::identityOrNoText`.
+ */
 export function messageDeleteKey(message: ChatHistoryMessage): string {
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     return [
@@ -94,7 +110,14 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
     ].join("::");
 }
 
-/** Performs assistant text looks recovered. */
+/**
+ * Determines whether two assistant text blocks appear to be recoveries of the same content
+ * by checking if each trimmed text is non-empty, at least 20 characters long, and one contains the other.
+ *
+ * @param left - The first assistant text to compare
+ * @param right - The second assistant text to compare
+ * @returns `true` if both trimmed texts are at least 20 characters and one contains the other, `false` otherwise
+ */
 export function assistantTextLooksRecovered(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();

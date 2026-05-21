@@ -7,7 +7,13 @@ import { RefreshButton } from "../components/ui/RefreshButton";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { getSyntaxClass } from "../utils/fileUtils";
 
-/** Renders the files UI. */
+/**
+ * Render the file explorer and editor UI for browsing, previewing, and editing repository files.
+ *
+ * Displays a refresh control, an optional error alert with a dismiss action, a sidebar for
+ * navigating the file tree, and an editor panel driven by file-explorer state (content, edit
+ * mode, previews, validation, and save/refresh handlers).
+ */
 export function Files() {
     const {
         files,

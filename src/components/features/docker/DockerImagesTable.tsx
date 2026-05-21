@@ -16,7 +16,12 @@ import { EmptyState } from "../../ui/EmptyState";
 
 const columnHelper = createColumnHelper<DockerImage>();
 
-/** Formats bytes for display. */
+/**
+ * Convert a byte count into a human-readable string using binary units (B, KB, MB, GB, TB).
+ *
+ * @param bytes - The size in bytes to format.
+ * @returns `0 B` if `bytes` is not a finite number or is less than or equal to 0; otherwise a string containing the numeric value and unit (`B`, `KB`, `MB`, `GB`, or `TB`). Values use no decimal places when the unit is bytes or the numeric value is >= 10, otherwise one decimal place.
+ */
 function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";

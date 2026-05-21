@@ -24,7 +24,16 @@ function shortenPath(path: string): string {
     return path;
 }
 
-/** Renders the terminal UI. */
+/**
+ * Render an interactive terminal UI for executing commands, inspecting output, and navigating history.
+ *
+ * Supports built-in `cd` (updates displayed cwd) and `pwd` (prints current cwd), displays past command entries
+ * and live output for running jobs, provides Tab completion and Arrow key history navigation, auto-scrolls
+ * output when the view is at the bottom (with a sticky "↓ Follow" button when scrolled up), and exposes
+ * controls to run/stop commands and clear history.
+ *
+ * @returns A React element containing the terminal UI.
+ */
 export function Terminal() {
     const [command, setCommand] = useState("");
     const [historyIndex, setHistoryIndex] = useState(-1);

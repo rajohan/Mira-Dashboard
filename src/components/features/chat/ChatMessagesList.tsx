@@ -52,7 +52,12 @@ export function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDispl
     return <Paperclip className="h-4 w-4" />;
 }
 
-/** Decodes base64 text attachments without throwing during rendering. */
+/**
+ * Decode a base64-encoded UTF-8 value into a string.
+ *
+ * @param base64 - The base64-encoded input to decode.
+ * @returns The decoded text, or `undefined` if the input cannot be decoded.
+ */
 export function base64ToText(base64: string): string | undefined {
     try {
         const binary = window.atob(base64);
@@ -63,7 +68,14 @@ export function base64ToText(base64: string): string | undefined {
     }
 }
 
-/** Performs preview from attachment. */
+/**
+ * Builds a preview item for a chat attachment.
+ *
+ * Returns `null` if the attachment has neither `dataUrl` nor `contentBase64`.
+ *
+ * @param attachment - The chat attachment to produce a preview for
+ * @returns A `ChatPreviewItem` describing the attachment (including a data URL, MIME type, optional decoded text for text attachments, and size), or `null` when no preview can be produced
+ */
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -165,7 +177,13 @@ function DeleteMessageButton({
     );
 }
 
-/** Renders the tts button UI. */
+/**
+ * Render a text-to-speech control for a message.
+ *
+ * The button triggers `onSpeak(messageKey, text)` when clicked. If `text` is empty or contains only whitespace, nothing is rendered.
+ *
+ * @returns `JSX.Element` when the control is rendered, `null` when `text` is empty or whitespace-only.
+ */
 function TtsButton({
     text,
     messageKey,
@@ -246,7 +264,19 @@ function stopAudioPlayback(
     setPlayingMessageKey(null);
 }
 
-/** Renders the chat messages list UI. */
+/**
+ * Render the virtualized chat message list with support for message actions, attachments, image previews, and text-to-speech controls.
+ *
+ * The component displays loading / empty states, a sticky "Follow" button when the view is not at the bottom, and a virtualized sequence of chat rows. It exposes controls for deleting messages, previewing attachments and images, and requesting/generated TTS playback for assistant messages. Dynamic image loads trigger the provided callback so parent layout/virtualizer can react.
+ *
+ * @param onDynamicContentLoad - Called when dynamically-loaded content (e.g., images) finishes loading.
+ * @param onFollow - Called when the "Follow" button is clicked to scroll to the bottom.
+ * @param onPreview - Called with a preview item when the user requests to open an attachment or image preview.
+ * @param onScroll - Scroll event handler for the messages container.
+ * @param onTtsError - Called with an error message when TTS generation or playback fails.
+ * @param onDeleteMessage - Called with a message key when a user requests deletion of a message.
+ * @returns The chat messages list element ready to be rendered in the UI.
+ */
 export function ChatMessagesList({
     isLoadingHistory,
     isAtBottom,

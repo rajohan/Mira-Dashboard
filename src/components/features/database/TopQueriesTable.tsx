@@ -43,7 +43,16 @@ const columns = [
     }),
 ];
 
-/** Renders the top queries table UI. */
+/**
+ * Displays a table of the database's top queries and a modal with query details.
+ *
+ * When `enabled` is false, renders an empty state indicating pg_stat_statements is not enabled.
+ * When enabled, renders a table of `data` rows; clicking a row opens a modal that shows Calls, Total ms, Mean ms, Rows, a copy-to-clipboard button for the full query, and the full query text.
+ *
+ * @param enabled - Whether the top-queries UI should be shown
+ * @param data - Array of top-query rows (DatabaseOverviewResponse["topQueries"])
+ * @returns The rendered top queries table and associated modal UI
+ */
 export function TopQueriesTable({
     enabled,
     data,

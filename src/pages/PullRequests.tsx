@@ -151,7 +151,19 @@ function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     return "Ready to deploy";
 }
 
-/** Performs checkout message. */
+/**
+ * Produces a human-readable message describing the production checkout state or a fetch error.
+ *
+ * @param checkout - The current production checkout status, or `undefined` while loading
+ * @param error - An error encountered fetching the checkout status, if any
+ * @returns A message string:
+ * - `error.message` when `error` is provided
+ * - `"Loading checkout status…"` when `checkout` is `undefined`
+ * - A blocking message when the backend is not on the expected production root
+ * - A blocking message when the checkout has local (dirty) changes
+ * - A blocking message when the checkout branch does not match the expected branch
+ * - Otherwise: `"Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees."`
+ */
 function checkoutMessage(
     checkout: ProductionCheckoutStatus | undefined,
     error: Error | null
@@ -170,7 +182,12 @@ function checkoutMessage(
     return "Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees.";
 }
 
-/** Performs action label. */
+/**
+ * Return the user-facing title for a pending action.
+ *
+ * @param action - The pending action to produce a label for
+ * @returns The button or modal title corresponding to `action` (e.g. "Merge PR", "Merge + deploy", "Reject PR", or "Deploy latest main")
+ */
 function actionLabel(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
@@ -184,7 +201,12 @@ function actionLabel(action: Exclude<PendingAction, null>) {
     }
 }
 
-/** Performs action message. */
+/**
+ * Produce the user-facing confirmation text describing the operational steps for a specific pending action.
+ *
+ * @param action - The pending action to describe (`merge`, `merge-deploy`, `reject`, or `deploy`)
+ * @returns The confirmation message to display in the confirmation modal describing what the action will do
+ */
 function actionMessage(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
@@ -298,7 +320,14 @@ function PullRequestCard({
     );
 }
 
-/** Renders the pull requests UI. */
+/**
+ * Render the pull requests review UI and controls for merging, rejecting, and deploying.
+ *
+ * Presents lists of Mira-authored and external pull requests, shows production checkout
+ * and recent deploys, and provides confirmation flows for merge, merge+deploy, reject,
+ * and deploy actions. Fetches pull request and deployment data, reads production checkout
+ * status, invokes approve/reject/deploy mutations, and displays success or error results.
+ */
 export function PullRequests() {
     const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
     const { data: deployments = [] } = usePullRequestDeployments();
@@ -319,7 +348,11 @@ export function PullRequests() {
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
-    /** Performs confirm action. */
+    /**
+     * Executes a confirmed pending action (merge, merge-deploy, reject, or deploy) and updates UI state with the resulting message or error.
+     *
+     * @param action - The confirmed action to perform; one of `"merge"`, `"merge-deploy"`, `"reject"`, or `"deploy"`. For actions that operate on a pull request, `action.pr` contains the target PR. 
+     */
     async function confirmAction(action: Exclude<PendingAction, null>) {
         setActionError(null);
         try {

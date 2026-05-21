@@ -10,7 +10,12 @@ import { cn } from "../../../utils/cn";
 
 const JSON_LANGUAGES = new Set(["json", "json5", "jsonc"]);
 
-/** Performs children to text. */
+/**
+ * Convert a ReactNode tree into a single concatenated string of its textual content.
+ *
+ * @param children - The React node(s) to extract text from; may be a string, number, element, or an array of nodes
+ * @returns The concatenated text representation of `children`, or an empty string if no textual content is found
+ */
 export function childrenToText(children: ReactNode): string {
     if (typeof children === "string" || typeof children === "number") {
         return String(children);
@@ -59,7 +64,12 @@ function looksLikeJson(code: string): boolean {
     );
 }
 
-/** Parses JSON block. */
+/**
+ * Parse a JSON or JSON5 value from a string into an object-shaped result.
+ *
+ * @param code - The string containing JSON or JSON5 content to parse.
+ * @returns The parsed object or array when the input represents an object/array; otherwise an object `{ value: parsed }` containing the parsed primitive; `null` if parsing fails.
+ */
 function parseJsonBlock(code: string): object | null {
     try {
         const parsed = JSON5.parse(code) as unknown;
@@ -69,7 +79,12 @@ function parseJsonBlock(code: string): object | null {
     }
 }
 
-/** Returns pre code block. */
+/**
+ * Extracts the code text and language identifier from the first child of a pre/code block.
+ *
+ * @param children - The ReactNode to inspect (typically the children of a `<pre>` element).
+ * @returns An object with `code` (the extracted text, with a trailing newline removed) and `language` (the language identifier derived from the child's `className`), or `null` if the first child is not a valid element containing code.
+ */
 export function getPreCodeBlock(
     children: ReactNode
 ): { code: string; language: string } | null {
@@ -83,7 +98,13 @@ export function getPreCodeBlock(
     };
 }
 
-/** Renders the chat code block UI. */
+/**
+ * Displays a formatted code block, rendering JSON data as an expandable viewer when possible.
+ *
+ * @param code - The code or JSON text to display
+ * @param language - The code language label to show in the header
+ * @returns The rendered code block UI
+ */
 function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     const shouldTryJson = JSON_LANGUAGES.has(language) || looksLikeJson(code);
     const parsedJson = shouldTryJson ? parseJsonBlock(code) : null;

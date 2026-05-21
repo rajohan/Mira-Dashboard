@@ -25,7 +25,19 @@ interface NewTaskModalProps {
     ) => Promise<void>;
 }
 
-/** Renders the new task modal UI. */
+/**
+ * Renders a modal with a form for creating a new task and optional recurring automation fields.
+ *
+ * @param isOpen - Whether the modal is visible.
+ * @param onClose - Callback invoked to close the modal.
+ * @param onSubmit - Async callback invoked when the form is submitted with a non-empty title. Called with:
+ *   - `title` (trimmed string)
+ *   - `body` (trimmed string or `undefined` when empty)
+ *   - `priority` (`"high" | "medium" | "low"`)
+ *   - `assignee` (`TaskAssigneeId`)
+ *   - `automation` (optional object with `cronJobId`, `scheduleSummary`, and `sessionTarget`); included only when a non-empty `cronJobId` is provided
+ * @returns The modal's JSX element.
+ */
 export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
     const form = useForm({
         defaultValues: {

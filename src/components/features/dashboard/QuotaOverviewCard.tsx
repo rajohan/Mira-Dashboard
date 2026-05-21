@@ -19,7 +19,17 @@ function getSeverity(
     return "error";
 }
 
-/** Parses OpenAI reset timestamps and returns null when the value is unavailable or invalid. */
+/**
+ * Parse OpenAI-style quota reset strings into a Date when possible.
+ *
+ * Supports two formats: a time-only string ("HH:MM") and a time-with-day-and-month string
+ * ("HH:MM on DD Mon", where Mon is a three-letter month abbreviation, e.g. "Sep").
+ * For time-only inputs the returned Date uses today's date with the parsed hours and minutes.
+ * For day/month inputs the returned Date uses the current year with the parsed day, month, hours, and minutes.
+ *
+ * @param value - Reset timestamp string in an OpenAI-style format
+ * @returns A Date representing the parsed reset time, or `null` if the string does not match supported formats or contains an unrecognized month
+ */
 function tryParseOpenAiReset(value: string): Date | null {
     const timeOnlyMatch = value.match(/^(\d{1,2}):(\d{2})$/);
     if (timeOnlyMatch) {

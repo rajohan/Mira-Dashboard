@@ -249,12 +249,22 @@ export function optimisticAttachmentDisplay(
     }));
 }
 
-/** Performs file name from path. */
+/**
+ * Extracts the file name from a filesystem or URL path.
+ *
+ * @param path - Path string using `/` or `\` separators
+ * @returns The file name (last path segment) from `path`
+ */
 function fileNameFromPath(path: string): string {
     return path.split(/[\\/]/).pop()!;
 }
 
-/** Performs mime type from path. */
+/**
+ * Infers a MIME type from a file path, URL, or filename extension.
+ *
+ * @param path - File path, URL, or filename to examine for an extension
+ * @returns The MIME type corresponding to the file extension, or `application/octet-stream` if the extension is not recognized
+ */
 function mimeTypeFromPath(path: string): string {
     const extension = path.split(".").pop()!.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -563,7 +573,17 @@ export function isRenderableChatHistoryMessage(
     );
 }
 
-/** Normalizes visible chat history messages. */
+/**
+ * Produce chat history filtered and adjusted for display according to visibility settings.
+ *
+ * Hidden attachments from tool-role messages are accumulated and merged into the next
+ * assistant message's attachments when encountered; if no assistant message follows,
+ * the accumulated attachments are appended as a synthetic assistant message at the end.
+ *
+ * @param messages - Raw chat messages to normalize and filter for visibility
+ * @param visibility - UI visibility settings that control inclusion of thinking/tool content
+ * @returns An array of `ChatHistoryMessage` objects prepared for rendering with hidden tool attachments merged or appended as described
+ */
 export function normalizeVisibleChatHistoryMessages(
     messages: RawChatHistoryMessage[],
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY

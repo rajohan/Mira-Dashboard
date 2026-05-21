@@ -51,7 +51,15 @@ interface UseChatSlashCommandsParams {
     shouldStickToBottomReference: { current: boolean };
 }
 
-/** Provides chat slash commands. */
+/**
+ * Create a handler that parses and executes supported chat slash commands for the current session.
+ *
+ * The returned async function accepts a command string (e.g., "/reset", "/model gpt-4") and executes
+ * built-in commands that manipulate session settings, local message state, active streams, and backend
+ * session endpoints. Unrecognized or non-slash inputs are not handled by this handler.
+ *
+ * @returns `true` if the input was a handled slash command, `false` if it is not a slash command and should be treated as regular input.
+ */
 export function useChatSlashCommands({
     request,
     selectedSession,

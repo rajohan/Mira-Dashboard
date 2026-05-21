@@ -40,7 +40,13 @@ import {
     useDockerVolumes,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
-/** Renders the docker UI. */
+/**
+ * Docker management page that displays Docker overview, updater controls, resource tables, and interactive modals.
+ *
+ * Renders summary cards (running/unhealthy/compose-managed/image size), an updater overview with run/update actions and recent events, containers list with details/logs/console actions, images and volumes tables with delete/prune operations, and contextual modals for container details, logs, console, and confirmations. Manages local UI state and coordinates async Docker queries and mutations.
+ *
+ * @returns The rendered React element for the Docker management page.
+ */
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -125,7 +131,12 @@ export function Docker() {
         });
     }
 
-    /** Runs a container action and shows the resulting output. */
+    /**
+     * Perform the specified action on a container and record the resulting output in the action log.
+     *
+     * @param containerId - The ID of the target container
+     * @param action - The action to perform: `"start"`, `"stop"`, `"restart"`, or `"update"`
+     */
     async function handleContainerAction(
         containerId: string,
         action: "start" | "stop" | "restart" | "update"
@@ -141,7 +152,11 @@ export function Docker() {
         }
     }
 
-    /** Restarts a Docker stack or one service within the stack. */
+    /**
+     * Request a restart of the entire Docker stack and display the server response or error in the action output UI.
+     *
+     * Sends a POST to `/api/docker/stack/action` with `{ action: "restart" }` and writes the server's `output` on success or a formatted error message on failure.
+     */
     async function handleStackRestart() {
         showActionOutput("Restarting Docker stack...");
         try {

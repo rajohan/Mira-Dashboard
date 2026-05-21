@@ -66,7 +66,15 @@ export function configuredChannels(config?: OpenClawConfig): ChannelSummary[] {
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Performs number from duration. */
+/**
+ * Convert a duration value to a number of seconds.
+ *
+ * Accepts a number or a string with an optional unit suffix (`s`, `m`, `h`, `d`, case-insensitive).
+ *
+ * @param value - A numeric seconds value or a string like `"30s"`, `"5m"`, `"1h"`, `"2d"`. If the unit is omitted the value is treated as seconds.
+ * @param fallback - Value to return when `value` is not a number or a matching duration string.
+ * @returns The duration expressed in seconds, or `fallback` if `value` is not a supported format.
+ */
 export function numberFromDuration(value: unknown, fallback: number): number {
     if (typeof value === "number") return value;
     if (typeof value !== "string") return fallback;
@@ -83,12 +91,23 @@ export function numberFromDuration(value: unknown, fallback: number): number {
     return amount * factors[unit];
 }
 
-/** Returns a displayable error message with a stable fallback. */
+/**
+ * Get a human-readable message from an error, falling back to the provided string.
+ *
+ * @param error - Value that may be an `Error` instance
+ * @param fallback - Message to return when `error` is not an `Error`
+ * @returns `error.message` when `error` is an `Error`, otherwise `fallback`
+ */
 export function errorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
 }
 
-/** Returns undefined for empty form values before writing config patches. */
+/**
+ * Normalize optional form input by converting empty or falsy strings to `undefined`.
+ *
+ * @param value - The form input value to normalize.
+ * @returns The original `value` when it is a non-empty string, otherwise `undefined`.
+ */
 export function optionalFormValue(value?: string): string | undefined {
     return value || undefined;
 }
@@ -102,7 +121,13 @@ interface SystemHostCache {
     };
 }
 
-/** Renders the settings UI. */
+/**
+ * Render the Settings page UI with configuration controls, backup/restart actions, and server information.
+ *
+ * Loads configuration, skills, and host data; provides handlers to save session, heartbeat, agent access,
+ * model, tool, and channel settings; allows toggling skills, creating backups, and restarting the gateway.
+ * Displays error and success alerts and clears internal timers on unmount.
+ */
 export function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -132,7 +157,11 @@ export function Settings() {
         };
     }, []);
 
-    /** Responds to restart events. */
+    /**
+     * Initiates a gateway restart; on success closes the restart modal and schedules a page reload after two seconds.
+     *
+     * On failure, sets the component error state with a user-facing message derived from the caught error.
+     */
     async function handleRestart() {
         try {
             await restartGateway.mutateAsync();
@@ -146,7 +175,12 @@ export function Settings() {
         }
     }
 
-    /** Responds to backup events. */
+    /**
+     * Triggers a server backup and initiates a JSON file download.
+     *
+     * Calls the backup mutation, serializes the returned data to pretty JSON, and starts a download named
+     * `openclaw-backup-YYYY-MM-DD.json`. On failure, sets the component error state with a backup failure message.
+     */
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
@@ -164,7 +198,12 @@ export function Settings() {
         }
     }
 
-    /** Responds to skill toggle events. */
+    /**
+     * Toggle a skill's enabled state in the backend and set an error message if the update fails.
+     *
+     * @param skillName - The name of the skill to update.
+     * @param enabled - Whether the skill should be enabled.
+     */
     async function handleSkillToggle(skillName: string, enabled: boolean) {
         try {
             await toggleSkill.mutateAsync({ name: skillName, enabled });
@@ -173,7 +212,13 @@ export function Settings() {
         }
     }
 
-    /** Responds to session save events. */
+    /**
+     * Persist the session idle timeout (minutes) into the application configuration and display a success message on completion.
+     *
+     * On failure, sets the component's error message to a readable fallback.
+     *
+     * @param idleMinutes - Idle timeout in minutes to set for session reset
+     */
     async function handleSessionSave(idleMinutes: number) {
         setError(null);
         try {
@@ -186,7 +231,14 @@ export function Settings() {
         }
     }
 
-    /** Responds to heartbeat save events. */
+    /**
+     * Save heartbeat configuration to the application's config.
+     *
+     * Updates `heartbeat.every` and `heartbeat.target`; if an agent with id `"ops"` exists, updates only that agent's `heartbeat`, otherwise updates the top-level `heartbeat`. When targeting an agent, `every` is converted to a string using minutes (`"Nm"`) when divisible by 60 or seconds (`"Ns"`) otherwise. The `target` parameter is normalized to `undefined` when empty.
+     *
+     * @param every - Heartbeat interval in seconds
+     * @param target - Heartbeat target string (empty string becomes `undefined`)
+     */
     async function handleHeartbeatSave(every: number, target: string) {
         setError(null);
         try {
@@ -222,7 +274,14 @@ export function Settings() {
         }
     }
 
-    /** Responds to agent access save events. */
+    /**
+     * Persist the provided agent access list to the application configuration and update UI state.
+     *
+     * Clears any existing error, updates config with the given agents list, shows a transient
+     * success message on success, and sets a user-facing error message on failure.
+     *
+     * @param agents - The full list of agent configurations to save as `agents.list` in the config
+     */
     async function handleAgentAccessSave(agents: AgentConfig[]) {
         setError(null);
         try {
@@ -237,7 +296,14 @@ export function Settings() {
         }
     }
 
-    /** Responds to model save events. */
+    /**
+     * Save agent model defaults from the provided form values into the application configuration.
+     *
+     * On success, sets a transient success message ("Model settings saved"); on failure, sets the error message
+     * derived from the thrown error or the fallback "Failed to save".
+     *
+     * @param values - Object containing `primary` model id and an array of `fallbacks`
+     */
     async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
         setError(null);
         try {
@@ -250,7 +316,11 @@ export function Settings() {
         }
     }
 
-    /** Responds to tool save events. */
+    /**
+     * Save tool-related settings to the configuration and trigger success or error UI feedback.
+     *
+     * @param values - Form values for tool settings including profile, web search and fetch options, exec policies, elevated and agent-to-agent toggles, and sessions visibility
+     */
     async function handleToolSave(values: ToolSettings) {
         setError(null);
         try {
@@ -281,7 +351,11 @@ export function Settings() {
         }
     }
 
-    /** Responds to channels save events. */
+    /**
+     * Persists the provided channel enabled states to the application configuration and displays a transient success message.
+     *
+     * @param channels - Array of channel summaries whose `enabled` state will be saved by channel id
+     */
     async function handleChannelsSave(channels: ChannelSummary[]) {
         setError(null);
         try {

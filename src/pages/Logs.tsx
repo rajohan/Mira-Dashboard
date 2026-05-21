@@ -36,7 +36,14 @@ export function compareLogFileNamesDescending(
     return String(b.name || "").localeCompare(String(a.name || ""));
 }
 
-/** Renders the logs UI. */
+/**
+ * Render the interactive logs viewer and its controls.
+ *
+ * Provides file selection, line-count selection, level and text filtering, export and clear actions,
+ * a virtualized log list, auto-follow scrolling behavior, and live subscription to incoming logs.
+ *
+ * @returns The React element representing the logs UI.
+ */
 export function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [lineCount, setLineCount] = useState<number>(100);
