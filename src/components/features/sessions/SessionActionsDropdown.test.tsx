@@ -19,11 +19,11 @@ describe("SessionActionsDropdown", () => {
             />
         );
 
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
         await userEvent.click(await screen.findByRole("menuitem", { name: "Compact" }));
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
         await userEvent.click(await screen.findByRole("menuitem", { name: "Reset" }));
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
         await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
         expect(onCompact).toHaveBeenCalledTimes(1);
@@ -40,7 +40,7 @@ describe("SessionActionsDropdown", () => {
             />
         );
 
-        await userEvent.click(screen.getByRole("button"));
+        await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
 
         expect(
             await screen.findByRole("menuitem", { name: "Compact" })
@@ -48,5 +48,20 @@ describe("SessionActionsDropdown", () => {
         expect(
             screen.queryByRole("menuitem", { name: "Delete" })
         ).not.toBeInTheDocument();
+    });
+
+    it("uses custom trigger labels when provided", () => {
+        render(
+            <SessionActionsDropdown
+                ariaLabel="Actions for Main"
+                onCompact={vi.fn()}
+                onReset={vi.fn()}
+            />
+        );
+
+        expect(screen.getByRole("button", { name: "Actions for Main" })).toHaveAttribute(
+            "aria-haspopup",
+            "menu"
+        );
     });
 });

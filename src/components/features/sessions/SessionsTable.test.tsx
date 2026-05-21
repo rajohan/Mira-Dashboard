@@ -75,6 +75,12 @@ describe("SessionsTable", () => {
         expect(screen.getAllByText("Research helper").length).toBeGreaterThan(0);
         expect(screen.getAllByText("codex").length).toBeGreaterThan(0);
         expect(screen.getAllByText("25.0k / 100k").length).toBeGreaterThan(0);
+        expect(
+            screen.getAllByRole("button", { name: "Actions for Main" }).length
+        ).toBeGreaterThan(0);
+        expect(
+            screen.getAllByRole("button", { name: "Actions for Research helper" }).length
+        ).toBeGreaterThan(0);
     });
 
     it("invokes compact, reset, and delete actions", async () => {
@@ -133,6 +139,22 @@ describe("SessionsTable", () => {
         expect(screen.getAllByText("fallback-id").length).toBeGreaterThan(0);
         expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
         expect(screen.getAllByText("0.0k / 200k").length).toBeGreaterThan(0);
+    });
+
+    it("uses the same action label fallback across responsive views", () => {
+        const unnamedSession: Session = {
+            ...sessions[0],
+            displayLabel: "",
+            displayName: "",
+            id: "",
+            key: "unnamed-key",
+            label: "",
+        };
+        renderTable({ sessions: [unnamedSession] });
+
+        expect(
+            screen.getAllByRole("button", { name: "Actions for unknown" }).length
+        ).toBe(2);
     });
 
     it("treats non-array session data as empty", () => {

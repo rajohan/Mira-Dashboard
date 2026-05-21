@@ -4,6 +4,7 @@ import { Dropdown, type DropdownItem } from "../../ui/Dropdown";
 
 /** Provides props for session actions dropdown. */
 interface SessionActionsDropdownProps {
+    ariaLabel?: string;
     onCompact: () => void;
     onReset: () => void;
     onDelete?: () => void;
@@ -12,6 +13,7 @@ interface SessionActionsDropdownProps {
 
 /** Renders the session actions dropdown UI. */
 export function SessionActionsDropdown({
+    ariaLabel = "Session actions",
     onCompact,
     onReset,
     onDelete,
@@ -41,6 +43,7 @@ export function SessionActionsDropdown({
 
     return (
         <Dropdown
+            ariaLabel={ariaLabel}
             icon={<MoreVertical className="h-4 w-4" />}
             variant="ghost"
             items={items}
