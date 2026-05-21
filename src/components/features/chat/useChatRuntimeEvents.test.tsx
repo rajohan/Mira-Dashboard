@@ -1841,6 +1841,42 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
+    it("does not merge unflushed deltas across new runs", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "Old" },
+                    runId: "run-old",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "New" },
+                    runId: "run-new",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                aliases: expect.arrayContaining(["run-new"]),
+                runId: "run-new",
+                text: "New",
+            })
+        );
+    });
+
     it("handles stream aliases for non-selected terminal events", async () => {
         const { emit, request, result } = renderRuntimeEvents({
             activeStreams: {

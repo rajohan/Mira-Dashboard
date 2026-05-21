@@ -75,6 +75,11 @@ const mocks = vi.hoisted(() => ({
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
     } | null,
+    confirmModalHandlers: null as {
+        isOpen: boolean;
+        onCancel: () => void;
+        onConfirm: () => void;
+    } | null,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
     virtualizerOptions: null as {
@@ -394,8 +399,9 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         onCancel: () => void;
         onConfirm: () => void;
         title: string;
-    }) =>
-        isOpen ? (
+    }) => {
+        mocks.confirmModalHandlers = { isOpen, onCancel, onConfirm };
+        return isOpen ? (
             <div role="dialog" aria-label={title}>
                 <button type="button" onClick={onCancel}>
                     cancel delete
@@ -404,11 +410,8 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     confirm delete
                 </button>
             </div>
-        ) : (
-            <button type="button" onClick={onConfirm}>
-                force closed confirm {title}
-            </button>
-        ),
+        ) : null;
+    },
 }));
 
 /** Installs an isolated localStorage mock for chat page tests. */
@@ -1655,9 +1658,12 @@ describe("Chat", () => {
         render(<Chat />);
         await screen.findByText("old user message");
 
-        await userEvent.click(
-            screen.getByRole("button", { name: "force closed confirm Delete message" })
-        );
+        expect(
+            screen.queryByRole("button", { name: "confirm delete" })
+        ).not.toBeInTheDocument();
+        act(() => {
+            mocks.confirmModalHandlers?.onConfirm();
+        });
 
         expect(screen.getByText("old user message")).toBeInTheDocument();
         expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
@@ -2516,11 +2522,11 @@ describe("Chat", () => {
                     typeof setInterval
                 >;
             });
-        let resolveHistory: (value: unknown) => void = () => {};
+        const historyRequests: Array<(value: unknown) => void> = [];
         mocks.request.mockImplementation((method: string) =>
             method === "chat.history"
                 ? new Promise((resolve) => {
-                      resolveHistory = resolve;
+                      historyRequests.push(resolve);
                   })
                 : Promise.resolve({ models: [] })
         );
@@ -2528,14 +2534,26 @@ describe("Chat", () => {
         try {
             const { unmount } = render(<Chat />);
             await waitFor(() => expect(intervalCallbacks.length).toBeGreaterThan(0));
+            await waitFor(() => expect(historyRequests.length).toBeGreaterThan(0));
+            const initialHistoryRequestCount = historyRequests.length;
+
+            await act(async () => {
+                for (const resolveInitialHistory of historyRequests) {
+                    resolveInitialHistory({ messages: [] });
+                }
+            });
 
             await act(async () => {
                 intervalCallbacks[0]!();
             });
+            await waitFor(() =>
+                expect(historyRequests.length).toBeGreaterThan(initialHistoryRequestCount)
+            );
+            const pollingHistoryRequestIndex = historyRequests.length - 1;
             unmount();
 
             await act(async () => {
-                resolveHistory({
+                historyRequests[pollingHistoryRequestIndex]!({
                     messages: [
                         {
                             content: "late response",

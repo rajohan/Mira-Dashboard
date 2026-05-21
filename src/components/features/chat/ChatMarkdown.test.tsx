@@ -205,7 +205,7 @@ describe("ChatMarkdown", () => {
         }) => ReactElement;
 
         render(
-            Pre({
+            createElement(Pre, {
                 children: "raw pre",
                 className: "custom-pre",
             })

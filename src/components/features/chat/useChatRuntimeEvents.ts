@@ -484,6 +484,12 @@ export function useChatRuntimeEvents({
             runId: string,
             deltaMessage: ChatHistoryMessage
         ) => {
+            const existingPending =
+                pendingDeltaUpdatesReference.current[streamSessionKey];
+            if (isNewRunForStream(existingPending, runId)) {
+                flushPendingDeltaUpdates();
+            }
+
             const pending = pendingDeltaUpdatesReference.current[streamSessionKey] || {
                 aliases: [],
                 deltas: [],
