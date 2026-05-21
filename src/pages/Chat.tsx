@@ -351,10 +351,13 @@ export function Chat() {
     }
 
     useEffect(() => {
-        if (!selectedSessionKey && sortedSessions.length > 0) {
+        if (
+            sortedSessions.length > 0 &&
+            (!selectedSessionKey || !sessionMap.has(selectedSessionKey))
+        ) {
             setSelectedSessionKey(sortedSessions[0]?.key || "");
         }
-    }, [sortedSessions, selectedSessionKey]);
+    }, [selectedSessionKey, sessionMap, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(

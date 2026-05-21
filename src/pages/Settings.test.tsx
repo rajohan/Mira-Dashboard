@@ -290,7 +290,10 @@ describe("Settings helpers", () => {
         );
         expect(errorMessage("bad", "Fallback")).toBe("Fallback");
         expect(optionalFormValue("value")).toBe("value");
+        expect(optionalFormValue("  value  ")).toBe("value");
         expect(optionalFormValue("")).toBeUndefined();
+        expect(optionalFormValue("   ")).toBeUndefined();
+        expect(optionalFormValue()).toBeUndefined();
     });
 
     it("clears success messages after the timeout", () => {

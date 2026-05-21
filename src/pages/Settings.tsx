@@ -90,7 +90,8 @@ export function errorMessage(error: unknown, fallback: string): string {
 
 /** Returns undefined for empty form values before writing config patches. */
 export function optionalFormValue(value?: string): string | undefined {
-    return value || undefined;
+    const trimmed = value?.trim();
+    return trimmed || undefined;
 }
 
 /** Represents system host cache. */

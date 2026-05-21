@@ -107,9 +107,12 @@ describe("SessionsTable", () => {
         await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
         await user.click(within(table).getByRole("columnheader", { name: /Type/u }));
 
-        const tableActionButton = within(table)
-            .getAllByRole("button")
-            .find((button) => button.getAttribute("aria-haspopup") === "menu")!;
+        const researchRow = within(table)
+            .getByRole("cell", { name: "Research helper" })
+            .closest("tr")!;
+        const tableActionButton = within(researchRow).getByRole("button", {
+            name: "Actions for Research helper",
+        });
         await user.click(tableActionButton);
         await user.click(await screen.findByRole("menuitem", { name: "Compact" }));
         await user.click(tableActionButton);

@@ -101,6 +101,9 @@ export function assistantTextLooksRecovered(left: string, right: string): boolea
     if (!normalizedLeft || !normalizedRight) {
         return false;
     }
+    if (normalizedLeft === normalizedRight) {
+        return true;
+    }
     if (normalizedLeft.length < 20 || normalizedRight.length < 20) {
         return false;
     }

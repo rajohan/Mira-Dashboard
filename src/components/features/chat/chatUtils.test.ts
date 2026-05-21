@@ -50,7 +50,8 @@ describe("chat utils", () => {
     it("detects recovered assistant text with normalization guards", () => {
         expect(assistantTextLooksRecovered("", "server reply")).toBe(false);
         expect(assistantTextLooksRecovered("client reply", " ")).toBe(false);
-        expect(assistantTextLooksRecovered(" same reply ", "same reply")).toBe(false);
+        expect(assistantTextLooksRecovered(" same reply ", "same reply")).toBe(true);
+        expect(assistantTextLooksRecovered("Done", "OK")).toBe(false);
         expect(
             assistantTextLooksRecovered(
                 "This response is still streaming from the assistant",

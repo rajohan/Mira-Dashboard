@@ -1081,7 +1081,7 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(screen.getByTestId("session-options")).toHaveTextContent("Main chat")
         );
-        expect(screen.getByTestId("selected-session")).toHaveTextContent("session-b");
+        expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a");
     });
 
     it("uses an empty model list response fallback", async () => {
@@ -2044,27 +2044,35 @@ describe("Chat", () => {
                 resolveFetch = resolve;
             }) as Promise<Response>
         );
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        const { unmount } = render(<Chat />);
-        await screen.findByText("old user message");
-        const voiceInput = document.querySelector<HTMLInputElement>(
-            'input[accept="audio/*"]'
-        )!;
+        try {
+            const { unmount } = render(<Chat />);
+            await screen.findByText("old user message");
+            const voiceInput = document.querySelector<HTMLInputElement>(
+                'input[accept="audio/*"]'
+            )!;
 
-        fireEvent.change(voiceInput, {
-            target: {
-                files: [new File(["voice"], "voice.webm", { type: "audio/webm" })],
-            },
-        });
-        unmount();
+            fireEvent.change(voiceInput, {
+                target: {
+                    files: [new File(["voice"], "voice.webm", { type: "audio/webm" })],
+                },
+            });
+            unmount();
 
-        await act(async () => {
-            resolveFetch({
-                json: async () => ({ text: "late voice" }),
-                ok: true,
-            } as Response);
-            await Promise.resolve();
-        });
+            await act(async () => {
+                resolveFetch({
+                    json: async () => ({ text: "late voice" }),
+                    ok: true,
+                } as Response);
+                await Promise.resolve();
+            });
+
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+            expect(screen.queryByText("late voice")).not.toBeInTheDocument();
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
     });
 
     it("records direct microphone audio and transcribes the stopped recording", async () => {
