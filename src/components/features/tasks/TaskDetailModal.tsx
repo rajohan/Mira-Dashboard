@@ -119,7 +119,7 @@ export function TaskDetailModal({
     }
 
     const priority = getPriority(task.labels);
-    const currentColumn = getColumnId(task)!;
+    const currentColumn = getColumnId(task);
     const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
     const automation = task.automation;
     const automationStatus = automation?.runningAtMs
@@ -241,7 +241,7 @@ export function TaskDetailModal({
                             >
                                 {task.state === "CLOSED"
                                     ? "DONE"
-                                    : currentColumn.toUpperCase()}
+                                    : `${currentColumn}`.toUpperCase()}
                             </span>
                             <span
                                 className={

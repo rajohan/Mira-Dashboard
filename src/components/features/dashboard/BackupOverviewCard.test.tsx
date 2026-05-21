@@ -153,7 +153,7 @@ describe("BackupOverviewCard", () => {
             },
         });
 
-        render(<BackupOverviewCard />);
+        const { rerender } = render(<BackupOverviewCard />);
 
         expect(screen.getByText("Postgres backup is running")).toBeInTheDocument();
         expect(screen.getByText("Backup is running")).toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("BackupOverviewCard", () => {
                 },
             },
         });
-        render(<BackupOverviewCard />);
+        rerender(<BackupOverviewCard />);
         expect(screen.getAllByText(/backup is running/iu).length).toBeGreaterThanOrEqual(
             2
         );

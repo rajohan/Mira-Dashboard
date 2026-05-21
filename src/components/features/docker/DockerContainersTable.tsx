@@ -51,6 +51,8 @@ function parseMemoryUsedMiB(value: string | undefined): number {
         GB: 1024,
         TIB: 1024 * 1024,
         TB: 1024 * 1024,
+        PIB: 1024 * 1024 * 1024,
+        PB: 1024 * 1024 * 1024,
     };
 
     return amount * factors[unit]!;
@@ -59,7 +61,7 @@ function parseMemoryUsedMiB(value: string | undefined): number {
 /** Formats memory used mb for display. */
 function formatMemoryUsedMb(value: string | undefined): string {
     const usedMiB = parseMemoryUsedMiB(value);
-    if (usedMiB < 0) {
+    if (!Number.isFinite(usedMiB) || usedMiB < 0) {
         return "-";
     }
 

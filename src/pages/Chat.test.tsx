@@ -1009,6 +1009,44 @@ describe("Chat", () => {
         );
     });
 
+    it("keeps the selected session when switching to an agent without sessions", async () => {
+        const user = userEvent.setup();
+        mocks.agentsStatus = {
+            agents: [
+                {
+                    id: "ops",
+                    currentTask: "Ops work",
+                    sessionKey: "agent:ops:missing",
+                    status: "online",
+                },
+            ],
+        };
+        mocks.liveSessions = [
+            {
+                key: "agent:main:main",
+                displayLabel: "Main",
+                label: "main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent(
+                "agent:main:main"
+            )
+        );
+
+        await user.click(screen.getByRole("button", { name: "select ops agent" }));
+
+        expect(screen.getByTestId("selected-session")).toHaveTextContent(
+            "agent:main:main"
+        );
+    });
+
     it("clears selected session details when the selected session disappears", async () => {
         const user = userEvent.setup();
         const { rerender } = render(<Chat />);

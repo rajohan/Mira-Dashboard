@@ -809,7 +809,9 @@ export function Chat() {
                     isSameSessionKey(session.key, agentSession) &&
                     getChatAgentId(session) === agentId
             ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
-        setSelectedSessionKey(nextSession!.key);
+        if (nextSession) {
+            setSelectedSessionKey(nextSession.key);
+        }
     };
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);

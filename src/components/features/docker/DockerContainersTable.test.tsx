@@ -227,6 +227,36 @@ describe("DockerContainersTable", () => {
                 },
                 status: "Dead",
             }),
+            makeContainer({
+                health: "healthy",
+                id: "huge",
+                name: "huge-container",
+                state: "running",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "0%",
+                    memory: "1PiB / 2PiB",
+                    memoryPercent: "50%",
+                    netIO: "0B / 0B",
+                    pids: "1",
+                },
+                status: "Up",
+            }),
+            makeContainer({
+                health: "healthy",
+                id: "invalid",
+                name: "invalid-container",
+                state: "running",
+                stats: {
+                    blockIO: "0B / 0B",
+                    cpu: "0%",
+                    memory: `${"9".repeat(400)}PB / 2PB`,
+                    memoryPercent: "50%",
+                    netIO: "0B / 0B",
+                    pids: "1",
+                },
+                status: "Up",
+            }),
         ]);
 
         expect(screen.getAllByText("created")[0]).toBeInTheDocument();
@@ -235,6 +265,7 @@ describe("DockerContainersTable", () => {
         expect(screen.getAllByText("none")[0]).toBeInTheDocument();
         expect(screen.getAllByText("1 MB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("1073.74 GB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("1099511.63 GB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("-")[0]).toBeInTheDocument();
         expect(screen.getAllByText("-7.5%")[0]).toBeInTheDocument();
     });
