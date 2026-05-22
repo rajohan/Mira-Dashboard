@@ -91,4 +91,23 @@ describe("LogRotationCard", () => {
         expect(screen.getByRole("button", { name: "Run real now" })).toBeDisabled();
         expect(screen.getByText("Loading...")).toBeInTheDocument();
     });
+
+    it("shows real-run pending and last real-run output states", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            data: { result: { dryRun: false }, success: true },
+            isPending: true,
+            mutate: vi.fn(),
+        });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Run dry-run now" })).toBeDisabled();
+        expect(screen.getByText("Last real run output")).toBeInTheDocument();
+    });
 });

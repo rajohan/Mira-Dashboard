@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Terminal } from "./Terminal";
+import {
+    isTerminalOutputAtBottom,
+    scrollTerminalOutputToBottom,
+    scrollTerminalOutputToBottomAndReport,
+    Terminal,
+} from "./Terminal";
 
 const terminal = vi.hoisted(() => ({
     addCommand: vi.fn(),
@@ -102,6 +107,42 @@ describe("Terminal page", () => {
         expect(screen.getByRole("button", { name: /Clear/ })).toBeDisabled();
     });
 
+    it("checks terminal output bottom state defensively", () => {
+        expect(isTerminalOutputAtBottom(null)).toBe(false);
+        expect(
+            isTerminalOutputAtBottom({
+                clientHeight: 100,
+                scrollHeight: 500,
+                scrollTop: 371,
+            })
+        ).toBe(true);
+        expect(
+            isTerminalOutputAtBottom({
+                clientHeight: 100,
+                scrollHeight: 500,
+                scrollTop: 100,
+            })
+        ).toBe(false);
+    });
+
+    it("scrolls terminal output to the bottom defensively", () => {
+        expect(scrollTerminalOutputToBottom(null)).toBe(false);
+        const onScrolled = vi.fn();
+        expect(scrollTerminalOutputToBottomAndReport(null, onScrolled)).toBe(false);
+        expect(onScrolled).not.toHaveBeenCalled();
+
+        const output = {
+            clientHeight: 100,
+            scrollHeight: 500,
+            scrollTop: 100,
+        };
+
+        expect(scrollTerminalOutputToBottom(output)).toBe(true);
+        expect(output.scrollTop).toBe(500);
+        expect(scrollTerminalOutputToBottomAndReport(output, onScrolled)).toBe(true);
+        expect(onScrolled).toHaveBeenCalledOnce();
+    });
+
     it("handles pwd locally", async () => {
         const user = userEvent.setup();
 
@@ -126,7 +167,8 @@ describe("Terminal page", () => {
         terminal.changeDirectory
             .mockResolvedValueOnce({ newCwd: "/home/ubuntu", success: true })
             .mockResolvedValueOnce({ newCwd: "/home/ubuntu/projects", success: true })
-            .mockResolvedValueOnce({ error: "No such directory", success: false });
+            .mockResolvedValueOnce({ error: "No such directory", success: false })
+            .mockResolvedValueOnce({ success: false });
 
         render(<Terminal />);
 
@@ -153,23 +195,31 @@ describe("Terminal page", () => {
                 stderr: "No such directory",
             })
         );
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "cd failed");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        expect(terminal.addCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+                command: "cd failed",
+                code: 1,
+                stderr: "cd failed",
+            })
+        );
     });
 
     it("does not submit while a command is pending", async () => {
-        const user = userEvent.setup();
-
-        const { rerender } = render(<Terminal />);
-        const input = screen.getByPlaceholderText("Enter command...");
-        await user.type(input, "ls -la");
-
         terminal.useStartTerminalCommand.mockReturnValue({
             isPending: true,
             mutateAsync: terminal.startCommand,
         });
-        rerender(<Terminal />);
+        render(<Terminal />);
 
+        const input = screen.getByPlaceholderText("Enter command...");
         const runButton = screen.getByRole("button", { name: /Run/ });
-        fireEvent.submit(input.closest("form")!);
+        act(() => {
+            fireEvent.change(input, { target: { value: "ls -la" } });
+            fireEvent.submit(input.closest("form")!);
+        });
 
         expect(runButton).toBeDisabled();
         expect(terminal.startCommand).not.toHaveBeenCalled();
@@ -198,7 +248,11 @@ describe("Terminal page", () => {
 
     it("uses tab completion and command history navigation", async () => {
         const user = userEvent.setup();
-        terminal.history = [makeHistoryEntry("npm test"), makeHistoryEntry("git status")];
+        terminal.history = [
+            makeHistoryEntry("npm test"),
+            makeHistoryEntry("git status"),
+            makeHistoryEntry(undefined as never),
+        ];
         terminal.getCompletions.mockResolvedValue({
             commonPrefix: "git status",
             completions: [{ completion: "git status" }, { completion: "git stash" }],
@@ -212,11 +266,11 @@ describe("Terminal page", () => {
         await waitFor(() => expect(input).toHaveValue("git status"));
 
         await user.keyboard("{ArrowUp}");
-        expect(input).toHaveValue("git status");
+        expect(input).toHaveValue("");
         await user.keyboard("{ArrowUp}");
-        expect(input).toHaveValue("npm test");
-        await user.keyboard("{ArrowDown}");
         expect(input).toHaveValue("git status");
+        await user.keyboard("{ArrowDown}");
+        expect(input).toHaveValue("");
     });
 
     it("handles empty tab, empty history navigation, scrolling, and follow button", async () => {
@@ -344,6 +398,39 @@ describe("Terminal page", () => {
         expect(screen.getByText("Command failed to start")).toBeInTheDocument();
         expect(screen.getByText("Exit code: unknown")).toBeInTheDocument();
         expect(screen.queryByText("detached stdout")).not.toBeInTheDocument();
+    });
+
+    it("renders current job output before history attaches it", async () => {
+        const user = userEvent.setup();
+        terminal.addCommand.mockImplementation(() => "detached-entry");
+        terminal.updateCommand.mockImplementation(() => {});
+        terminal.useTerminalHistory.mockImplementation(() => ({
+            addCommand: terminal.addCommand,
+            clearHistory: terminal.clearHistory,
+            history: [],
+            updateCommand: terminal.updateCommand,
+        }));
+        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+            data: jobId
+                ? {
+                      code: null,
+                      endedAt: null,
+                      stderr: "detached stderr",
+                      stdout: "detached stdout",
+                      status: "running",
+                  }
+                : null,
+        }));
+
+        const { rerender } = render(<Terminal />);
+
+        await user.type(screen.getByPlaceholderText("Enter command..."), "npm run dev");
+        await user.click(screen.getByRole("button", { name: /Run/ }));
+        rerender(<Terminal />);
+
+        expect(await screen.findByText("detached stdout")).toBeInTheDocument();
+        expect(screen.getByText("detached stderr")).toBeInTheDocument();
+        expect(screen.getByText("Running...")).toBeInTheDocument();
     });
 
     it("clears command history", async () => {

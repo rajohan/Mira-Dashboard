@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,14 @@ function renderTable(props: Partial<React.ComponentProps<typeof TopQueriesTable>
     return render(<TopQueriesTable enabled data={topQueries} {...props} />);
 }
 
+function restoreClipboard(descriptor: PropertyDescriptor | undefined) {
+    if (descriptor) {
+        Object.defineProperty(navigator, "clipboard", descriptor);
+        return;
+    }
+    Reflect.deleteProperty(navigator, "clipboard");
+}
+
 describe("TopQueriesTable", () => {
     it("renders disabled state when pg_stat_statements is unavailable", () => {
         render(<TopQueriesTable enabled={false} data={[]} />);
@@ -40,25 +48,102 @@ describe("TopQueriesTable", () => {
     });
 
     it("opens query details and copies the selected query", async () => {
+        const user = userEvent.setup();
+        let setTimeoutSpy: { mockRestore: () => void } | undefined;
+        let resetCopied: (() => void) | undefined;
         const writeText = vi.fn().mockImplementation(async () => {});
+        const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
             value: { writeText },
         });
 
-        renderTable({ data: [topQueries[0]!] });
+        try {
+            renderTable({ data: [topQueries[0]!] });
 
-        await userEvent.click(
-            screen.getAllByText("SELECT * FROM torrents WHERE id = $1")[0]!
-        );
+            await user.click(
+                screen.getAllByText("SELECT * FROM torrents WHERE id = $1")[0]!
+            );
 
-        expect(await screen.findByText("Query details")).toBeInTheDocument();
-        expect(screen.getByText("Calls: 12")).toBeInTheDocument();
+            expect(await screen.findByText("Query details")).toBeInTheDocument();
+            expect(screen.getByText("Calls: 12")).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole("button", { name: /Copy query/u }));
+            setTimeoutSpy = vi
+                .spyOn(window, "setTimeout")
+                .mockImplementationOnce((handler) => {
+                    if (typeof handler === "function") {
+                        resetCopied = handler as () => void;
+                    }
+                    return 1 as unknown as ReturnType<typeof setTimeout>;
+                });
+            await act(async () => {
+                fireEvent.click(screen.getByRole("button", { name: /Copy query/u }));
+                await Promise.resolve();
+            });
+            setTimeoutSpy.mockRestore();
+            setTimeoutSpy = undefined;
 
-        expect(writeText).toHaveBeenCalledWith("SELECT * FROM torrents WHERE id = $1");
-        expect(screen.getByRole("button", { name: /Copied/u })).toBeInTheDocument();
+            expect(writeText).toHaveBeenCalledWith(
+                "SELECT * FROM torrents WHERE id = $1"
+            );
+            expect(screen.getByRole("button", { name: /Copied/u })).toBeInTheDocument();
+            act(() => resetCopied?.());
+            expect(
+                screen.getByRole("button", { name: /Copy query/u })
+            ).toBeInTheDocument();
+        } finally {
+            setTimeoutSpy?.mockRestore();
+            restoreClipboard(originalClipboard);
+        }
+    });
+
+    it("resets copy state when clipboard writes fail", async () => {
+        const user = userEvent.setup();
+        const copyError = new Error("clipboard unavailable");
+        const writeText = vi
+            .fn()
+            .mockImplementationOnce(async () => {})
+            .mockRejectedValueOnce(copyError);
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: { writeText },
+        });
+
+        try {
+            renderTable({ data: [topQueries[0]!] });
+
+            await user.click(
+                screen.getAllByText("SELECT * FROM torrents WHERE id = $1")[0]!
+            );
+            await screen.findByText("Query details");
+
+            await act(async () => {
+                fireEvent.click(screen.getByRole("button", { name: /Copy query/u }));
+                await Promise.resolve();
+            });
+            expect(screen.getByRole("button", { name: /Copied/u })).toBeInTheDocument();
+
+            expect(writeText).toHaveBeenCalledWith(
+                "SELECT * FROM torrents WHERE id = $1"
+            );
+
+            await act(async () => {
+                fireEvent.click(screen.getByRole("button", { name: /Copied/u }));
+                await Promise.resolve();
+            });
+            expect(consoleError).toHaveBeenCalledWith("Failed to copy query", copyError);
+            expect(
+                screen.getByRole("button", { name: /Copy query/u })
+            ).toBeInTheDocument();
+            expect(
+                screen.queryByRole("button", { name: /Copied/u })
+            ).not.toBeInTheDocument();
+        } finally {
+            consoleError.mockRestore();
+            restoreClipboard(originalClipboard);
+        }
     });
 
     it("renders desktop columns, mobile summary cards, and sorted numeric data", async () => {

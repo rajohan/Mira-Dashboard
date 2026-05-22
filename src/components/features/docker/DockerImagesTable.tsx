@@ -31,7 +31,7 @@ function formatBytes(bytes: number): string {
         unitIndex += 1;
     }
 
-    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]!}`;
 }
 
 /** Provides props for docker images table. */

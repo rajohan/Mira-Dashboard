@@ -211,6 +211,7 @@ describe("useChatSlashCommands", () => {
             await result.current.runCommand("/think");
             await result.current.runCommand("/verbose");
             await result.current.runCommand("/fast status");
+            await result.current.runCommand("/status");
             await result.current.runCommand("/reasoning");
             await result.current.runCommand("/elevated");
             await result.current.runCommand("/usage");
@@ -224,6 +225,7 @@ describe("useChatSlashCommands", () => {
         expect(systemText).toContain("Current thinking level: medium");
         expect(systemText).toContain("Current verbose mode: off");
         expect(systemText).toContain("Current fast mode: on");
+        expect(systemText).toContain("Fast mode: on");
         expect(systemText).toContain("Current reasoning visibility: off");
         expect(systemText).toContain("Current elevated mode: off");
         expect(systemText).toContain("Session usage:");
@@ -323,6 +325,7 @@ describe("useChatSlashCommands", () => {
         await act(async () => {
             await result.current.runCommand("/status");
             await result.current.runCommand("/models");
+            await result.current.runCommand("/model");
         });
 
         expect(request).not.toHaveBeenCalled();
@@ -330,6 +333,7 @@ describe("useChatSlashCommands", () => {
             "hello",
             "No selected session.",
             "No configured models returned by the gateway.",
+            "Current model: default\nNo model list available.",
         ]);
     });
 

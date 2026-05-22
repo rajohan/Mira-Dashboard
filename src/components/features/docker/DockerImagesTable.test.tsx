@@ -28,6 +28,17 @@ const images: DockerImage[] = [
         size: 0,
         tag: "",
     },
+    {
+        containerName: "",
+        createdAt: "2026-05-10T09:00:00.000Z",
+        id: "image-small",
+        inUseBy: [],
+        lastTagTime: "2026-05-10T09:00:00.000Z",
+        platform: "linux/arm64",
+        repository: "small",
+        size: 1536,
+        tag: "tiny",
+    },
 ];
 
 describe("DockerImagesTable", () => {
@@ -53,11 +64,13 @@ describe("DockerImagesTable", () => {
         expect(screen.getAllByText("ghcr.io/example/comet")[0]).toBeInTheDocument();
         expect(screen.getAllByText("orphan")[0]).toBeInTheDocument();
         expect(screen.getAllByText("50 MB")[0]).toBeInTheDocument();
+        expect(screen.getAllByText("1.5 KB")[0]).toBeInTheDocument();
         expect(screen.getAllByText("Unused")[0]).toBeInTheDocument();
 
         const table = screen.getByRole("table");
         await userEvent.click(within(table).getByText("Used by"));
-        await userEvent.click(screen.getByRole("button", { name: "Remove unused (1)" }));
+        await userEvent.click(within(table).getByText("Used by"));
+        await userEvent.click(screen.getByRole("button", { name: "Remove unused (2)" }));
         const enabledDeleteButton = within(table)
             .getAllByRole("button", { name: "Delete orphan:<none>" })
             .find((button) => !button.hasAttribute("disabled"));

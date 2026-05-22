@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
+    assistantTextLooksRecovered,
     base64ToText,
+    chatErrorMessage,
     dataUrlToBase64,
     dedupeMessages,
     displayMimeType,
@@ -31,6 +33,40 @@ describe("chat utils", () => {
         expect(dataUrlToBase64("data:text/plain;base64,aGVsbG8=")).toBe("aGVsbG8=");
         expect(dataUrlToBase64("raw-base64")).toBe("raw-base64");
         expect(base64ToText("aGVsbG8=")).toBe("hello");
+        const codePointAtSpy = vi
+            .spyOn(String.prototype, "codePointAt")
+            .mockImplementationOnce(() => void 0);
+        expect(base64ToText("QQ==")).toBe("\u0000");
+        codePointAtSpy.mockRestore();
+        expect(chatErrorMessage(new Error("Specific failure"), "Fallback")).toBe(
+            "Specific failure"
+        );
+        expect(chatErrorMessage(new Error("  Trimmed failure  "), "Fallback")).toBe(
+            "Trimmed failure"
+        );
+        const emptyError = new Error("empty");
+        emptyError.message = "   ";
+        expect(chatErrorMessage(emptyError, "Fallback")).toBe("Fallback");
+        expect(chatErrorMessage("bad", "Fallback")).toBe("Fallback");
+    });
+
+    it("detects recovered assistant text with normalization guards", () => {
+        expect(assistantTextLooksRecovered("", "server reply")).toBe(false);
+        expect(assistantTextLooksRecovered("client reply", " ")).toBe(false);
+        expect(assistantTextLooksRecovered(" same reply ", "same reply")).toBe(true);
+        expect(assistantTextLooksRecovered("Done", "OK")).toBe(false);
+        expect(
+            assistantTextLooksRecovered(
+                "This response is still streaming from the assistant",
+                "response is still streaming"
+            )
+        ).toBe(true);
+        expect(
+            assistantTextLooksRecovered(
+                "response is still streaming",
+                "This response is still streaming from the assistant"
+            )
+        ).toBe(true);
     });
 
     it("builds stable message identity and delete keys", () => {
@@ -61,6 +97,15 @@ describe("chat utils", () => {
         expect(messageDeleteKey(toolCall)).toContain(
             'assistant::no-time::run-1::tool-calls::tool-1::bash::{"command":"date"}'
         );
+        expect(
+            messageIdentity(
+                message({
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-empty", name: "noop" }],
+                })
+            )
+        ).toBe("assistant::tool-calls::tool-empty::noop::null");
 
         const thinking = message({
             role: "assistant",
@@ -68,6 +113,9 @@ describe("chat utils", () => {
             thinking: [{ text: "reasoning" }],
         });
         expect(messageIdentity(thinking)).toBe("assistant::thinking::reasoning");
+        expect(messageIdentity(message({ role: "tool", text: "plain result" }))).toBe(
+            "tool::plain result"
+        );
 
         const visibleThinking = message({
             role: "assistant",
