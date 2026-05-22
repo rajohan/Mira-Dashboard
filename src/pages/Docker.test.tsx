@@ -698,6 +698,14 @@ describe("Docker page", () => {
             ok: true,
         } as Response);
         await user.click(screen.getByRole("button", { name: "Restart stack" }));
+        const stackRestartCall = vi
+            .mocked(fetch)
+            .mock.calls.find(([url]) => url === "/api/docker/stack/action");
+        expect(stackRestartCall?.[1]).toEqual(
+            expect.objectContaining({
+                body: JSON.stringify({ action: "restart" }),
+            })
+        );
         expect(
             await screen.findByText("Docker stack restart completed.")
         ).toBeInTheDocument();

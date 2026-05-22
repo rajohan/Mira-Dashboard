@@ -30,6 +30,14 @@ function renderTable(props: Partial<React.ComponentProps<typeof TopQueriesTable>
     return render(<TopQueriesTable enabled data={topQueries} {...props} />);
 }
 
+function restoreClipboard(descriptor: PropertyDescriptor | undefined) {
+    if (descriptor) {
+        Object.defineProperty(navigator, "clipboard", descriptor);
+        return;
+    }
+    Reflect.deleteProperty(navigator, "clipboard");
+}
+
 describe("TopQueriesTable", () => {
     it("renders disabled state when pg_stat_statements is unavailable", () => {
         render(<TopQueriesTable enabled={false} data={[]} />);
@@ -44,6 +52,7 @@ describe("TopQueriesTable", () => {
         let setTimeoutSpy: { mockRestore: () => void } | undefined;
         let resetCopied: (() => void) | undefined;
         const writeText = vi.fn().mockImplementation(async () => {});
+        const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
             value: { writeText },
@@ -84,6 +93,7 @@ describe("TopQueriesTable", () => {
             ).toBeInTheDocument();
         } finally {
             setTimeoutSpy?.mockRestore();
+            restoreClipboard(originalClipboard);
         }
     });
 
@@ -95,6 +105,7 @@ describe("TopQueriesTable", () => {
             .mockImplementationOnce(async () => {})
             .mockRejectedValueOnce(copyError);
         const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
             value: { writeText },
@@ -131,6 +142,7 @@ describe("TopQueriesTable", () => {
             ).not.toBeInTheDocument();
         } finally {
             consoleError.mockRestore();
+            restoreClipboard(originalClipboard);
         }
     });
 
