@@ -11,12 +11,7 @@ import {
     getCronStatusVariant,
 } from "../../../utils/cronUtils";
 import { formatDate, formatDuration } from "../../../utils/format";
-import {
-    COLUMN_CONFIG,
-    getColumnId,
-    getPriority,
-    PRIORITY_COLORS,
-} from "../../../utils/taskUtils";
+import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -124,8 +119,7 @@ export function TaskDetailModal({
     }
 
     const priority = getPriority(task.labels);
-    const fallbackColumn = COLUMN_CONFIG[0]?.id ?? "todo";
-    const currentColumn = getColumnId(task) || fallbackColumn;
+    const currentColumn = getColumnId(task);
     const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
     const automation = task.automation;
     const automationStatus = automation?.runningAtMs
