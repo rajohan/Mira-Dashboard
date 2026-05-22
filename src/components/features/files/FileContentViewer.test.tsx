@@ -151,7 +151,10 @@ describe("FileContentViewer", () => {
             />
         );
 
-        expect(screen.getByRole("img", { name: "Image" })).toBeInTheDocument();
+        expect(screen.getByRole("img", { name: "Image" })).toHaveAttribute(
+            "src",
+            "data:image/png;base64,iVBORw0KGgo="
+        );
     });
 
     it("uses textarea editing for code files when code edit mode is enabled", async () => {

@@ -1303,59 +1303,62 @@ describe("Chat", () => {
         await screen.findByText("old user message");
         const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
 
-        act(() => {
-            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
-                ...previous,
-                "session-a": {
-                    aliases: ["run-live"],
-                    message: {
-                        content: "streaming answer",
-                        role: "assistant",
+        try {
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        message: {
+                            content: "streaming answer",
+                            role: "assistant",
+                            text: "streaming answer",
+                        },
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        statusText: "Using tools",
                         text: "streaming answer",
+                        updatedAt: "2026-05-11T00:02:00.000Z",
                     },
-                    runId: "run-live",
-                    sessionKey: "session-a",
-                    statusText: "Using tools",
-                    text: "streaming answer",
-                    updatedAt: "2026-05-11T00:02:00.000Z",
-                },
-                "session-b": {
-                    aliases: ["run-side"],
-                    message: {
-                        content: "side stream",
-                        role: "assistant",
+                    "session-b": {
+                        aliases: ["run-side"],
+                        message: {
+                            content: "side stream",
+                            role: "assistant",
+                            text: "side stream",
+                        },
+                        runId: "run-side",
+                        sessionKey: "session-b",
+                        statusText: "Still live",
                         text: "side stream",
+                        updatedAt: "2026-05-11T00:03:00.000Z",
                     },
-                    runId: "run-side",
-                    sessionKey: "session-b",
-                    statusText: "Still live",
-                    text: "side stream",
-                    updatedAt: "2026-05-11T00:03:00.000Z",
-                },
-            }));
-        });
+                }));
+            });
 
-        expect(await screen.findByText("streaming answer")).toBeInTheDocument();
-        expect(screen.getByText("Using tools")).toBeInTheDocument();
+            expect(await screen.findByText("streaming answer")).toBeInTheDocument();
+            expect(screen.getByText("Using tools")).toBeInTheDocument();
 
-        const liveRefreshTimer = window.setTimeout(vi.fn(), 1000);
-        mocks.runtimeEventsOptions!.liveHistoryRefreshTimerReference.current =
-            liveRefreshTimer;
-        mocks.isConnected = false;
-        rerender(<Chat />);
+            const liveRefreshTimer = window.setTimeout(vi.fn(), 1000);
+            mocks.runtimeEventsOptions!.liveHistoryRefreshTimerReference.current =
+                liveRefreshTimer;
+            mocks.isConnected = false;
+            rerender(<Chat />);
 
-        await waitFor(() =>
-            expect(screen.queryByText("streaming answer")).not.toBeInTheDocument()
-        );
-        act(() => {
-            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
-                ...previous,
-                "session-b": previous["session-b"],
-            }));
-        });
-        expect(screen.queryByText("side stream")).not.toBeInTheDocument();
-        expect(clearTimeoutSpy).toHaveBeenCalledWith(liveRefreshTimer);
-        clearTimeoutSpy.mockRestore();
+            await waitFor(() =>
+                expect(screen.queryByText("streaming answer")).not.toBeInTheDocument()
+            );
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-b": previous["session-b"],
+                }));
+            });
+            expect(screen.queryByText("side stream")).not.toBeInTheDocument();
+            expect(clearTimeoutSpy).toHaveBeenCalledWith(liveRefreshTimer);
+        } finally {
+            clearTimeoutSpy.mockRestore();
+        }
     });
 
     it("computes virtual row keys, sizes typing rows, and follows bottom changes", async () => {
