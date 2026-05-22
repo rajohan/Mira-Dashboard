@@ -66,9 +66,13 @@ export function TopQueriesTable({
 
     /** Responds to copy events. */
     const handleCopy = async (query: string) => {
-        await navigator.clipboard.writeText(query);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
+        try {
+            await navigator.clipboard.writeText(query);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+        } catch (error_) {
+            console.error("Failed to copy query", error_);
+        }
     };
 
     return (

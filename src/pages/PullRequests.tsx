@@ -35,6 +35,16 @@ type PendingAction =
     | { type: "reject"; pr: PullRequestSummary }
     | { type: "deploy" }
     | null;
+type PendingActionType = Exclude<PendingAction, null>["type"];
+type UnhandledPendingActionType = Exclude<
+    PendingActionType,
+    "deploy" | "merge" | "merge-deploy" | "reject"
+>;
+
+const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
+    ? true
+    : never = true;
+void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
@@ -323,37 +333,43 @@ export function PullRequests() {
     async function confirmAction(action: Exclude<PendingAction, null>) {
         setActionError(null);
         try {
-            if (action.type === "merge") {
-                const result = await approvePullRequest.mutateAsync({
-                    number: action.pr.number,
-                    deploy: false,
-                });
-                setLastResult(actionResultMessage(result.message, result.cleanup));
-            }
+            switch (action.type) {
+                case "merge": {
+                    const result = await approvePullRequest.mutateAsync({
+                        number: action.pr.number,
+                        deploy: false,
+                    });
+                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    break;
+                }
 
-            if (action.type === "merge-deploy") {
-                const result = await approvePullRequest.mutateAsync({
-                    number: action.pr.number,
-                    deploy: true,
-                });
-                setLastResult(
-                    actionResultMessage(
-                        result.deployment?.note || result.message,
-                        result.cleanup
-                    )
-                );
-            }
+                case "merge-deploy": {
+                    const result = await approvePullRequest.mutateAsync({
+                        number: action.pr.number,
+                        deploy: true,
+                    });
+                    setLastResult(
+                        actionResultMessage(
+                            result.deployment?.note || result.message,
+                            result.cleanup
+                        )
+                    );
+                    break;
+                }
 
-            if (action.type === "reject") {
-                const result = await rejectPullRequest.mutateAsync({
-                    number: action.pr.number,
-                });
-                setLastResult(actionResultMessage(result.message, result.cleanup));
-            }
+                case "reject": {
+                    const result = await rejectPullRequest.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    break;
+                }
 
-            if (action.type === "deploy") {
-                const result = await deployDashboard.mutateAsync();
-                setLastResult(result.deployment.note || "Deploy scheduled");
+                case "deploy": {
+                    const result = await deployDashboard.mutateAsync();
+                    setLastResult(result.deployment.note || "Deploy scheduled");
+                    break;
+                }
             }
 
             setPendingAction(null);

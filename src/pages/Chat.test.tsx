@@ -670,6 +670,14 @@ describe("Chat", () => {
         mocks.socketError = null;
         mocks.liveSessions = [
             {
+                key: "",
+                displayLabel: "Broken chat",
+                label: "broken",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:01:00.000Z",
+            },
+            {
                 key: "session-a",
                 displayLabel: "Main chat",
                 label: "main",

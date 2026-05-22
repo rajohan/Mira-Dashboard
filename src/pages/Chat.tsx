@@ -360,7 +360,10 @@ export function Chat() {
         }
 
         if (!selectedSessionKey || !sessionMap.has(selectedSessionKey)) {
-            setSelectedSessionKey(sortedSessions[0]?.key || "");
+            const fallbackSession = sortedSessions.find(
+                (session) => session.key && sessionMap.has(session.key)
+            );
+            setSelectedSessionKey(fallbackSession?.key || "");
         }
     }, [selectedSessionKey, sessionMap, sortedSessions]);
 

@@ -87,6 +87,44 @@ describe("TopQueriesTable", () => {
         }
     });
 
+    it("keeps copy state unchanged when clipboard writes fail", async () => {
+        const user = userEvent.setup();
+        const copyError = new Error("clipboard unavailable");
+        const writeText = vi.fn().mockRejectedValue(copyError);
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: { writeText },
+        });
+
+        try {
+            renderTable({ data: [topQueries[0]!] });
+
+            await user.click(
+                screen.getAllByText("SELECT * FROM torrents WHERE id = $1")[0]!
+            );
+            await screen.findByText("Query details");
+
+            await act(async () => {
+                fireEvent.click(screen.getByRole("button", { name: /Copy query/u }));
+                await Promise.resolve();
+            });
+
+            expect(writeText).toHaveBeenCalledWith(
+                "SELECT * FROM torrents WHERE id = $1"
+            );
+            expect(consoleError).toHaveBeenCalledWith("Failed to copy query", copyError);
+            expect(
+                screen.getByRole("button", { name: /Copy query/u })
+            ).toBeInTheDocument();
+            expect(
+                screen.queryByRole("button", { name: /Copied/u })
+            ).not.toBeInTheDocument();
+        } finally {
+            consoleError.mockRestore();
+        }
+    });
+
     it("renders desktop columns, mobile summary cards, and sorted numeric data", async () => {
         renderTable();
 

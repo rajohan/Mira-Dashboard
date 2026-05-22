@@ -179,7 +179,7 @@ export function Logs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        const downloadName = [selectedFile, "logs"][Number(!selectedFile)]!;
+        const downloadName = selectedFile ?? "logs";
         a.download = `${downloadName}-${formatDateStamp()}.txt`;
         a.click();
         URL.revokeObjectURL(url);

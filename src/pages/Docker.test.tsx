@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,11 @@ import { Docker } from "./Docker";
 
 const docker = vi.hoisted(() => ({
     action: vi.fn(),
+    confirmModalHandlers: null as {
+        isOpen: boolean;
+        onConfirm: () => void;
+        title: string;
+    } | null,
     deleteImage: vi.fn(),
     deleteVolume: vi.fn(),
     manualUpdate: vi.fn(),
@@ -63,8 +68,9 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         onCancel: () => void;
         onConfirm: () => void;
         title: string;
-    }) =>
-        isOpen ? (
+    }) => {
+        docker.confirmModalHandlers = { isOpen, onConfirm, title };
+        return isOpen ? (
             <section data-testid="confirm-modal">
                 <h2>{title}</h2>
                 <p>{message}</p>
@@ -75,11 +81,8 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : (
-            <button type="button" onClick={onConfirm}>
-                Force closed confirm {title}
-            </button>
-        ),
+        ) : null;
+    },
 }));
 
 vi.mock("../components/ui/Modal", () => ({
@@ -391,6 +394,7 @@ describe("Docker page", () => {
         docker.runUpdater.mockResolvedValue({ ok: true });
         docker.startExec.mockResolvedValue({ jobId: "job-1" });
         docker.stopExec.mockResolvedValue(Promise.resolve());
+        docker.confirmModalHandlers = null;
         for (const value of Object.values(docker)) {
             if (typeof value === "function" && "mockClear" in value) value.mockClear();
         }
@@ -495,15 +499,19 @@ describe("Docker page", () => {
     });
 
     it("ignores closed manual update confirmations without a selected target", async () => {
-        const user = userEvent.setup();
-
         render(<Docker />);
 
-        await user.click(
-            screen.getByRole("button", {
+        expect(
+            screen.queryByRole("button", {
                 name: "Force closed confirm Run manual update",
             })
+        ).not.toBeInTheDocument();
+        expect(docker.confirmModalHandlers).toEqual(
+            expect.objectContaining({ isOpen: false, title: "Run manual update" })
         );
+        act(() => {
+            docker.confirmModalHandlers!.onConfirm();
+        });
 
         expect(docker.manualUpdate).not.toHaveBeenCalled();
     });

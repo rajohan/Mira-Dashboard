@@ -210,6 +210,26 @@ describe("Logs page", () => {
         mockLogs();
     });
 
+    it("exports live logs when no file is selected", () => {
+        const anchor = document.createElement("a");
+        let createElementSpy: { mockRestore: () => void } | undefined;
+        mocks.useLogFiles.mockReturnValue({ data: [] });
+
+        try {
+            render(<Logs />);
+
+            createElementSpy = vi
+                .spyOn(document, "createElement")
+                .mockReturnValueOnce(anchor);
+            fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+            expect(anchor.download).toMatch(/^logs-/u);
+            expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
+        } finally {
+            createElementSpy?.mockRestore();
+        }
+    });
+
     it("subscribes to logs, selects the latest file, and renders log entries", async () => {
         render(<Logs />);
 
@@ -297,16 +317,31 @@ describe("Logs page", () => {
 
     it("exports filtered logs", async () => {
         const user = userEvent.setup();
+        const anchor = document.createElement("a");
+        let createElementSpy: { mockRestore: () => void } | undefined;
 
-        render(<Logs />);
+        try {
+            render(<Logs />);
 
-        await user.click(screen.getByRole("button", { name: "Export" }));
-        expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
-        expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:logs");
+            await waitFor(() =>
+                expect(screen.getAllByLabelText("select")[0]).toHaveValue(
+                    "openclaw-2099-01-02.log"
+                )
+            );
+            createElementSpy = vi
+                .spyOn(document, "createElement")
+                .mockReturnValueOnce(anchor);
+            await user.click(screen.getByRole("button", { name: "Export" }));
+
+            expect(anchor.download).toMatch(/^openclaw-2099-01-02\.log-/u);
+            expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
+            expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:logs");
+        } finally {
+            createElementSpy?.mockRestore();
+        }
     });
 
     it("exports message-only logs after clearing the selected file", async () => {
-        const user = userEvent.setup();
         const anchor = document.createElement("a");
         let createElementSpy: { mockRestore: () => void } | undefined;
         mocks.liveLogs = [
@@ -324,11 +359,10 @@ describe("Logs page", () => {
             fireEvent.change(screen.getAllByLabelText("select")[0]!, {
                 target: { value: "" },
             });
-            await user.click(screen.getByRole("button", { name: "Reload" }));
             createElementSpy = vi
                 .spyOn(document, "createElement")
                 .mockReturnValueOnce(anchor);
-            await user.click(screen.getByRole("button", { name: "Export" }));
+            fireEvent.click(screen.getByRole("button", { name: "Export" }));
 
             expect(anchor.download).toMatch(/\.txt$/u);
             expect(mocks.createObjectUrl).toHaveBeenCalledTimes(1);
