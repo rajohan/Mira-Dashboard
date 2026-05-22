@@ -430,9 +430,12 @@ export function useChatRuntimeEvents({
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
 
-    selectedSessionKeyReference.current = selectedSessionKey;
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
+
+    useEffect(() => {
+        selectedSessionKeyReference.current = selectedSessionKey;
+    }, [selectedSessionKey]);
 
     useEffect(() => {
         let cancelled = false;
@@ -499,10 +502,15 @@ export function useChatRuntimeEvents({
                 existingPending &&
                 isProvisionalRunId(streamSessionKey, existingPending.runId) &&
                 !isProvisionalRunId(streamSessionKey, runId);
+            const usesProvisionalFallback =
+                existingPending && isProvisionalRunId(streamSessionKey, runId);
 
             if (migratesProvisionalRun) {
                 existingPending.runId = runId;
-            } else if (isNewRunForStream(existingPending, runId)) {
+            } else if (
+                !usesProvisionalFallback &&
+                isNewRunForStream(existingPending, runId)
+            ) {
                 flushPendingDeltaUpdates();
             }
 

@@ -1056,6 +1056,41 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
+    it("preserves queued real-run deltas when a fallback run id arrives", async () => {
+        const { emit, result } = renderRuntimeEvents();
+
+        await act(async () => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "Early ",
+                    runId: "run-real",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "token",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                aliases: ["run-real", "session-a"],
+                runId: "run-real",
+                text: "Earlytoken",
+            })
+        );
+    });
+
     it("drops stale aliases when Gateway v4 replacement starts a new run", () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
