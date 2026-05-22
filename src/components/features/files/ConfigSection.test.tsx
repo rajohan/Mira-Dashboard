@@ -60,4 +60,29 @@ describe("ConfigSection", () => {
         await user.keyboard(" ");
         expect(onSelect).toHaveBeenCalledWith("config:cron/jobs.json");
     });
+
+    it("marks selected nested cron and hook files", async () => {
+        const user = userEvent.setup();
+        const { rerender } = render(
+            <ConfigSection selectedPath="config:cron/jobs.json" onSelect={vi.fn()} />
+        );
+
+        await user.click(screen.getByRole("button", { name: "cron" }));
+        expect(screen.getByRole("button", { name: "jobs.json" })).toHaveAttribute(
+            "aria-current",
+            "true"
+        );
+
+        rerender(
+            <ConfigSection
+                selectedPath="config:hooks/transforms/agentmail.ts"
+                onSelect={vi.fn()}
+            />
+        );
+        await user.click(screen.getByRole("button", { name: "hooks" }));
+        expect(screen.getByRole("button", { name: "agentmail.ts" })).toHaveAttribute(
+            "aria-current",
+            "true"
+        );
+    });
 });

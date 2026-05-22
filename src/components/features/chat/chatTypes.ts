@@ -251,12 +251,13 @@ export function optimisticAttachmentDisplay(
 
 /** Performs file name from path. */
 function fileNameFromPath(path: string): string {
-    return path.split(/[\\/]/).pop() || path;
+    const fileName = path.split(/[\\/]/).pop();
+    return fileName || path;
 }
 
 /** Performs mime type from path. */
 function mimeTypeFromPath(path: string): string {
-    const extension = path.split(".").pop()?.toLowerCase();
+    const extension = path.split(".").pop()!.toLowerCase();
     const mimeTypes: Record<string, string> = {
         png: "image/png",
         jpg: "image/jpeg",
@@ -273,9 +274,7 @@ function mimeTypeFromPath(path: string): string {
         webm: "video/webm",
     };
 
-    return extension
-        ? mimeTypes[extension] || "application/octet-stream"
-        : "application/octet-stream";
+    return mimeTypes[extension] || "application/octet-stream";
 }
 
 /** Performs media URL from path. */
@@ -576,15 +575,10 @@ export function normalizeVisibleChatHistoryMessages(
     for (const message of messages.map(normalizeChatHistoryMessage)) {
         const isToolMessage = isToolRole(message.role);
         const hiddenToolMedia =
-            isToolMessage &&
-            !visibility.showTools &&
-            (message.attachments || []).length > 0;
+            isToolMessage && !visibility.showTools && message.attachments!.length > 0;
 
         if (hiddenToolMedia) {
-            pendingHiddenToolMedia = [
-                ...pendingHiddenToolMedia,
-                ...(message.attachments || []),
-            ];
+            pendingHiddenToolMedia = [...pendingHiddenToolMedia, ...message.attachments!];
             continue;
         }
 
@@ -598,7 +592,7 @@ export function normalizeVisibleChatHistoryMessages(
         ) {
             visibleMessages.push({
                 ...message,
-                attachments: [...(message.attachments || []), ...pendingHiddenToolMedia],
+                attachments: [...message.attachments!, ...pendingHiddenToolMedia],
             });
             pendingHiddenToolMedia = [];
             continue;

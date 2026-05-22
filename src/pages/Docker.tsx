@@ -142,17 +142,15 @@ export function Docker() {
     }
 
     /** Restarts a Docker stack or one service within the stack. */
-    async function handleStackRestart(service?: string) {
-        showActionOutput(
-            service ? `Restarting ${service}...` : "Restarting Docker stack..."
-        );
+    async function handleStackRestart() {
+        showActionOutput("Restarting Docker stack...");
         try {
             const response = await fetch("/api/docker/stack/action", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ action: "restart", service }),
+                body: JSON.stringify({ action: "restart" }),
             });
             const result = (await response.json()) as { output?: string; error?: string };
             if (!response.ok) {
@@ -716,9 +714,7 @@ export function Docker() {
                     />
                     <Button
                         onClick={() =>
-                            selectedConsoleContainer
-                                ? void handleStartConsole(selectedConsoleContainer.id)
-                                : undefined
+                            void handleStartConsole(selectedConsoleContainer!.id)
                         }
                         disabled={!selectedConsoleContainer || !consoleCommand.trim()}
                     >

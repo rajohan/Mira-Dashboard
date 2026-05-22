@@ -225,33 +225,39 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                 </div>
 
                 <div className="grid grid-cols-1 gap-2 pt-2 sm:flex sm:justify-end">
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={onClose}
-                        disabled={form.state.isSubmitting}
-                        className="w-full sm:w-auto"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        type="submit"
-                        variant="primary"
-                        disabled={form.state.isSubmitting}
-                        className="w-full sm:w-auto"
-                    >
-                        {form.state.isSubmitting ? (
+                    <form.Subscribe selector={(state) => state.isSubmitting}>
+                        {(isSubmitting) => (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Creating...
-                            </>
-                        ) : (
-                            <>
-                                <Plus className="h-4 w-4" />
-                                Create Task
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={onClose}
+                                    disabled={isSubmitting}
+                                    className="w-full sm:w-auto"
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    variant="primary"
+                                    disabled={isSubmitting}
+                                    className="w-full sm:w-auto"
+                                >
+                                    {isSubmitting ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            Creating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Plus className="h-4 w-4" />
+                                            Create Task
+                                        </>
+                                    )}
+                                </Button>
                             </>
                         )}
-                    </Button>
+                    </form.Subscribe>
                 </div>
             </form>
         </Modal>

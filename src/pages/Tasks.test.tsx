@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -586,6 +586,10 @@ describe("Tasks page", () => {
                 await handlers.onDragEnd({ active: { id: "1" }, over: null });
                 await handlers.onDragEnd({ active: { id: "1" }, over: { id: "1" } });
                 await handlers.onDragEnd({
+                    active: { id: "1" },
+                    over: { id: "missing" },
+                });
+                await handlers.onDragEnd({
                     active: { id: "missing" },
                     over: { id: "done" },
                 });
@@ -671,5 +675,65 @@ describe("Tasks page", () => {
         expect(hooks.deleteTaskUpdate).not.toHaveBeenCalled();
         expect(hooks.deleteTask).not.toHaveBeenCalled();
         expect(screen.queryByTestId("task-detail")).not.toBeInTheDocument();
+    });
+
+    it("keeps delete confirmation open and logs when task deletion fails", async () => {
+        const user = userEvent.setup();
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const deleteError = new Error("delete failed");
+        hooks.deleteTask.mockRejectedValue(deleteError);
+
+        try {
+            render(<Tasks />);
+
+            await user.click(screen.getByRole("button", { name: "Build tests" }));
+            await user.click(screen.getByRole("button", { name: "Delete task" }));
+            await user.click(screen.getByRole("button", { name: "Confirm Delete task" }));
+
+            expect(hooks.deleteTask).toHaveBeenCalledWith({ number: 1 });
+            await screen.findByTestId("confirm-Delete task");
+            expect(screen.getByTestId("task-detail")).toBeInTheDocument();
+            await waitFor(() =>
+                expect(consoleErrorSpy).toHaveBeenCalledWith(
+                    "Failed to delete task:",
+                    deleteError
+                )
+            );
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
+    });
+
+    it("logs and keeps progress-update deletion confirmation open when deletion fails", async () => {
+        const user = userEvent.setup();
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const deleteError = new Error("delete update failed");
+        hooks.deleteTaskUpdate.mockRejectedValue(deleteError);
+
+        try {
+            render(<Tasks />);
+
+            await user.click(screen.getByRole("button", { name: "Build tests" }));
+            await user.click(screen.getByRole("button", { name: "Delete progress" }));
+            await user.click(
+                screen.getByRole("button", { name: "Confirm Delete progress update" })
+            );
+
+            expect(hooks.deleteTaskUpdate).toHaveBeenCalledWith({
+                taskId: 1,
+                updateId: 10,
+            });
+            await waitFor(() =>
+                expect(consoleErrorSpy).toHaveBeenCalledWith(
+                    "Failed to delete task update:",
+                    deleteError
+                )
+            );
+            expect(
+                screen.getByTestId("confirm-Delete progress update")
+            ).toBeInTheDocument();
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
     });
 });

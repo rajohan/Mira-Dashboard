@@ -100,51 +100,51 @@ export function Logs() {
             const sorted = [...availableLogFiles].sort(compareLogFileNamesDescending);
             const today = formatDateStamp();
             const todayFile = sorted.find((f) => f.name.includes(today));
-            setSelectedFile(todayFile?.name || sorted[0]?.name || "");
+            setSelectedFile(todayFile?.name || sorted[0]!.name);
         }
     }, [availableLogFiles, selectedFile]);
 
     // Subscribe to log stream once per connection
     useEffect(() => {
-        if (!isConnected) return;
-        if (subscribedConnectionIdRef.current === connectionId) return;
-
-        subscribedConnectionIdRef.current = connectionId;
-        request("subscribe", { channel: "logs" }).catch((error_) => {
-            console.error("Failed to subscribe to logs:", error_);
-            subscribedConnectionIdRef.current = null;
-        });
+        if (isConnected && subscribedConnectionIdRef.current !== connectionId) {
+            subscribedConnectionIdRef.current = connectionId;
+            request("subscribe", { channel: "logs" }).catch((error_) => {
+                console.error("Failed to subscribe to logs:", error_);
+                subscribedConnectionIdRef.current = null;
+            });
+        }
     }, [isConnected, connectionId, request]);
 
     /** Performs load log content. */
     const loadLogContent = async () => {
-        if (!selectedFile) return;
-
         const seq = ++requestSeqRef.current;
-        const result = await refetchContent();
+        let result: Awaited<ReturnType<typeof refetchContent>>;
 
-        if (seq !== requestSeqRef.current) {
+        try {
+            result = await refetchContent();
+        } catch (error_) {
+            console.error("Failed to load log content:", error_);
             return;
         }
 
-        const content = result.data || "";
-        const lines = content.split("\n").filter((line) => line.trim());
-        const parsedLogs = lines
-            .map((line, index) => parseLogLine(line, index))
-            .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+        if (seq === requestSeqRef.current) {
+            const content = result.data || "";
+            const lines = content.split("\n").filter((line) => line.trim());
+            const parsedLogs = lines
+                .map((line, index) => parseLogLine(line, index))
+                .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-        if (!logsCollection.isReady()) {
-            return;
-        }
+            if (logsCollection.isReady()) {
+                // Replace full snapshot without relying on stale array references.
+                const existingKeys = Array.from(logsCollection, ([key]) => String(key));
+                for (const key of existingKeys) {
+                    logsCollection.utils.writeDelete(key);
+                }
 
-        // Replace full snapshot without relying on stale array references.
-        const existingKeys = Array.from(logsCollection, ([key]) => String(key));
-        for (const key of existingKeys) {
-            logsCollection.utils.writeDelete(key);
-        }
-
-        for (const parsed of parsedLogs) {
-            logsCollection.utils.writeInsert(parsed);
+                for (const parsed of parsedLogs) {
+                    logsCollection.utils.writeInsert(parsed);
+                }
+            }
         }
     };
 
@@ -186,7 +186,8 @@ export function Logs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${selectedFile || "logs"}-${formatDateStamp()}.txt`;
+        const downloadName = selectedFile ?? "logs";
+        a.download = `${downloadName}-${formatDateStamp()}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -196,25 +197,22 @@ export function Logs() {
         getScrollElement: () => logContainerRef.current,
         estimateSize: () => 22,
         overscan: 15,
-        getItemKey: (index) => filteredLogs[index]?.id ?? index,
+        getItemKey: (index) => filteredLogs[index]!.id,
         measureElement: (element) => Math.ceil(element.getBoundingClientRect().height),
     });
 
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        const el = logContainerRef.current;
-        if (!el) return true;
+        const el = logContainerRef.current!;
         return (
             el.scrollHeight - el.scrollTop - el.clientHeight <= LOG_BOTTOM_THRESHOLD_PX
         );
     };
 
     /** Updates scroll state when the log viewport scrolls. */
-    const handleScroll = () => {
-        const el = logContainerRef.current;
-        if (el) {
-            lastKnownLogScrollTopRef.current = el.scrollTop;
-        }
+    const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+        const el = event.currentTarget;
+        lastKnownLogScrollTopRef.current = el.scrollTop;
 
         const atBottom = checkIsAtBottom();
         shouldStickToBottomRef.current = atBottom;
@@ -223,8 +221,7 @@ export function Logs() {
 
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        const el = logContainerRef.current;
-        if (!el) return;
+        const el = logContainerRef.current!;
         el.scrollTop = el.scrollHeight;
         lastKnownLogScrollTopRef.current = el.scrollTop;
         shouldStickToBottomRef.current = true;
@@ -323,6 +320,7 @@ export function Logs() {
                         onClick={() => void loadLogContent()}
                         isLoading={isLoadingContent}
                         label="Reload"
+                        disabled={!selectedFile}
                     />
                     <Button
                         variant="secondary"
@@ -379,8 +377,7 @@ export function Logs() {
                             }}
                         >
                             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                                const log = filteredLogs[virtualRow.index];
-                                if (!log) return null;
+                                const log = filteredLogs[virtualRow.index]!;
 
                                 return (
                                     <div

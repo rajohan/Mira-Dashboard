@@ -274,6 +274,19 @@ describe("Cron page", () => {
         expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
     });
 
+    it("uses the generic edit error for non-Error save failures", async () => {
+        const user = userEvent.setup();
+        hooks.updateJob.mockRejectedValueOnce("nope");
+
+        render(<Cron />);
+
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        expect(
+            await screen.findByText("Invalid JSON in edit fields")
+        ).toBeInTheDocument();
+    });
+
     it("ignores actions when the current job has no identifier", async () => {
         const user = userEvent.setup();
         mockCronJobs({
@@ -302,5 +315,37 @@ describe("Cron page", () => {
         expect(hooks.toggleJob).not.toHaveBeenCalled();
         expect(hooks.runNow).not.toHaveBeenCalled();
         expect(hooks.updateJob).not.toHaveBeenCalled();
+    });
+
+    it("saves jobs with missing optional drafts as empty patch fields", async () => {
+        const user = userEvent.setup();
+        mockCronJobs({
+            data: [
+                {
+                    enabled: true,
+                    id: "minimal",
+                },
+            ],
+        });
+
+        render(<Cron />);
+
+        expect(await screen.findByTestId("cron-details")).toHaveTextContent(
+            "name draft:"
+        );
+        expect(screen.getByTestId("cron-details")).toHaveTextContent(
+            "schedule draft: {}"
+        );
+
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        expect(hooks.updateJob).toHaveBeenCalledWith({
+            id: "minimal",
+            patch: expect.objectContaining({
+                name: undefined,
+                payload: {},
+                schedule: {},
+            }),
+        });
     });
 });

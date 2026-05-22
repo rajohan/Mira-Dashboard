@@ -64,9 +64,10 @@ export function Tasks() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
     const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null);
-    const [pendingDeleteUpdateId, setPendingDeleteUpdateId] = useState<number | null>(
-        null
-    );
+    const [pendingDeleteUpdate, setPendingDeleteUpdate] = useState<{
+        taskId: number;
+        updateId: number;
+    } | null>(null);
 
     const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
 
@@ -151,20 +152,20 @@ export function Tasks() {
         const taskId = String(active.id);
         const columnId = resolveColumnFromOverId(String(over.id));
 
-        if (columnId) {
-            const column = COLUMN_CONFIG.find((c) => c.id === columnId);
-            if (column) {
-                const task = tasks.find((t) => t.number.toString() === taskId);
-                if (task && !task.labels.some((l) => l.name === column.label)) {
-                    try {
-                        await moveTask.mutateAsync({
-                            number: Number.parseInt(taskId),
-                            columnLabel: column.label,
-                        });
-                    } catch (error_) {
-                        console.error("Failed to move task:", error_);
-                    }
-                }
+        if (!columnId) {
+            return;
+        }
+
+        const column = COLUMN_CONFIG.find((c) => c.id === columnId)!;
+        const task = tasks.find((t) => t.number.toString() === taskId);
+        if (task && !task.labels.some((l) => l.name === column.label)) {
+            try {
+                await moveTask.mutateAsync({
+                    number: Number.parseInt(taskId),
+                    columnLabel: column.label,
+                });
+            } catch (error_) {
+                console.error("Failed to move task:", error_);
             }
         }
     };
@@ -175,58 +176,55 @@ export function Tasks() {
     };
 
     /** Responds to move task events. */
-    const handleMoveTask = async (column: ColumnId) => {
-        if (!selectedTask) return;
-        const col = COLUMN_CONFIG.find((c) => c.id === column);
-        if (col) {
-            const updated = await moveTask.mutateAsync({
-                number: selectedTask.number,
-                columnLabel: col.label,
-            });
-            setSelectedTask(updated);
-        }
+    const handleMoveTask = async (task: Task, column: ColumnId) => {
+        const col = COLUMN_CONFIG.find((c) => c.id === column)!;
+        const updated = await moveTask.mutateAsync({
+            number: task.number,
+            columnLabel: col.label,
+        });
+        setSelectedTask(updated);
     };
 
     /** Responds to assign task events. */
-    const handleAssignTask = async (assignee: TaskAssigneeId) => {
-        if (!selectedTask) return;
+    const handleAssignTask = async (task: Task, assignee: TaskAssigneeId) => {
         const updated = await assignTask.mutateAsync({
-            number: selectedTask.number,
+            number: task.number,
             assignee,
         });
         setSelectedTask(updated);
     };
 
     /** Responds to delete task events. */
-    const handleDeleteTask = async () => {
-        if (!selectedTask) return;
-        setPendingDeleteTaskId(selectedTask.number);
+    const handleDeleteTask = async (task: Task) => {
+        setPendingDeleteTaskId(task.number);
     };
 
     /** Performs confirm delete task. */
-    const confirmDeleteTask = async () => {
-        if (!pendingDeleteTaskId) return;
-        await deleteTask.mutateAsync({ number: pendingDeleteTaskId });
-        setPendingDeleteTaskId(null);
-        setSelectedTask(null);
+    const confirmDeleteTask = async (taskId: number) => {
+        try {
+            await deleteTask.mutateAsync({ number: taskId });
+            setPendingDeleteTaskId(null);
+            setSelectedTask(null);
+        } catch (error_) {
+            console.error("Failed to delete task:", error_);
+        }
     };
 
     /** Responds to update task events. */
-    const handleUpdateTask = async (updates: {
-        title?: string;
-        body?: string;
-        labels?: string[];
-        automation?: Pick<
-            TaskAutomation,
-            "cronJobId" | "scheduleSummary" | "sessionTarget"
-        > | null;
-    }) => {
-        if (!selectedTask) {
-            throw new Error("No selected task");
+    const handleUpdateTask = async (
+        task: Task,
+        updates: {
+            title?: string;
+            body?: string;
+            labels?: string[];
+            automation?: Pick<
+                TaskAutomation,
+                "cronJobId" | "scheduleSummary" | "sessionTarget"
+            > | null;
         }
-
+    ) => {
         const updated = await updateTask.mutateAsync({
-            number: selectedTask.number,
+            number: task.number,
             updates,
         });
         setSelectedTask(updated);
@@ -234,22 +232,22 @@ export function Tasks() {
     };
 
     /** Responds to add task update events. */
-    const handleAddTaskUpdate = async (messageMd: string) => {
-        if (!selectedTask) return;
-
+    const handleAddTaskUpdate = async (task: Task, messageMd: string) => {
         await createTaskUpdate.mutateAsync({
-            taskId: selectedTask.number,
+            taskId: task.number,
             author: TASK_ASSIGNEES.raymond.id,
             messageMd,
         });
     };
 
     /** Responds to edit task update events. */
-    const handleEditTaskUpdate = async (updateId: number, messageMd: string) => {
-        if (!selectedTask) return;
-
+    const handleEditTaskUpdate = async (
+        task: Task,
+        updateId: number,
+        messageMd: string
+    ) => {
         await updateTaskUpdate.mutateAsync({
-            taskId: selectedTask.number,
+            taskId: task.number,
             updateId,
             author: TASK_ASSIGNEES.raymond.id,
             messageMd,
@@ -257,19 +255,24 @@ export function Tasks() {
     };
 
     /** Responds to delete task update events. */
-    const handleDeleteTaskUpdate = async (updateId: number) => {
-        setPendingDeleteUpdateId(updateId);
+    const handleDeleteTaskUpdate = async (task: Task, updateId: number) => {
+        setPendingDeleteUpdate({ taskId: task.number, updateId });
     };
 
     /** Performs confirm delete task update. */
-    const confirmDeleteTaskUpdate = async () => {
-        if (!selectedTask || !pendingDeleteUpdateId) return;
-
-        await deleteTaskUpdate.mutateAsync({
-            taskId: selectedTask.number,
-            updateId: pendingDeleteUpdateId,
-        });
-        setPendingDeleteUpdateId(null);
+    const confirmDeleteTaskUpdate = async (pendingDelete: {
+        taskId: number;
+        updateId: number;
+    }) => {
+        try {
+            await deleteTaskUpdate.mutateAsync({
+                taskId: pendingDelete.taskId,
+                updateId: pendingDelete.updateId,
+            });
+            setPendingDeleteUpdate(null);
+        } catch (error_) {
+            console.error("Failed to delete task update:", error_);
+        }
     };
 
     const activeTask = activeId
@@ -332,7 +335,7 @@ export function Tasks() {
                             <TaskColumn
                                 key={column.id}
                                 id={column.id}
-                                tasks={tasksByColumn[column.id] || []}
+                                tasks={tasksByColumn[column.id]}
                                 isOver={overId === column.id}
                                 onTaskClick={handleTaskClick}
                             />
@@ -343,14 +346,24 @@ export function Tasks() {
                         <TaskDetailModal
                             task={selectedTask}
                             onClose={() => setSelectedTask(null)}
-                            onMove={handleMoveTask}
-                            onAssign={handleAssignTask}
-                            onDelete={handleDeleteTask}
-                            onUpdate={handleUpdateTask}
+                            onMove={(column) => handleMoveTask(selectedTask, column)}
+                            onAssign={(assignee) =>
+                                handleAssignTask(selectedTask, assignee)
+                            }
+                            onDelete={() => handleDeleteTask(selectedTask)}
+                            onUpdate={(updates) =>
+                                handleUpdateTask(selectedTask, updates)
+                            }
                             updates={taskUpdates}
-                            onAddUpdate={handleAddTaskUpdate}
-                            onEditUpdate={handleEditTaskUpdate}
-                            onDeleteUpdate={handleDeleteTaskUpdate}
+                            onAddUpdate={(messageMd) =>
+                                handleAddTaskUpdate(selectedTask, messageMd)
+                            }
+                            onEditUpdate={(updateId, messageMd) =>
+                                handleEditTaskUpdate(selectedTask, updateId, messageMd)
+                            }
+                            onDeleteUpdate={(updateId) =>
+                                handleDeleteTaskUpdate(selectedTask, updateId)
+                            }
                         />
                     )}
 
@@ -383,29 +396,33 @@ export function Tasks() {
                         {activeTask && <TaskOverlay task={activeTask} />}
                     </DragOverlay>
 
-                    <ConfirmModal
-                        isOpen={pendingDeleteTaskId !== null}
-                        title="Delete task"
-                        message={`Are you sure you want to delete task #${pendingDeleteTaskId ?? ""}?`}
-                        confirmLabel="Delete"
-                        danger
-                        onCancel={() => setPendingDeleteTaskId(null)}
-                        onConfirm={() => {
-                            void confirmDeleteTask();
-                        }}
-                    />
+                    {pendingDeleteTaskId !== null && (
+                        <ConfirmModal
+                            isOpen
+                            title="Delete task"
+                            message={`Are you sure you want to delete task #${pendingDeleteTaskId}?`}
+                            confirmLabel="Delete"
+                            danger
+                            onCancel={() => setPendingDeleteTaskId(null)}
+                            onConfirm={() => {
+                                void confirmDeleteTask(pendingDeleteTaskId);
+                            }}
+                        />
+                    )}
 
-                    <ConfirmModal
-                        isOpen={pendingDeleteUpdateId !== null}
-                        title="Delete progress update"
-                        message="Are you sure you want to delete this progress update?"
-                        confirmLabel="Delete"
-                        danger
-                        onCancel={() => setPendingDeleteUpdateId(null)}
-                        onConfirm={() => {
-                            void confirmDeleteTaskUpdate();
-                        }}
-                    />
+                    {pendingDeleteUpdate && (
+                        <ConfirmModal
+                            isOpen
+                            title="Delete progress update"
+                            message="Are you sure you want to delete this progress update?"
+                            confirmLabel="Delete"
+                            danger
+                            onCancel={() => setPendingDeleteUpdate(null)}
+                            onConfirm={() => {
+                                void confirmDeleteTaskUpdate(pendingDeleteUpdate);
+                            }}
+                        />
+                    )}
                 </div>
             </DndContext>
         </PageState>

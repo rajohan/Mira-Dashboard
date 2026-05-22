@@ -64,6 +64,41 @@ describe("NewTaskModal", () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it("submits without optional body or automation", async () => {
+        const user = userEvent.setup();
+        const onSubmit = vi.fn(async () => {});
+        render(<NewTaskModal isOpen onClose={vi.fn()} onSubmit={onSubmit} />);
+
+        fireEvent.change(screen.getByLabelText("Title"), {
+            target: { value: "Minimal task" },
+        });
+        fireEvent.change(screen.getByPlaceholderText("Task description..."), {
+            target: { value: "   " },
+        });
+        await user.click(screen.getByRole("button", { name: /Create Task/ }));
+
+        expect(onSubmit).toHaveBeenCalledWith(
+            "Minimal task",
+            undefined,
+            "medium",
+            "mira-2026",
+            undefined
+        );
+    });
+
+    it("shows the submitting state while creation is pending", async () => {
+        const user = userEvent.setup();
+        const onSubmit = vi.fn(() => new Promise<void>(() => {}));
+        render(<NewTaskModal isOpen onClose={vi.fn()} onSubmit={onSubmit} />);
+
+        fireEvent.change(screen.getByLabelText("Title"), {
+            target: { value: "Slow task" },
+        });
+        await user.click(screen.getByRole("button", { name: /Create Task/ }));
+
+        expect(screen.getByText("Creating...")).toBeInTheDocument();
+    });
+
     it("labels the icon-only close button", async () => {
         const user = userEvent.setup();
         const onClose = vi.fn();
