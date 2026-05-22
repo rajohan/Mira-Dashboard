@@ -176,6 +176,32 @@ export function historyHasNewerAssistantMessage(
     });
 }
 
+/** Returns the next history-load bottom-following state. */
+export function nextHistoryBottomState(
+    previous: boolean,
+    isNewSession: boolean,
+    shouldStickToBottom: boolean
+) {
+    if (isNewSession || shouldStickToBottom) {
+        return true;
+    }
+
+    return previous;
+}
+
+/** Returns the next send error after a history load failure. */
+export function nextHistoryLoadSendError(
+    previous: string | null,
+    cancelled: boolean,
+    historyLoadError: string
+) {
+    if (cancelled) {
+        return previous;
+    }
+
+    return historyLoadError;
+}
+
 /** Performs read stored chat diagnostic visibility. */
 export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
@@ -479,14 +505,12 @@ export function Chat() {
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
                 }
-                setIsAtBottom(
-                    (previous) =>
-                        [previous, true][
-                            Math.max(
-                                Number(isNewSession),
-                                Number(shouldStickToBottomReference.current)
-                            )
-                        ]!
+                setIsAtBottom((previous) =>
+                    nextHistoryBottomState(
+                        previous,
+                        isNewSession,
+                        shouldStickToBottomReference.current
+                    )
                 );
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch (error_) {
@@ -494,8 +518,8 @@ export function Chat() {
                     error_,
                     "Failed to load chat history"
                 );
-                setSendError(
-                    (previous) => [historyLoadError, previous][Number(cancelled)]!
+                setSendError((previous) =>
+                    nextHistoryLoadSendError(previous, cancelled, historyLoadError)
                 );
             } finally {
                 if (!cancelled) {

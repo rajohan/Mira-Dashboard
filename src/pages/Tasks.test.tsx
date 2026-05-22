@@ -701,4 +701,35 @@ describe("Tasks page", () => {
             consoleErrorSpy.mockRestore();
         }
     });
+
+    it("logs and clears progress-update deletion confirmation when deletion fails", async () => {
+        const user = userEvent.setup();
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const deleteError = new Error("delete update failed");
+        hooks.deleteTaskUpdate.mockRejectedValue(deleteError);
+
+        try {
+            render(<Tasks />);
+
+            await user.click(screen.getByRole("button", { name: "Build tests" }));
+            await user.click(screen.getByRole("button", { name: "Delete progress" }));
+            await user.click(
+                screen.getByRole("button", { name: "Confirm Delete progress update" })
+            );
+
+            expect(hooks.deleteTaskUpdate).toHaveBeenCalledWith({
+                taskId: 1,
+                updateId: 10,
+            });
+            expect(
+                screen.queryByTestId("confirm-Delete progress update")
+            ).not.toBeInTheDocument();
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                "Failed to delete task update:",
+                deleteError
+            );
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
+    });
 });

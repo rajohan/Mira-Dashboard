@@ -134,7 +134,10 @@ describe("DockerContainersTable", () => {
         card.focus();
         await user.keyboard("{Enter}");
         await user.keyboard(" ");
+        // Irrelevant keys should not trigger the card or nested action buttons.
         await user.keyboard("a");
+        expect(onDetails).toHaveBeenCalledTimes(2);
+        expect(onLogs).not.toHaveBeenCalled();
         await user.click(
             screen.getAllByRole("button", { name: "Show logs for comet" })[0]!
         );

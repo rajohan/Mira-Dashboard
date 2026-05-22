@@ -264,11 +264,16 @@ export function Tasks() {
         taskId: number;
         updateId: number;
     }) => {
-        await deleteTaskUpdate.mutateAsync({
-            taskId: pendingDelete.taskId,
-            updateId: pendingDelete.updateId,
-        });
-        setPendingDeleteUpdate(null);
+        try {
+            await deleteTaskUpdate.mutateAsync({
+                taskId: pendingDelete.taskId,
+                updateId: pendingDelete.updateId,
+            });
+        } catch (error_) {
+            console.error("Failed to delete task update:", error_);
+        } finally {
+            setPendingDeleteUpdate(null);
+        }
     };
 
     const activeTask = activeId

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Terminal } from "./Terminal";
+import { isTerminalOutputAtBottom, Terminal } from "./Terminal";
 
 const terminal = vi.hoisted(() => ({
     addCommand: vi.fn(),
@@ -100,6 +100,24 @@ describe("Terminal page", () => {
         ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Clear/ })).toBeDisabled();
+    });
+
+    it("checks terminal output bottom state defensively", () => {
+        expect(isTerminalOutputAtBottom(null)).toBe(false);
+        expect(
+            isTerminalOutputAtBottom({
+                clientHeight: 100,
+                scrollHeight: 500,
+                scrollTop: 371,
+            })
+        ).toBe(true);
+        expect(
+            isTerminalOutputAtBottom({
+                clientHeight: 100,
+                scrollHeight: 500,
+                scrollTop: 100,
+            })
+        ).toBe(false);
     });
 
     it("handles pwd locally", async () => {

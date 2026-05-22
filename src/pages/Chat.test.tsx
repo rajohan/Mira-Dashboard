@@ -6,6 +6,8 @@ import type { ChatRow } from "../components/features/chat/chatTypes";
 import {
     Chat,
     historyHasNewerAssistantMessage,
+    nextHistoryBottomState,
+    nextHistoryLoadSendError,
     readDeletedMessageKeys,
     readStoredChatDiagnosticVisibility,
     sessionTimestampMs,
@@ -636,6 +638,16 @@ describe("Chat helpers", () => {
                 "2026-05-11T00:02:30.000Z"
             )
         ).toBe(false);
+    });
+
+    it("computes explicit history reload state transitions", () => {
+        expect(nextHistoryBottomState(false, true, false)).toBe(true);
+        expect(nextHistoryBottomState(false, false, true)).toBe(true);
+        expect(nextHistoryBottomState(false, false, false)).toBe(false);
+        expect(nextHistoryLoadSendError("previous", true, "new error")).toBe("previous");
+        expect(nextHistoryLoadSendError("previous", false, "new error")).toBe(
+            "new error"
+        );
     });
 
     it("selects the first supported recorder mime type", () => {
