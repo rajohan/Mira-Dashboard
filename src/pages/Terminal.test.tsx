@@ -167,20 +167,18 @@ describe("Terminal page", () => {
     });
 
     it("does not submit while a command is pending", async () => {
-        const user = userEvent.setup();
-
-        const { rerender } = render(<Terminal />);
-        const input = screen.getByPlaceholderText("Enter command...");
-        await user.type(input, "ls -la");
-
         terminal.useStartTerminalCommand.mockReturnValue({
             isPending: true,
             mutateAsync: terminal.startCommand,
         });
-        rerender(<Terminal />);
+        render(<Terminal />);
 
+        const input = screen.getByPlaceholderText("Enter command...");
         const runButton = screen.getByRole("button", { name: /Run/ });
-        fireEvent.submit(input.closest("form")!);
+        act(() => {
+            fireEvent.change(input, { target: { value: "ls -la" } });
+            fireEvent.submit(input.closest("form")!);
+        });
 
         expect(runButton).toBeDisabled();
         expect(terminal.startCommand).not.toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Login } from "./Login";
@@ -242,9 +243,11 @@ describe("Login page", () => {
             expect.objectContaining({ method: "POST" })
         );
 
-        resolveBootstrap(
-            jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
-        );
+        await act(async () => {
+            resolveBootstrap(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            );
+        });
     });
 
     it("still refreshes bootstrap state when session refresh fails after auth errors", async () => {
