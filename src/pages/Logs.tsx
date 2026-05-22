@@ -18,6 +18,47 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 let lastVisibleLogFiles: LogFile[] = [];
 
+type LogViewportElement = Pick<
+    HTMLDivElement,
+    "clientHeight" | "scrollHeight" | "scrollTop"
+>;
+
+/** Returns whether a log viewport is currently scrolled near the bottom. */
+export function isLogViewportAtBottom(viewport: LogViewportElement | null) {
+    if (!viewport) {
+        return false;
+    }
+
+    return (
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <=
+        LOG_BOTTOM_THRESHOLD_PX
+    );
+}
+
+/** Scrolls a log viewport to the bottom when present. */
+export function scrollLogViewportToBottom(viewport: LogViewportElement | null) {
+    if (!viewport) {
+        return false;
+    }
+
+    viewport.scrollTop = viewport.scrollHeight;
+    return true;
+}
+
+/** Scrolls a log viewport to the bottom and reports the new scroll position. */
+export function scrollLogViewportToBottomAndReport(
+    viewport: LogViewportElement | null,
+    onScrolled: (scrollTop: number) => void
+) {
+    if (!viewport) {
+        return false;
+    }
+
+    scrollLogViewportToBottom(viewport);
+    onScrolled(viewport.scrollTop);
+    return true;
+}
+
 /** Returns whether named log file. */
 export function isNamedLogFile(file: unknown): file is LogFile {
     return (
@@ -203,10 +244,7 @@ export function Logs() {
 
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        const el = logContainerRef.current!;
-        return (
-            el.scrollHeight - el.scrollTop - el.clientHeight <= LOG_BOTTOM_THRESHOLD_PX
-        );
+        return isLogViewportAtBottom(logContainerRef.current);
     };
 
     /** Updates scroll state when the log viewport scrolls. */
@@ -221,11 +259,11 @@ export function Logs() {
 
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        const el = logContainerRef.current!;
-        el.scrollTop = el.scrollHeight;
-        lastKnownLogScrollTopRef.current = el.scrollTop;
-        shouldStickToBottomRef.current = true;
-        setIsAtBottom(true);
+        scrollLogViewportToBottomAndReport(logContainerRef.current, (scrollTop) => {
+            lastKnownLogScrollTopRef.current = scrollTop;
+            shouldStickToBottomRef.current = true;
+            setIsAtBottom(true);
+        });
     };
 
     useLayoutEffect(() => {

@@ -2,7 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compareLogFileNamesDescending, isNamedLogFile, Logs } from "./Logs";
+import {
+    compareLogFileNamesDescending,
+    isLogViewportAtBottom,
+    isNamedLogFile,
+    Logs,
+    scrollLogViewportToBottom,
+    scrollLogViewportToBottomAndReport,
+} from "./Logs";
 
 const mocks = vi.hoisted(() => ({
     createObjectUrl: vi.fn(() => "blob:logs"),
@@ -185,6 +192,33 @@ describe("Logs helpers", () => {
         expect(
             compareLogFileNamesDescending({ name: undefined }, { name: undefined })
         ).toBe(0);
+    });
+
+    it("checks and scrolls log viewports defensively", () => {
+        expect(isLogViewportAtBottom(null)).toBe(false);
+        expect(scrollLogViewportToBottom(null)).toBe(false);
+        const onScrolled = vi.fn();
+        expect(scrollLogViewportToBottomAndReport(null, onScrolled)).toBe(false);
+        expect(onScrolled).not.toHaveBeenCalled();
+
+        const viewport = {
+            clientHeight: 100,
+            scrollHeight: 500,
+            scrollTop: 376,
+        };
+
+        expect(isLogViewportAtBottom(viewport)).toBe(true);
+        expect(scrollLogViewportToBottom(viewport)).toBe(true);
+        expect(viewport.scrollTop).toBe(500);
+        expect(scrollLogViewportToBottomAndReport(viewport, onScrolled)).toBe(true);
+        expect(onScrolled).toHaveBeenCalledWith(500);
+        expect(
+            isLogViewportAtBottom({
+                clientHeight: 100,
+                scrollHeight: 500,
+                scrollTop: 100,
+            })
+        ).toBe(false);
     });
 });
 

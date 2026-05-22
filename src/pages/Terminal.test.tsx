@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isTerminalOutputAtBottom, Terminal } from "./Terminal";
+import {
+    isTerminalOutputAtBottom,
+    scrollTerminalOutputToBottom,
+    scrollTerminalOutputToBottomAndReport,
+    Terminal,
+} from "./Terminal";
 
 const terminal = vi.hoisted(() => ({
     addCommand: vi.fn(),
@@ -118,6 +123,24 @@ describe("Terminal page", () => {
                 scrollTop: 100,
             })
         ).toBe(false);
+    });
+
+    it("scrolls terminal output to the bottom defensively", () => {
+        expect(scrollTerminalOutputToBottom(null)).toBe(false);
+        const onScrolled = vi.fn();
+        expect(scrollTerminalOutputToBottomAndReport(null, onScrolled)).toBe(false);
+        expect(onScrolled).not.toHaveBeenCalled();
+
+        const output = {
+            clientHeight: 100,
+            scrollHeight: 500,
+            scrollTop: 100,
+        };
+
+        expect(scrollTerminalOutputToBottom(output)).toBe(true);
+        expect(output.scrollTop).toBe(500);
+        expect(scrollTerminalOutputToBottomAndReport(output, onScrolled)).toBe(true);
+        expect(onScrolled).toHaveBeenCalledOnce();
     });
 
     it("handles pwd locally", async () => {

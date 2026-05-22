@@ -158,7 +158,7 @@ export function Tasks() {
 
         const column = COLUMN_CONFIG.find((c) => c.id === columnId)!;
         const task = tasks.find((t) => t.number.toString() === taskId);
-        if (task && !task.labels.some((l) => l.name === column.label)) {
+        if (task && getColumnId(task) !== columnId) {
             try {
                 await moveTask.mutateAsync({
                     number: Number.parseInt(taskId),

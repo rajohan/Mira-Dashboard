@@ -10,6 +10,7 @@ import {
     nextHistoryLoadSendError,
     readDeletedMessageKeys,
     readStoredChatDiagnosticVisibility,
+    scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
     supportedAudioRecordingMimeType,
     writeDeletedMessageKeys,
@@ -679,6 +680,12 @@ describe("Chat helpers", () => {
         expect(nextHistoryLoadSendError("previous", false, "new error")).toBe(
             "new error"
         );
+
+        const scheduleBottomFollow = vi.fn();
+        expect(scheduleBottomFollowWhenNeeded(false, scheduleBottomFollow)).toBe(false);
+        expect(scheduleBottomFollow).not.toHaveBeenCalled();
+        expect(scheduleBottomFollowWhenNeeded(true, scheduleBottomFollow)).toBe(true);
+        expect(scheduleBottomFollow).toHaveBeenCalledOnce();
     });
 
     it("selects the first supported recorder mime type", () => {

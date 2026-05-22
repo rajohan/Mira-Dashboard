@@ -202,6 +202,19 @@ export function nextHistoryLoadSendError(
     return historyLoadError;
 }
 
+/** Calls a bottom-follow scheduler only when the view should stick to bottom. */
+export function scheduleBottomFollowWhenNeeded(
+    shouldStickToBottom: boolean,
+    scheduleBottomFollow: () => void
+) {
+    if (!shouldStickToBottom) {
+        return false;
+    }
+
+    scheduleBottomFollow();
+    return true;
+}
+
 /** Performs read stored chat diagnostic visibility. */
 export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
@@ -794,10 +807,10 @@ export function Chat() {
 
     /** Responds to dynamic row content load events. */
     const handleDynamicRowContentLoad = () => {
-        const followBottom = [undefined, scheduleBottomFollow][
-            Number(shouldStickToBottomReference.current)
-        ];
-        followBottom?.();
+        scheduleBottomFollowWhenNeeded(
+            shouldStickToBottomReference.current,
+            scheduleBottomFollow
+        );
     };
 
     useLayoutEffect(() => {

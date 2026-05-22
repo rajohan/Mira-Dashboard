@@ -38,6 +38,29 @@ export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
     return output.scrollHeight - output.scrollTop - output.clientHeight < 30;
 }
 
+/** Scrolls terminal output to the bottom when present. */
+export function scrollTerminalOutputToBottom(output: TerminalOutputElement | null) {
+    if (!output) {
+        return false;
+    }
+
+    output.scrollTop = output.scrollHeight;
+    return true;
+}
+
+/** Scrolls terminal output and reports whether scrolling happened. */
+export function scrollTerminalOutputToBottomAndReport(
+    output: TerminalOutputElement | null,
+    onScrolled: () => void
+) {
+    if (!scrollTerminalOutputToBottom(output)) {
+        return false;
+    }
+
+    onScrolled();
+    return true;
+}
+
 /** Renders the terminal UI. */
 export function Terminal() {
     const [command, setCommand] = useState("");
@@ -82,8 +105,9 @@ export function Terminal() {
     // Scroll to bottom manually
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        outputRef.current!.scrollTop = outputRef.current!.scrollHeight;
-        setIsAtBottom(true);
+        scrollTerminalOutputToBottomAndReport(outputRef.current, () =>
+            setIsAtBottom(true)
+        );
     };
 
     // Update command status when job data changes - only if actually different

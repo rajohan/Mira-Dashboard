@@ -562,6 +562,39 @@ describe("Tasks page", () => {
         expect(screen.queryByTestId("task-overlay")).not.toBeInTheDocument();
     });
 
+    it("moves tasks when the destination label is already present but not current", async () => {
+        mockTaskHooks({
+            data: [
+                task({
+                    labels: [
+                        { name: "todo" },
+                        { name: "in-progress" },
+                        { name: "priority-high" },
+                    ],
+                    number: 1,
+                    title: "Build tests",
+                }),
+            ],
+        });
+
+        render(<Tasks />);
+
+        expect(dndMocks.handlers).not.toBeNull();
+        const handlers = dndMocks.handlers!;
+
+        await act(async () => {
+            await handlers.onDragEnd({
+                active: { id: "1" },
+                over: { id: "in-progress" },
+            });
+        });
+
+        expect(hooks.moveTask).toHaveBeenCalledWith({
+            number: 1,
+            columnLabel: "in-progress",
+        });
+    });
+
     it("handles drag/drop edge cases without leaking state", async () => {
         const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
         try {
