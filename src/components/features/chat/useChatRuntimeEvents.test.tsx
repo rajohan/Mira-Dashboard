@@ -402,7 +402,7 @@ describe("useChatRuntimeEvents", () => {
 
     it.each(["aborted", "error", "final"] as const)(
         "ignores stale selected-session %s events from replaced runs",
-        (state) => {
+        async (state) => {
             const { emit, request, result } = renderRuntimeEvents({
                 activeStreams: {
                     "session-a": {
@@ -426,6 +426,11 @@ describe("useChatRuntimeEvents", () => {
                     },
                     type: "event",
                 });
+            });
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(500);
+                await Promise.resolve();
             });
 
             expect(result.current.activeStreams["session-a"]).toEqual(
