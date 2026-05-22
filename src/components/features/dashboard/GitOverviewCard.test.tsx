@@ -80,9 +80,25 @@ describe("GitOverviewCard", () => {
                                 total: 3,
                             },
                         },
+                        {
+                            key: "n8n",
+                            name: "n8n",
+                            branch: "main",
+                            remote: null,
+                            dirty: true,
+                            statusSummary: {
+                                staged: 0,
+                                modified: 1,
+                                deleted: 0,
+                                untracked: 0,
+                                renamed: 0,
+                                conflicted: 0,
+                                total: 1,
+                            },
+                        },
                     ],
-                    dirtyRepos: ["dashboard"],
-                    dirtyCount: 1,
+                    dirtyRepos: ["dashboard", "n8n"],
+                    dirtyCount: 2,
                     missingRepos: [],
                     checkedAt: "2026-05-10T10:00:00.000Z",
                 },
@@ -97,9 +113,10 @@ describe("GitOverviewCard", () => {
         expect(screen.getByText("Mira Workspace")).toBeInTheDocument();
         expect(screen.getByText("Mira Dashboard")).toBeInTheDocument();
         expect(screen.getByText("Clean")).toBeInTheDocument();
-        expect(screen.getByText("Dirty")).toBeInTheDocument();
+        expect(screen.getAllByText("Dirty")).toHaveLength(2);
         expect(container).toHaveTextContent("main · no changes");
         expect(container).toHaveTextContent("unknown branch · 3 changes");
+        expect(container).toHaveTextContent("main · 1 change");
     });
 
     it("flags clean repos that are checked out away from main", () => {

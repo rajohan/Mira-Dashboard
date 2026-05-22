@@ -43,6 +43,13 @@ const hooks = vi.hoisted(() => ({
     useStartOpsAction: vi.fn(),
 }));
 
+const confirmModalMock = vi.hoisted(() => ({
+    props: null as null | {
+        onCancel: () => void;
+        onConfirm: () => void;
+    },
+}));
+
 vi.mock("../../../hooks", () => ({
     OPS_ACTIONS: hooks.actions,
     useCacheEntry: hooks.useCacheEntry,
@@ -51,9 +58,43 @@ vi.mock("../../../hooks", () => ({
     useStartOpsAction: hooks.useStartOpsAction,
 }));
 
+vi.mock("../../ui/ConfirmModal", () => ({
+    ConfirmModal: ({
+        confirmLabel,
+        isOpen,
+        message,
+        onCancel,
+        onConfirm,
+        title,
+    }: {
+        confirmLabel: string;
+        isOpen: boolean;
+        message: string;
+        onCancel: () => void;
+        onConfirm: () => void;
+        title: string;
+    }) => {
+        confirmModalMock.props = { onCancel, onConfirm };
+
+        return isOpen ? (
+            <section data-testid="confirm-modal">
+                <h2>{title}</h2>
+                <p>{message}</p>
+                <button type="button" onClick={onCancel}>
+                    Cancel
+                </button>
+                <button type="button" onClick={onConfirm}>
+                    {confirmLabel}
+                </button>
+            </section>
+        ) : null;
+    },
+}));
+
 function setupHooks() {
     hooks.startAction.mockReset();
     hooks.refreshCache.mockReset();
+    confirmModalMock.props = null;
     hooks.refreshCache.mockResolvedValue({});
     hooks.useCacheEntry.mockReturnValue({
         data: {
@@ -99,6 +140,34 @@ describe("ServiceActionsCard", () => {
         expect(hooks.startAction).toHaveBeenCalledWith(hooks.actions[1]);
     });
 
+    it("ignores closed confirmation callbacks without a pending action", () => {
+        setupHooks();
+
+        render(<ServiceActionsCard />);
+
+        expect(confirmModalMock.props).not.toBeNull();
+        confirmModalMock.props!.onConfirm();
+
+        expect(hooks.startAction).not.toHaveBeenCalled();
+    });
+
+    it("keeps confirmation open while an action is pending", async () => {
+        setupHooks();
+        const user = userEvent.setup();
+
+        const { rerender } = render(<ServiceActionsCard />);
+
+        await user.click(screen.getByRole("button", { name: /Cleanup system/u }));
+        hooks.useStartOpsAction.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.startAction,
+        });
+        rerender(<ServiceActionsCard />);
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+        expect(screen.getByText("Run cleanup now?")).toBeInTheDocument();
+    });
+
     it("keeps output visible while an action is running and tracks manual scroll state", async () => {
         setupHooks();
         hooks.startAction.mockResolvedValue({ jobId: "job-cleanup" });
@@ -132,6 +201,7 @@ describe("ServiceActionsCard", () => {
             scrollTop: { configurable: true, value: 10 },
         });
         fireEvent.scroll(output);
+        fireEvent.scroll(output);
     });
 
     it("clears running state when starting an action fails", async () => {
@@ -151,6 +221,7 @@ describe("ServiceActionsCard", () => {
     it("shows completed action output and refreshes host cache after OpenClaw update", async () => {
         setupHooks();
         const user = userEvent.setup();
+        hooks.refreshCache.mockRejectedValueOnce(new Error("cache offline"));
         hooks.startAction.mockResolvedValue({ jobId: "job-update" });
         hooks.useExecJob.mockImplementation((jobId: string | null) => ({
             data: jobId
@@ -198,7 +269,7 @@ describe("ServiceActionsCard", () => {
             data: jobId
                 ? {
                       code: 0,
-                      endedAt: Date.UTC(2026, 4, 10, 19, 0, 0),
+                      endedAt: null,
                       jobId,
                       startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
                       status: "done",
@@ -221,5 +292,25 @@ describe("ServiceActionsCard", () => {
             expect(screen.getByText("No output")).toBeInTheDocument();
         });
         expect(screen.getByText(/Last run: Cleanup system/u)).toBeInTheDocument();
+    });
+
+    it("renders fallback metadata for externally reported running jobs", () => {
+        setupHooks();
+        hooks.useExecJob.mockReturnValue({
+            data: {
+                code: null,
+                endedAt: null,
+                jobId: "external-job",
+                startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
+                status: "running",
+                stderr: "",
+                stdout: "external output",
+            },
+        });
+
+        render(<ServiceActionsCard />);
+
+        expect(screen.getByText(/Running: Running action/u)).toBeInTheDocument();
+        expect(screen.getByText("external output")).toBeInTheDocument();
     });
 });

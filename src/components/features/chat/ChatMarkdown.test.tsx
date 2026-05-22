@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ChatMarkdown } from "./ChatMarkdown";
+import {
+    ChatMarkdown,
+    childrenToText,
+    getPreCodeBlock,
+    markdownComponents,
+} from "./ChatMarkdown";
 
 vi.mock("@microlink/react-json-view", () => ({
     default: ({ src }: { src: unknown }) => (
@@ -22,6 +28,23 @@ vi.mock("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
 }));
 
 describe("ChatMarkdown", () => {
+    it("flattens markdown code children for code block rendering", () => {
+        expect(childrenToText(["alpha", 2, createElement("span", {}, "beta")])).toBe(
+            "alpha2beta"
+        );
+        expect(childrenToText(null)).toBe("");
+
+        expect(getPreCodeBlock("raw text")).toBeNull();
+        expect(
+            getPreCodeBlock(
+                createElement("code", { className: "language-ts" }, "const ok = true;\n")
+            )
+        ).toEqual({
+            code: "const ok = true;",
+            language: "ts",
+        });
+    });
+
     it("renders links, images as links, tables, and inline code", () => {
         render(
             <ChatMarkdown
@@ -173,5 +196,29 @@ describe("ChatMarkdown", () => {
 
         expect(screen.getByText("<pre>raw pre</pre>")).toBeInTheDocument();
         expect(screen.queryByRole("link", { name: "" })).not.toBeInTheDocument();
+    });
+
+    it("renders custom raw pre children without a nested code block", () => {
+        const Pre = markdownComponents.pre! as (props: {
+            children: ReactNode;
+            className?: string;
+        }) => ReactElement;
+
+        render(
+            createElement(Pre, {
+                children: "raw pre",
+                className: "custom-pre",
+            })
+        );
+
+        expect(screen.getByText("raw pre")).toHaveClass("custom-pre");
+    });
+
+    it("renders markdown-looking text literally inside code spans", () => {
+        render(<ChatMarkdown text={"`alpha [beta](https://example.com) gamma`"} />);
+
+        expect(
+            screen.getByText("alpha [beta](https://example.com) gamma")
+        ).toBeInTheDocument();
     });
 });

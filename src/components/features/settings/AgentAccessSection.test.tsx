@@ -110,4 +110,27 @@ describe("AgentAccessSection", () => {
             { id: "main", name: "Mira", tools: { deny: ["exec"] } },
         ]);
     });
+
+    it("handles empty and unnamed agent configs", async () => {
+        const user = userEvent.setup();
+        const onSave = vi.fn(async () => {});
+        const { rerender } = render(
+            <AgentAccessSection agents={[]} onSave={onSave} saving={false} />
+        );
+
+        await user.click(screen.getByRole("button", { name: /Agent access control/u }));
+        expect(screen.queryByText("Shell Commands")).not.toBeInTheDocument();
+
+        rerender(
+            <AgentAccessSection
+                agents={[{ id: "ops", tools: { deny: [] } }]}
+                onSave={onSave}
+                saving={false}
+            />
+        );
+
+        expect(await screen.findByRole("button", { name: /ops/u })).toHaveTextContent(
+            "ops"
+        );
+    });
 });

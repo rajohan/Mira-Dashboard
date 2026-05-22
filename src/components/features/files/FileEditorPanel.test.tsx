@@ -180,4 +180,67 @@ describe("FileEditorPanel", () => {
 
         expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     });
+
+    it("renders markdown and code preview toggles", async () => {
+        const user = userEvent.setup();
+        const markdownFile: FileContent = {
+            ...jsonFile,
+            content: "# Notes",
+            path: "/workspace/notes.md",
+            size: 7,
+        };
+        const { handlers, rerender } = renderPanel({
+            fileContent: markdownFile,
+            isJsonEditing: false,
+            selectedPath: "/workspace/notes.md",
+        });
+
+        await user.click(screen.getByRole("button", { name: "Preview" }));
+        expect(handlers.onMarkdownPreviewChange).toHaveBeenCalledWith(true);
+
+        rerender(
+            <FileEditorPanel
+                codeEditMode={false}
+                contentLoading={false}
+                editedContent="const ok = true;"
+                fileContent={{
+                    ...jsonFile,
+                    content: "const ok = true;",
+                    modified: "",
+                    path: "/workspace/app.ts",
+                    size: 16,
+                }}
+                hasChanges={false}
+                isEditable
+                isJsonEditing={false}
+                jsonPreview={false}
+                jsonValidation={{ error: null, valid: true }}
+                largeFileWarning={false}
+                markdownPreview={false}
+                onCodePreviewChange={handlers.onCodePreviewChange}
+                onContentChange={handlers.onContentChange}
+                onJsonPreviewChange={handlers.onJsonPreviewChange}
+                onMarkdownPreviewChange={handlers.onMarkdownPreviewChange}
+                onSave={handlers.onSave}
+                savePending={false}
+                selectedPath="/workspace/app.ts"
+                syntaxClass="text-primary-300"
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Preview" }));
+        expect(handlers.onCodePreviewChange).toHaveBeenCalledWith(true);
+        expect(screen.getByText(/Modified:/u)).toHaveTextContent("Unknown");
+    });
+
+    it("uses the generic parse error title when JSON validation has no message", () => {
+        renderPanel({
+            jsonValidation: { error: null, valid: false },
+        });
+
+        expect(screen.getByText("Invalid JSON")).toHaveAttribute(
+            "title",
+            "Invalid JSON: parse error"
+        );
+    });
 });

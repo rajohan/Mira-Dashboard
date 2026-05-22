@@ -53,6 +53,8 @@ describe("slash commands", () => {
                 description: "Show or set verbose mode",
             },
         ]);
+
+        expect(buildSlashCommandSuggestions("/status ", [])).toEqual([]);
     });
 
     it("uses available model options for /model suggestions", () => {

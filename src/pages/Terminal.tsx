@@ -17,11 +17,48 @@ import { cn } from "../utils/cn";
 
 const HOME_DIR = "/home/ubuntu";
 
+type TerminalOutputElement = Pick<
+    HTMLDivElement,
+    "clientHeight" | "scrollHeight" | "scrollTop"
+>;
+
 /** Performs shorten path. */
 function shortenPath(path: string): string {
     if (path === HOME_DIR) return "~";
     if (path.startsWith(HOME_DIR + "/")) return "~" + path.slice(HOME_DIR.length);
     return path;
+}
+
+/** Returns whether terminal output is currently scrolled near the bottom. */
+export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
+    if (!output) {
+        return false;
+    }
+
+    return output.scrollHeight - output.scrollTop - output.clientHeight < 30;
+}
+
+/** Scrolls terminal output to the bottom when present. */
+export function scrollTerminalOutputToBottom(output: TerminalOutputElement | null) {
+    if (!output) {
+        return false;
+    }
+
+    output.scrollTop = output.scrollHeight;
+    return true;
+}
+
+/** Scrolls terminal output and reports whether scrolling happened. */
+export function scrollTerminalOutputToBottomAndReport(
+    output: TerminalOutputElement | null,
+    onScrolled: () => void
+) {
+    if (!scrollTerminalOutputToBottom(output)) {
+        return false;
+    }
+
+    onScrolled();
+    return true;
 }
 
 /** Renders the terminal UI. */
@@ -48,9 +85,7 @@ export function Terminal() {
     // Check if user is near bottom (within 30px)
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        if (!outputRef.current) return true;
-        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
-        return scrollHeight - scrollTop - clientHeight < 30;
+        return isTerminalOutputAtBottom(outputRef.current);
     };
 
     // Auto-scroll only when user is at bottom
@@ -70,10 +105,9 @@ export function Terminal() {
     // Scroll to bottom manually
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        if (outputRef.current) {
-            outputRef.current.scrollTop = outputRef.current.scrollHeight;
-            setIsAtBottom(true);
-        }
+        scrollTerminalOutputToBottomAndReport(outputRef.current, () =>
+            setIsAtBottom(true)
+        );
     };
 
     // Update command status when job data changes - only if actually different

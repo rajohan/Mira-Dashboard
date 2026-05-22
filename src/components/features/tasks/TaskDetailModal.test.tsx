@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Task, TaskUpdate } from "../../../types/task";
-import { TaskDetailModal } from "./TaskDetailModal";
+import {
+    formatTaskColumnBadge,
+    normalizeTaskDetailColumn,
+    TaskDetailModal,
+} from "./TaskDetailModal";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
@@ -54,6 +58,15 @@ function renderModal(
 }
 
 describe("TaskDetailModal", () => {
+    it("normalizes missing task columns for badge and movement state", () => {
+        expect(formatTaskColumnBadge(null)).toBe("UNASSIGNED");
+        expect(formatTaskColumnBadge()).toBe("UNASSIGNED");
+        expect(formatTaskColumnBadge("in-progress")).toBe("IN-PROGRESS");
+        expect(normalizeTaskDetailColumn(null)).toBe("todo");
+        expect(normalizeTaskDetailColumn()).toBe("todo");
+        expect(normalizeTaskDetailColumn("done")).toBe("done");
+    });
+
     it("renders nothing without a selected task", () => {
         renderModal({ task: null });
 
@@ -200,6 +213,30 @@ describe("TaskDetailModal", () => {
         expect(props.onUpdate).not.toHaveBeenCalled();
     });
 
+    it("uses the new column for tasks without a column label", async () => {
+        renderModal({ task: makeTask({ labels: [{ name: "priority-high" }] }) });
+
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Move to New" })
+        ).not.toBeInTheDocument();
+    });
+
+    it("falls back to the first board column for invalid task columns", async () => {
+        renderModal({
+            task: makeTask({
+                labels: [],
+                state: undefined as unknown as Task["state"],
+            }),
+        });
+
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
+        expect(screen.queryByText("UNDEFINED")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Move to New" })
+        ).not.toBeInTheDocument();
+    });
+
     it("renders closed tasks and scheduled/disabled automation fallbacks", async () => {
         renderModal({
             task: makeTask({
@@ -229,21 +266,85 @@ describe("TaskDetailModal", () => {
     });
 
     it("renders scheduled automation duration fallbacks", async () => {
-        renderModal({
+        const baseProps: React.ComponentProps<typeof TaskDetailModal> = {
             task: makeTask({
+                labels: [],
                 automation: {
                     type: "cron",
                     recurring: true,
                     cronJobId: "job-scheduled",
                     enabled: true,
-                    lastDurationMs: 3_661_000,
+                    lastDurationMs: 60_000,
                 },
             }),
             updates: [],
-        });
+            onClose: vi.fn(),
+            onMove: vi.fn(),
+            onAssign: vi.fn(),
+            onDelete: vi.fn(),
+            onUpdate: vi.fn(),
+            onAddUpdate: vi.fn(),
+            onEditUpdate: vi.fn(),
+            onDeleteUpdate: vi.fn(),
+        };
+        const { rerender } = render(<TaskDetailModal {...baseProps} />);
 
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
         expect(await screen.findByText("SCHEDULED")).toBeInTheDocument();
-        expect(screen.getByText("1h 1m")).toBeInTheDocument();
+        expect(screen.getByText("1m")).toBeInTheDocument();
+
+        rerender(
+            <TaskDetailModal
+                {...baseProps}
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-hour",
+                        enabled: true,
+                        lastDurationMs: 3_600_000,
+                    },
+                })}
+                updates={[]}
+            />
+        );
+        expect(await screen.findByText("1h")).toBeInTheDocument();
+    });
+
+    it("renders whole-hour durations and Raymond-authored updates", async () => {
+        render(
+            <TaskDetailModal
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-hour",
+                        enabled: true,
+                        lastDurationMs: 3_660_000,
+                    },
+                })}
+                onClose={vi.fn()}
+                onMove={vi.fn(async () => {})}
+                onAssign={vi.fn(async () => {})}
+                onDelete={vi.fn(async () => {})}
+                onUpdate={vi.fn(async () => makeTask())}
+                updates={[
+                    {
+                        id: 32,
+                        taskId: 88,
+                        author: "rajohan",
+                        messageMd: "Reviewed by Raymond.",
+                        createdAt: "2026-05-10T10:00:00.000Z",
+                    },
+                ]}
+                onAddUpdate={vi.fn(async () => {})}
+                onEditUpdate={vi.fn(async () => {})}
+                onDeleteUpdate={vi.fn(async () => {})}
+            />
+        );
+
+        expect(await screen.findByText("1h 1m")).toBeInTheDocument();
+        expect(screen.getByText("Reviewed by Raymond.")).toBeInTheDocument();
     });
 
     it("renders completed automation fallbacks and cancels progress edit mode", async () => {

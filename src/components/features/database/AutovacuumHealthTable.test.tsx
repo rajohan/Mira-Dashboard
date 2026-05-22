@@ -55,4 +55,19 @@ describe("AutovacuumHealthTable", () => {
             within(bodyRows()[0]!).getByText("public.small_table")
         ).toBeInTheDocument();
     });
+
+    it("renders missing autoanalyze fallback", () => {
+        const { container } = render(
+            <AutovacuumHealthTable
+                data={[
+                    {
+                        ...rows[0]!,
+                        last_autoanalyze: "",
+                    },
+                ]}
+            />
+        );
+
+        expect(container).toHaveTextContent("Last autoanalyze: —");
+    });
 });

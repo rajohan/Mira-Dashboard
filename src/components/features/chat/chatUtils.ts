@@ -9,6 +9,16 @@ export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
+/** Returns a displayable error message with a stable fallback. */
+export function chatErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error) {
+        const message = error.message.trim();
+        return message || fallback;
+    }
+
+    return fallback;
+}
+
 /** Represents chat model option. */
 export interface ChatModelOption {
     id?: string;
@@ -90,18 +100,15 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
 }
 
 /** Performs assistant text looks recovered. */
-function assistantTextLooksRecovered(left: string, right: string): boolean {
+export function assistantTextLooksRecovered(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();
-
     if (!normalizedLeft || !normalizedRight) {
         return false;
     }
-
     if (normalizedLeft === normalizedRight) {
         return true;
     }
-
     if (normalizedLeft.length < 20 || normalizedRight.length < 20) {
         return false;
     }

@@ -35,6 +35,16 @@ type PendingAction =
     | { type: "reject"; pr: PullRequestSummary }
     | { type: "deploy" }
     | null;
+type PendingActionType = Exclude<PendingAction, null>["type"];
+type UnhandledPendingActionType = Exclude<
+    PendingActionType,
+    "deploy" | "merge" | "merge-deploy" | "reject"
+>;
+
+const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
+    ? true
+    : never = true;
+void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
@@ -171,8 +181,7 @@ function checkoutMessage(
 }
 
 /** Performs action label. */
-function actionLabel(action: PendingAction) {
-    if (!action) return "Confirm";
+function actionLabel(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
             return "Merge PR";
@@ -186,8 +195,7 @@ function actionLabel(action: PendingAction) {
 }
 
 /** Performs action message. */
-function actionMessage(action: PendingAction) {
-    if (!action) return "";
+function actionMessage(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
@@ -322,42 +330,46 @@ export function PullRequests() {
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
     /** Performs confirm action. */
-    async function confirmAction() {
-        if (!pendingAction) return;
-
+    async function confirmAction(action: Exclude<PendingAction, null>) {
         setActionError(null);
         try {
-            if (pendingAction.type === "merge") {
-                const result = await approvePullRequest.mutateAsync({
-                    number: pendingAction.pr.number,
-                    deploy: false,
-                });
-                setLastResult(actionResultMessage(result.message, result.cleanup));
-            }
+            switch (action.type) {
+                case "merge": {
+                    const result = await approvePullRequest.mutateAsync({
+                        number: action.pr.number,
+                        deploy: false,
+                    });
+                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    break;
+                }
 
-            if (pendingAction.type === "merge-deploy") {
-                const result = await approvePullRequest.mutateAsync({
-                    number: pendingAction.pr.number,
-                    deploy: true,
-                });
-                setLastResult(
-                    actionResultMessage(
-                        result.deployment?.note || result.message,
-                        result.cleanup
-                    )
-                );
-            }
+                case "merge-deploy": {
+                    const result = await approvePullRequest.mutateAsync({
+                        number: action.pr.number,
+                        deploy: true,
+                    });
+                    setLastResult(
+                        actionResultMessage(
+                            result.deployment?.note || result.message,
+                            result.cleanup
+                        )
+                    );
+                    break;
+                }
 
-            if (pendingAction.type === "reject") {
-                const result = await rejectPullRequest.mutateAsync({
-                    number: pendingAction.pr.number,
-                });
-                setLastResult(actionResultMessage(result.message, result.cleanup));
-            }
+                case "reject": {
+                    const result = await rejectPullRequest.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    break;
+                }
 
-            if (pendingAction.type === "deploy") {
-                const result = await deployDashboard.mutateAsync();
-                setLastResult(result.deployment.note || "Deploy scheduled");
+                case "deploy": {
+                    const result = await deployDashboard.mutateAsync();
+                    setLastResult(result?.deployment?.note ?? "Deploy scheduled");
+                    break;
+                }
             }
 
             setPendingAction(null);
@@ -635,24 +647,26 @@ export function PullRequests() {
                     </Card>
                 </div>
 
-                <ConfirmModal
-                    isOpen={pendingAction !== null}
-                    title={actionLabel(pendingAction)}
-                    message={actionMessage(pendingAction)}
-                    confirmLabel={actionLabel(pendingAction)}
-                    confirmLoadingLabel="Working"
-                    loading={isActionPending}
-                    danger={pendingAction?.type === "reject"}
-                    onCancel={() => {
-                        if (!isActionPending) {
-                            setPendingAction(null);
-                            setActionError(null);
-                        }
-                    }}
-                    onConfirm={() => {
-                        void confirmAction();
-                    }}
-                />
+                {pendingAction && (
+                    <ConfirmModal
+                        isOpen
+                        title={actionLabel(pendingAction)}
+                        message={actionMessage(pendingAction)}
+                        confirmLabel={actionLabel(pendingAction)}
+                        confirmLoadingLabel="Working"
+                        loading={isActionPending}
+                        danger={pendingAction.type === "reject"}
+                        onCancel={() => {
+                            if (!isActionPending) {
+                                setPendingAction(null);
+                                setActionError(null);
+                            }
+                        }}
+                        onConfirm={() => {
+                            void confirmAction(pendingAction);
+                        }}
+                    />
+                )}
             </div>
         </PageState>
     );
