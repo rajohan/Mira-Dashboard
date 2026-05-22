@@ -1219,6 +1219,11 @@ describe("useChatRuntimeEvents", () => {
                     aliases: ["session-a"],
                     runId: "session-a",
                     sessionKey: "session-a",
+                    message: {
+                        role: "assistant",
+                        content: "Buffered ",
+                        text: "Buffered ",
+                    },
                     text: "Buffered ",
                     updatedAt: "2026-05-15T10:00:00.000Z",
                 },
@@ -1244,6 +1249,11 @@ describe("useChatRuntimeEvents", () => {
 
         expect(result.current.activeStreams["session-a"]).toEqual(
             expect.objectContaining({
+                message: expect.objectContaining({
+                    role: "assistant",
+                    runId: "real-run",
+                    text: "Buffered continuation",
+                }),
                 runId: "real-run",
                 text: "Buffered continuation",
             })

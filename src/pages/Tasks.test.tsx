@@ -693,9 +693,11 @@ describe("Tasks page", () => {
             expect(hooks.deleteTask).toHaveBeenCalledWith({ number: 1 });
             await screen.findByTestId("confirm-Delete task");
             expect(screen.getByTestId("task-detail")).toBeInTheDocument();
-            expect(consoleErrorSpy).toHaveBeenCalledWith(
-                "Failed to delete task:",
-                deleteError
+            await waitFor(() =>
+                expect(consoleErrorSpy).toHaveBeenCalledWith(
+                    "Failed to delete task:",
+                    deleteError
+                )
             );
         } finally {
             consoleErrorSpy.mockRestore();

@@ -840,7 +840,7 @@ describe("Chat", () => {
         expect(screen.getByTestId("agent-options")).toHaveTextContent("main");
         expect(screen.getByTestId("agent-options")).not.toHaveTextContent("Main");
         expect(screen.getByTestId("agent-options")).toHaveTextContent("ops");
-        expect(screen.getByTestId("agent-options")).toHaveTextContent("unknown");
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("unknown");
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
         expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
         expect(screen.getByTestId("session-options")).toHaveTextContent("agent");
@@ -1113,6 +1113,30 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
         );
+        expect(screen.getByTestId("loading-history")).toHaveTextContent("false");
+    });
+
+    it("clears history loading when sessions disappear during a pending load", async () => {
+        mocks.request.mockImplementation((method: string) =>
+            method === "chat.history"
+                ? new Promise(() => {})
+                : Promise.resolve({ models: [] })
+        );
+
+        const { rerender } = render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("session-a")
+        );
+        expect(screen.getByTestId("loading-history")).toHaveTextContent("true");
+
+        mocks.liveSessions = [];
+        rerender(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
+        expect(screen.getByTestId("loading-history")).toHaveTextContent("false");
     });
 
     it("uses an empty model list response fallback", async () => {
@@ -1145,7 +1169,7 @@ describe("Chat", () => {
         });
     });
 
-    it("handles sessions without a key while deriving chat buckets", async () => {
+    it("excludes sessions without a key from selectable agent buckets", async () => {
         mocks.liveSessions = [
             {
                 key: undefined,
@@ -1161,11 +1185,11 @@ describe("Chat", () => {
         render(<Chat />);
 
         await waitFor(() =>
-            expect(screen.getByTestId("agent-options")).toHaveTextContent("direct")
+            expect(screen.getByTestId("session-options")).toHaveTextContent(
+                "Missing key chat"
+            )
         );
-        expect(screen.getByTestId("session-options")).toHaveTextContent(
-            "Missing key chat"
-        );
+        expect(screen.getByTestId("agent-options")).not.toHaveTextContent("direct");
     });
 
     it("filters hidden tool result rows before message virtualization", async () => {

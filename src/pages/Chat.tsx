@@ -65,7 +65,7 @@ function normalizeChatAgentId(agentId: string): string {
 
 /** Returns the top-level chat agent bucket for a session. */
 function getChatAgentId(session: Session): string {
-    const sessionKey = typeof session.key === "string" ? session.key : "";
+    const sessionKey = session.key;
     const [scope = "", agentId] = sessionKey.split(":");
 
     if (scope.toLowerCase() === "agent" && agentId) {
@@ -387,6 +387,7 @@ export function Chat() {
             if (selectedSessionKey) {
                 setSelectedSessionKey("");
             }
+            setIsLoadingHistory(false);
             return;
         }
 
@@ -840,8 +841,9 @@ export function Chat() {
         description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
     }));
 
+    const selectableSessions = sortedSessions.filter(hasSessionKey);
     const agentSessionCounts = new Map<string, number>();
-    for (const session of sortedSessions) {
+    for (const session of selectableSessions) {
         const agentId = getChatAgentId(session);
         agentSessionCounts.set(agentId, (agentSessionCounts.get(agentId) || 0) + 1);
     }

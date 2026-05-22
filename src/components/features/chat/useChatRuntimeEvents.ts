@@ -470,7 +470,10 @@ export function useChatRuntimeEvents({
                     isProvisionalRunId(streamSessionKey, existing.runId);
                 let text =
                     startsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
-                let message = startsNewRun ? undefined : existing?.message;
+                let message =
+                    startsNewRun && !promotesProvisionalRun
+                        ? undefined
+                        : existing?.message;
 
                 for (const deltaMessage of pending.deltas) {
                     text = mergeStreamText(text, deltaMessage.text);

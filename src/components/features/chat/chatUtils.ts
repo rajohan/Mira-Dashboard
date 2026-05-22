@@ -11,7 +11,12 @@ export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
 /** Returns a displayable error message with a stable fallback. */
 export function chatErrorMessage(error: unknown, fallback: string): string {
-    return error instanceof Error && error.message ? error.message : fallback;
+    if (error instanceof Error) {
+        const message = error.message.trim();
+        return message || fallback;
+    }
+
+    return fallback;
 }
 
 /** Represents chat model option. */
