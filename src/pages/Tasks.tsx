@@ -269,10 +269,9 @@ export function Tasks() {
                 taskId: pendingDelete.taskId,
                 updateId: pendingDelete.updateId,
             });
+            setPendingDeleteUpdate(null);
         } catch (error_) {
             console.error("Failed to delete task update:", error_);
-        } finally {
-            setPendingDeleteUpdate(null);
         }
     };
 

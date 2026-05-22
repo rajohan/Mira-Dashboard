@@ -702,7 +702,7 @@ describe("Tasks page", () => {
         }
     });
 
-    it("logs and clears progress-update deletion confirmation when deletion fails", async () => {
+    it("logs and keeps progress-update deletion confirmation open when deletion fails", async () => {
         const user = userEvent.setup();
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
         const deleteError = new Error("delete update failed");
@@ -722,8 +722,8 @@ describe("Tasks page", () => {
                 updateId: 10,
             });
             expect(
-                screen.queryByTestId("confirm-Delete progress update")
-            ).not.toBeInTheDocument();
+                screen.getByTestId("confirm-Delete progress update")
+            ).toBeInTheDocument();
             expect(consoleErrorSpy).toHaveBeenCalledWith(
                 "Failed to delete task update:",
                 deleteError
