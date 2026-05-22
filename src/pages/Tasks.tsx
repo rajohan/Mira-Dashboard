@@ -201,9 +201,13 @@ export function Tasks() {
 
     /** Performs confirm delete task. */
     const confirmDeleteTask = async (taskId: number) => {
-        await deleteTask.mutateAsync({ number: taskId });
-        setPendingDeleteTaskId(null);
-        setSelectedTask(null);
+        try {
+            await deleteTask.mutateAsync({ number: taskId });
+            setPendingDeleteTaskId(null);
+            setSelectedTask(null);
+        } catch (error_) {
+            console.error("Failed to delete task:", error_);
+        }
     };
 
     /** Responds to update task events. */

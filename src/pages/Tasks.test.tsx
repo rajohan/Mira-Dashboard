@@ -676,4 +676,29 @@ describe("Tasks page", () => {
         expect(hooks.deleteTask).not.toHaveBeenCalled();
         expect(screen.queryByTestId("task-detail")).not.toBeInTheDocument();
     });
+
+    it("keeps delete confirmation open and logs when task deletion fails", async () => {
+        const user = userEvent.setup();
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const deleteError = new Error("delete failed");
+        hooks.deleteTask.mockRejectedValue(deleteError);
+
+        try {
+            render(<Tasks />);
+
+            await user.click(screen.getByRole("button", { name: "Build tests" }));
+            await user.click(screen.getByRole("button", { name: "Delete task" }));
+            await user.click(screen.getByRole("button", { name: "Confirm Delete task" }));
+
+            expect(hooks.deleteTask).toHaveBeenCalledWith({ number: 1 });
+            await screen.findByTestId("confirm-Delete task");
+            expect(screen.getByTestId("task-detail")).toBeInTheDocument();
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                "Failed to delete task:",
+                deleteError
+            );
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
+    });
 });
