@@ -367,7 +367,7 @@ export function PullRequests() {
 
                 case "deploy": {
                     const result = await deployDashboard.mutateAsync();
-                    setLastResult(result.deployment.note || "Deploy scheduled");
+                    setLastResult(result?.deployment?.note ?? "Deploy scheduled");
                     break;
                 }
             }

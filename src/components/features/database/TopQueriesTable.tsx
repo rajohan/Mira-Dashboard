@@ -71,6 +71,7 @@ export function TopQueriesTable({
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
         } catch (error_) {
+            setCopied(false);
             console.error("Failed to copy query", error_);
         }
     };

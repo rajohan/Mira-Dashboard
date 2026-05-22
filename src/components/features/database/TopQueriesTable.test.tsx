@@ -87,10 +87,13 @@ describe("TopQueriesTable", () => {
         }
     });
 
-    it("keeps copy state unchanged when clipboard writes fail", async () => {
+    it("resets copy state when clipboard writes fail", async () => {
         const user = userEvent.setup();
         const copyError = new Error("clipboard unavailable");
-        const writeText = vi.fn().mockRejectedValue(copyError);
+        const writeText = vi
+            .fn()
+            .mockImplementationOnce(async () => {})
+            .mockRejectedValueOnce(copyError);
         const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
@@ -109,10 +112,16 @@ describe("TopQueriesTable", () => {
                 fireEvent.click(screen.getByRole("button", { name: /Copy query/u }));
                 await Promise.resolve();
             });
+            expect(screen.getByRole("button", { name: /Copied/u })).toBeInTheDocument();
 
             expect(writeText).toHaveBeenCalledWith(
                 "SELECT * FROM torrents WHERE id = $1"
             );
+
+            await act(async () => {
+                fireEvent.click(screen.getByRole("button", { name: /Copied/u }));
+                await Promise.resolve();
+            });
             expect(consoleError).toHaveBeenCalledWith("Failed to copy query", copyError);
             expect(
                 screen.getByRole("button", { name: /Copy query/u })

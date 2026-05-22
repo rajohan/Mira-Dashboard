@@ -553,7 +553,7 @@ describe("PullRequests page", () => {
             deployment: undefined,
             message: "Merged and deployed fallback",
         });
-        hooks.deploy.mockResolvedValueOnce({ deployment: {} });
+        hooks.deploy.mockResolvedValueOnce({ deployment: null });
 
         render(<PullRequests />);
 
