@@ -408,7 +408,7 @@ describe("useChatRuntimeEvents", () => {
                     "session-a": {
                         sessionKey: "session-a",
                         runId: "run-new",
-                        aliases: ["run-old", "run-new"],
+                        aliases: ["run-new"],
                         text: "Current response",
                         updatedAt: "2026-05-22T13:40:00.000Z",
                     },
@@ -446,6 +446,50 @@ describe("useChatRuntimeEvents", () => {
             });
         }
     );
+
+    it("accepts selected-session terminal events for active run aliases", async () => {
+        const { emit, request, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    sessionKey: "session-a",
+                    runId: "run-new",
+                    aliases: ["run-old", "run-new"],
+                    text: "Current response",
+                    updatedAt: "2026-05-22T13:40:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "Alias final", role: "assistant" },
+                    runId: "run-old",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+        expect(result.current.messages).toEqual([
+            expect.objectContaining({
+                text: "Alias final",
+            }),
+        ]);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(500);
+            await Promise.resolve();
+        });
+
+        expect(request).toHaveBeenCalledWith("chat.history", {
+            limit: 1000,
+            sessionKey: "session-a",
+        });
+    });
 
     it("subscribes to selected Gateway v4 transcript events", () => {
         const { request, unmount } = renderRuntimeEvents({

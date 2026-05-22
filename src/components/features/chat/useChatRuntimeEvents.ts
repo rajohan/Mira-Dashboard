@@ -769,8 +769,10 @@ export function useChatRuntimeEvents({
 
             const streams = activeStreamsReference.current;
             const streamForRun = payload.runId
-                ? Object.values(streams).find((stream) =>
-                      stream.aliases.includes(payload.runId as string)
+                ? Object.values(streams).find(
+                      (stream) =>
+                          stream.runId === payload.runId ||
+                          stream.aliases.includes(payload.runId as string)
                   )
                 : undefined;
             const eventSessionKey = payload.sessionKey || streamForRun?.sessionKey;
@@ -791,12 +793,19 @@ export function useChatRuntimeEvents({
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
+            const selectedStream = eventMatchesSelected
+                ? streams[selectedSessionKey]
+                : undefined;
+            const selectedStreamRunIds = uniqueStrings([
+                selectedStream?.runId,
+                ...(selectedStream?.aliases || []),
+            ]);
             const isStaleSelectedTerminalEvent =
                 eventMatchesSelected &&
-                streamForRun &&
+                selectedStream &&
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
-                streamForRun.runId !== payload.runId;
+                !selectedStreamRunIds.includes(payload.runId);
             if (isStaleSelectedTerminalEvent) {
                 return;
             }
