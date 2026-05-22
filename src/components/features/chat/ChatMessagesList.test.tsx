@@ -166,6 +166,21 @@ describe("ChatMessagesList helpers", () => {
                 url: "data:text/plain;base64,bm90ZXM=",
             })
         );
+        expect(
+            previewFromAttachment({
+                dataUrl: "",
+                contentBase64: btoa("fallback"),
+                fileName: "fallback.txt",
+                id: "fallback",
+                kind: "text",
+                mimeType: "text/plain",
+            })
+        ).toEqual(
+            expect.objectContaining({
+                text: "fallback",
+                url: `data:text/plain;base64,${btoa("fallback")}`,
+            })
+        );
     });
 });
 

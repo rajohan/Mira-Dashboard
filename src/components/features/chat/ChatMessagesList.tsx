@@ -73,7 +73,7 @@ export function previewFromAttachment(
 
     const mimeType = attachment.mimeType || "application/octet-stream";
     const url =
-        attachment.dataUrl ?? `data:${mimeType};base64,${attachment.contentBase64!}`;
+        attachment.dataUrl || `data:${mimeType};base64,${attachment.contentBase64!}`;
 
     return {
         title: attachment.fileName,

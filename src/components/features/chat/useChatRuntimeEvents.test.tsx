@@ -963,7 +963,7 @@ describe("useChatRuntimeEvents", () => {
         );
     });
 
-    it("keeps existing status for queued thinking-only deltas on the same run", async () => {
+    it("clears existing status for queued thinking-only deltas on the same run", async () => {
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
                 "session-a": {

@@ -43,6 +43,13 @@ const hooks = vi.hoisted(() => ({
     useStartOpsAction: vi.fn(),
 }));
 
+const confirmModalMock = vi.hoisted(() => ({
+    props: null as null | {
+        onCancel: () => void;
+        onConfirm: () => void;
+    },
+}));
+
 vi.mock("../../../hooks", () => ({
     OPS_ACTIONS: hooks.actions,
     useCacheEntry: hooks.useCacheEntry,
@@ -66,8 +73,10 @@ vi.mock("../../ui/ConfirmModal", () => ({
         onCancel: () => void;
         onConfirm: () => void;
         title: string;
-    }) =>
-        isOpen ? (
+    }) => {
+        confirmModalMock.props = { onCancel, onConfirm };
+
+        return isOpen ? (
             <section data-testid="confirm-modal">
                 <h2>{title}</h2>
                 <p>{message}</p>
@@ -78,16 +87,14 @@ vi.mock("../../ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : (
-            <button type="button" onClick={onConfirm}>
-                Force closed confirm {title}
-            </button>
-        ),
+        ) : null;
+    },
 }));
 
 function setupHooks() {
     hooks.startAction.mockReset();
     hooks.refreshCache.mockReset();
+    confirmModalMock.props = null;
     hooks.refreshCache.mockResolvedValue({});
     hooks.useCacheEntry.mockReturnValue({
         data: {
@@ -133,17 +140,13 @@ describe("ServiceActionsCard", () => {
         expect(hooks.startAction).toHaveBeenCalledWith(hooks.actions[1]);
     });
 
-    it("ignores closed confirmation callbacks without a pending action", async () => {
+    it("ignores closed confirmation callbacks without a pending action", () => {
         setupHooks();
-        const user = userEvent.setup();
 
         render(<ServiceActionsCard />);
 
-        await user.click(
-            screen.getByRole("button", {
-                name: "Force closed confirm Confirm action",
-            })
-        );
+        expect(confirmModalMock.props).not.toBeNull();
+        confirmModalMock.props!.onConfirm();
 
         expect(hooks.startAction).not.toHaveBeenCalled();
     });
