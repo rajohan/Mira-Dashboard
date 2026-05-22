@@ -835,7 +835,10 @@ export function useChatRuntimeEvents({
 
                         if (
                             cancelled ||
-                            !isSameSessionKey(sessionKey, selectedSessionKey)
+                            !isSameSessionKey(
+                                sessionKey,
+                                selectedSessionKeyReference.current
+                            )
                         ) {
                             return;
                         }

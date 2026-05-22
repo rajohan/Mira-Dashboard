@@ -1169,7 +1169,7 @@ describe("Chat", () => {
         });
     });
 
-    it("excludes sessions without a key from selectable agent buckets", async () => {
+    it("excludes sessions without a key from selectable chat controls", async () => {
         mocks.liveSessions = [
             {
                 key: undefined,
@@ -1185,9 +1185,10 @@ describe("Chat", () => {
         render(<Chat />);
 
         await waitFor(() =>
-            expect(screen.getByTestId("session-options")).toHaveTextContent(
-                "Missing key chat"
-            )
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
+        expect(screen.getByTestId("session-options")).not.toHaveTextContent(
+            "Missing key chat"
         );
         expect(screen.getByTestId("agent-options")).not.toHaveTextContent("direct");
     });

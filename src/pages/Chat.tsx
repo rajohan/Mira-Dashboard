@@ -82,7 +82,7 @@ function hasSessionKey(session: Session): boolean {
 
 /** Formats the session label inside a selected chat agent bucket. */
 function formatChatSessionLabel(session: Session, agentId: string): string {
-    const sessionKey = typeof session.key === "string" ? session.key : "";
+    const sessionKey = session.key;
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
     if (
         scope.toLowerCase() === "agent" &&
@@ -835,11 +835,13 @@ export function Chat() {
         return () => cancelAnimationFrame(scrollFrame);
     }, [chatRows.length, selectedStreamText, selectedSessionKey]);
 
-    const sessionOptions = sessionsForSelectedAgent.map((session) => ({
-        value: session.key,
-        label: formatChatSessionLabel(session, selectedAgentId),
-        description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
-    }));
+    const sessionOptions = sessionsForSelectedAgent
+        .filter(hasSessionKey)
+        .map((session) => ({
+            value: session.key,
+            label: formatChatSessionLabel(session, selectedAgentId),
+            description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
+        }));
 
     const selectableSessions = sortedSessions.filter(hasSessionKey);
     const agentSessionCounts = new Map<string, number>();
