@@ -286,14 +286,16 @@ describe("useChatRuntimeEvents", () => {
     });
 
     it("ignores delayed history refresh results after the selected session changes", async () => {
+        let historyRequest: Promise<{ messages: Array<{ role: string; text: string }> }>;
         let resolveHistory:
             | ((value: { messages: Array<{ role: string; text: string }> }) => void)
             | undefined;
         const request = vi.fn((method: string) => {
             if (method === "chat.history") {
-                return new Promise((resolve) => {
+                historyRequest = new Promise((resolve) => {
                     resolveHistory = resolve;
                 });
+                return historyRequest;
             }
 
             return Promise.resolve({});
@@ -311,12 +313,12 @@ describe("useChatRuntimeEvents", () => {
 
         act(() => {
             emit({
-                event: "chat",
+                event: "session.item",
                 payload: {
-                    message: { content: "Done", role: "assistant" },
+                    data: { title: "Working" },
                     runId: "run-1",
                     sessionKey: "session-a",
-                    state: "final",
+                    stream: "item",
                 },
                 type: "event",
             });
@@ -337,6 +339,7 @@ describe("useChatRuntimeEvents", () => {
             resolveHistory?.({
                 messages: [{ role: "assistant", text: "stale history" }],
             });
+            await historyRequest;
         });
 
         expect(result.current.historyLoadVersion).toBe(0);

@@ -527,10 +527,6 @@ export function useChatRuntimeEvents({
         /** Performs refresh selected history soon. */
         const refreshSelectedHistorySoon = (delayMs = 450) => {
             const sessionKeyAtCall = selectedSessionKey;
-            if (!sessionKeyAtCall) {
-                return;
-            }
-
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
             }
