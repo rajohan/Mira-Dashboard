@@ -99,6 +99,30 @@ describe("ChatComposer", () => {
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help ");
     });
 
+    it("falls back to the draft when applying an empty slash suggestion with tab", async () => {
+        const user = userEvent.setup();
+        const onApplySlashSuggestion = vi.fn();
+
+        renderComposer({
+            draft: "/custom",
+            onApplySlashSuggestion,
+            slashCommandSuggestions: [
+                {
+                    description: "Empty custom suggestion",
+                    title: "/custom",
+                    value: "",
+                },
+            ],
+        });
+
+        screen
+            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
+            .focus();
+        await user.keyboard("{Tab}");
+
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/custom");
+    });
+
     it("previews image attachments and removes attachments from the keyboard", async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();
@@ -183,6 +207,8 @@ describe("ChatComposer", () => {
         expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        fireEvent.keyDown(document, { key: "a" });
+        expect(screen.getByText("Emoji")).toBeInTheDocument();
         fireEvent.keyDown(document, { key: "Escape" });
         expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
 
@@ -204,6 +230,26 @@ describe("ChatComposer", () => {
         await waitFor(() => {
             expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
         });
+    });
+
+    it("ignores emoji insertion when the textarea selection is unavailable", async () => {
+        const user = userEvent.setup();
+        const onChangeDraft = vi.fn();
+
+        renderComposer({ draft: "Hi ", onChangeDraft });
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        Object.defineProperties(textarea, {
+            selectionEnd: { configurable: true, value: undefined },
+            selectionStart: { configurable: true, value: undefined },
+        });
+
+        await user.click(screen.getByRole("button", { name: "Insert emoji" }));
+        await user.click(screen.getByRole("button", { name: "Insert 😀" }));
+
+        expect(onChangeDraft).not.toHaveBeenCalled();
+        expect(screen.getByText("Emoji")).toBeInTheDocument();
     });
 
     it("handles file attachment and voice controls", async () => {

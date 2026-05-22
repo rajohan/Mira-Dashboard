@@ -18,6 +18,16 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
+/** Returns a stable task column for movement controls. */
+export function normalizeTaskDetailColumn(column?: ColumnId | null): ColumnId {
+    return column ?? "todo";
+}
+
+/** Formats the task status badge without coercing nullish columns. */
+export function formatTaskColumnBadge(column?: ColumnId | null): string {
+    return column?.toUpperCase() ?? "UNASSIGNED";
+}
+
 /** Formats elapsed milliseconds into a short human-readable duration. */
 function formatElapsedMs(value: number): string {
     if (!Number.isFinite(value) || value < 0) {
@@ -108,7 +118,7 @@ export function TaskDetailModal({
 
         setEditTitle(task.title);
         setEditBody(task.body || "");
-        setEditPriority(getPriority(task.labels || []));
+        setEditPriority(getPriority(task.labels));
         setEditCronJobId(task.automation?.cronJobId || "");
         setEditScheduleSummary(task.automation?.scheduleSummary || "");
         setEditSessionTarget(task.automation?.sessionTarget || "");
@@ -119,7 +129,8 @@ export function TaskDetailModal({
     }
 
     const priority = getPriority(task.labels);
-    const currentColumn = getColumnId(task) || "todo";
+    const rawColumn = getColumnId(task);
+    const currentColumn = normalizeTaskDetailColumn(rawColumn);
     const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
     const automation = task.automation;
     const automationStatus = automation?.runningAtMs
@@ -241,7 +252,7 @@ export function TaskDetailModal({
                             >
                                 {task.state === "CLOSED"
                                     ? "DONE"
-                                    : currentColumn.toUpperCase()}
+                                    : formatTaskColumnBadge(rawColumn)}
                             </span>
                             <span
                                 className={

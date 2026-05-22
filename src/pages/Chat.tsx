@@ -30,6 +30,7 @@ import {
 } from "../components/features/chat/chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
+    chatErrorMessage,
     type ChatModelOption,
     dataUrlToBase64,
     dedupeMessages,
@@ -74,13 +75,19 @@ function getChatAgentId(session: Session): string {
     return normalizeChatAgentId(session.agentType || session.type || "unknown");
 }
 
+/** Returns whether a live session has a usable key. */
+function hasSessionKey(session: Session): boolean {
+    return typeof session.key === "string" && session.key.length > 0;
+}
+
 /** Formats the session label inside a selected chat agent bucket. */
 function formatChatSessionLabel(session: Session, agentId: string): string {
-    const sessionKey = typeof session.key === "string" ? session.key : "";
+    const sessionKey = session.key;
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
     if (
         scope.toLowerCase() === "agent" &&
-        normalizeChatAgentId(keyAgentId || "") === agentId
+        keyAgentId &&
+        normalizeChatAgentId(keyAgentId) === agentId
     ) {
         return sessionParts.join(":") || sessionKey;
     }
@@ -169,6 +176,45 @@ export function historyHasNewerAssistantMessage(
     });
 }
 
+/** Returns the next history-load bottom-following state. */
+export function nextHistoryBottomState(
+    previous: boolean,
+    isNewSession: boolean,
+    shouldStickToBottom: boolean
+) {
+    if (isNewSession || shouldStickToBottom) {
+        return true;
+    }
+
+    return previous;
+}
+
+/** Returns the next send error after a history load failure. */
+export function nextHistoryLoadSendError(
+    previous: string | null,
+    cancelled: boolean,
+    historyLoadError: string
+) {
+    if (cancelled) {
+        return previous;
+    }
+
+    return historyLoadError;
+}
+
+/** Calls a bottom-follow scheduler only when the view should stick to bottom. */
+export function scheduleBottomFollowWhenNeeded(
+    shouldStickToBottom: boolean,
+    scheduleBottomFollow: () => void
+) {
+    if (!shouldStickToBottom) {
+        return false;
+    }
+
+    scheduleBottomFollow();
+    return true;
+}
+
 /** Performs read stored chat diagnostic visibility. */
 export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
@@ -232,6 +278,7 @@ export function Chat() {
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const liveHistoryRefreshTimerReference = useRef<number | null>(null);
+    const backgroundHistoryRefreshAbortReference = useRef<AbortController | null>(null);
     const mediaRecorderReference = useRef<MediaRecorder | null>(null);
     const recordingChunksReference = useRef<Blob[]>([]);
     const voiceFileInputReference = useRef<HTMLInputElement | null>(null);
@@ -286,7 +333,7 @@ export function Chat() {
         });
     };
 
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions || []);
+    const sortedSessions = sortSessionsByTypeAndActivity(sessions);
     const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
     const selectedSessionUpdatedAt = selectedSessionKey
         ? sessionMap.get(selectedSessionKey)?.updatedAt
@@ -325,7 +372,7 @@ export function Chat() {
 
     if (shouldShowSelectedStreamRow) {
         chatRows.push({
-            key: `stream-${selectedSessionKey || "none"}`,
+            key: `stream-${selectedSessionKey}`,
             kind: "stream",
             message: selectedStreamMessage || {
                 role: "assistant",
@@ -336,22 +383,34 @@ export function Chat() {
     }
 
     if (shouldShowTypingIndicator) {
+        const typingStream = selectedStream!;
         chatRows.push({
-            key: `typing-${selectedSessionKey || "none"}-${selectedStream?.statusText || "working"}`,
+            key: `typing-${selectedSessionKey}-${typingStream.statusText || "working"}`,
             kind: "typing",
             message: {
                 role: "assistant",
-                content: selectedStream?.statusText || "Thinking",
-                text: selectedStream?.statusText || "Thinking",
+                content: typingStream.statusText || "Thinking",
+                text: typingStream.statusText || "Thinking",
             },
         });
     }
 
     useEffect(() => {
-        if (!selectedSessionKey && sortedSessions.length > 0) {
-            setSelectedSessionKey(sortedSessions[0]?.key || "");
+        if (sortedSessions.length === 0) {
+            if (selectedSessionKey) {
+                setSelectedSessionKey("");
+            }
+            setIsLoadingHistory(false);
+            return;
         }
-    }, [sortedSessions, selectedSessionKey]);
+
+        if (!selectedSessionKey || !sessionMap.has(selectedSessionKey)) {
+            const fallbackSession = sortedSessions.find(
+                (session) => session.key && sessionMap.has(session.key)
+            );
+            setSelectedSessionKey(fallbackSession?.key || "");
+        }
+    }, [selectedSessionKey, sessionMap, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(
@@ -365,17 +424,7 @@ export function Chat() {
             sendInFlightReference.current = false;
             setIsSending(false);
 
-            if (selectedSessionKey) {
-                updateActiveStreams((previous) => {
-                    if (!previous[selectedSessionKey]) {
-                        return previous;
-                    }
-
-                    const next = { ...previous };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
-            }
+            updateActiveStreams(() => ({}));
 
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
@@ -469,17 +518,23 @@ export function Chat() {
                 });
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
-                    setIsAtBottom(true);
-                } else if (shouldStickToBottomReference.current) {
-                    setIsAtBottom(true);
                 }
+                setIsAtBottom((previous) =>
+                    nextHistoryBottomState(
+                        previous,
+                        isNewSession,
+                        shouldStickToBottomReference.current
+                    )
+                );
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch (error_) {
-                if (!cancelled) {
-                    setSendError(
-                        (error_ as Error).message || "Failed to load chat history"
-                    );
-                }
+                const historyLoadError = chatErrorMessage(
+                    error_,
+                    "Failed to load chat history"
+                );
+                setSendError((previous) =>
+                    nextHistoryLoadSendError(previous, cancelled, historyLoadError)
+                );
             } finally {
                 if (!cancelled) {
                     setIsLoadingHistory(false);
@@ -494,81 +549,101 @@ export function Chat() {
         };
     }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
     useEffect(() => {
-        if (!selectedSessionKey || !selectedSessionUpdatedAt || isLoadingHistory) {
+        if (
+            !isConnected ||
+            !selectedSessionKey ||
+            !selectedSessionUpdatedAt ||
+            isLoadingHistory
+        ) {
             return;
         }
 
+        const requestSessionKey = selectedSessionKey;
+        const abortController = new AbortController();
+        backgroundHistoryRefreshAbortReference.current?.abort();
+        backgroundHistoryRefreshAbortReference.current = abortController;
+        let cancelled = false;
+
         /** Performs refresh history. */
         const refreshHistory = async () => {
-            if (!shouldStickToBottomReference.current) {
-                return;
-            }
+            const refreshVisibleHistory = async () => {
+                try {
+                    const result = (await request("chat.history", {
+                        sessionKey: requestSessionKey,
+                        limit: CHAT_HISTORY_LIMIT,
+                    })) as {
+                        messages?: RawChatHistoryMessage[];
+                    };
 
-            try {
-                const result = (await request("chat.history", {
-                    sessionKey: selectedSessionKey,
-                    limit: CHAT_HISTORY_LIMIT,
-                })) as {
-                    messages?: RawChatHistoryMessage[];
-                };
-
-                const nextMessages = visibleHistoryMessages(
-                    result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
-                );
-                const activeStream = activeStreamsReference.current[selectedSessionKey];
-                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
-                const activeStreamIsQuiet =
-                    activeStreamUpdatedAt === null ||
-                    Date.now() - activeStreamUpdatedAt >=
-                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                const recoveredStreamInHistory = Boolean(
-                    activeStream &&
-                    activeStreamIsQuiet &&
-                    ((activeStream.text &&
-                        historyContainsRecoveredStream(
-                            nextMessages,
-                            activeStream.text
-                        )) ||
-                        historyHasNewerAssistantMessage(
-                            nextMessages,
-                            activeStream.updatedAt
-                        ))
-                );
-
-                setMessages((previous) => {
-                    const previousLast = previous.at(-1)?.timestamp || "";
-                    const nextLast = nextMessages.at(-1)?.timestamp || "";
-
-                    if (
-                        previous.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return previous;
+                    if (cancelled || abortController.signal.aborted) {
+                        return;
                     }
 
-                    if (shouldStickToBottomReference.current) {
-                        setIsAtBottom(true);
-                    }
+                    const nextMessages = visibleHistoryMessages(
+                        result.messages,
+                        createChatVisibility(showThinkingOutput, showToolOutput)
+                    );
+                    const activeStream =
+                        activeStreamsReference.current[requestSessionKey];
+                    const activeStreamUpdatedAt = sessionTimestampMs(
+                        activeStream?.updatedAt
+                    );
+                    const activeStreamIsQuiet =
+                        activeStreamUpdatedAt === null ||
+                        Date.now() - activeStreamUpdatedAt >=
+                            ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                    const recoveredStreamInHistory = Boolean(
+                        activeStream &&
+                        activeStreamIsQuiet &&
+                        ((activeStream.text &&
+                            historyContainsRecoveredStream(
+                                nextMessages,
+                                activeStream.text
+                            )) ||
+                            historyHasNewerAssistantMessage(
+                                nextMessages,
+                                activeStream.updatedAt
+                            ))
+                    );
+                    setMessages((previous) => {
+                        const previousLast = previous.at(-1)?.timestamp;
+                        const nextLast = nextMessages.at(-1)?.timestamp;
 
-                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
-                });
+                        if (
+                            previous.length === nextMessages.length &&
+                            previousLast === nextLast
+                        ) {
+                            return previous;
+                        }
 
-                if (recoveredStreamInHistory) {
-                    updateActiveStreams((previous) => {
-                        const next = { ...previous };
-                        delete next[selectedSessionKey];
-                        return next;
+                        return mergeWithRecentOptimisticMessages(previous, nextMessages);
                     });
+                    setIsAtBottom(shouldStickToBottomReference.current);
+                    if (recoveredStreamInHistory) {
+                        updateActiveStreams((previous) => {
+                            const next = { ...previous };
+                            delete next[requestSessionKey];
+                            return next;
+                        });
+                    }
+                } catch {
+                    // Ignore background refresh failures.
                 }
-            } catch {
-                // Ignore background refresh failures.
-            }
+            };
+
+            await refreshVisibleHistory();
         };
 
         void refreshHistory();
+
+        return () => {
+            cancelled = true;
+            abortController.abort();
+            backgroundHistoryRefreshAbortReference.current = null;
+        };
     }, [
         isLoadingHistory,
+        isConnected,
         request,
         selectedSessionKey,
         selectedSessionUpdatedAt,
@@ -614,8 +689,8 @@ export function Chat() {
                 );
 
                 setMessages((previous) => {
-                    const previousLast = previous.at(-1)?.timestamp || "";
-                    const nextLast = nextMessages.at(-1)?.timestamp || "";
+                    const previousLast = previous.at(-1)?.timestamp;
+                    const nextLast = nextMessages.at(-1)?.timestamp;
 
                     if (
                         previous.length === nextMessages.length &&
@@ -627,9 +702,7 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(previous, nextMessages);
                 });
 
-                if (shouldStickToBottomReference.current) {
-                    setIsAtBottom(true);
-                }
+                setIsAtBottom(shouldStickToBottomReference.current);
                 setHistoryLoadVersion((previous) => previous + 1);
             } catch {
                 // Opportunistic live refresh; WebSocket events remain the primary path.
@@ -670,7 +743,6 @@ export function Chat() {
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
-
         if (!container) {
             return true;
         }
@@ -735,9 +807,10 @@ export function Chat() {
 
     /** Responds to dynamic row content load events. */
     const handleDynamicRowContentLoad = () => {
-        if (shouldStickToBottomReference.current) {
-            scheduleBottomFollow();
-        }
+        scheduleBottomFollowWhenNeeded(
+            shouldStickToBottomReference.current,
+            scheduleBottomFollow
+        );
     };
 
     useLayoutEffect(() => {
@@ -775,20 +848,23 @@ export function Chat() {
         return () => cancelAnimationFrame(scrollFrame);
     }, [chatRows.length, selectedStreamText, selectedSessionKey]);
 
-    const sessionOptions = sessionsForSelectedAgent.map((session) => ({
-        value: session.key,
-        label: formatChatSessionLabel(session, selectedAgentId),
-        description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
-    }));
+    const sessionOptions = sessionsForSelectedAgent
+        .filter(hasSessionKey)
+        .map((session) => ({
+            value: session.key,
+            label: formatChatSessionLabel(session, selectedAgentId),
+            description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
+        }));
 
+    const selectableSessions = sortedSessions.filter(hasSessionKey);
     const agentSessionCounts = new Map<string, number>();
-    for (const session of sortedSessions) {
+    for (const session of selectableSessions) {
         const agentId = getChatAgentId(session);
         agentSessionCounts.set(agentId, (agentSessionCounts.get(agentId) || 0) + 1);
     }
 
     const agentOptions = [...agentSessionCounts.entries()].map(([agentId, count]) => {
-        const agent = agents.find((entry) => entry.id === agentId);
+        const agent = agents.find((entry) => normalizeChatAgentId(entry.id) === agentId);
         return {
             value: agentId,
             label: agentId,
@@ -804,14 +880,20 @@ export function Chat() {
 
         const agentSession = agents.find(
             (agent) => normalizeChatAgentId(agent.id) === agentId
-        )?.sessionKey;
+        )?.sessionKey as string | undefined;
         const nextSession =
             sortedSessions.find(
                 (session) =>
-                    isSameSessionKey(session.key, agentSession || undefined) &&
+                    hasSessionKey(session) &&
+                    isSameSessionKey(session.key, agentSession) &&
                     getChatAgentId(session) === agentId
-            ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
-        setSelectedSessionKey(nextSession?.key || "");
+            ) ||
+            sortedSessions.find(
+                (session) => hasSessionKey(session) && getChatAgentId(session) === agentId
+            );
+        if (nextSession) {
+            setSelectedSessionKey(nextSession.key);
+        }
     };
 
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
@@ -884,7 +966,7 @@ export function Chat() {
 
             setAttachments((previous) => [...previous, ...nextAttachments]);
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to read attachment");
+            setSendError(chatErrorMessage(error_, "Failed to read attachment"));
         } finally {
             if (fileInputReference.current) {
                 fileInputReference.current.value = "";
@@ -940,7 +1022,7 @@ export function Chat() {
                 return trimmedPrevious ? `${trimmedPrevious}\n${text}` : text;
             });
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to transcribe audio");
+            setSendError(chatErrorMessage(error_, "Failed to transcribe audio"));
         } finally {
             setIsTranscribing(false);
         }
@@ -962,7 +1044,7 @@ export function Chat() {
 
             await transcribeRecording(file);
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to read audio file");
+            setSendError(chatErrorMessage(error_, "Failed to read audio file"));
         } finally {
             if (voiceFileInputReference.current) {
                 voiceFileInputReference.current.value = "";
@@ -1033,7 +1115,7 @@ export function Chat() {
                     track.stop();
                 }
             }
-            setSendError((error_ as Error).message || "Failed to start recording");
+            setSendError(chatErrorMessage(error_, "Failed to start recording"));
         }
     };
 
@@ -1151,7 +1233,7 @@ export function Chat() {
                 });
             }
         } catch (error_) {
-            setSendError((error_ as Error).message || "Failed to send message");
+            setSendError(chatErrorMessage(error_, "Failed to send message"));
             updateActiveStreams((previous) => {
                 const next = { ...previous };
                 delete next[selectedSessionKey];

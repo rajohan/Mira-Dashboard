@@ -56,4 +56,16 @@ describe("ModelSection", () => {
             screen.getByRole("button", { name: "Save model settings" })
         ).toBeDisabled();
     });
+
+    it("shows saving state", async () => {
+        render(
+            <ModelSection defaultModel="codex" fallbacks={[]} onSave={vi.fn()} saving />
+        );
+
+        await userEvent.click(
+            screen.getByRole("button", { name: /Model Configuration/u })
+        );
+
+        expect(screen.getByRole("button", { name: /Saving/u })).toBeDisabled();
+    });
 });

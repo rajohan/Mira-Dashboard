@@ -40,7 +40,7 @@ export function Files() {
     const isLoading = rootLoading || contentLoading;
     const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
     const syntaxClass = fileContent
-        ? getSyntaxClass(fileContent.path.split("/").pop() || "")
+        ? getSyntaxClass(fileContent.path.split("/").pop()!)
         : "";
 
     return (

@@ -116,8 +116,16 @@ export function ChatComposer({
     /** Performs insert emoji. */
     const insertEmoji = (emoji: string) => {
         const textarea = textareaReference.current;
-        const selectionStart = textarea?.selectionStart ?? draft.length;
-        const selectionEnd = textarea?.selectionEnd ?? draft.length;
+        if (
+            !textarea ||
+            typeof textarea.selectionStart !== "number" ||
+            typeof textarea.selectionEnd !== "number"
+        ) {
+            return;
+        }
+
+        const selectionStart = textarea.selectionStart;
+        const selectionEnd = textarea.selectionEnd;
         const nextDraft = `${draft.slice(0, selectionStart)}${emoji}${draft.slice(
             selectionEnd
         )}`;

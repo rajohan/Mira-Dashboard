@@ -175,6 +175,25 @@ describe("Sessions page", () => {
         expect(screen.getByTestId("sessions-table")).toHaveTextContent("sessions: 1");
     });
 
+    it("excludes sessions without a type from type filters", async () => {
+        const user = userEvent.setup();
+        mockSessions({
+            sessions: [
+                {
+                    displayLabel: "Untyped session",
+                    key: "untyped",
+                    lastActivityAt: "2026-05-11T00:00:00.000Z",
+                },
+            ],
+        });
+
+        render(<Sessions />);
+
+        await user.click(screen.getByRole("button", { name: "DIRECT" }));
+
+        expect(screen.getByTestId("sessions-table")).toHaveTextContent("sessions: 0");
+    });
+
     it("shows connecting and socket error states", () => {
         const { rerender } = render(<Sessions />);
 
