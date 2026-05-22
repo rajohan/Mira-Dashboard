@@ -1,3 +1,4 @@
+import type { useVirtualizer } from "@tanstack/react-virtual";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,9 +25,50 @@ interface MockLiveSession {
     model?: string;
     type: string;
     updatedAt: string;
+    verboseLevel?: string;
 }
 
-const mocks = vi.hoisted(() => ({
+type ChatVirtualizerOptions = Parameters<typeof useVirtualizer>[0];
+type ChatVirtualizerInstance = Parameters<
+    NonNullable<ChatVirtualizerOptions["onChange"]>
+>[0];
+
+interface ChatTestMocks {
+    agentsStatus:
+        | {
+              agents: Array<{
+                  currentTask: string;
+                  id: string;
+                  sessionKey: string;
+                  status: string;
+              }>;
+          }
+        | undefined;
+    confirmModalHandlers: {
+        isOpen: boolean;
+        onCancel: () => void;
+        onConfirm: () => void;
+    } | null;
+    isConnected: boolean;
+    liveSessions: MockLiveSession[] | undefined;
+    request: ReturnType<typeof vi.fn>;
+    runtimeEventsOptions: {
+        connectionId: number;
+        isConnected: boolean;
+        liveHistoryRefreshTimerReference: { current: number | null };
+        updateActiveStreams: (
+            updater: (previous: Record<string, unknown>) => Record<string, unknown>
+        ) => void;
+    } | null;
+    skipComposerFileInputRef: boolean;
+    skipMessagesContainerRef: boolean;
+    slashCommand: ReturnType<typeof vi.fn>;
+    socketError: string | null;
+    subscribe: ReturnType<typeof vi.fn>;
+    virtualizerOptions: ChatVirtualizerOptions | null;
+}
+
+const mocks = vi.hoisted<ChatTestMocks>(() => ({
     request: vi.fn(),
     subscribe: vi.fn(),
     slashCommand: vi.fn(),
@@ -49,7 +91,7 @@ const mocks = vi.hoisted(() => ({
             type: "channel",
             updatedAt: "2026-05-10T23:00:00.000Z",
         },
-    ] as MockLiveSession[],
+    ],
     agentsStatus: {
         agents: [
             {
@@ -59,39 +101,33 @@ const mocks = vi.hoisted(() => ({
                 status: "online",
             },
         ],
-    } as
-        | {
-              agents: Array<{
-                  id: string;
-                  currentTask: string;
-                  sessionKey: string;
-                  status: string;
-              }>;
-          }
-        | undefined,
-    runtimeEventsOptions: null as {
-        connectionId: number;
-        isConnected: boolean;
-        liveHistoryRefreshTimerReference: { current: number | null };
-        updateActiveStreams: (
-            updater: (previous: Record<string, unknown>) => Record<string, unknown>
-        ) => void;
-    } | null,
-    confirmModalHandlers: null as {
-        isOpen: boolean;
-        onCancel: () => void;
-        onConfirm: () => void;
-    } | null,
+    },
+    runtimeEventsOptions: null,
+    confirmModalHandlers: null,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
-    virtualizerOptions: null as {
-        count: number;
-        estimateSize: (index: number) => number;
-        getItemKey: (index: number) => string;
-        getScrollElement: () => Element | null;
-        onChange: (_instance: unknown, sync: boolean) => void;
-    } | null,
+    virtualizerOptions: null,
 }));
+
+function getVirtualizerOptions(): ChatVirtualizerOptions & {
+    estimateSize: NonNullable<ChatVirtualizerOptions["estimateSize"]>;
+    getItemKey: NonNullable<ChatVirtualizerOptions["getItemKey"]>;
+    onChange: NonNullable<ChatVirtualizerOptions["onChange"]>;
+} {
+    const options = mocks.virtualizerOptions;
+    if (!options?.estimateSize || !options.getItemKey || !options.onChange) {
+        throw new Error("Expected virtualizer options to be captured");
+    }
+
+    return {
+        ...options,
+        estimateSize: options.estimateSize,
+        getItemKey: options.getItemKey,
+        onChange: options.onChange,
+    };
+}
+
+const mockVirtualizerInstance = {} as ChatVirtualizerInstance;
 
 vi.mock("@tanstack/react-db", () => ({
     useLiveQuery: (
@@ -102,13 +138,7 @@ vi.mock("@tanstack/react-db", () => ({
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-    useVirtualizer: (options: {
-        count: number;
-        estimateSize: (index: number) => number;
-        getItemKey: (index: number) => string;
-        getScrollElement: () => Element | null;
-        onChange: (_instance: unknown, sync: boolean) => void;
-    }) => {
+    useVirtualizer: (options: ChatVirtualizerOptions) => {
         const { count, estimateSize, getItemKey, getScrollElement } = options;
         mocks.virtualizerOptions = options;
         getScrollElement();
@@ -119,7 +149,7 @@ vi.mock("@tanstack/react-virtual", () => ({
                 Array.from({ length: count }, (_, index) => ({
                     end: (index + 1) * estimateSize(index),
                     index,
-                    key: getItemKey(index),
+                    key: getItemKey?.(index) ?? index,
                     start: index * estimateSize(index),
                 })),
             measureElement: vi.fn(),
@@ -828,6 +858,13 @@ describe("Chat", () => {
                 type: "",
                 updatedAt: "2026-05-10T22:00:00.000Z",
             },
+            {
+                displayLabel: "Malformed",
+                label: "malformed",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: "2026-05-10T21:30:00.000Z",
+            },
         ];
 
         render(<Chat />);
@@ -844,6 +881,7 @@ describe("Chat", () => {
         expect(screen.getByTestId("session-options")).toHaveTextContent("main");
         expect(screen.getByTestId("session-options")).toHaveTextContent("scratch");
         expect(screen.getByTestId("session-options")).toHaveTextContent("agent");
+        expect(screen.getByTestId("session-options")).not.toHaveTextContent("Malformed");
 
         await user.click(screen.getByRole("button", { name: "select scratch chat" }));
         await waitFor(() =>
@@ -869,7 +907,7 @@ describe("Chat", () => {
 
     it("falls back for loading session and agent data", async () => {
         mocks.agentsStatus = undefined;
-        mocks.liveSessions = undefined as unknown as MockLiveSession[];
+        mocks.liveSessions = undefined;
 
         render(<Chat />);
 
@@ -1313,7 +1351,7 @@ describe("Chat", () => {
                 type: "direct",
                 updatedAt: "2026-05-11T00:00:00.000Z",
                 verboseLevel: "full",
-            } as MockLiveSession,
+            },
         ];
 
         render(<Chat />);
@@ -1426,15 +1464,16 @@ describe("Chat", () => {
 
             await screen.findByText("Using tools");
 
-            expect(mocks.virtualizerOptions?.getItemKey(0)).toMatch(/^user::/u);
-            expect(mocks.virtualizerOptions?.getItemKey(999)).toBe("row-999");
-            expect(mocks.virtualizerOptions?.estimateSize(0)).toBe(160);
-            expect(mocks.virtualizerOptions?.estimateSize(2)).toBe(76);
+            const virtualizerOptions = getVirtualizerOptions();
+            expect(virtualizerOptions.getItemKey(0)).toMatch(/^user::/u);
+            expect(virtualizerOptions.getItemKey(999)).toBe("row-999");
+            expect(virtualizerOptions.estimateSize(0)).toBe(160);
+            expect(virtualizerOptions.estimateSize(2)).toBe(76);
 
             act(() => {
-                mocks.virtualizerOptions?.onChange({}, false);
-                mocks.virtualizerOptions?.onChange({}, false);
-                mocks.virtualizerOptions?.onChange({}, true);
+                virtualizerOptions.onChange(mockVirtualizerInstance, false);
+                virtualizerOptions.onChange(mockVirtualizerInstance, false);
+                virtualizerOptions.onChange(mockVirtualizerInstance, true);
             });
 
             expect(requestAnimationFrameSpy).toHaveBeenCalled();
@@ -1461,7 +1500,7 @@ describe("Chat", () => {
         });
 
         expect(await screen.findByText("Thinking")).toBeInTheDocument();
-        expect(mocks.virtualizerOptions?.getItemKey(2)).toBe("typing-session-a-working");
+        expect(getVirtualizerOptions().getItemKey(2)).toBe("typing-session-a-working");
     });
 
     it("recovers quiet active streams from refreshed history", async () => {
@@ -1665,7 +1704,7 @@ describe("Chat", () => {
 
         fireEvent.scroll(screen.getByLabelText("chat messages"));
         act(() => {
-            mocks.virtualizerOptions?.onChange({}, false);
+            getVirtualizerOptions().onChange(mockVirtualizerInstance, false);
         });
 
         expect(screen.getByTestId("bottom-state")).toHaveTextContent("true");

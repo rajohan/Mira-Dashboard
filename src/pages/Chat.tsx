@@ -65,7 +65,7 @@ function normalizeChatAgentId(agentId: string): string {
 
 /** Returns the top-level chat agent bucket for a session. */
 function getChatAgentId(session: Session): string {
-    const sessionKey = session.key;
+    const sessionKey = typeof session.key === "string" ? session.key : "";
     const [scope = "", agentId] = sessionKey.split(":");
 
     if (scope.toLowerCase() === "agent" && agentId) {
