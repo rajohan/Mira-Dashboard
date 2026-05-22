@@ -219,7 +219,7 @@ export function Settings() {
                           ),
                       },
                   }
-                : { heartbeat: { every, target: optionalFormValue(target) } };
+                : { heartbeat: { every: nextEvery, target: optionalFormValue(target) } };
 
             await updateConfig.mutateAsync(patch as OpenClawConfig);
             patchSuccess(setSuccess, "Heartbeat settings saved", successTimerRef);

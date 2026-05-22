@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { QuotasResponse, SyntheticQuota } from "../../../hooks/useQuotas";
 import { QuotaOverviewCard } from "./QuotaOverviewCard";
@@ -67,6 +67,10 @@ const quotas: QuotasResponse = {
 };
 
 describe("QuotaOverviewCard", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it("renders loading state without quota data", () => {
         render(<QuotaOverviewCard quotas={undefined} />);
 
@@ -202,5 +206,40 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText(/weekly 0% left/u)).toBeInTheDocument();
         expect(screen.getByText(/5h 0% left · weekly 0% left/u)).toBeInTheDocument();
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(2);
+    });
+
+    it("falls back when OpenAI-style date construction produces an invalid date", () => {
+        const RealDate = Date;
+        const MockDate = function (this: Date, ...args: unknown[]) {
+            if (args.length === 7) {
+                return new RealDate(Number.NaN);
+            }
+
+            if (this instanceof MockDate) {
+                return Reflect.construct(RealDate, args, MockDate);
+            }
+
+            return String(new RealDate());
+        } as unknown as DateConstructor;
+
+        MockDate.UTC = RealDate.UTC;
+        MockDate.now = RealDate.now;
+        MockDate.parse = RealDate.parse;
+        Object.defineProperty(MockDate, "prototype", { value: RealDate.prototype });
+        vi.stubGlobal("Date", MockDate);
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    openai: {
+                        ...quotas.openai,
+                        fiveHourReset: "13:45 on 10 May",
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/5h 13:45 on 10 May/u)).toBeInTheDocument();
     });
 });

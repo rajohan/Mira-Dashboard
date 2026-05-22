@@ -275,7 +275,9 @@ export function ChatComposer({
                                 slashCommandSuggestions.length > 0
                             ) {
                                 event.preventDefault();
-                                onApplySlashSuggestion(slashCommandSuggestions[0]!.value);
+                                onApplySlashSuggestion(
+                                    slashCommandSuggestions[0]?.value || draft
+                                );
                                 return;
                             }
 

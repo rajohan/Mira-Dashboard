@@ -572,7 +572,7 @@ describe("Settings page", () => {
         await user.click(screen.getByRole("button", { name: "Save heartbeat" }));
 
         expect(hooks.updateConfig).toHaveBeenCalledWith({
-            heartbeat: { every: 1800, target: "ops-check" },
+            heartbeat: { every: "30m", target: "ops-check" },
         });
     });
 
@@ -593,7 +593,7 @@ describe("Settings page", () => {
         await user.click(screen.getByRole("button", { name: "Save heartbeat" }));
 
         expect(hooks.updateConfig).toHaveBeenCalledWith({
-            heartbeat: { every: 1800, target: "ops-check" },
+            heartbeat: { every: "30m", target: "ops-check" },
         });
     });
 

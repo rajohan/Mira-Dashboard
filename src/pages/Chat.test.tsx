@@ -1,4 +1,3 @@
-import type { useVirtualizer } from "@tanstack/react-virtual";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +27,9 @@ interface MockLiveSession {
     verboseLevel?: string;
 }
 
-type ChatVirtualizerOptions = Parameters<typeof useVirtualizer>[0];
+type ChatVirtualizerOptions = Parameters<
+    typeof import("@tanstack/react-virtual").useVirtualizer
+>[0];
 type ChatVirtualizerInstance = Parameters<
     NonNullable<ChatVirtualizerOptions["onChange"]>
 >[0];

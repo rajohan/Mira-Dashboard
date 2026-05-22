@@ -603,9 +603,9 @@ export function Chat() {
                             return previous;
                         }
 
-                        setIsAtBottom(shouldStickToBottomReference.current);
                         return mergeWithRecentOptimisticMessages(previous, nextMessages);
                     });
+                    setIsAtBottom(shouldStickToBottomReference.current);
                     if (recoveredStreamInHistory) {
                         updateActiveStreams((previous) => {
                             const next = { ...previous };
@@ -851,7 +851,7 @@ export function Chat() {
     }
 
     const agentOptions = [...agentSessionCounts.entries()].map(([agentId, count]) => {
-        const agent = agents.find((entry) => entry.id === agentId);
+        const agent = agents.find((entry) => normalizeChatAgentId(entry.id) === agentId);
         return {
             value: agentId,
             label: agentId,

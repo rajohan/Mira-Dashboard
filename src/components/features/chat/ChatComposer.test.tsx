@@ -99,6 +99,30 @@ describe("ChatComposer", () => {
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help ");
     });
 
+    it("falls back to the draft when applying an empty slash suggestion with tab", async () => {
+        const user = userEvent.setup();
+        const onApplySlashSuggestion = vi.fn();
+
+        renderComposer({
+            draft: "/custom",
+            onApplySlashSuggestion,
+            slashCommandSuggestions: [
+                {
+                    description: "Empty custom suggestion",
+                    title: "/custom",
+                    value: "",
+                },
+            ],
+        });
+
+        screen
+            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
+            .focus();
+        await user.keyboard("{Tab}");
+
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/custom");
+    });
+
     it("previews image attachments and removes attachments from the keyboard", async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();

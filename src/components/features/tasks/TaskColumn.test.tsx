@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Task } from "../../../types/task";
+import type { ColumnId, Task } from "../../../types/task";
 import { TaskColumn } from "./TaskColumn";
 
 vi.mock("@dnd-kit/core", () => ({
@@ -69,7 +69,7 @@ describe("TaskColumn", () => {
     it("renders nothing for unknown column ids", () => {
         const { container } = render(
             <TaskColumn
-                id={"archived" as never}
+                id={"archived" as unknown as ColumnId}
                 tasks={[]}
                 isOver={false}
                 onTaskClick={vi.fn()}

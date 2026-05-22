@@ -10,6 +10,7 @@ import {
     mergeStreamMessage,
     mergeStreamText,
     normalizeAssistantPayload,
+    parseAgentSessionKey,
     payloadIsCommandMessage,
     shouldShowStreamRow,
     uniqueStrings,
@@ -48,6 +49,10 @@ describe("chat runtime helpers", () => {
         expect(isSameSessionKey("agent:main:main", "agent:ops:main")).toBe(false);
         expect(isSameSessionKey(undefined, "main")).toBe(false);
         expect(isSameSessionKey("agent:main", "main")).toBe(false);
+        expect(isSameSessionKey("agent::rest", "rest")).toBe(false);
+        expect(isSameSessionKey("agent:main:", "main")).toBe(false);
+        expect(parseAgentSessionKey("agent::rest")).toBeNull();
+        expect(parseAgentSessionKey("agent:main:")).toBeNull();
     });
 
     it("normalizes assistant payloads and final stream messages", () => {
