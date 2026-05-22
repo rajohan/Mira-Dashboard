@@ -209,6 +209,21 @@ describe("TaskDetailModal", () => {
         ).not.toBeInTheDocument();
     });
 
+    it("falls back to the first board column for invalid task columns", async () => {
+        renderModal({
+            task: makeTask({
+                labels: [],
+                state: undefined as unknown as Task["state"],
+            }),
+        });
+
+        expect(await screen.findByText("TODO")).toBeInTheDocument();
+        expect(screen.queryByText("UNDEFINED")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Move to New" })
+        ).not.toBeInTheDocument();
+    });
+
     it("renders closed tasks and scheduled/disabled automation fallbacks", async () => {
         renderModal({
             task: makeTask({

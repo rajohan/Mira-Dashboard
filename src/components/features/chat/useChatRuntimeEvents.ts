@@ -40,6 +40,7 @@ interface PendingDeltaUpdate {
 }
 
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
+const TERMINAL_CHAT_STATES = new Set(["aborted", "error", "final"]);
 const WORK_STREAMS = new Set(["tool", "item", "plan", "approval", "patch", "compaction"]);
 const NON_WORK_TOOL_NAMES = new Set([
     "message",
@@ -790,6 +791,15 @@ export function useChatRuntimeEvents({
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
+            const isStaleSelectedTerminalEvent =
+                eventMatchesSelected &&
+                streamForRun &&
+                payload.runId &&
+                TERMINAL_CHAT_STATES.has(payload.state || "") &&
+                streamForRun.runId !== payload.runId;
+            if (isStaleSelectedTerminalEvent) {
+                return;
+            }
 
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
