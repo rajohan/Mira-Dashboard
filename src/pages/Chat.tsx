@@ -511,7 +511,12 @@ export function Chat() {
         };
     }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
     useEffect(() => {
-        if (!selectedSessionKey || !selectedSessionUpdatedAt || isLoadingHistory) {
+        if (
+            !isConnected ||
+            !selectedSessionKey ||
+            !selectedSessionUpdatedAt ||
+            isLoadingHistory
+        ) {
             return;
         }
 
@@ -600,6 +605,7 @@ export function Chat() {
         };
     }, [
         isLoadingHistory,
+        isConnected,
         request,
         selectedSessionKey,
         selectedSessionUpdatedAt,
