@@ -578,6 +578,7 @@ describe("Settings page", () => {
 
     it("saves heartbeat fallback config when agents are absent", async () => {
         const user = userEvent.setup();
+        hooks.updateConfig.mockClear();
         mockSettings({
             config: {
                 data: {

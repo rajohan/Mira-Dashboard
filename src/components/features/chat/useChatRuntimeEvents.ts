@@ -464,7 +464,12 @@ export function useChatRuntimeEvents({
                 const runId = startsNewRun
                     ? incomingRunId
                     : existing?.runId || incomingRunId;
-                let text = startsNewRun ? "" : existing?.text || "";
+                const promotesProvisionalRun =
+                    startsNewRun &&
+                    existing &&
+                    isProvisionalRunId(streamSessionKey, existing.runId);
+                let text =
+                    startsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
                 let message = startsNewRun ? undefined : existing?.message;
 
                 for (const deltaMessage of pending.deltas) {
@@ -825,7 +830,10 @@ export function useChatRuntimeEvents({
                             limit: CHAT_HISTORY_LIMIT,
                         });
 
-                        if (cancelled || sessionKey !== selectedSessionKey) {
+                        if (
+                            cancelled ||
+                            !isSameSessionKey(sessionKey, selectedSessionKey)
+                        ) {
                             return;
                         }
 

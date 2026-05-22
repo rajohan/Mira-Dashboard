@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -721,13 +721,15 @@ describe("Tasks page", () => {
                 taskId: 1,
                 updateId: 10,
             });
+            await waitFor(() =>
+                expect(consoleErrorSpy).toHaveBeenCalledWith(
+                    "Failed to delete task update:",
+                    deleteError
+                )
+            );
             expect(
                 screen.getByTestId("confirm-Delete progress update")
             ).toBeInTheDocument();
-            expect(consoleErrorSpy).toHaveBeenCalledWith(
-                "Failed to delete task update:",
-                deleteError
-            );
         } finally {
             consoleErrorSpy.mockRestore();
         }

@@ -118,7 +118,14 @@ export function Logs() {
     /** Performs load log content. */
     const loadLogContent = async () => {
         const seq = ++requestSeqRef.current;
-        const result = await refetchContent();
+        let result: Awaited<ReturnType<typeof refetchContent>>;
+
+        try {
+            result = await refetchContent();
+        } catch (error_) {
+            console.error("Failed to load log content:", error_);
+            return;
+        }
 
         if (seq === requestSeqRef.current) {
             const content = result.data || "";

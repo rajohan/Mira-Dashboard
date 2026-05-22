@@ -1212,6 +1212,44 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.aliases).toEqual(["new-run"]);
     });
 
+    it("preserves buffered text when promoting a provisional run id", async () => {
+        const { emit, result } = renderRuntimeEvents({
+            activeStreams: {
+                "session-a": {
+                    aliases: ["session-a"],
+                    runId: "session-a",
+                    sessionKey: "session-a",
+                    text: "Buffered ",
+                    updatedAt: "2026-05-15T10:00:00.000Z",
+                },
+            },
+        });
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    deltaText: "continuation",
+                    runId: "real-run",
+                    sessionKey: "session-a",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(80);
+        });
+
+        expect(result.current.activeStreams["session-a"]).toEqual(
+            expect.objectContaining({
+                runId: "real-run",
+                text: "Buffered continuation",
+            })
+        );
+    });
+
     it("drops queued Gateway v4 deltas when a replacement arrives before flush", async () => {
         const { emit, result } = renderRuntimeEvents();
 

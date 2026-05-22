@@ -577,6 +577,19 @@ describe("Logs page", () => {
             );
 
             mocks.logsReady = true;
+            mocks.refetchContent.mockReset();
+            mocks.refetchContent.mockRejectedValueOnce(new Error("load failed"));
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            await waitFor(() =>
+                expect(consoleError).toHaveBeenCalledWith(
+                    "Failed to load log content:",
+                    expect.any(Error)
+                )
+            );
+            expect(mocks.writeInsert).not.toHaveBeenCalledWith(
+                expect.objectContaining({ raw: "load failed" })
+            );
+
             mocks.refetchContent.mockResolvedValueOnce({});
             mocks.writeDelete.mockClear();
             await user.click(screen.getByRole("button", { name: "Reload" }));

@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Task, TaskUpdate } from "../../../types/task";
-import { TaskDetailModal } from "./TaskDetailModal";
+import {
+    formatTaskColumnBadge,
+    normalizeTaskDetailColumn,
+    TaskDetailModal,
+} from "./TaskDetailModal";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
@@ -54,6 +58,15 @@ function renderModal(
 }
 
 describe("TaskDetailModal", () => {
+    it("normalizes missing task columns for badge and movement state", () => {
+        expect(formatTaskColumnBadge(null)).toBe("UNASSIGNED");
+        expect(formatTaskColumnBadge()).toBe("UNASSIGNED");
+        expect(formatTaskColumnBadge("in-progress")).toBe("IN-PROGRESS");
+        expect(normalizeTaskDetailColumn(null)).toBe("todo");
+        expect(normalizeTaskDetailColumn()).toBe("todo");
+        expect(normalizeTaskDetailColumn("done")).toBe("done");
+    });
+
     it("renders nothing without a selected task", () => {
         renderModal({ task: null });
 
