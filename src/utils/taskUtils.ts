@@ -116,6 +116,8 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
 }
 
 /** Returns column ID. */
+export function getColumnId(taskOrId: Task): ColumnId;
+export function getColumnId(taskOrId: string): ColumnId | null;
 export function getColumnId(taskOrId: Task | string): ColumnId | null {
     if (typeof taskOrId === "string") {
         if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {

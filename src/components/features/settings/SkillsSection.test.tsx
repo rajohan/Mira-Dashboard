@@ -24,6 +24,12 @@ const skills: Skill[] = [
         name: "custom-skill",
         source: undefined,
     },
+    {
+        description: undefined,
+        enabled: false,
+        name: "unknown-source-skill",
+        source: "unknown" as Skill["source"],
+    },
 ];
 
 describe("SkillsSection", () => {
@@ -32,7 +38,7 @@ describe("SkillsSection", () => {
         render(<SkillsSection skills={skills} onToggle={onToggle} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Skills/u }));
-        expect(screen.getByText("1/3 enabled")).toBeInTheDocument();
+        expect(screen.getByText("1/4 enabled")).toBeInTheDocument();
         expect(screen.getByText("Browser automation helpers")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "all" })).toHaveAttribute(
             "aria-pressed",
@@ -56,6 +62,7 @@ describe("SkillsSection", () => {
         expect(screen.getByText("task-tracking")).toBeInTheDocument();
 
         expect(screen.getByText("custom-skill")).toBeInTheDocument();
+        expect(screen.getByText("unknown-source-skill")).toBeInTheDocument();
         expect(screen.getAllByText("Extra").length).toBeGreaterThan(0);
 
         await userEvent.click(screen.getByRole("button", { name: /Workspace/u }));

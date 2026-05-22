@@ -89,6 +89,15 @@ describe("TaskCard", () => {
             screen.getByText("Expand dashboard test coverage").closest("div")
                 ?.parentElement
         ).toHaveClass("cursor-grabbing");
+
+        render(
+            <TaskCard
+                isDragging={false}
+                onClick={vi.fn()}
+                task={makeTask({ number: 43, title: "Stationary transformed task" })}
+            />
+        );
+        expect(screen.getByText("Stationary transformed task")).toBeInTheDocument();
     });
 
     it("renders without an assignee and falls back to unknown avatar initials", () => {
@@ -109,5 +118,18 @@ describe("TaskCard", () => {
         );
 
         expect(screen.getByText("?")).toBeInTheDocument();
+
+        rerender(
+            <TaskCard
+                task={makeTask({
+                    assignees: [{ avatar_url: "https://example.com/avatar.png" }],
+                })}
+                onClick={vi.fn()}
+            />
+        );
+        expect(screen.getByAltText("Avatar")).toHaveAttribute(
+            "src",
+            "https://example.com/avatar.png"
+        );
     });
 });

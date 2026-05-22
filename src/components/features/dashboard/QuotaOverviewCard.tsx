@@ -65,7 +65,11 @@ function tryParseOpenAiReset(value: string): Date | null {
             0
         );
 
-        return Number.isNaN(date.getTime()) ? null : date;
+        if (Number.isNaN(date.getTime())) {
+            return null;
+        }
+
+        return date;
     }
 
     return null;

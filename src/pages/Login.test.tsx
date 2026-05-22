@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Login } from "./Login";
@@ -193,5 +194,89 @@ describe("Login page", () => {
         expect(await screen.findByText("Invalid credentials")).toBeInTheDocument();
         expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
         expect(mocks.navigate).not.toHaveBeenCalled();
+    });
+
+    it("uses the fallback message for empty authentication error payloads", async () => {
+        const user = userEvent.setup();
+        mocks.fetch
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            )
+            .mockResolvedValueOnce(jsonResponse({ error: "" }, { status: 401 }))
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            );
+
+        render(<Login />);
+
+        await screen.findByText("Log in with your dashboard username and password");
+        await user.type(screen.getByPlaceholderText("Enter your username"), "raymond");
+        await user.type(screen.getByPlaceholderText("Enter your password"), "wrong");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        expect(await screen.findByText("Authentication failed")).toBeInTheDocument();
+    });
+
+    it("submits with default login mode before bootstrap state resolves", async () => {
+        const user = userEvent.setup();
+        let resolveBootstrap: (value: Response) => void = () => {};
+        mocks.fetch
+            .mockReturnValueOnce(
+                new Promise<Response>((resolve) => {
+                    resolveBootstrap = resolve;
+                })
+            )
+            .mockRejectedValueOnce("network down")
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            );
+
+        render(<Login />);
+
+        await user.type(screen.getByPlaceholderText("Enter your username"), "raymond");
+        await user.type(screen.getByPlaceholderText("Enter your password"), "wrong");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        expect(await screen.findByText("Authentication failed")).toBeInTheDocument();
+        expect(mocks.fetch).toHaveBeenCalledWith(
+            "/api/auth/login",
+            expect.objectContaining({ method: "POST" })
+        );
+
+        await act(async () => {
+            resolveBootstrap(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            );
+        });
+    });
+
+    it("still refreshes bootstrap state when session refresh fails after auth errors", async () => {
+        const user = userEvent.setup();
+        mocks.refreshSession.mockRejectedValueOnce(new Error("refresh failed"));
+        mocks.fetch
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({ error: "Invalid credentials" }, { status: 401 })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({ bootstrapRequired: true, hasGatewayToken: false })
+            );
+
+        render(<Login />);
+
+        await screen.findByText("Log in with your dashboard username and password");
+        await user.type(screen.getByPlaceholderText("Enter your username"), "raymond");
+        await user.type(screen.getByPlaceholderText("Enter your password"), "wrong");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        expect(await screen.findByText("Invalid credentials")).toBeInTheDocument();
+        expect(
+            await screen.findByText(
+                "Create the first dashboard user and save the gateway token server-side"
+            )
+        ).toBeInTheDocument();
+        expect(mocks.refreshSession).toHaveBeenCalledTimes(1);
     });
 });

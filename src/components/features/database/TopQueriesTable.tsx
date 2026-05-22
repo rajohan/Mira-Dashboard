@@ -65,11 +65,15 @@ export function TopQueriesTable({
     }
 
     /** Responds to copy events. */
-    const handleCopy = async () => {
-        if (!selectedQuery) return;
-        await navigator.clipboard.writeText(selectedQuery.query);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
+    const handleCopy = async (query: string) => {
+        try {
+            await navigator.clipboard.writeText(query);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+        } catch (error_) {
+            setCopied(false);
+            console.error("Failed to copy query", error_);
+        }
     };
 
     return (
@@ -131,7 +135,7 @@ export function TopQueriesTable({
                             <Button
                                 variant="secondary"
                                 size="sm"
-                                onClick={() => void handleCopy()}
+                                onClick={() => void handleCopy(selectedQuery.query)}
                                 className="w-full sm:w-auto"
                             >
                                 <Copy className="mr-2 h-4 w-4" />

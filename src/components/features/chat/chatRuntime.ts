@@ -55,15 +55,15 @@ interface ParsedAgentSessionKey {
 }
 
 /** Parses agent session key. */
-function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
+export function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
     const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
-    if (!match) {
+    if (!match || !match[1] || !match[2]) {
         return null;
     }
 
     return {
-        agentId: match[1]?.toLowerCase() || "",
-        rest: match[2]?.toLowerCase() || "",
+        agentId: match[1]!.toLowerCase(),
+        rest: match[2]!.toLowerCase(),
     };
 }
 

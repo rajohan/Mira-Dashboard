@@ -73,9 +73,30 @@ export function numberFromDuration(value: unknown, fallback: number): number {
     const match = value.match(/^(\d+)([smhd])?$/i);
     if (!match) return fallback;
     const amount = Number(match[1]);
-    const unit = (match[2] || "s").toLowerCase();
-    const factors: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86_400 };
-    return amount * (factors[unit] || 1);
+    const unit = (match[2] || "s").toLowerCase() as "s" | "m" | "h" | "d";
+    const factors: Record<typeof unit, number> = {
+        s: 1,
+        m: 60,
+        h: 3600,
+        d: 86_400,
+    };
+    return amount * factors[unit];
+}
+
+/** Returns a displayable error message with a stable fallback. */
+export function errorMessage(error: unknown, fallback: string): string {
+    if (!(error instanceof Error)) {
+        return fallback;
+    }
+
+    const message = error.message.trim();
+    return message || fallback;
+}
+
+/** Returns undefined for empty form values before writing config patches. */
+export function optionalFormValue(value?: string): string | undefined {
+    const trimmed = value?.trim();
+    return trimmed || undefined;
 }
 
 /** Represents system host cache. */
@@ -127,7 +148,7 @@ export function Settings() {
                 2000
             );
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to restart");
+            setError(errorMessage(error_, "Failed to restart"));
         }
     }
 
@@ -145,7 +166,7 @@ export function Settings() {
             a.click();
             URL.revokeObjectURL(url);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to backup");
+            setError(errorMessage(error_, "Failed to backup"));
         }
     }
 
@@ -154,7 +175,7 @@ export function Settings() {
         try {
             await toggleSkill.mutateAsync({ name: skillName, enabled });
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to update skill");
+            setError(errorMessage(error_, "Failed to update skill"));
         }
     }
 
@@ -167,7 +188,7 @@ export function Settings() {
             } as OpenClawConfig);
             patchSuccess(setSuccess, "Session settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 
@@ -191,19 +212,19 @@ export function Settings() {
                                                 unknown
                                             >),
                                             every: nextEvery,
-                                            target: target || undefined,
+                                            target: optionalFormValue(target),
                                         },
                                     }
                                   : agent
                           ),
                       },
                   }
-                : { heartbeat: { every, target: target || undefined } };
+                : { heartbeat: { every: nextEvery, target: optionalFormValue(target) } };
 
             await updateConfig.mutateAsync(patch as OpenClawConfig);
             patchSuccess(setSuccess, "Heartbeat settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 
@@ -218,7 +239,7 @@ export function Settings() {
             } as OpenClawConfig);
             patchSuccess(setSuccess, "Agent access settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 
@@ -231,7 +252,7 @@ export function Settings() {
             } as OpenClawConfig);
             patchSuccess(setSuccess, "Model settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 
@@ -241,11 +262,11 @@ export function Settings() {
         try {
             await updateConfig.mutateAsync({
                 tools: {
-                    profile: values.profile || undefined,
+                    profile: optionalFormValue(values.profile),
                     web: {
                         search: {
                             enabled: values.webSearchEnabled,
-                            provider: values.webSearchProvider || undefined,
+                            provider: optionalFormValue(values.webSearchProvider),
                         },
                         fetch: { enabled: values.webFetchEnabled },
                     },
@@ -255,12 +276,14 @@ export function Settings() {
                     },
                     elevated: { enabled: values.elevatedEnabled },
                     agentToAgent: { enabled: values.agentToAgentEnabled },
-                    sessions: { visibility: values.sessionsVisibility || undefined },
+                    sessions: {
+                        visibility: optionalFormValue(values.sessionsVisibility),
+                    },
                 },
             } as OpenClawConfig);
             patchSuccess(setSuccess, "Tool settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 
@@ -275,7 +298,7 @@ export function Settings() {
             } as OpenClawConfig);
             patchSuccess(setSuccess, "Channel settings saved", successTimerRef);
         } catch (error_) {
-            setError(error_ instanceof Error ? error_.message : "Failed to save");
+            setError(errorMessage(error_, "Failed to save"));
         }
     }
 

@@ -14,6 +14,7 @@ import type {
 } from "./chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
+    chatErrorMessage,
     type ChatModelOption,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtils";
@@ -129,7 +130,7 @@ export function useChatSlashCommands({
             try {
                 await action();
             } catch (error_) {
-                setSendError((error_ as Error).message || `Failed to run ${rawCommand}`);
+                setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
             } finally {
                 setIsSending(false);
             }
@@ -396,7 +397,7 @@ export function useChatSlashCommands({
                         : `Compaction skipped${result.reason ? `: ${result.reason}` : "."}`
                 );
             } catch (error_) {
-                setSendError((error_ as Error).message || "Failed to run /compact");
+                setSendError(chatErrorMessage(error_, "Failed to run /compact"));
             } finally {
                 updateActiveStreams((previous) => {
                     const next = { ...previous };

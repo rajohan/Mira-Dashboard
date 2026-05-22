@@ -152,6 +152,7 @@ describe("ChatMessagesList helpers", () => {
         ).toBeNull();
         expect(
             previewFromAttachment({
+                dataUrl: "data:text/plain;base64,bm90ZXM=",
                 contentBase64: btoa("notes"),
                 fileName: "notes.txt",
                 id: "notes",
@@ -162,6 +163,22 @@ describe("ChatMessagesList helpers", () => {
                 mimeType: "application/octet-stream",
                 text: "notes",
                 title: "notes.txt",
+                url: "data:text/plain;base64,bm90ZXM=",
+            })
+        );
+        expect(
+            previewFromAttachment({
+                dataUrl: "",
+                contentBase64: btoa("fallback"),
+                fileName: "fallback.txt",
+                id: "fallback",
+                kind: "text",
+                mimeType: "text/plain",
+            })
+        ).toEqual(
+            expect.objectContaining({
+                text: "fallback",
+                url: `data:text/plain;base64,${btoa("fallback")}`,
             })
         );
     });
@@ -258,6 +275,7 @@ describe("ChatMessagesList", () => {
             },
             { type: "image" }
         );
+        rows[2]!.message.text = "";
         rows.push(
             {
                 key: "assistant-empty",
@@ -289,7 +307,7 @@ describe("ChatMessagesList", () => {
         expect(screen.getByText("Hello Mira")).toBeInTheDocument();
         expect(screen.getByText("Hi Raymond")).toBeInTheDocument();
         expect(screen.getByText("thinkingtool output")).toBeInTheDocument();
-        expect(screen.getByText("Working")).toBeInTheDocument();
+        expect(screen.getByText("Thinking")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Delete your message" }));
         expect(onDeleteMessage).toHaveBeenCalledWith("user-1");
@@ -342,6 +360,17 @@ describe("ChatMessagesList", () => {
         expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
         expect(screen.queryByText("raw tool output")).not.toBeInTheDocument();
         expect(screen.queryByText("formatted tool output")).not.toBeInTheDocument();
+    });
+
+    it("renders bottom padding for shorter virtualized rows", () => {
+        const rows = makeRows();
+
+        renderMessages({
+            chatRows: rows,
+            messagesVirtualizer: makeVirtualizer(rows.length, { padded: true }),
+        });
+
+        expect(screen.getByText("Hello Mira")).toBeInTheDocument();
     });
 
     it("uses the TTS endpoint for assistant messages and reports errors", async () => {
@@ -414,6 +443,16 @@ describe("ChatMessagesList", () => {
         await waitFor(() =>
             expect(onTtsError).toHaveBeenCalledWith("Failed to generate speech")
         );
+
+        (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            json: async () => ({}),
+            ok: false,
+            status: 429,
+        });
+        await user.click(
+            screen.getByRole("button", { name: "Read assistant message aloud" })
+        );
+        await waitFor(() => expect(onTtsError).toHaveBeenCalledWith("HTTP 429"));
     });
 
     it("reports generated audio playback errors", async () => {

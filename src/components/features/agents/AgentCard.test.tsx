@@ -51,4 +51,21 @@ describe("AgentCard", () => {
         expect(screen.getByText("No active task")).toBeInTheDocument();
         expect(screen.getByText(/Last active N\/A/)).toBeInTheDocument();
     });
+
+    it("renders active status and preserves models with trailing separators", () => {
+        render(
+            <AgentCard
+                id="builder"
+                status="active"
+                model="provider/"
+                currentTask={null}
+                currentActivity={null}
+                lastActivity={null}
+                channel={null}
+            />
+        );
+
+        expect(screen.getByText("Working")).toBeInTheDocument();
+        expect(screen.getByText("provider/")).toBeInTheDocument();
+    });
 });
