@@ -56,9 +56,11 @@ function renderRuntimeEvents(
         ({
             connectionId = overrides.connectionId ?? 1,
             isConnected = overrides.isConnected ?? true,
+            selectedSessionKey,
         }: {
             connectionId?: number;
             isConnected?: boolean;
+            selectedSessionKey?: string;
         } = {}) => {
             const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>(
                 overrides.activeStreams ?? {}
@@ -90,7 +92,8 @@ function renderRuntimeEvents(
                 isConnected,
                 liveHistoryRefreshTimerReference,
                 request: request as unknown as ChatRequest,
-                selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
+                selectedSessionKey:
+                    selectedSessionKey ?? overrides.selectedSessionKey ?? "session-a",
                 setHistoryLoadVersion,
                 setIsAtBottom,
                 setMessages,
@@ -279,6 +282,66 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.isAtBottom).toBe(true);
         expect(result.current.messages.map((message) => message.text)).toContain(
             "history message"
+        );
+    });
+
+    it("ignores delayed history refresh results after the selected session changes", async () => {
+        let resolveHistory:
+            | ((value: { messages: Array<{ role: string; text: string }> }) => void)
+            | undefined;
+        const request = vi.fn((method: string) => {
+            if (method === "chat.history") {
+                return new Promise((resolve) => {
+                    resolveHistory = resolve;
+                });
+            }
+
+            return Promise.resolve({});
+        });
+        const {
+            emit,
+            rerender,
+            request: requestMock,
+            result,
+        } = renderRuntimeEvents({
+            clearInitialRequests: false,
+            request,
+        });
+        requestMock.mockClear();
+
+        act(() => {
+            emit({
+                event: "chat",
+                payload: {
+                    message: { content: "Done", role: "assistant" },
+                    runId: "run-1",
+                    sessionKey: "session-a",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(500);
+        });
+
+        expect(requestMock).toHaveBeenCalledWith("chat.history", {
+            limit: 1000,
+            sessionKey: "session-a",
+        });
+
+        rerender({ selectedSessionKey: "session-b" });
+
+        await act(async () => {
+            resolveHistory?.({
+                messages: [{ role: "assistant", text: "stale history" }],
+            });
+        });
+
+        expect(result.current.historyLoadVersion).toBe(0);
+        expect(result.current.messages.map((message) => message.text)).not.toContain(
+            "stale history"
         );
     });
 

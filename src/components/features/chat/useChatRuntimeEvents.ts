@@ -426,13 +426,17 @@ export function useChatRuntimeEvents({
 }: UseChatRuntimeEventsParams) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<number | null>(null);
+    const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
 
+    selectedSessionKeyReference.current = selectedSessionKey;
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
 
     useEffect(() => {
+        let cancelled = false;
+
         /** Performs flush pending delta updates. */
         const flushPendingDeltaUpdates = () => {
             if (pendingDeltaFlushTimerReference.current !== null) {
@@ -522,6 +526,11 @@ export function useChatRuntimeEvents({
 
         /** Performs refresh selected history soon. */
         const refreshSelectedHistorySoon = (delayMs = 450) => {
+            const sessionKeyAtCall = selectedSessionKey;
+            if (!sessionKeyAtCall) {
+                return;
+            }
+
             if (liveHistoryRefreshTimerReference.current !== null) {
                 window.clearTimeout(liveHistoryRefreshTimerReference.current);
             }
@@ -529,7 +538,7 @@ export function useChatRuntimeEvents({
             liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
                 liveHistoryRefreshTimerReference.current = null;
 
-                if (!shouldStickToBottomReference.current) {
+                if (cancelled || !shouldStickToBottomReference.current) {
                     return;
                 }
 
@@ -537,10 +546,20 @@ export function useChatRuntimeEvents({
                     const result = await request<{ messages?: RawChatHistoryMessage[] }>(
                         "chat.history",
                         {
-                            sessionKey: selectedSessionKey,
+                            sessionKey: sessionKeyAtCall,
                             limit: CHAT_HISTORY_LIMIT,
                         }
                     );
+
+                    if (
+                        cancelled ||
+                        !isSameSessionKey(
+                            sessionKeyAtCall,
+                            selectedSessionKeyReference.current
+                        )
+                    ) {
+                        return;
+                    }
 
                     setMessages((previous) =>
                         mergeWithRecentOptimisticMessages(
@@ -771,7 +790,7 @@ export function useChatRuntimeEvents({
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
-                    if (!shouldStickToBottomReference.current) {
+                    if (cancelled || !shouldStickToBottomReference.current) {
                         return;
                     }
 
@@ -783,7 +802,7 @@ export function useChatRuntimeEvents({
                             limit: CHAT_HISTORY_LIMIT,
                         });
 
-                        if (sessionKey !== selectedSessionKey) {
+                        if (cancelled || sessionKey !== selectedSessionKey) {
                             return;
                         }
 
@@ -949,6 +968,7 @@ export function useChatRuntimeEvents({
         });
 
         return () => {
+            cancelled = true;
             flushPendingDeltaUpdates();
             unsubscribe();
             if (liveHistoryRefreshTimerReference.current !== null) {

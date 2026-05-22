@@ -75,6 +75,11 @@ function getChatAgentId(session: Session): string {
     return normalizeChatAgentId(session.agentType || session.type || "unknown");
 }
 
+/** Returns whether a live session has a usable key. */
+function hasSessionKey(session: Session): boolean {
+    return typeof session.key === "string" && session.key.length > 0;
+}
+
 /** Formats the session label inside a selected chat agent bucket. */
 function formatChatSessionLabel(session: Session, agentId: string): string {
     const sessionKey = typeof session.key === "string" ? session.key : "";
@@ -832,9 +837,13 @@ export function Chat() {
         const nextSession =
             sortedSessions.find(
                 (session) =>
+                    hasSessionKey(session) &&
                     isSameSessionKey(session.key, agentSession) &&
                     getChatAgentId(session) === agentId
-            ) || sortedSessions.find((session) => getChatAgentId(session) === agentId);
+            ) ||
+            sortedSessions.find(
+                (session) => hasSessionKey(session) && getChatAgentId(session) === agentId
+            );
         if (nextSession) {
             setSelectedSessionKey(nextSession.key);
         }
