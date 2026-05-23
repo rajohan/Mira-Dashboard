@@ -13,6 +13,7 @@ vi.mock("@dnd-kit/sortable", () => ({
     useSortable: () => ({
         attributes: { "aria-describedby": "sortable-task" },
         listeners: { onPointerDown: vi.fn() },
+        setActivatorNodeRef: vi.fn(),
         setNodeRef: vi.fn(),
         transform: sortable.transform,
     }),
@@ -56,6 +57,22 @@ describe("TaskCard", () => {
         expect(onClick).toHaveBeenCalledTimes(1);
     });
 
+    it("opens the task from keyboard focus", async () => {
+        const user = userEvent.setup();
+        const onClick = vi.fn();
+        render(<TaskCard task={makeTask()} onClick={onClick} />);
+
+        const openButton = screen.getByRole("button", {
+            name: "Open task #42: Expand dashboard test coverage",
+        });
+
+        openButton.focus();
+        await user.keyboard("{Enter}");
+        await user.keyboard(" ");
+
+        expect(onClick).toHaveBeenCalledTimes(2);
+    });
+
     it("stops card clicks from the drag handle", async () => {
         const onClick = vi.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
@@ -86,8 +103,9 @@ describe("TaskCard", () => {
         expect(screen.getByText("Recurring")).toBeInTheDocument();
         expect(screen.getByText("R")).toBeInTheDocument();
         expect(
-            screen.getByText("Expand dashboard test coverage").closest("div")
-                ?.parentElement
+            screen.getByRole("button", {
+                name: "Open task #42: Expand dashboard test coverage",
+            }).parentElement
         ).toHaveClass("cursor-grabbing");
 
         render(

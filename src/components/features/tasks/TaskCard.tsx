@@ -16,9 +16,10 @@ interface TaskCardProps {
 
 /** Renders the task card UI. */
 export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
-    const { attributes, listeners, setNodeRef, transform } = useSortable({
-        id: String(task.number),
-    });
+    const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform } =
+        useSortable({
+            id: String(task.number),
+        });
 
     const style = transform
         ? {
@@ -34,24 +35,30 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
         <div
             ref={setNodeRef}
             style={style}
-            {...attributes}
             className={
-                "group border-primary-700 bg-primary-800 relative cursor-pointer rounded-lg border p-3 transition-all " +
+                "group border-primary-700 bg-primary-800 relative rounded-lg border p-3 transition-all " +
                 "hover:border-primary-600 " +
                 (isDragging ? "border-accent-500 cursor-grabbing opacity-90" : "")
             }
-            onClick={onClick}
         >
             <button
+                ref={setActivatorNodeRef}
+                type="button"
+                {...attributes}
                 {...listeners}
                 aria-label={`Drag task #${task.number}`}
-                className="text-primary-500 hover:text-primary-300 md:text-primary-600 absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                className="text-primary-500 hover:text-primary-300 focus:ring-accent-400 md:text-primary-600 absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab rounded transition-opacity focus:opacity-100 focus:ring-2 focus:outline-none md:opacity-0 md:group-hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
             </button>
 
-            <div className="ml-3 min-w-0">
+            <button
+                type="button"
+                aria-label={`Open task #${task.number}: ${task.title}`}
+                className="focus:ring-accent-400 ml-3 block min-w-0 cursor-pointer rounded text-left focus:ring-2 focus:outline-none"
+                onClick={onClick}
+            >
                 <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
                     <span className="text-primary-500 shrink-0 text-xs">
                         #{task.number}
@@ -97,7 +104,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                         </div>
                     )}
                 </div>
-            </div>
+            </button>
         </div>
     );
 }
