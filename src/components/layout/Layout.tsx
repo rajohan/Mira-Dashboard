@@ -152,7 +152,7 @@ export function Layout({ children }: LayoutProps) {
                     }
                     isSidebarOpen={isSidebarOpen}
                     sidebarId={sidebarId}
-                    onOpenSidebar={() => setIsSidebarOpen(true)}
+                    onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
                 />
                 <div className="min-h-0 flex-1 overflow-auto">{children}</div>
             </main>

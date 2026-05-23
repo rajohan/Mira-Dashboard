@@ -12,7 +12,7 @@ interface AppHeaderProps {
     title: string;
     isSidebarOpen: boolean;
     sidebarId: string;
-    onOpenSidebar: () => void;
+    onToggleSidebar: () => void;
 }
 
 /** Renders the app header UI. */
@@ -20,7 +20,7 @@ export function AppHeader({
     title,
     isSidebarOpen,
     sidebarId,
-    onOpenSidebar,
+    onToggleSidebar,
 }: AppHeaderProps) {
     const navigate = useNavigate();
     const { isConnected } = useOpenClawSocket();
@@ -47,7 +47,7 @@ export function AppHeader({
                         aria-controls={sidebarId}
                         aria-expanded={isSidebarOpen}
                         aria-label={navigationToggleLabel}
-                        onClick={onOpenSidebar}
+                        onClick={onToggleSidebar}
                     >
                         <Menu size={22} />
                     </button>
