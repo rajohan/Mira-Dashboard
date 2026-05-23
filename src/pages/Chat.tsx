@@ -29,8 +29,8 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
-    CHAT_HISTORY_LIMIT,
     assistantTextLooksRecovered,
+    CHAT_HISTORY_LIMIT,
     chatErrorMessage,
     type ChatModelOption,
     dataUrlToBase64,
@@ -361,21 +361,27 @@ export function Chat() {
             !deletedMessageKeys.has(messageDeleteKey(message)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
     );
+    const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
+    const selectedStreamIsQuiet =
+        selectedStreamUpdatedAt === null ||
+        Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
     const selectedStreamIsRecoveredInMessages = Boolean(
         selectedStreamText.trim() &&
-            visibleMessagesForRows.some(
-                (message) =>
-                    message.role.toLowerCase() === "assistant" &&
-                    assistantTextLooksRecovered(message.text, selectedStreamText)
-            )
+        selectedStreamIsQuiet &&
+        visibleMessagesForRows.some((message) => {
+            return (
+                message.role.toLowerCase() === "assistant" &&
+                assistantTextLooksRecovered(message.text, selectedStreamText)
+            );
+        })
     );
     const shouldShowSelectedStreamRow =
         !selectedStreamIsRecoveredInMessages &&
         shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
     const shouldShowTypingIndicator = Boolean(
         selectedStream &&
-            !selectedStreamIsRecoveredInMessages &&
-            (selectedStream.statusText || !shouldShowSelectedStreamRow)
+        !selectedStreamIsRecoveredInMessages &&
+        (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),

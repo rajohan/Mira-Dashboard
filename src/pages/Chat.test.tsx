@@ -1520,25 +1520,60 @@ describe("Chat", () => {
     });
 
     it("does not render a live stream row when the same assistant text is already visible", async () => {
-        render(<Chat />);
-        await screen.findByText("old assistant message");
+        const nowSpy = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
+        try {
+            render(<Chat />);
+            await screen.findByText("old assistant message");
 
-        act(() => {
-            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
-                ...previous,
-                "session-a": {
-                    aliases: ["run-live"],
-                    runId: "run-live",
-                    sessionKey: "session-a",
-                    statusText: "Thinking",
-                    text: "old assistant message",
-                    updatedAt: "2026-05-11T00:02:00.000Z",
-                },
-            }));
-        });
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        statusText: "Thinking",
+                        text: "old assistant message",
+                        updatedAt: "2026-05-11T00:02:00.000Z",
+                    },
+                }));
+            });
 
-        expect(screen.getAllByText("old assistant message")).toHaveLength(1);
-        expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+            expect(screen.getAllByText("old assistant message")).toHaveLength(1);
+            expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+        } finally {
+            nowSpy.mockRestore();
+        }
+    });
+
+    it("keeps a fresh live stream row when it shares text with a visible assistant message", async () => {
+        const nowSpy = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
+        try {
+            render(<Chat />);
+            await screen.findByText("old assistant message");
+
+            act(() => {
+                mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                    ...previous,
+                    "session-a": {
+                        aliases: ["run-live"],
+                        runId: "run-live",
+                        sessionKey: "session-a",
+                        statusText: "Thinking",
+                        text: "old assistant message",
+                        updatedAt: "2026-05-11T00:04:30.000Z",
+                    },
+                }));
+            });
+
+            expect(screen.getAllByText("old assistant message")).toHaveLength(2);
+        } finally {
+            nowSpy.mockRestore();
+        }
     });
 
     it("recovers quiet active streams from refreshed history", async () => {
