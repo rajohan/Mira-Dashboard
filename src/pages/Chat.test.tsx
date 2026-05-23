@@ -1519,6 +1519,28 @@ describe("Chat", () => {
         expect(getVirtualizerOptions().getItemKey(2)).toBe("typing-session-a-working");
     });
 
+    it("does not render a live stream row when the same assistant text is already visible", async () => {
+        render(<Chat />);
+        await screen.findByText("old assistant message");
+
+        act(() => {
+            mocks.runtimeEventsOptions?.updateActiveStreams((previous) => ({
+                ...previous,
+                "session-a": {
+                    aliases: ["run-live"],
+                    runId: "run-live",
+                    sessionKey: "session-a",
+                    statusText: "Thinking",
+                    text: "old assistant message",
+                    updatedAt: "2026-05-11T00:02:00.000Z",
+                },
+            }));
+        });
+
+        expect(screen.getAllByText("old assistant message")).toHaveLength(1);
+        expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+    });
+
     it("recovers quiet active streams from refreshed history", async () => {
         const nowSpy = vi
             .spyOn(Date, "now")

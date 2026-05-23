@@ -30,6 +30,7 @@ import {
 } from "../components/features/chat/chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
+    assistantTextLooksRecovered,
     chatErrorMessage,
     type ChatModelOption,
     dataUrlToBase64,
@@ -355,18 +356,26 @@ export function Chat() {
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
-    const shouldShowSelectedStreamRow = shouldRenderStreamRow(
-        selectedStreamText,
-        selectedStreamMessage,
-        chatVisibility
-    );
-    const shouldShowTypingIndicator = Boolean(
-        selectedStream && (selectedStream.statusText || !shouldShowSelectedStreamRow)
-    );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) =>
             !deletedMessageKeys.has(messageDeleteKey(message)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
+    );
+    const selectedStreamIsRecoveredInMessages = Boolean(
+        selectedStreamText.trim() &&
+            visibleMessagesForRows.some(
+                (message) =>
+                    message.role.toLowerCase() === "assistant" &&
+                    assistantTextLooksRecovered(message.text, selectedStreamText)
+            )
+    );
+    const shouldShowSelectedStreamRow =
+        !selectedStreamIsRecoveredInMessages &&
+        shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
+    const shouldShowTypingIndicator = Boolean(
+        selectedStream &&
+            !selectedStreamIsRecoveredInMessages &&
+            (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
