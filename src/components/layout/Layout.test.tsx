@@ -198,6 +198,6 @@ describe("Layout", () => {
         closeButtons = screen.getAllByRole("button", {
             name: "Close navigation menu",
         });
-        await user.click(closeButtons.at(-1)!);
+        await user.click(closeButtons[1]!);
     });
 });

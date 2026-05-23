@@ -73,7 +73,7 @@ describe("AppHeader", () => {
                 title="Dashboard"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onOpenSidebar={vi.fn()}
+                onToggleSidebar={vi.fn()}
             />
         );
 
@@ -95,7 +95,7 @@ describe("AppHeader", () => {
                 title="Sessions"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onOpenSidebar={vi.fn()}
+                onToggleSidebar={vi.fn()}
             />
         );
 
@@ -119,7 +119,7 @@ describe("AppHeader", () => {
                 title="Tasks"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onOpenSidebar={vi.fn()}
+                onToggleSidebar={vi.fn()}
             />
         );
 
@@ -130,7 +130,7 @@ describe("AppHeader", () => {
     });
 
     it("opens sidebar via hamburger button on mobile", async () => {
-        const onOpenSidebar = vi.fn();
+        const onToggleSidebar = vi.fn();
         const user = userEvent.setup();
 
         render(
@@ -138,12 +138,32 @@ describe("AppHeader", () => {
                 title="Dashboard"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onOpenSidebar={onOpenSidebar}
+                onToggleSidebar={onToggleSidebar}
             />
         );
 
         await user.click(screen.getByRole("button", { name: "Open navigation menu" }));
-        expect(onOpenSidebar).toHaveBeenCalledTimes(1);
+        expect(onToggleSidebar).toHaveBeenCalledTimes(1);
+    });
+
+    it("labels and dispatches the mobile navigation toggle when the sidebar is open", async () => {
+        const onToggleSidebar = vi.fn();
+        const user = userEvent.setup();
+
+        render(
+            <AppHeader
+                title="Dashboard"
+                isSidebarOpen={true}
+                sidebarId="sidebar"
+                onToggleSidebar={onToggleSidebar}
+            />
+        );
+
+        const toggle = screen.getByRole("button", { name: "Close navigation menu" });
+        expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+        await user.click(toggle);
+        expect(onToggleSidebar).toHaveBeenCalledTimes(1);
     });
 
     it("calls logout and navigates to login on log out click", async () => {
@@ -154,7 +174,7 @@ describe("AppHeader", () => {
                 title="Dashboard"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onOpenSidebar={vi.fn()}
+                onToggleSidebar={vi.fn()}
             />
         );
 
