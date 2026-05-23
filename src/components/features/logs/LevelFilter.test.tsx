@@ -18,8 +18,16 @@ describe("LevelFilter", () => {
         expect(screen.getByRole("button", { name: "info" })).toHaveClass(
             "bg-primary-700"
         );
+        expect(screen.getByRole("button", { name: "info" })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
         expect(screen.getByRole("button", { name: "warn" })).toHaveClass(
             "bg-yellow-500/20"
+        );
+        expect(screen.getByRole("button", { name: "warn" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
         );
 
         fireEvent.click(screen.getByRole("button", { name: "error" }));

@@ -18,6 +18,7 @@ export function LevelFilter({ levels, activeLevels, onToggle }: LevelFilterProps
                     key={level}
                     variant="ghost"
                     size="sm"
+                    aria-pressed={activeLevels.has(level)}
                     onClick={() => onToggle(level)}
                     className={cn(
                         "rounded px-2 py-0.5 text-xs",
