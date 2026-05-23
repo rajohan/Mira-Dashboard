@@ -45,6 +45,8 @@ function renderSlashCommands(
         attachments?: ChatSendAttachment[];
         request?: ReturnType<typeof vi.fn>;
         chatModelOptions?: Array<{ id?: string; label?: string; name?: string }>;
+        confirmResetSession?: () => Promise<boolean>;
+        initialSendError?: string | null;
         selectedSession?: Session | null;
         selectedSessionKey?: string;
     } = {}
@@ -56,7 +58,9 @@ function renderSlashCommands(
             { content: "hello", role: "user", text: "hello" },
         ]);
         const [draft, setDraft] = useState("/help");
-        const [sendError, setSendError] = useState<string | null>(null);
+        const [sendError, setSendError] = useState<string | null>(
+            overrides.initialSendError ?? null
+        );
         const [isSending, setIsSending] = useState(false);
         const [isAtBottom, setIsAtBottom] = useState(false);
         const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
@@ -92,6 +96,8 @@ function renderSlashCommands(
             showThinkingOutput: false,
             showToolOutput: false,
             updateActiveStreams: setActiveStreams,
+            confirmResetSession:
+                overrides.confirmResetSession || vi.fn().mockResolvedValue(true),
         });
 
         return {
@@ -112,7 +118,7 @@ function renderSlashCommands(
 
 describe("useChatSlashCommands", () => {
     beforeEach(() => {
-        vi.stubGlobal("confirm", vi.fn());
+        vi.unstubAllGlobals();
     });
 
     it("ignores non-slash text and blocks slash commands with attachments", async () => {
@@ -288,7 +294,6 @@ describe("useChatSlashCommands", () => {
             selectedSession: null,
             selectedSessionKey: "",
         });
-        (window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(true);
 
         await act(async () => {
             await result.current.runCommand("/reset");
@@ -373,20 +378,28 @@ describe("useChatSlashCommands", () => {
 
             return {};
         });
-        const { result } = renderSlashCommands({ request });
+        const confirmResetSession = vi
+            .fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+        const { result } = renderSlashCommands({
+            confirmResetSession,
+            initialSendError: "Old send error",
+            request,
+        });
 
-        (window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
         await act(async () => {
             await result.current.runCommand("/reset");
         });
         expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
+        expect(result.current.sendError).toBeNull();
         expect(request).not.toHaveBeenCalledWith("sessions.reset", expect.anything());
 
-        (window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(true);
         await act(async () => {
             await result.current.runCommand("/new");
         });
 
+        expect(confirmResetSession).toHaveBeenCalledTimes(2);
         expect(request).toHaveBeenCalledWith("sessions.reset", { key: "session-a" });
         expect(request).toHaveBeenCalledWith("chat.history", {
             limit: 1000,
@@ -398,6 +411,24 @@ describe("useChatSlashCommands", () => {
         expect(result.current.historyLoadVersion).toBe(1);
         expect(result.current.isAtBottom).toBe(true);
         expect(result.current.shouldStickToBottom).toBe(true);
+    });
+
+    it("treats reset confirmation failures as cancellations", async () => {
+        const confirmResetSession = vi.fn().mockRejectedValue(new Error("closed"));
+        const { request, result } = renderSlashCommands({
+            confirmResetSession,
+            initialSendError: "Old send error",
+        });
+
+        await act(async () => {
+            await result.current.runCommand("/reset");
+        });
+
+        expect(confirmResetSession).toHaveBeenCalledTimes(1);
+        expect(request).not.toHaveBeenCalledWith("sessions.reset", expect.anything());
+        expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
+        expect(result.current.draft).toBe("");
+        expect(result.current.sendError).toBeNull();
     });
 
     it("tracks compact progress and reports failures", async () => {

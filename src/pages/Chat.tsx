@@ -29,6 +29,7 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
+    assistantTextLooksRecovered,
     CHAT_HISTORY_LIMIT,
     chatErrorMessage,
     type ChatModelOption,
@@ -288,6 +289,9 @@ export function Chat() {
     const previousSelectedStreamTextReference = useRef("");
     const bottomFollowFrameReference = useRef<number | null>(null);
     const sendInFlightReference = useRef(false);
+    const resetConfirmResolverReference = useRef<((confirmed: boolean) => void) | null>(
+        null
+    );
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -302,6 +306,7 @@ export function Chat() {
     const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<string | null>(
         null
     );
+    const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -351,18 +356,32 @@ export function Chat() {
     const selectedStreamText = selectedStream?.text || "";
     const selectedStreamMessage = selectedStream?.message;
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
-    const shouldShowSelectedStreamRow = shouldRenderStreamRow(
-        selectedStreamText,
-        selectedStreamMessage,
-        chatVisibility
-    );
-    const shouldShowTypingIndicator = Boolean(
-        selectedStream && (selectedStream.statusText || !shouldShowSelectedStreamRow)
-    );
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) =>
             !deletedMessageKeys.has(messageDeleteKey(message)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
+    );
+    const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
+    const selectedStreamIsQuiet =
+        selectedStreamUpdatedAt === null ||
+        Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+    const selectedStreamIsRecoveredInMessages = Boolean(
+        selectedStreamText.trim() &&
+        selectedStreamIsQuiet &&
+        visibleMessagesForRows.some((message) => {
+            return (
+                message.role.toLowerCase() === "assistant" &&
+                assistantTextLooksRecovered(message.text, selectedStreamText)
+            );
+        })
+    );
+    const shouldShowSelectedStreamRow =
+        !selectedStreamIsRecoveredInMessages &&
+        shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
+    const shouldShowTypingIndicator = Boolean(
+        selectedStream &&
+        !selectedStreamIsRecoveredInMessages &&
+        (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
@@ -923,6 +942,64 @@ export function Chat() {
         setPendingDeleteMessageKey(null);
     };
 
+    /**
+     * Resolves a pending reset confirmation and hides the modal.
+     *
+     * @param confirmed - Whether the user accepted the reset.
+     */
+    const closeResetConfirm = (confirmed: boolean) => {
+        resetConfirmResolverReference.current?.(confirmed);
+        resetConfirmResolverReference.current = null;
+        setIsResetConfirmOpen(false);
+    };
+
+    /**
+     * Opens the reset confirmation modal and resolves with the user's choice.
+     *
+     * @returns A promise that resolves to the user's reset decision.
+     */
+    const confirmResetSession = () =>
+        new Promise<boolean>(
+            /**
+             * Stores the reset-confirm resolver and opens the modal.
+             *
+             * @param resolve - Promise resolver for the reset decision.
+             */
+            (resolve) => {
+                resetConfirmResolverReference.current?.(false);
+                resetConfirmResolverReference.current = resolve;
+                setIsResetConfirmOpen(true);
+            }
+        );
+
+    useEffect(
+        /**
+         * Registers cleanup for any reset confirmation left open on unmount.
+         *
+         * @returns Cleanup that cancels unresolved reset confirmation prompts.
+         */
+        () => {
+            /**
+             * Cancels a pending reset confirmation before the chat page unmounts.
+             */
+            return () => {
+                resetConfirmResolverReference.current?.(false);
+                resetConfirmResolverReference.current = null;
+            };
+        },
+        []
+    );
+
+    /**
+     * Responds to reset confirmation cancellation.
+     */
+    const handleCancelResetConfirm = () => closeResetConfirm(false);
+
+    /**
+     * Responds to reset confirmation acceptance.
+     */
+    const handleConfirmResetConfirm = () => closeResetConfirm(true);
+
     /** Responds to files selected events. */
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) {
@@ -1135,6 +1212,7 @@ export function Chat() {
         setIsAtBottom,
         setHistoryLoadVersion,
         shouldStickToBottomReference,
+        confirmResetSession,
     });
 
     /** Responds to send events. */
@@ -1348,6 +1426,16 @@ export function Chat() {
                 danger
                 onCancel={() => setPendingDeleteMessageKey(null)}
                 onConfirm={confirmDeleteMessage}
+            />
+
+            <ConfirmModal
+                isOpen={isResetConfirmOpen}
+                title="Reset chat session"
+                message="Reset this chat session? This clears the session history/transcript for the selected target."
+                confirmLabel="Reset"
+                danger
+                onCancel={handleCancelResetConfirm}
+                onConfirm={handleConfirmResetConfirm}
             />
         </div>
     );

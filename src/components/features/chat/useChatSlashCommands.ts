@@ -49,6 +49,7 @@ interface UseChatSlashCommandsParams {
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
     shouldStickToBottomReference: { current: boolean };
+    confirmResetSession: () => Promise<boolean>;
 }
 
 /** Provides chat slash commands. */
@@ -68,6 +69,7 @@ export function useChatSlashCommands({
     setIsAtBottom,
     setHistoryLoadVersion,
     shouldStickToBottomReference,
+    confirmResetSession,
 }: UseChatSlashCommandsParams) {
     /** Performs add system message. */
     const addSystemMessage = (text: string) => {
@@ -137,12 +139,19 @@ export function useChatSlashCommands({
         };
 
         if (command === "/reset" || command === "/new") {
-            const confirmed = window.confirm(
-                "Reset this chat session? This clears the session history/transcript for the selected target."
-            );
+            let confirmed: boolean;
+            try {
+                confirmed = await confirmResetSession();
+            } catch {
+                setDraft("");
+                setSendError(null);
+                addSystemMessage("Reset cancelled.");
+                return true;
+            }
 
             if (!confirmed) {
                 setDraft("");
+                setSendError(null);
                 addSystemMessage("Reset cancelled.");
                 return true;
             }
