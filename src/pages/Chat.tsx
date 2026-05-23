@@ -985,7 +985,6 @@ export function Chat() {
             return () => {
                 resetConfirmResolverReference.current?.(false);
                 resetConfirmResolverReference.current = null;
-                setIsResetConfirmOpen(false);
             };
         },
         []
