@@ -51,6 +51,7 @@ function renderComposer(
 describe("ChatComposer", () => {
     beforeEach(() => {
         vi.useRealTimers();
+        vi.unstubAllGlobals();
     });
 
     it("edits and sends draft text from keyboard and send button", async () => {
@@ -70,6 +71,43 @@ describe("ChatComposer", () => {
         expect(onSend).toHaveBeenCalledTimes(1);
 
         await user.click(screen.getByRole("button", { name: /Send/ }));
+        expect(onSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps Enter as newline on coarse pointer keyboards", async () => {
+        const user = userEvent.setup();
+        const onSend = vi.fn();
+        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+
+        renderComposer({ draft: "hello", onSend });
+
+        screen
+            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
+            .focus();
+        await user.keyboard("{Enter}");
+
+        expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it("sends from Enter when matchMedia is unavailable or returns no query", async () => {
+        const user = userEvent.setup();
+        const onSend = vi.fn();
+
+        vi.stubGlobal("matchMedia", void 0);
+        const { rerender, props } = renderComposer({ draft: "hello", onSend });
+
+        screen
+            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
+            .focus();
+        await user.keyboard("{Enter}");
+        expect(onSend).toHaveBeenCalledTimes(1);
+
+        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(null));
+        rerender(<ChatComposer {...props} draft="again" onSend={onSend} />);
+        screen
+            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
+            .focus();
+        await user.keyboard("{Enter}");
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 

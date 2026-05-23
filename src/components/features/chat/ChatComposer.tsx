@@ -1,5 +1,11 @@
 import { Mic, Paperclip, Send, Smile, Square, X } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import {
+    type KeyboardEvent as ReactKeyboardEvent,
+    type RefObject,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
@@ -34,6 +40,21 @@ const CHAT_EMOJIS = [
     "❤️",
     "🚀",
 ];
+
+/**
+ * Returns whether Enter should submit instead of inserting a newline.
+ *
+ * @param event - Keyboard event from the composer textarea.
+ * @returns True when Enter should send the message.
+ */
+function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+        return false;
+    }
+
+    const coarsePointerQuery = window.matchMedia?.("(pointer: coarse)") ?? null;
+    return !coarsePointerQuery?.matches;
+}
 
 /** Provides props for chat composer. */
 interface ChatComposerProps {
@@ -281,15 +302,12 @@ export function ChatComposer({
                                 return;
                             }
 
-                            if (
-                                event.key === "Enter" &&
-                                !event.shiftKey &&
-                                !event.nativeEvent.isComposing
-                            ) {
+                            if (shouldSendFromEnter(event)) {
                                 event.preventDefault();
                                 onSend();
                             }
                         }}
+                        enterKeyHint="enter"
                         disabled={!selectedSessionKey || !isConnected || isSending}
                         placeholder={
                             selectedSessionKey

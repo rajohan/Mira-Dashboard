@@ -65,6 +65,7 @@ interface ChatTestMocks {
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
     slashCommand: ReturnType<typeof vi.fn>;
+    slashCommandOptions: { confirmResetSession: () => Promise<boolean> } | null;
     socketError: string | null;
     subscribe: ReturnType<typeof vi.fn>;
     virtualizerOptions: ChatVirtualizerOptions | null;
@@ -108,6 +109,7 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
     confirmModalHandlers: null,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
+    slashCommandOptions: null,
     virtualizerOptions: null,
 }));
 
@@ -193,7 +195,10 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
 }));
 
 vi.mock("../components/features/chat/useChatSlashCommands", () => ({
-    useChatSlashCommands: () => mocks.slashCommand,
+    useChatSlashCommands: (options: { confirmResetSession: () => Promise<boolean> }) => {
+        mocks.slashCommandOptions = options;
+        return mocks.slashCommand;
+    },
 }));
 
 vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
@@ -434,14 +439,16 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         onConfirm: () => void;
         title: string;
     }) => {
-        mocks.confirmModalHandlers = { isOpen, onCancel, onConfirm };
+        if (title === "Delete message") {
+            mocks.confirmModalHandlers = { isOpen, onCancel, onConfirm };
+        }
         return isOpen ? (
             <div role="dialog" aria-label={title}>
                 <button type="button" onClick={onCancel}>
-                    cancel delete
+                    {title === "Delete message" ? "cancel delete" : "cancel reset"}
                 </button>
                 <button type="button" onClick={onConfirm}>
-                    confirm delete
+                    {title === "Delete message" ? "confirm delete" : "confirm reset"}
                 </button>
             </div>
         ) : null;
@@ -758,6 +765,7 @@ describe("Chat", () => {
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
         mocks.confirmModalHandlers = null;
+        mocks.slashCommandOptions = null;
         mocks.runtimeEventsOptions = null;
         mocks.skipComposerFileInputRef = false;
         mocks.skipMessagesContainerRef = false;
@@ -1780,6 +1788,44 @@ describe("Chat", () => {
 
         expect(screen.getByText("old user message")).toBeInTheDocument();
         expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
+    });
+
+    it("resolves reset confirmation choices from the app modal", async () => {
+        const user = userEvent.setup();
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        let cancelled: Promise<boolean>;
+        await act(async () => {
+            cancelled = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+        await user.click(screen.getByRole("button", { name: "cancel reset" }));
+        await expect(cancelled!).resolves.toBe(false);
+
+        let confirmed: Promise<boolean>;
+        await act(async () => {
+            confirmed = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+        await user.click(screen.getByRole("button", { name: "confirm reset" }));
+        await expect(confirmed!).resolves.toBe(true);
+    });
+
+    it("cancels pending reset confirmations on unmount", async () => {
+        const { unmount } = render(<Chat />);
+        await screen.findByText("old user message");
+
+        let pendingResetConfirmation: Promise<boolean>;
+        await act(async () => {
+            pendingResetConfirmation = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+
+        unmount();
+
+        await expect(pendingResetConfirmation!).resolves.toBe(false);
     });
 
     it("persists deleted message keys and can open attachment previews", async () => {
