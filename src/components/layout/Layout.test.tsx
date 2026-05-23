@@ -28,12 +28,14 @@ vi.mock("@tanstack/react-router", () => ({
         to,
         children,
         className,
+        ...props
     }: {
         to: string;
         children: React.ReactNode;
         className?: string;
+        [key: string]: unknown;
     }) => (
-        <a href={to} className={className} data-testid="nav-link">
+        <a href={to} className={className} data-testid="nav-link" {...props}>
             {children}
         </a>
     ),
@@ -104,6 +106,10 @@ describe("Layout", () => {
         const tasksLink = navLinks.find((link) => link.getAttribute("href") === "/tasks");
         expect(tasksLink).toBeTruthy();
         expect(tasksLink!.className).toContain("bg-accent-500");
+        expect(tasksLink).toHaveAttribute("aria-current", "page");
+
+        const dashboardLink = navLinks.find((link) => link.getAttribute("href") === "/");
+        expect(dashboardLink).not.toHaveAttribute("aria-current");
     });
 
     it("shows pull request count badges for active and inactive PR routes", async () => {
