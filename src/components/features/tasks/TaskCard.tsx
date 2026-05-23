@@ -59,7 +59,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                 className="focus:ring-accent-400 ml-3 block min-w-0 cursor-pointer rounded text-left focus:ring-2 focus:outline-none"
                 onClick={onClick}
             >
-                <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
+                <span className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
                     <span className="text-primary-500 shrink-0 text-xs">
                         #{task.number}
                     </span>
@@ -76,18 +76,22 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                             Recurring
                         </Badge>
                     )}
-                </div>
+                </span>
 
-                <h3 className="text-primary-200 mb-1.5 line-clamp-2 text-sm font-medium break-words">
+                <span
+                    role="heading"
+                    aria-level={3}
+                    className="text-primary-200 mb-1.5 line-clamp-2 text-sm font-medium break-words"
+                >
                     {task.title}
-                </h3>
+                </span>
 
-                <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center justify-between gap-2">
                     <span className="text-primary-500 truncate text-xs">
                         {formatDuration(new Date(task.updatedAt).getTime())}
                     </span>
                     {assignee && (
-                        <div className="flex items-center gap-1">
+                        <span className="flex items-center gap-1">
                             {assignee.avatar_url ? (
                                 <img
                                     src={assignee.avatar_url}
@@ -95,15 +99,15 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                                     className="h-5 w-5 rounded-full"
                                 />
                             ) : (
-                                <div className="bg-primary-700 text-primary-300 flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
+                                <span className="bg-primary-700 text-primary-300 flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
                                     {(assignee.login ||
                                         assignee.name ||
                                         "?")[0].toUpperCase()}
-                                </div>
+                                </span>
                             )}
-                        </div>
+                        </span>
                     )}
-                </div>
+                </span>
             </button>
         </div>
     );
