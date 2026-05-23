@@ -9,22 +9,6 @@ reviews:
     review_status: true
     commit_status: true
     fail_commit_status: true
-    pre_merge_checks:
-        docstrings:
-            mode: error
-            threshold: 100
-        title:
-            mode: warning
-            requirements: "Content"
-        description:
-            mode: warning
-        issue_assessment:
-            mode: warning
-    finishing_touches:
-        docstrings:
-            enabled: true
-        unit_tests:
-            enabled: true
     auto_review:
         enabled: true
         auto_incremental_review: true
@@ -38,8 +22,3 @@ reviews:
         - "!backend/coverage/**"
         - "!package-lock.json"
         - "!backend/package-lock.json"
-code_generation:
-    docstrings:
-        path_instructions: []
-    unit_tests:
-        path_instructions: []
