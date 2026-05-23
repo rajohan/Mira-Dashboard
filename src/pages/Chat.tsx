@@ -367,10 +367,17 @@ export function Chat() {
         Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
     const selectedStreamIsRecoveredInMessages = Boolean(
         selectedStreamText.trim() &&
-        selectedStreamIsQuiet &&
         visibleMessagesForRows.some((message) => {
+            if (message.role.toLowerCase() !== "assistant") {
+                return false;
+            }
+
+            if (message.text.trim() === selectedStreamText.trim()) {
+                return true;
+            }
+
             return (
-                message.role.toLowerCase() === "assistant" &&
+                selectedStreamIsQuiet &&
                 assistantTextLooksRecovered(message.text, selectedStreamText)
             );
         })
