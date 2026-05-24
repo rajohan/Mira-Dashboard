@@ -20,6 +20,7 @@ import {
 interface MockLiveSession {
     agentType?: string;
     displayLabel: string;
+    id?: string;
     key?: string;
     label: string;
     model?: string;
@@ -79,6 +80,7 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
     isConnected: true,
     liveSessions: [
         {
+            id: "session-id-a",
             key: "session-a",
             displayLabel: "Main chat",
             label: "main",
@@ -735,6 +737,7 @@ describe("Chat", () => {
                 updatedAt: "2026-05-11T00:01:00.000Z",
             },
             {
+                id: "session-id-a",
                 key: "session-a",
                 displayLabel: "Main chat",
                 label: "main",
@@ -1301,8 +1304,8 @@ describe("Chat", () => {
             expect(mocks.request).toHaveBeenCalledWith(
                 "chat.send",
                 expect.objectContaining({
-                    deliver: false,
                     message: "Hello from test",
+                    sessionId: "session-id-a",
                     sessionKey: "session-a",
                 })
             )
