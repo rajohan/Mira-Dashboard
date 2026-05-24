@@ -25,6 +25,14 @@ describe("AgentAccessSection", () => {
         expect(screen.getByRole("button", { name: /Researcher/u })).toHaveTextContent(
             "1/22 tools"
         );
+        expect(screen.getByRole("button", { name: /Mira/u })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
+        expect(screen.getByRole("button", { name: /Researcher/u })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
         expect(screen.getByText("Shell Commands")).toBeInTheDocument();
 
         const execSwitch = within(
@@ -50,6 +58,14 @@ describe("AgentAccessSection", () => {
 
         await user.click(screen.getByRole("button", { name: /Agent access control/u }));
         await user.click(screen.getByRole("button", { name: /Researcher/u }));
+        expect(screen.getByRole("button", { name: /Mira/u })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
+        expect(screen.getByRole("button", { name: /Researcher/u })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
         await user.type(screen.getByPlaceholderText("Filter tools..."), "web");
 
         expect(await screen.findByText("Web Search")).toBeInTheDocument();
