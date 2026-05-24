@@ -1,4 +1,4 @@
-import { AlertTriangle, DollarSign, Waves, Zap } from "lucide-react";
+import { DollarSign, Waves, Zap } from "lucide-react";
 
 import { hasQuotaStatus, type QuotasResponse } from "../../../hooks/useQuotas";
 import { formatDate } from "../../../utils/format";
@@ -136,23 +136,6 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 quotas.elevenlabs.percentUsed !== null
                     ? quotas.elevenlabs.percentUsed
                     : null,
-        },
-        {
-            key: "zai",
-            label: "Z.ai",
-            icon: <AlertTriangle className="h-4 w-4" />,
-            line1: hasQuotaStatus(quotas.zai)
-                ? quotas.zai.status.replaceAll("_", " ")
-                : `5h ${Math.max(100 - quotas.zai.fiveHour.usedPercentage, 0)}% left · weekly ${Math.max(100 - quotas.zai.weekly.usedPercentage, 0)}% left`,
-            line2: hasQuotaStatus(quotas.zai)
-                ? quotas.zai.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.zai.fiveHour.resetAt)} · weekly ${formatResetValue(quotas.zai.weekly.resetAt)}`,
-            percent: hasQuotaStatus(quotas.zai)
-                ? null
-                : Math.max(
-                      quotas.zai.fiveHour.usedPercentage,
-                      quotas.zai.weekly.usedPercentage
-                  ),
         },
         {
             key: "synthetic",

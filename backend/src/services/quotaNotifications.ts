@@ -3,7 +3,7 @@ import { fetchCachedQuotas, hasQuotaStatus } from "../lib/quotasCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 /** Defines provider key. */
-type ProviderKey = "openrouter" | "elevenlabs" | "zai" | "synthetic" | "openai";
+type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
@@ -20,15 +20,6 @@ function getProviderPercent(
 
     if (provider === "elevenlabs") {
         return hasQuotaStatus(quotas.elevenlabs) ? null : quotas.elevenlabs.percentUsed;
-    }
-
-    if (provider === "zai") {
-        return hasQuotaStatus(quotas.zai)
-            ? null
-            : Math.max(
-                  quotas.zai.fiveHour.usedPercentage,
-                  quotas.zai.weekly.usedPercentage
-              );
     }
 
     if (provider === "synthetic") {
@@ -60,13 +51,6 @@ function getNotificationPayload(
         return {
             title: `ElevenLabs usage high (${bucket}%)`,
             description: `${quotas.elevenlabs.percentUsed}% used (${quotas.elevenlabs.remaining.toLocaleString()} chars remaining)`,
-        };
-    }
-
-    if (provider === "zai" && !hasQuotaStatus(quotas.zai)) {
-        return {
-            title: `Z.ai usage high (${bucket}%)`,
-            description: `5h ${quotas.zai.fiveHour.usedPercentage}% · weekly ${quotas.zai.weekly.usedPercentage}%`,
         };
     }
 
@@ -169,7 +153,6 @@ export async function runQuotaNotificationCheck(): Promise<void> {
         const providers: ProviderKey[] = [
             "openrouter",
             "elevenlabs",
-            "zai",
             "synthetic",
             "openai",
         ];

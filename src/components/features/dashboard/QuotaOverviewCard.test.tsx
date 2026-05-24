@@ -59,11 +59,6 @@ const quotas: QuotasResponse = {
             percentRemaining: 98,
         },
     },
-    zai: {
-        fiveHour: { resetAt: "unknown", usedPercentage: 30 },
-        level: "pro",
-        weekly: { resetAt: "2026-05-17T10:00:00.000Z", usedPercentage: 40 },
-    },
 };
 
 describe("QuotaOverviewCard", () => {
@@ -92,7 +87,6 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("96%")).toHaveClass("bg-red-500/20");
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
-        expect(screen.getByText(/5h 70% left · weekly 60% left/u)).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
 
@@ -149,13 +143,12 @@ describe("QuotaOverviewCard", () => {
                     openai: { status: "error" },
                     openrouter: { status: "not_configured" },
                     synthetic: { status: "error" },
-                    zai: { status: "not_configured" },
                 }}
             />
         );
 
         expect(screen.getAllByText("error")).toHaveLength(3);
-        expect(screen.getAllByText("not configured")).toHaveLength(2);
+        expect(screen.getAllByText("not configured")).toHaveLength(1);
         expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });
 
@@ -192,20 +185,13 @@ describe("QuotaOverviewCard", () => {
                             percentRemaining: -12,
                         },
                     },
-                    zai: {
-                        ...quotas.zai,
-                        fiveHour: { resetAt: "13:45 on 10 Foo", usedPercentage: 130 },
-                        weekly: { resetAt: "13:45", usedPercentage: 110 },
-                    },
                 }}
             />
         );
 
         expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
         expect(screen.getByText("100% left")).toBeInTheDocument();
-        expect(screen.getByText(/weekly 0% left/u)).toBeInTheDocument();
-        expect(screen.getByText(/5h 0% left · weekly 0% left/u)).toBeInTheDocument();
-        expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(2);
+        expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
     });
 
     it("falls back when OpenAI-style date construction produces an invalid date", () => {

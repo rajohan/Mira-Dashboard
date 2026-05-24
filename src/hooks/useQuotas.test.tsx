@@ -22,11 +22,6 @@ describe("quota hooks", () => {
                 percentUsed: 20,
                 resetAt: null,
             },
-            zai: {
-                level: "free",
-                fiveHour: { usedPercentage: 30, resetAt: "2026-01-01" },
-                weekly: { usedPercentage: 10, resetAt: "2026-01-07" },
-            },
             synthetic: {
                 subscription: {
                     limit: 1000,
