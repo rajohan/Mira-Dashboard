@@ -31,4 +31,20 @@ describe("SearchInput", () => {
             screen.getByRole("textbox", { name: "Filter task board" })
         ).toHaveAttribute("placeholder", "Search tasks");
     });
+
+    it("uses the first non-empty accessible label fallback", () => {
+        render(
+            <SearchInput
+                value=""
+                onChange={vi.fn()}
+                label="   "
+                placeholder=" Search tasks "
+            />
+        );
+
+        expect(screen.getByRole("textbox", { name: "Search tasks" })).toHaveAttribute(
+            "aria-label",
+            "Search tasks"
+        );
+    });
 });
