@@ -104,6 +104,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                 key={agent.id}
                                 type="button"
                                 onClick={() => setActiveAgentId(agent.id)}
+                                aria-pressed={activeAgent?.id === agent.id}
                                 className={cn(
                                     "rounded-xl border px-3 py-3 text-left transition sm:px-4",
                                     activeAgent?.id === agent.id

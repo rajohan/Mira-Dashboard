@@ -9,8 +9,51 @@ describe("SearchInput", () => {
         const onChange = vi.fn();
         render(<SearchInput value="" onChange={onChange} placeholder="Search tasks" />);
 
-        await userEvent.type(screen.getByPlaceholderText("Search tasks"), "task");
+        await userEvent.type(
+            screen.getByRole("textbox", { name: "Search tasks" }),
+            "task"
+        );
 
         expect(onChange).toHaveBeenCalledWith("t");
+    });
+
+    it("allows a distinct accessible label", () => {
+        render(
+            <SearchInput
+                value=""
+                onChange={vi.fn()}
+                label="Filter task board"
+                placeholder="Search tasks"
+            />
+        );
+
+        expect(
+            screen.getByRole("textbox", { name: "Filter task board" })
+        ).toHaveAttribute("placeholder", "Search tasks");
+    });
+
+    it("uses the first non-empty accessible label fallback", () => {
+        render(
+            <SearchInput
+                value=""
+                onChange={vi.fn()}
+                label="   "
+                placeholder=" Search tasks "
+            />
+        );
+
+        expect(screen.getByRole("textbox", { name: "Search tasks" })).toHaveAttribute(
+            "aria-label",
+            "Search tasks"
+        );
+    });
+
+    it("uses a fallback accessible label when label and placeholder are empty", () => {
+        render(<SearchInput value="" onChange={vi.fn()} label="   " placeholder="   " />);
+
+        expect(screen.getByRole("textbox", { name: "Search" })).toHaveAttribute(
+            "aria-label",
+            "Search"
+        );
     });
 });
