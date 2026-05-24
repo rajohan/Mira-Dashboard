@@ -9,8 +9,26 @@ describe("SearchInput", () => {
         const onChange = vi.fn();
         render(<SearchInput value="" onChange={onChange} placeholder="Search tasks" />);
 
-        await userEvent.type(screen.getByPlaceholderText("Search tasks"), "task");
+        await userEvent.type(
+            screen.getByRole("textbox", { name: "Search tasks" }),
+            "task"
+        );
 
         expect(onChange).toHaveBeenCalledWith("t");
+    });
+
+    it("allows a distinct accessible label", () => {
+        render(
+            <SearchInput
+                value=""
+                onChange={vi.fn()}
+                label="Filter task board"
+                placeholder="Search tasks"
+            />
+        );
+
+        expect(
+            screen.getByRole("textbox", { name: "Filter task board" })
+        ).toHaveAttribute("placeholder", "Search tasks");
     });
 });
