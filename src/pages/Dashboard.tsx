@@ -156,9 +156,9 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     return (
                         <div
                             key={day.date}
-                            className="border-primary-700 bg-primary-800/40 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-md border px-2 py-1 text-xs sm:text-sm"
+                            className="border-primary-700 bg-primary-800/40 grid min-w-0 grid-cols-[3rem_auto] items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs sm:grid-cols-[3.25rem_auto] sm:text-sm"
                         >
-                            <span className="text-primary-400 min-w-0 truncate">
+                            <span className="text-primary-400 whitespace-nowrap">
                                 {index === 0 ? "Today" : dayLabel}
                             </span>
                             <span className="text-primary-100 inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums">
