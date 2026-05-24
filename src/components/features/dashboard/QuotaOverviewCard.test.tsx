@@ -205,6 +205,51 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
     });
 
+    it("falls back to Synthetic weekly regen credits when regen percent is unavailable", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenPercent: null,
+                            percentRemaining: 98.3,
+                            remainingCredits: null,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/weekly 98% left/u)).toBeInTheDocument();
+        expect(screen.getByText(/weekly regen \+\$0\.48 at/u)).toBeInTheDocument();
+    });
+
+    it("renders decimal Synthetic weekly regen percentages", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenPercent: 2.5,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/weekly regen \+2\.5% at/u)).toBeInTheDocument();
+    });
+
     it("falls back when OpenAI-style date construction produces an invalid date", () => {
         const RealDate = Date;
         const MockDate = function (this: Date, ...args: unknown[]) {
