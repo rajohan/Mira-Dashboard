@@ -103,6 +103,10 @@ describe("Terminal page", () => {
         expect(
             screen.getByText(/Welcome to Mira Dashboard Terminal/)
         ).toBeInTheDocument();
+        expect(screen.getByRole("log", { name: "Terminal output" })).toBeInTheDocument();
+        expect(
+            screen.getByRole("textbox", { name: "Terminal command" })
+        ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Clear/ })).toBeDisabled();
     });
