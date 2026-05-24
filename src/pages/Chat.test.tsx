@@ -20,6 +20,7 @@ import {
 interface MockLiveSession {
     agentType?: string;
     displayLabel: string;
+    id?: string;
     key?: string;
     label: string;
     model?: string;
@@ -79,6 +80,7 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
     isConnected: true,
     liveSessions: [
         {
+            id: "session-id-a",
             key: "session-a",
             displayLabel: "Main chat",
             label: "main",
@@ -735,6 +737,7 @@ describe("Chat", () => {
                 updatedAt: "2026-05-11T00:01:00.000Z",
             },
             {
+                id: "session-id-a",
                 key: "session-a",
                 displayLabel: "Main chat",
                 label: "main",
@@ -1301,8 +1304,8 @@ describe("Chat", () => {
             expect(mocks.request).toHaveBeenCalledWith(
                 "chat.send",
                 expect.objectContaining({
-                    deliver: false,
                     message: "Hello from test",
+                    sessionId: "session-id-a",
                     sessionKey: "session-a",
                 })
             )
@@ -1318,6 +1321,70 @@ describe("Chat", () => {
         expect(verbosePatchCall).toBeLessThan(chatSendCall);
         expect(screen.getByText("Hello from test")).toBeInTheDocument();
         expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
+    it("Chat.handleSend sends chat.send without sessionId when it is a fallback", async () => {
+        const user = userEvent.setup();
+        mocks.liveSessions = [
+            {
+                id: "session-a",
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "No canonical session id");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "No canonical session id",
+                    sessionId: undefined,
+                    sessionKey: "session-a",
+                })
+            )
+        );
+    });
+
+    it("Chat.handleSend sends chat.send without sessionId when it is unknown", async () => {
+        const user = userEvent.setup();
+        mocks.liveSessions = [
+            {
+                id: "unknown",
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "Unknown session id");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "Unknown session id",
+                    sessionId: undefined,
+                    sessionKey: "session-a",
+                })
+            )
+        );
     });
 
     it("still sends chat text when enabling verbose diagnostics fails", async () => {

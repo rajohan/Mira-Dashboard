@@ -1291,9 +1291,14 @@ export function Chat() {
 
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
+                sessionId:
+                    selectedSession?.id &&
+                    selectedSession.id !== "unknown" &&
+                    selectedSession.id !== selectedSessionKey
+                        ? selectedSession.id
+                        : undefined,
                 message: messageText,
                 attachments: gatewayAttachments(sendAttachments),
-                deliver: false,
                 idempotencyKey,
             })) as { runId?: string } | undefined;
             const acknowledgedRunId = result?.runId;
