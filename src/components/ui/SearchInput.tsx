@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 interface SearchInputProps {
     value: string;
     onChange: (value: string) => void;
+    label?: string;
     placeholder?: string;
 }
 
@@ -11,13 +12,22 @@ interface SearchInputProps {
 export function SearchInput({
     value,
     onChange,
+    label,
     placeholder = "Search...",
 }: SearchInputProps) {
+    const normalizedLabel = label?.trim() || undefined;
+    const normalizedPlaceholder = placeholder.trim() || undefined;
+    const accessibleLabel = normalizedLabel ?? normalizedPlaceholder ?? "Search";
+
     return (
         <div className="relative max-w-md flex-1">
-            <Search className="text-primary-400 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Search
+                aria-hidden="true"
+                className="text-primary-400 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+            />
             <input
                 type="text"
+                aria-label={accessibleLabel}
                 placeholder={placeholder}
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
