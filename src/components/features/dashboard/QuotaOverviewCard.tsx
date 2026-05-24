@@ -103,10 +103,10 @@ function formatPercent(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-/** Formats the Synthetic.new weekly regeneration amount. */
-function formatSyntheticWeeklyRegen(
+/** Formats the Synthetic.new weekly regeneration amount when data is available. */
+function formatSyntheticWeeklyRegenAmount(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
-): string {
+): string | null {
     if (
         weeklyTokenLimit.nextRegenPercent !== null &&
         weeklyTokenLimit.nextRegenPercent !== undefined
@@ -118,13 +118,13 @@ function formatSyntheticWeeklyRegen(
         return `+${weeklyTokenLimit.nextRegenCredits}`;
     }
 
-    return "+2%";
+    return null;
 }
 
-/** Formats the Synthetic.new 5h regeneration amount. */
-function formatSyntheticFiveHourRegen(
+/** Formats the Synthetic.new 5h regeneration amount when data is available. */
+function formatSyntheticFiveHourRegenAmount(
     rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
-): string {
+): string | null {
     if (
         rollingFiveHourLimit.tickPercent !== null &&
         rollingFiveHourLimit.tickPercent !== undefined
@@ -132,7 +132,18 @@ function formatSyntheticFiveHourRegen(
         return `+${formatPercent(rollingFiveHourLimit.tickPercent)}%`;
     }
 
-    return "+5%";
+    return null;
+}
+
+/** Formats one Synthetic.new regeneration window segment. */
+function formatSyntheticRegenSegment(
+    label: string,
+    resetAt: string | null | undefined,
+    amount: string | null
+): string {
+    const amountSuffix = amount ? ` (${amount})` : "";
+
+    return `${label} ${formatResetValue(resetAt)}${amountSuffix}`;
 }
 
 /** Formats the Synthetic.new weekly remaining quota. */
@@ -198,7 +209,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
-                : `5h regen ${formatSyntheticFiveHourRegen(quotas.synthetic.rollingFiveHourLimit)} at ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly regen ${formatSyntheticWeeklyRegen(quotas.synthetic.weeklyTokenLimit)} at ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
+                : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit))} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
                 : Math.round(

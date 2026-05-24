@@ -93,8 +93,10 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
         expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
-        expect(screen.getByText(/5h regen \+5% at unknown/u)).toBeInTheDocument();
-        expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
+        expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+2%\)/u)
+        ).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
 
@@ -203,11 +205,11 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
         expect(screen.getByText("100% left")).toBeInTheDocument();
         expect(screen.getByText(/weekly -12% left/u)).toBeInTheDocument();
-        expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
+        expect(screen.getAllByText(/weekly 17\.05\.2026, 12:00/u)).toHaveLength(2);
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
     });
 
-    it("falls back to Synthetic 5h regen percent when tick percent is unavailable", () => {
+    it("does not fabricate Synthetic regen amounts when they are unavailable", () => {
         const synthetic = quotas.synthetic as SyntheticQuota;
 
         render(
@@ -220,12 +222,20 @@ describe("QuotaOverviewCard", () => {
                             ...synthetic.rollingFiveHourLimit,
                             tickPercent: undefined,
                         },
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenCredits: null,
+                            nextRegenPercent: null,
+                        },
                     },
                 }}
             />
         );
 
-        expect(screen.getByText(/5h regen \+5% at unknown/u)).toBeInTheDocument();
+        const regenLine = screen.getByText(/Regen: 5h unknown · weekly/u);
+        expect(regenLine).toBeInTheDocument();
+        expect(regenLine).not.toHaveTextContent("+5%");
+        expect(regenLine).not.toHaveTextContent("+2%");
     });
 
     it("falls back to Synthetic weekly regen credits when regen percent is unavailable", () => {
@@ -249,7 +259,9 @@ describe("QuotaOverviewCard", () => {
         );
 
         expect(screen.getByText(/weekly 98% left/u)).toBeInTheDocument();
-        expect(screen.getByText(/weekly regen \+\$0\.48 at/u)).toBeInTheDocument();
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+\$0\.48\)/u)
+        ).toBeInTheDocument();
     });
 
     it("renders decimal Synthetic weekly regen percentages", () => {
@@ -270,7 +282,9 @@ describe("QuotaOverviewCard", () => {
             />
         );
 
-        expect(screen.getByText(/weekly regen \+2\.5% at/u)).toBeInTheDocument();
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+2\.5%\)/u)
+        ).toBeInTheDocument();
     });
 
     it("falls back when OpenAI-style date construction produces an invalid date", () => {

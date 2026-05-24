@@ -148,7 +148,7 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                 </div>
             )}
 
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
                 {(weather?.forecast || []).slice(0, 3).map((day, index) => {
                     const dayLabel = formatWeekdayShort(new Date(day.date));
                     const ForecastIcon = getWeatherIcon(day.description);
@@ -156,13 +156,13 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     return (
                         <div
                             key={day.date}
-                            className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-between gap-2 rounded-md border px-2 py-1 text-sm"
+                            className="border-primary-700 bg-primary-800/40 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-md border px-2 py-1 text-xs sm:text-sm"
                         >
-                            <span className="text-primary-400">
+                            <span className="text-primary-400 min-w-0 truncate">
                                 {index === 0 ? "Today" : dayLabel}
                             </span>
-                            <span className="text-primary-100 inline-flex items-center gap-2">
-                                <ForecastIcon className="text-primary-300 h-4 w-4" />
+                            <span className="text-primary-100 inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums">
+                                <ForecastIcon className="text-primary-300 h-4 w-4 shrink-0" />
                                 {formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°
                             </span>
                         </div>
