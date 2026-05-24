@@ -323,6 +323,8 @@ export function Terminal() {
                 {/* Terminal Output */}
                 <div
                     ref={outputRef}
+                    role="log"
+                    aria-label="Terminal output"
                     onScroll={handleScroll}
                     className="relative min-h-0 flex-1 overflow-auto bg-black p-3 font-mono text-xs sm:p-4 sm:text-sm"
                 >
@@ -404,6 +406,7 @@ export function Terminal() {
                                 value={command}
                                 onChange={(e) => setCommand(e.target.value)}
                                 onKeyDown={handleKeyDown}
+                                aria-label="Terminal command"
                                 placeholder="Enter command..."
                                 className="w-full bg-black font-mono text-base sm:text-sm"
                                 disabled={startCommand.isPending}
