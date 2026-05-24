@@ -55,8 +55,12 @@ const quotas: QuotasResponse = {
             requests: 0,
         },
         weeklyTokenLimit: {
+            maxCredits: "$24.00",
             nextRegenAt: "2026-05-17T10:00:00.000Z",
+            nextRegenCredits: "$0.48",
+            nextRegenPercent: 2,
             percentRemaining: 98,
+            remainingCredits: "$23.52",
         },
     },
 };
@@ -87,6 +91,8 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("96%")).toHaveClass("bg-red-500/20");
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
+        expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
+        expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
 
@@ -182,7 +188,10 @@ describe("QuotaOverviewCard", () => {
                         },
                         weeklyTokenLimit: {
                             ...synthetic.weeklyTokenLimit,
+                            nextRegenCredits: null,
+                            nextRegenPercent: null,
                             percentRemaining: -12,
+                            remainingCredits: null,
                         },
                     },
                 }}
@@ -191,6 +200,8 @@ describe("QuotaOverviewCard", () => {
 
         expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
         expect(screen.getByText("100% left")).toBeInTheDocument();
+        expect(screen.getByText(/weekly -12% left/u)).toBeInTheDocument();
+        expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
     });
 

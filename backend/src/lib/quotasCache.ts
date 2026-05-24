@@ -50,12 +50,17 @@ export interface SyntheticQuota {
     weeklyTokenLimit: {
         percentRemaining: number;
         nextRegenAt: string | null;
+        maxCredits?: string | null;
+        remainingCredits?: string | null;
+        nextRegenCredits?: string | null;
+        nextRegenPercent?: number | null;
     };
     rollingFiveHourLimit: {
         remaining: number;
         max: number;
         limited: boolean;
         nextTickAt: string | null;
+        tickPercent?: number;
         percentUsed: number | null;
     };
 }

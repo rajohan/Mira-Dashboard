@@ -1,5 +1,9 @@
 import { db } from "../db.js";
-import { fetchCachedQuotas, hasQuotaStatus } from "../lib/quotasCache.js";
+import {
+    fetchCachedQuotas,
+    hasQuotaStatus,
+    type SyntheticQuota,
+} from "../lib/quotasCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 /** Defines provider key. */
@@ -8,6 +12,17 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
+
+/** Formats the Synthetic.new weekly remaining quota. */
+function formatSyntheticWeeklyRemaining(
+    weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
+): string {
+    if (weeklyTokenLimit.remainingCredits) {
+        return `${weeklyTokenLimit.remainingCredits} left`;
+    }
+
+    return `${weeklyTokenLimit.percentRemaining}% left`;
+}
 
 /** Returns provIDer percent. */
 function getProviderPercent(
@@ -57,7 +72,7 @@ function getNotificationPayload(
     if (provider === "synthetic" && !hasQuotaStatus(quotas.synthetic)) {
         return {
             title: `Synthetic.new usage high (${bucket}%)`,
-            description: `5h ${Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0)}% left · weekly ${quotas.synthetic.weeklyTokenLimit.percentRemaining}% left`,
+            description: `5h ${Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0)}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
         };
     }
 

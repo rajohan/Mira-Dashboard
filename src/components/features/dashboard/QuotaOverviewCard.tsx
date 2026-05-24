@@ -1,6 +1,10 @@
 import { DollarSign, Waves, Zap } from "lucide-react";
 
-import { hasQuotaStatus, type QuotasResponse } from "../../../hooks/useQuotas";
+import {
+    hasQuotaStatus,
+    type QuotasResponse,
+    type SyntheticQuota,
+} from "../../../hooks/useQuotas";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
@@ -94,6 +98,40 @@ function formatResetValue(value: string | null | undefined): string {
     return value;
 }
 
+/** Formats a percent value without noisy trailing decimals. */
+function formatPercent(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Formats the Synthetic.new weekly regeneration amount. */
+function formatSyntheticWeeklyRegen(
+    weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
+): string {
+    if (
+        weeklyTokenLimit.nextRegenPercent !== null &&
+        weeklyTokenLimit.nextRegenPercent !== undefined
+    ) {
+        return `+${formatPercent(weeklyTokenLimit.nextRegenPercent)}%`;
+    }
+
+    if (weeklyTokenLimit.nextRegenCredits) {
+        return `+${weeklyTokenLimit.nextRegenCredits}`;
+    }
+
+    return "+2%";
+}
+
+/** Formats the Synthetic.new weekly remaining quota. */
+function formatSyntheticWeeklyRemaining(
+    weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
+): string {
+    if (weeklyTokenLimit.remainingCredits) {
+        return `${weeklyTokenLimit.remainingCredits} left`;
+    }
+
+    return `${Math.round(weeklyTokenLimit.percentRemaining)}% left`;
+}
+
 /** Renders the quota overview card UI. */
 export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
     if (!quotas) {
@@ -143,10 +181,10 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
             icon: <Zap className="h-4 w-4" />,
             line1: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.status.replaceAll("_", " ")
-                : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${Math.round(quotas.synthetic.weeklyTokenLimit.percentRemaining)}% left`,
+                : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
+                : `Reset: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly regen ${formatSyntheticWeeklyRegen(quotas.synthetic.weeklyTokenLimit)} at ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
                 : Math.round(
