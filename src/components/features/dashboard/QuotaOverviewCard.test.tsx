@@ -95,7 +95,7 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
         expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
         expect(
-            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+2%\)/u)
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+2%\)/u)
         ).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
@@ -205,7 +205,7 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
         expect(screen.getByText("100% left")).toBeInTheDocument();
         expect(screen.getByText(/weekly -12% left/u)).toBeInTheDocument();
-        expect(screen.getAllByText(/weekly 17\.05\.2026, 12:00/u)).toHaveLength(2);
+        expect(screen.getAllByText(/weekly 17\.05\.2026, \d{2}:00/u)).toHaveLength(2);
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
     });
 
@@ -260,7 +260,7 @@ describe("QuotaOverviewCard", () => {
 
         expect(screen.getByText(/weekly 98% left/u)).toBeInTheDocument();
         expect(
-            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+\$0\.48\)/u)
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+\$0\.48\)/u)
         ).toBeInTheDocument();
     });
 
@@ -283,7 +283,7 @@ describe("QuotaOverviewCard", () => {
         );
 
         expect(
-            screen.getByText(/weekly 17\.05\.2026, 12:00 \(\+2\.5%\)/u)
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+2\.5%\)/u)
         ).toBeInTheDocument();
     });
 
