@@ -141,6 +141,9 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("80%")).toHaveClass("bg-yellow-500/20");
         expect(screen.getByText("84%")).toHaveClass("bg-yellow-500/20");
         expect(screen.getByText("100% left")).toBeInTheDocument();
+        expect(
+            screen.getByText(/Resets: 5h \d{2}:30 · weekly not a date/u)
+        ).toBeInTheDocument();
         expect(screen.getByText(/weekly not a date/u)).toBeInTheDocument();
     });
 
@@ -275,6 +278,7 @@ describe("QuotaOverviewCard", () => {
                         ...quotas.synthetic,
                         rollingFiveHourLimit: {
                             ...synthetic.rollingFiveHourLimit,
+                            nextTickAt: "2026-05-17T11:00:00.000Z",
                             tickPercent: 0.05,
                         },
                     },
@@ -282,7 +286,7 @@ describe("QuotaOverviewCard", () => {
             />
         );
 
-        expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
+        expect(screen.getByText(/Regen: 5h \d{2}:00 \(\+5%\)/u)).toBeInTheDocument();
     });
 
     it("renders decimal Synthetic weekly regen percentages", () => {
@@ -341,5 +345,21 @@ describe("QuotaOverviewCard", () => {
         );
 
         expect(screen.getByText(/5h 13:45 on 10 May/u)).toBeInTheDocument();
+    });
+
+    it("formats OpenAI-style weekly reset dates when present", () => {
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    openai: {
+                        ...quotas.openai,
+                        weeklyReset: "13:45 on 10 May",
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/weekly 10\.05\.2026, 13:45/u)).toBeInTheDocument();
     });
 });
