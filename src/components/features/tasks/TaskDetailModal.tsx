@@ -517,6 +517,7 @@ export function TaskDetailModal({
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
+                                                    aria-label={`Edit progress update #${update.id}`}
                                                     onClick={() =>
                                                         startEditUpdate(update)
                                                     }
@@ -526,6 +527,7 @@ export function TaskDetailModal({
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
+                                                    aria-label={`Delete progress update #${update.id}`}
                                                     onClick={() =>
                                                         onDeleteUpdate(update.id)
                                                     }
@@ -538,6 +540,7 @@ export function TaskDetailModal({
                                         {isEditingThis ? (
                                             <div className="space-y-2">
                                                 <Textarea
+                                                    aria-label={`Edit progress update #${update.id}`}
                                                     value={editingUpdateMessage}
                                                     onChange={(event) =>
                                                         setEditingUpdateMessage(
