@@ -1355,6 +1355,38 @@ describe("Chat", () => {
         );
     });
 
+    it("Chat.handleSend sends chat.send without sessionId when it is unknown", async () => {
+        const user = userEvent.setup();
+        mocks.liveSessions = [
+            {
+                id: "unknown",
+                key: "session-a",
+                displayLabel: "Main chat",
+                label: "main",
+                model: "codex",
+                type: "direct",
+                updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+        ];
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "Unknown session id");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({
+                    message: "Unknown session id",
+                    sessionId: undefined,
+                    sessionKey: "session-a",
+                })
+            )
+        );
+    });
+
     it("still sends chat text when enabling verbose diagnostics fails", async () => {
         const user = userEvent.setup();
         mocks.request.mockImplementation(async (method: string) => {
