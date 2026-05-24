@@ -5,7 +5,7 @@ import {
     type QuotasResponse,
     type SyntheticQuota,
 } from "../../../hooks/useQuotas";
-import { formatDate } from "../../../utils/format";
+import { formatDate, formatOsloTime } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
@@ -98,6 +98,25 @@ function formatResetValue(value: string | null | undefined): string {
     return value;
 }
 
+/** Formats short rolling-window reset times without repeating today's date. */
+function formatResetTime(value: string | null | undefined): string {
+    if (!value || value === "unknown") {
+        return "unknown";
+    }
+
+    const nativeDate = new Date(value);
+    if (!Number.isNaN(nativeDate.getTime())) {
+        return formatOsloTime(nativeDate).slice(0, 5);
+    }
+
+    const openAiDate = tryParseOpenAiReset(value);
+    if (openAiDate) {
+        return formatOsloTime(openAiDate).slice(0, 5);
+    }
+
+    return value;
+}
+
 /** Formats a percent value without noisy trailing decimals. */
 function formatPercent(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -144,11 +163,12 @@ function formatSyntheticFiveHourRegenAmount(
 function formatSyntheticRegenSegment(
     label: string,
     resetAt: string | null | undefined,
-    amount: string | null
+    amount: string | null,
+    formatReset: (value: string | null | undefined) => string = formatResetValue
 ): string {
     const amountSuffix = amount ? ` (${amount})` : "";
 
-    return `${label} ${formatResetValue(resetAt)}${amountSuffix}`;
+    return `${label} ${formatReset(resetAt)}${amountSuffix}`;
 }
 
 /** Formats the Synthetic.new weekly remaining quota. */
@@ -214,7 +234,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
-                : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit))} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
+                : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit), formatResetTime)} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
                 : Math.round(
@@ -233,7 +253,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left`,
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
+                : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
             percent: hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed,
         },
     ];
