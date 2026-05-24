@@ -121,6 +121,20 @@ function formatSyntheticWeeklyRegen(
     return "+2%";
 }
 
+/** Formats the Synthetic.new 5h regeneration amount. */
+function formatSyntheticFiveHourRegen(
+    rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
+): string {
+    if (
+        rollingFiveHourLimit.tickPercent !== null &&
+        rollingFiveHourLimit.tickPercent !== undefined
+    ) {
+        return `+${formatPercent(rollingFiveHourLimit.tickPercent)}%`;
+    }
+
+    return "+5%";
+}
+
 /** Formats the Synthetic.new weekly remaining quota. */
 function formatSyntheticWeeklyRemaining(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
@@ -184,7 +198,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
-                : `Reset: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly regen ${formatSyntheticWeeklyRegen(quotas.synthetic.weeklyTokenLimit)} at ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
+                : `5h regen ${formatSyntheticFiveHourRegen(quotas.synthetic.rollingFiveHourLimit)} at ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly regen ${formatSyntheticWeeklyRegen(quotas.synthetic.weeklyTokenLimit)} at ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
                 : Math.round(

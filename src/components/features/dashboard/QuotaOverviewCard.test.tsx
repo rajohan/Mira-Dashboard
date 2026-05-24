@@ -39,6 +39,7 @@ const quotas: QuotasResponse = {
             nextTickAt: "unknown",
             percentUsed: 10,
             remaining: 90,
+            tickPercent: 5,
         },
         searchHourly: {
             limit: 100,
@@ -92,6 +93,7 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
         expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
+        expect(screen.getByText(/5h regen \+5% at unknown/u)).toBeInTheDocument();
         expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
@@ -203,6 +205,27 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText(/weekly -12% left/u)).toBeInTheDocument();
         expect(screen.getByText(/weekly regen \+2% at/u)).toBeInTheDocument();
         expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
+    });
+
+    it("falls back to Synthetic 5h regen percent when tick percent is unavailable", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            tickPercent: undefined,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/5h regen \+5% at unknown/u)).toBeInTheDocument();
     });
 
     it("falls back to Synthetic weekly regen credits when regen percent is unavailable", () => {
