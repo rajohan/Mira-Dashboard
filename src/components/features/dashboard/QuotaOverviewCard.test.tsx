@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { QuotasResponse, SyntheticQuota } from "../../../hooks/useQuotas";
+import { formatDate } from "../../../utils/format";
 import { QuotaOverviewCard } from "./QuotaOverviewCard";
 
 const quotas: QuotasResponse = {
@@ -348,6 +349,9 @@ describe("QuotaOverviewCard", () => {
     });
 
     it("formats OpenAI-style weekly reset dates when present", () => {
+        const currentYear = new Date().getFullYear();
+        const expectedWeeklyReset = formatDate(new Date(currentYear, 4, 10, 13, 45));
+
         render(
             <QuotaOverviewCard
                 quotas={{
@@ -360,6 +364,10 @@ describe("QuotaOverviewCard", () => {
             />
         );
 
-        expect(screen.getByText(/weekly 10\.05\.2026, 13:45/u)).toBeInTheDocument();
+        expect(
+            screen.getByText((content) =>
+                content.includes(`weekly ${expectedWeeklyReset}`)
+            )
+        ).toBeInTheDocument();
     });
 });
