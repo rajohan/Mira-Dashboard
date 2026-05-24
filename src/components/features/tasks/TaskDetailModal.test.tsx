@@ -177,12 +177,25 @@ describe("TaskDetailModal", () => {
         const updateCard = screen
             .getByText("Added component coverage.")
             .closest("div")!.parentElement!;
-        await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
-        fireEvent.change(within(updateCard).getByRole("textbox"), {
-            target: { value: "  Edited progress  " },
-        });
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+        fireEvent.change(
+            within(updateCard).getByRole("textbox", {
+                name: "Message for progress update #31",
+            }),
+            {
+                target: { value: "  Edited progress  " },
+            }
+        );
         await user.click(within(updateCard).getByRole("button", { name: "Save" }));
-        await user.click(within(updateCard).getByRole("button", { name: "Delete" }));
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Delete progress update #31",
+            })
+        );
 
         await user.click(screen.getAllByRole("button", { name: "Delete" }).at(-1)!);
 
@@ -193,6 +206,38 @@ describe("TaskDetailModal", () => {
         expect(props.onEditUpdate).toHaveBeenCalledWith(31, "Edited progress");
         expect(props.onDeleteUpdate).toHaveBeenCalledWith(31);
         expect(props.onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives progress update edit controls distinct accessible names", async () => {
+        const user = userEvent.setup();
+        renderModal();
+
+        const updateCard = screen
+            .getByText("Added component coverage.")
+            .closest("div")!.parentElement!;
+
+        expect(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        ).toBeInTheDocument();
+        expect(
+            within(updateCard).getByRole("button", {
+                name: "Delete progress update #31",
+            })
+        ).toBeInTheDocument();
+
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+
+        expect(
+            within(updateCard).getByRole("textbox", {
+                name: "Message for progress update #31",
+            })
+        ).toBeInTheDocument();
     });
 
     it("handles remaining move, assign, and edit cancel controls", async () => {
@@ -371,10 +416,19 @@ describe("TaskDetailModal", () => {
         const updateCard = screen
             .getByText("Added component coverage.")
             .closest("div")!.parentElement!;
-        await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
-        fireEvent.change(within(updateCard).getByRole("textbox"), {
-            target: { value: "Discard this edit" },
-        });
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+        fireEvent.change(
+            within(updateCard).getByRole("textbox", {
+                name: "Message for progress update #31",
+            }),
+            {
+                target: { value: "Discard this edit" },
+            }
+        );
         await user.click(within(updateCard).getByRole("button", { name: "Cancel" }));
 
         expect(onEditUpdate).not.toHaveBeenCalled();
@@ -394,9 +448,22 @@ describe("TaskDetailModal", () => {
         const updateCard = screen
             .getByText("Added component coverage.")
             .closest("div")!.parentElement!;
-        await user.click(within(updateCard).getByRole("button", { name: "Edit" }));
-        await user.clear(within(updateCard).getByRole("textbox"));
-        await user.type(within(updateCard).getByRole("textbox"), "   ");
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+        await user.clear(
+            within(updateCard).getByRole("textbox", {
+                name: "Message for progress update #31",
+            })
+        );
+        await user.type(
+            within(updateCard).getByRole("textbox", {
+                name: "Message for progress update #31",
+            }),
+            "   "
+        );
         await user.click(within(updateCard).getByRole("button", { name: "Save" }));
         expect(onEditUpdate).not.toHaveBeenCalled();
 
