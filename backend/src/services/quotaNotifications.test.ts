@@ -24,7 +24,6 @@ const data = process.env.FAKE_QUOTAS_JSON
   : {
       openrouter: { usage: 9, totalCredits: 10, remaining: 1.23, usageMonthly: 9, percentUsed: percent },
       elevenlabs: { status: "not_configured" },
-      zai: { status: "not_configured" },
       synthetic: { status: "not_configured" },
       openai: { status: "not_configured" },
       checkedAt,
@@ -146,10 +145,6 @@ describe("quota notifications", () => {
                 remaining: 1_300,
                 percentUsed: 87,
             },
-            zai: {
-                fiveHour: { used: 96, limit: 100, remaining: 4, usedPercentage: 96 },
-                weekly: { used: 10, limit: 100, remaining: 90, usedPercentage: 10 },
-            },
             synthetic: {
                 rollingFiveHourLimit: {
                     usedTokens: 0,
@@ -186,9 +181,6 @@ describe("quota notifications", () => {
                 "quota:openai:95",
                 "quota:synthetic:80",
                 "quota:synthetic:90",
-                "quota:zai:80",
-                "quota:zai:90",
-                "quota:zai:95",
             ]
         );
 

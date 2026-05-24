@@ -1,7 +1,11 @@
-import { AlertTriangle, DollarSign, Waves, Zap } from "lucide-react";
+import { DollarSign, Waves, Zap } from "lucide-react";
 
-import { hasQuotaStatus, type QuotasResponse } from "../../../hooks/useQuotas";
-import { formatDate } from "../../../utils/format";
+import {
+    hasQuotaStatus,
+    type QuotasResponse,
+    type SyntheticQuota,
+} from "../../../hooks/useQuotas";
+import { formatDate, formatOsloTime } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
@@ -94,6 +98,90 @@ function formatResetValue(value: string | null | undefined): string {
     return value;
 }
 
+/** Formats short rolling-window reset times without repeating today's date. */
+function formatResetTime(value: string | null | undefined): string {
+    if (!value || value === "unknown") {
+        return "unknown";
+    }
+
+    const nativeDate = new Date(value);
+    if (!Number.isNaN(nativeDate.getTime())) {
+        return formatOsloTime(nativeDate).slice(0, 5);
+    }
+
+    const openAiDate = tryParseOpenAiReset(value);
+    if (openAiDate) {
+        return formatOsloTime(openAiDate).slice(0, 5);
+    }
+
+    return value;
+}
+
+/** Formats a percent value without noisy trailing decimals. */
+function formatPercent(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Converts Synthetic.new fractional tick values into display percentages. */
+function normalizeSyntheticTickPercent(value: number): number {
+    return value > 0 && value <= 1 ? value * 100 : value;
+}
+
+/** Formats the Synthetic.new weekly regeneration amount when data is available. */
+function formatSyntheticWeeklyRegenAmount(
+    weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
+): string | null {
+    if (
+        weeklyTokenLimit.nextRegenPercent !== null &&
+        weeklyTokenLimit.nextRegenPercent !== undefined
+    ) {
+        return `+${formatPercent(weeklyTokenLimit.nextRegenPercent)}%`;
+    }
+
+    if (weeklyTokenLimit.nextRegenCredits) {
+        return `+${weeklyTokenLimit.nextRegenCredits}`;
+    }
+
+    return null;
+}
+
+/** Formats the Synthetic.new 5h regeneration amount when data is available. */
+function formatSyntheticFiveHourRegenAmount(
+    rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
+): string | null {
+    if (
+        rollingFiveHourLimit.tickPercent !== null &&
+        rollingFiveHourLimit.tickPercent !== undefined
+    ) {
+        return `+${formatPercent(normalizeSyntheticTickPercent(rollingFiveHourLimit.tickPercent))}%`;
+    }
+
+    return null;
+}
+
+/** Formats one Synthetic.new regeneration window segment. */
+function formatSyntheticRegenSegment(
+    label: string,
+    resetAt: string | null | undefined,
+    amount: string | null,
+    formatReset: (value: string | null | undefined) => string = formatResetValue
+): string {
+    const amountSuffix = amount ? ` (${amount})` : "";
+
+    return `${label} ${formatReset(resetAt)}${amountSuffix}`;
+}
+
+/** Formats the Synthetic.new weekly remaining quota. */
+function formatSyntheticWeeklyRemaining(
+    weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
+): string {
+    if (weeklyTokenLimit.remainingCredits) {
+        return `${weeklyTokenLimit.remainingCredits} left`;
+    }
+
+    return `${Math.round(weeklyTokenLimit.percentRemaining)}% left`;
+}
+
 /** Renders the quota overview card UI. */
 export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
     if (!quotas) {
@@ -138,32 +226,15 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                     : null,
         },
         {
-            key: "zai",
-            label: "Z.ai",
-            icon: <AlertTriangle className="h-4 w-4" />,
-            line1: hasQuotaStatus(quotas.zai)
-                ? quotas.zai.status.replaceAll("_", " ")
-                : `5h ${Math.max(100 - quotas.zai.fiveHour.usedPercentage, 0)}% left · weekly ${Math.max(100 - quotas.zai.weekly.usedPercentage, 0)}% left`,
-            line2: hasQuotaStatus(quotas.zai)
-                ? quotas.zai.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.zai.fiveHour.resetAt)} · weekly ${formatResetValue(quotas.zai.weekly.resetAt)}`,
-            percent: hasQuotaStatus(quotas.zai)
-                ? null
-                : Math.max(
-                      quotas.zai.fiveHour.usedPercentage,
-                      quotas.zai.weekly.usedPercentage
-                  ),
-        },
-        {
             key: "synthetic",
             label: "Synthetic.new",
             icon: <Zap className="h-4 w-4" />,
             line1: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.status.replaceAll("_", " ")
-                : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${Math.round(quotas.synthetic.weeklyTokenLimit.percentRemaining)}% left`,
+                : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
             line2: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.synthetic.rollingFiveHourLimit.nextTickAt)} · weekly ${formatResetValue(quotas.synthetic.weeklyTokenLimit.nextRegenAt)}`,
+                : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit), formatResetTime)} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
                 : Math.round(
@@ -182,7 +253,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left`,
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
-                : `Resets: 5h ${formatResetValue(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
+                : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
             percent: hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed,
         },
     ];

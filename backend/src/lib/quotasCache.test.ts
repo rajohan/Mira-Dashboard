@@ -24,7 +24,6 @@ const status = mode === "stale" ? "stale" : "fresh";
 const data = mode === "invalid" ? "not-json" : JSON.stringify({
   openrouter: { usage: 4, totalCredits: 10, remaining: 6, usageMonthly: 4, percentUsed: 40 },
   elevenlabs: { used: 100, total: 1000, remaining: 900, tier: "creator", percentUsed: 10, resetAt: "2026-06-01T00:00:00.000Z" },
-  zai: { status: "not_configured" },
   synthetic: { status: "error", note: "offline" },
   openai: { account: "raymond", model: "gpt-5.5", fiveHourLeftPercent: 80, weeklyLeftPercent: 90, fiveHourReset: null, weeklyReset: null, percentUsed: 20, resetAt: null },
   checkedAt: 1800000000000,
@@ -87,7 +86,6 @@ describe("quota cache helpers", () => {
             percentUsed: 10,
             resetAt: "2026-06-01T00:00:00.000Z",
         });
-        assert.equal(hasQuotaStatus(quotas.zai), true);
         assert.equal(hasQuotaStatus(quotas.synthetic), true);
         assert.equal(hasQuotaStatus(quotas.openrouter), false);
         assert.equal(quotas.cacheAgeMs, 0);

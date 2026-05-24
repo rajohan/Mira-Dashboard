@@ -19,19 +19,6 @@ export interface ElevenLabsQuota {
     resetAt: string | null;
 }
 
-/** Represents zai quota. */
-export interface ZaiQuota {
-    level: string;
-    fiveHour: {
-        usedPercentage: number;
-        resetAt: string;
-    };
-    weekly: {
-        usedPercentage: number;
-        resetAt: string;
-    };
-}
-
 /** Represents open ai quota. */
 export interface OpenAiQuota {
     account: string | null;
@@ -63,12 +50,17 @@ export interface SyntheticQuota {
     weeklyTokenLimit: {
         percentRemaining: number;
         nextRegenAt: string | null;
+        maxCredits?: string | null;
+        remainingCredits?: string | null;
+        nextRegenCredits?: string | null;
+        nextRegenPercent?: number | null;
     };
     rollingFiveHourLimit: {
         remaining: number;
         max: number;
         limited: boolean;
         nextTickAt: string | null;
+        tickPercent?: number;
         percentUsed: number | null;
     };
 }
@@ -83,7 +75,6 @@ export interface QuotaError {
 export interface QuotasResponse {
     openrouter: OpenRouterQuota | QuotaError;
     elevenlabs: ElevenLabsQuota | QuotaError;
-    zai: ZaiQuota | QuotaError;
     synthetic: SyntheticQuota | QuotaError;
     openai: OpenAiQuota | QuotaError;
     checkedAt: number;

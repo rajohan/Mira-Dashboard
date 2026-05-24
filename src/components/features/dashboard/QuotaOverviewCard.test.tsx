@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { QuotasResponse, SyntheticQuota } from "../../../hooks/useQuotas";
+import { formatDate } from "../../../utils/format";
 import { QuotaOverviewCard } from "./QuotaOverviewCard";
 
 const quotas: QuotasResponse = {
@@ -39,6 +40,7 @@ const quotas: QuotasResponse = {
             nextTickAt: "unknown",
             percentUsed: 10,
             remaining: 90,
+            tickPercent: 5,
         },
         searchHourly: {
             limit: 100,
@@ -55,14 +57,13 @@ const quotas: QuotasResponse = {
             requests: 0,
         },
         weeklyTokenLimit: {
+            maxCredits: "$24.00",
             nextRegenAt: "2026-05-17T10:00:00.000Z",
+            nextRegenCredits: "$0.48",
+            nextRegenPercent: 2,
             percentRemaining: 98,
+            remainingCredits: "$23.52",
         },
-    },
-    zai: {
-        fiveHour: { resetAt: "unknown", usedPercentage: 30 },
-        level: "pro",
-        weekly: { resetAt: "2026-05-17T10:00:00.000Z", usedPercentage: 40 },
     },
 };
 
@@ -92,7 +93,11 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("96%")).toHaveClass("bg-red-500/20");
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
-        expect(screen.getByText(/5h 70% left · weekly 60% left/u)).toBeInTheDocument();
+        expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
+        expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+2%\)/u)
+        ).toBeInTheDocument();
         expect(screen.getByText(/5h 15% left · weekly 60% left/u)).toBeInTheDocument();
     });
 
@@ -137,6 +142,9 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("80%")).toHaveClass("bg-yellow-500/20");
         expect(screen.getByText("84%")).toHaveClass("bg-yellow-500/20");
         expect(screen.getByText("100% left")).toBeInTheDocument();
+        expect(
+            screen.getByText(/Resets: 5h \d{2}:30 · weekly not a date/u)
+        ).toBeInTheDocument();
         expect(screen.getByText(/weekly not a date/u)).toBeInTheDocument();
     });
 
@@ -149,13 +157,12 @@ describe("QuotaOverviewCard", () => {
                     openai: { status: "error" },
                     openrouter: { status: "not_configured" },
                     synthetic: { status: "error" },
-                    zai: { status: "not_configured" },
                 }}
             />
         );
 
         expect(screen.getAllByText("error")).toHaveLength(3);
-        expect(screen.getAllByText("not configured")).toHaveLength(2);
+        expect(screen.getAllByText("not configured")).toHaveLength(1);
         expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });
 
@@ -189,13 +196,11 @@ describe("QuotaOverviewCard", () => {
                         },
                         weeklyTokenLimit: {
                             ...synthetic.weeklyTokenLimit,
+                            nextRegenCredits: null,
+                            nextRegenPercent: null,
                             percentRemaining: -12,
+                            remainingCredits: null,
                         },
-                    },
-                    zai: {
-                        ...quotas.zai,
-                        fiveHour: { resetAt: "13:45 on 10 Foo", usedPercentage: 130 },
-                        weekly: { resetAt: "13:45", usedPercentage: 110 },
                     },
                 }}
             />
@@ -203,9 +208,109 @@ describe("QuotaOverviewCard", () => {
 
         expect(screen.getByText("$1.50 remaining")).toBeInTheDocument();
         expect(screen.getByText("100% left")).toBeInTheDocument();
-        expect(screen.getByText(/weekly 0% left/u)).toBeInTheDocument();
-        expect(screen.getByText(/5h 0% left · weekly 0% left/u)).toBeInTheDocument();
-        expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(2);
+        expect(screen.getByText(/weekly -12% left/u)).toBeInTheDocument();
+        expect(screen.getAllByText(/weekly 17\.05\.2026, \d{2}:00/u)).toHaveLength(2);
+        expect(screen.getAllByText(/5h 13:45 on 10 Foo/u)).toHaveLength(1);
+    });
+
+    it("does not fabricate Synthetic regen amounts when they are unavailable", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            tickPercent: undefined,
+                        },
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenCredits: null,
+                            nextRegenPercent: null,
+                        },
+                    },
+                }}
+            />
+        );
+
+        const regenLine = screen.getByText(/Regen: 5h unknown · weekly/u);
+        expect(regenLine).toBeInTheDocument();
+        expect(regenLine).not.toHaveTextContent("+5%");
+        expect(regenLine).not.toHaveTextContent("+2%");
+    });
+
+    it("falls back to Synthetic weekly regen credits when regen percent is unavailable", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenPercent: null,
+                            percentRemaining: 98.3,
+                            remainingCredits: null,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/weekly 98% left/u)).toBeInTheDocument();
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+\$0\.48\)/u)
+        ).toBeInTheDocument();
+    });
+
+    it("treats fractional Synthetic 5h tick values as percentages", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            nextTickAt: "2026-05-17T11:00:00.000Z",
+                            tickPercent: 0.05,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/Regen: 5h \d{2}:00 \(\+5%\)/u)).toBeInTheDocument();
+    });
+
+    it("renders decimal Synthetic weekly regen percentages", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            nextRegenPercent: 2.5,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(
+            screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+2\.5%\)/u)
+        ).toBeInTheDocument();
     });
 
     it("falls back when OpenAI-style date construction produces an invalid date", () => {
@@ -241,5 +346,28 @@ describe("QuotaOverviewCard", () => {
         );
 
         expect(screen.getByText(/5h 13:45 on 10 May/u)).toBeInTheDocument();
+    });
+
+    it("formats OpenAI-style weekly reset dates when present", () => {
+        const currentYear = new Date().getFullYear();
+        const expectedWeeklyReset = formatDate(new Date(currentYear, 4, 10, 13, 45));
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    openai: {
+                        ...quotas.openai,
+                        weeklyReset: "13:45 on 10 May",
+                    },
+                }}
+            />
+        );
+
+        expect(
+            screen.getByText((content) =>
+                content.includes(`weekly ${expectedWeeklyReset}`)
+            )
+        ).toBeInTheDocument();
     });
 });
