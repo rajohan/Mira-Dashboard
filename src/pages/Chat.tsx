@@ -1292,7 +1292,9 @@ export function Chat() {
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 sessionId:
-                    selectedSession?.id && selectedSession.id !== "unknown"
+                    selectedSession?.id &&
+                    selectedSession.id !== "unknown" &&
+                    selectedSession.id !== selectedSessionKey
                         ? selectedSession.id
                         : undefined,
                 message: messageText,

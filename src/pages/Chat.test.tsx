@@ -1323,11 +1323,11 @@ describe("Chat", () => {
         expect(screen.getByText("Thinking")).toBeInTheDocument();
     });
 
-    it("Chat.handleSend sends chat.send without sessionId when it is unknown", async () => {
+    it("Chat.handleSend sends chat.send without sessionId when it is a fallback", async () => {
         const user = userEvent.setup();
         mocks.liveSessions = [
             {
-                id: "unknown",
+                id: "session-a",
                 key: "session-a",
                 displayLabel: "Main chat",
                 label: "main",
@@ -1340,14 +1340,14 @@ describe("Chat", () => {
         render(<Chat />);
         await screen.findByText("old user message");
 
-        await user.type(screen.getByLabelText("Draft"), "No session id");
+        await user.type(screen.getByLabelText("Draft"), "No canonical session id");
         await user.click(screen.getByRole("button", { name: "send" }));
 
         await waitFor(() =>
             expect(mocks.request).toHaveBeenCalledWith(
                 "chat.send",
                 expect.objectContaining({
-                    message: "No session id",
+                    message: "No canonical session id",
                     sessionId: undefined,
                     sessionKey: "session-a",
                 })
