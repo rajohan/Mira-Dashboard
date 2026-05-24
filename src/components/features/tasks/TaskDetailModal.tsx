@@ -540,7 +540,7 @@ export function TaskDetailModal({
                                         {isEditingThis ? (
                                             <div className="space-y-2">
                                                 <Textarea
-                                                    aria-label={`Edit progress update #${update.id}`}
+                                                    aria-label={`Message for progress update #${update.id}`}
                                                     value={editingUpdateMessage}
                                                     onChange={(event) =>
                                                         setEditingUpdateMessage(

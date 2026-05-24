@@ -184,7 +184,7 @@ describe("TaskDetailModal", () => {
         );
         fireEvent.change(
             within(updateCard).getByRole("textbox", {
-                name: "Edit progress update #31",
+                name: "Message for progress update #31",
             }),
             {
                 target: { value: "  Edited progress  " },
@@ -235,7 +235,7 @@ describe("TaskDetailModal", () => {
 
         expect(
             within(updateCard).getByRole("textbox", {
-                name: "Edit progress update #31",
+                name: "Message for progress update #31",
             })
         ).toBeInTheDocument();
     });
@@ -423,7 +423,7 @@ describe("TaskDetailModal", () => {
         );
         fireEvent.change(
             within(updateCard).getByRole("textbox", {
-                name: "Edit progress update #31",
+                name: "Message for progress update #31",
             }),
             {
                 target: { value: "Discard this edit" },
@@ -455,12 +455,12 @@ describe("TaskDetailModal", () => {
         );
         await user.clear(
             within(updateCard).getByRole("textbox", {
-                name: "Edit progress update #31",
+                name: "Message for progress update #31",
             })
         );
         await user.type(
             within(updateCard).getByRole("textbox", {
-                name: "Edit progress update #31",
+                name: "Message for progress update #31",
             }),
             "   "
         );
