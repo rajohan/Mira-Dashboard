@@ -47,4 +47,13 @@ describe("SearchInput", () => {
             "Search tasks"
         );
     });
+
+    it("uses a fallback accessible label when label and placeholder are empty", () => {
+        render(<SearchInput value="" onChange={vi.fn()} label="   " placeholder="   " />);
+
+        expect(screen.getByRole("textbox", { name: "Search" })).toHaveAttribute(
+            "aria-label",
+            "Search"
+        );
+    });
 });

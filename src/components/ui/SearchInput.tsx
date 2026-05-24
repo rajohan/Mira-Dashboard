@@ -17,7 +17,7 @@ export function SearchInput({
 }: SearchInputProps) {
     const normalizedLabel = label?.trim() || undefined;
     const normalizedPlaceholder = placeholder.trim() || undefined;
-    const accessibleLabel = normalizedLabel ?? normalizedPlaceholder;
+    const accessibleLabel = normalizedLabel ?? normalizedPlaceholder ?? "Search";
 
     return (
         <div className="relative max-w-md flex-1">
