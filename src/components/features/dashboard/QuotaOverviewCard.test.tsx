@@ -264,6 +264,27 @@ describe("QuotaOverviewCard", () => {
         ).toBeInTheDocument();
     });
 
+    it("treats fractional Synthetic 5h tick values as percentages", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            tickPercent: 0.05,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
+    });
+
     it("renders decimal Synthetic weekly regen percentages", () => {
         const synthetic = quotas.synthetic as SyntheticQuota;
 

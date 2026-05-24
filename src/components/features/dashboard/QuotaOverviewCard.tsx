@@ -103,6 +103,11 @@ function formatPercent(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/** Converts Synthetic.new fractional tick values into display percentages. */
+function normalizeSyntheticTickPercent(value: number): number {
+    return value > 0 && value <= 1 ? value * 100 : value;
+}
+
 /** Formats the Synthetic.new weekly regeneration amount when data is available. */
 function formatSyntheticWeeklyRegenAmount(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
@@ -129,7 +134,7 @@ function formatSyntheticFiveHourRegenAmount(
         rollingFiveHourLimit.tickPercent !== null &&
         rollingFiveHourLimit.tickPercent !== undefined
     ) {
-        return `+${formatPercent(rollingFiveHourLimit.tickPercent)}%`;
+        return `+${formatPercent(normalizeSyntheticTickPercent(rollingFiveHourLimit.tickPercent))}%`;
     }
 
     return null;
