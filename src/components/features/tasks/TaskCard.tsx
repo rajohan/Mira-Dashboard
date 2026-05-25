@@ -3,6 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 
 import type { Task } from "../../../types/task";
+import { formatCronLastStatus, getCronStatusVariant } from "../../../utils/cronUtils";
 import { formatDuration } from "../../../utils/format";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
@@ -12,6 +13,30 @@ interface TaskCardProps {
     task: Task;
     isDragging?: boolean;
     onClick: () => void;
+}
+
+/** Returns compact automation status for task cards. */
+function getTaskAutomationBadge(automation: Task["automation"]) {
+    if (!automation?.recurring) {
+        return null;
+    }
+
+    if (automation.runningAtMs) {
+        return { label: "Running", variant: "warning" as const };
+    }
+
+    if (automation.enabled === false) {
+        return { label: "Disabled", variant: "default" as const };
+    }
+
+    if (automation.lastRunStatus) {
+        return {
+            label: formatCronLastStatus(automation.lastRunStatus),
+            variant: getCronStatusVariant(automation.lastRunStatus),
+        };
+    }
+
+    return { label: "Recurring", variant: "cron" as const };
 }
 
 /** Renders the task card UI. */
@@ -30,6 +55,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
 
     const priority = getPriority(task.labels);
     const assignee = task.assignees[0];
+    const automationBadge = getTaskAutomationBadge(task.automation);
 
     return (
         <div
@@ -71,9 +97,12 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                     >
                         {priority.toUpperCase()}
                     </span>
-                    {task.automation?.recurring && (
-                        <Badge variant="cron" className="px-1.5 text-[10px]">
-                            Recurring
+                    {automationBadge && (
+                        <Badge
+                            variant={automationBadge.variant}
+                            className="px-1.5 text-[10px]"
+                        >
+                            {automationBadge.label}
                         </Badge>
                     )}
                 </span>
