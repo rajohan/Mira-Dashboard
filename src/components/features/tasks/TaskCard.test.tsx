@@ -133,6 +133,7 @@ describe("TaskCard", () => {
             />
         );
 
+        expect(screen.getByText("Recurring")).toBeInTheDocument();
         expect(screen.getByText("Running")).toBeInTheDocument();
 
         rerender(
@@ -149,6 +150,7 @@ describe("TaskCard", () => {
             />
         );
 
+        expect(screen.getByText("Recurring")).toBeInTheDocument();
         expect(screen.getByText("Disabled")).toBeInTheDocument();
 
         rerender(
@@ -165,6 +167,7 @@ describe("TaskCard", () => {
             />
         );
 
+        expect(screen.getByText("Recurring")).toBeInTheDocument();
         expect(screen.getByText("FAILED")).toBeInTheDocument();
     });
 

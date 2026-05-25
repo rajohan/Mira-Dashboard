@@ -15,8 +15,8 @@ interface TaskCardProps {
     onClick: () => void;
 }
 
-/** Returns compact automation status for task cards. */
-function getTaskAutomationBadge(automation: Task["automation"]) {
+/** Returns compact live automation status for task cards. */
+function getTaskAutomationStatusBadge(automation: Task["automation"]) {
     if (!automation?.recurring) {
         return null;
     }
@@ -36,7 +36,7 @@ function getTaskAutomationBadge(automation: Task["automation"]) {
         };
     }
 
-    return { label: "Recurring", variant: "cron" as const };
+    return null;
 }
 
 /** Renders the task card UI. */
@@ -55,7 +55,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
 
     const priority = getPriority(task.labels);
     const assignee = task.assignees[0];
-    const automationBadge = getTaskAutomationBadge(task.automation);
+    const automationStatusBadge = getTaskAutomationStatusBadge(task.automation);
 
     return (
         <div
@@ -97,12 +97,17 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                     >
                         {priority.toUpperCase()}
                     </span>
-                    {automationBadge && (
+                    {task.automation?.recurring && (
+                        <Badge variant="cron" className="px-1.5 text-[10px]">
+                            Recurring
+                        </Badge>
+                    )}
+                    {automationStatusBadge && (
                         <Badge
-                            variant={automationBadge.variant}
+                            variant={automationStatusBadge.variant}
                             className="px-1.5 text-[10px]"
                         >
-                            {automationBadge.label}
+                            {automationStatusBadge.label}
                         </Badge>
                     )}
                 </span>
