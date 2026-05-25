@@ -118,6 +118,56 @@ describe("TaskCard", () => {
         expect(screen.getByText("Stationary transformed task")).toBeInTheDocument();
     });
 
+    it("shows live cron status on recurring task cards", () => {
+        const { rerender } = render(
+            <TaskCard
+                onClick={vi.fn()}
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-running",
+                        runningAtMs: Date.now(),
+                    },
+                })}
+            />
+        );
+
+        expect(screen.getByText("Running")).toBeInTheDocument();
+
+        rerender(
+            <TaskCard
+                onClick={vi.fn()}
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-disabled",
+                        enabled: false,
+                    },
+                })}
+            />
+        );
+
+        expect(screen.getByText("Disabled")).toBeInTheDocument();
+
+        rerender(
+            <TaskCard
+                onClick={vi.fn()}
+                task={makeTask({
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-failed",
+                        lastRunStatus: "failed",
+                    },
+                })}
+            />
+        );
+
+        expect(screen.getByText("FAILED")).toBeInTheDocument();
+    });
+
     it("renders without an assignee and falls back to unknown avatar initials", () => {
         const { rerender } = render(
             <TaskCard task={makeTask({ assignees: [] })} onClick={vi.fn()} />
