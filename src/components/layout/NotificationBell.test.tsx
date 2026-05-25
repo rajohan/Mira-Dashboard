@@ -128,4 +128,70 @@ describe("NotificationBell", () => {
         expect(screen.getByText("Clear read").closest("button")).toBeDisabled();
         expect(screen.getByText("Mark all read").closest("button")).toBeDisabled();
     });
+
+    it("disables clear read until at least one notification is read", async () => {
+        const user = userEvent.setup();
+        hooks.useNotifications.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        createdAt: "2026-05-10T09:00:00.000Z",
+                        dedupeKey: null,
+                        description: "A warning notification",
+                        id: 1,
+                        isRead: false,
+                        metadata: {},
+                        occurredAt: "2026-05-10T10:00:00.000Z",
+                        source: null,
+                        title: "Backup stale",
+                        type: "warning",
+                        updatedAt: "2026-05-10T09:00:00.000Z",
+                    },
+                ],
+                unreadCount: 1,
+            },
+        });
+
+        render(<NotificationBell />);
+
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open notifications, 1 unread",
+            })
+        );
+
+        expect(screen.getByText("Clear read").closest("button")).toBeDisabled();
+        expect(screen.getByText("Mark all read").closest("button")).toBeEnabled();
+    });
+
+    it("disables mark all read after every notification is already read", async () => {
+        const user = userEvent.setup();
+        hooks.useNotifications.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        createdAt: "2026-05-10T08:00:00.000Z",
+                        dedupeKey: null,
+                        description: "An info notification",
+                        id: 2,
+                        isRead: true,
+                        metadata: {},
+                        occurredAt: "2026-05-10T08:00:00.000Z",
+                        source: null,
+                        title: "Cache refreshed",
+                        type: "info",
+                        updatedAt: "2026-05-10T08:00:00.000Z",
+                    },
+                ],
+                unreadCount: 0,
+            },
+        });
+
+        render(<NotificationBell />);
+
+        await user.click(screen.getByRole("button", { name: "Open notifications" }));
+
+        expect(screen.getByText("Clear read").closest("button")).toBeEnabled();
+        expect(screen.getByText("Mark all read").closest("button")).toBeDisabled();
+    });
 });

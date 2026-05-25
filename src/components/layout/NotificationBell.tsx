@@ -27,6 +27,7 @@ export function NotificationBell() {
 
     const items = notifications?.items || [];
     const unreadCount = notifications?.unreadCount || 0;
+    const readCount = items.filter((notification) => notification.isRead).length;
     const notificationMenuLabel =
         unreadCount === 0
             ? "Open notifications"
@@ -72,7 +73,7 @@ export function NotificationBell() {
                                 type="button"
                                 className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
                                 onClick={() => clearRead.mutate()}
-                                disabled={items.length === 0}
+                                disabled={readCount === 0}
                             >
                                 Clear read
                             </button>
@@ -80,7 +81,7 @@ export function NotificationBell() {
                                 type="button"
                                 className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
                                 onClick={() => markAllRead.mutate()}
-                                disabled={items.length === 0}
+                                disabled={unreadCount === 0}
                             >
                                 Mark all read
                             </button>
