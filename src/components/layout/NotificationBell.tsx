@@ -27,7 +27,7 @@ export function NotificationBell() {
 
     const items = notifications?.items || [];
     const unreadCount = notifications?.unreadCount || 0;
-    const readCount = items.filter((notification) => notification.isRead).length;
+    const readCount = notifications?.readCount || 0;
     const notificationMenuLabel =
         unreadCount === 0
             ? "Open notifications"

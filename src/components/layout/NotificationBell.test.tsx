@@ -65,6 +65,7 @@ beforeEach(() => {
                     updatedAt: "2026-05-10T08:00:00.000Z",
                 },
             ],
+            readCount: 1,
             unreadCount: 1,
         },
     });
@@ -148,6 +149,7 @@ describe("NotificationBell", () => {
                         updatedAt: "2026-05-10T09:00:00.000Z",
                     },
                 ],
+                readCount: 0,
                 unreadCount: 1,
             },
         });
@@ -183,6 +185,7 @@ describe("NotificationBell", () => {
                         updatedAt: "2026-05-10T08:00:00.000Z",
                     },
                 ],
+                readCount: 1,
                 unreadCount: 0,
             },
         });
@@ -193,5 +196,40 @@ describe("NotificationBell", () => {
 
         expect(screen.getByText("Clear read").closest("button")).toBeEnabled();
         expect(screen.getByText("Mark all read").closest("button")).toBeDisabled();
+    });
+
+    it("enables clear read when older read notifications are outside the page", async () => {
+        const user = userEvent.setup();
+        hooks.useNotifications.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        createdAt: "2026-05-10T09:00:00.000Z",
+                        dedupeKey: null,
+                        description: "A warning notification",
+                        id: 1,
+                        isRead: false,
+                        metadata: {},
+                        occurredAt: "2026-05-10T10:00:00.000Z",
+                        source: null,
+                        title: "Backup stale",
+                        type: "warning",
+                        updatedAt: "2026-05-10T09:00:00.000Z",
+                    },
+                ],
+                readCount: 4,
+                unreadCount: 1,
+            },
+        });
+
+        render(<NotificationBell />);
+
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open notifications, 1 unread",
+            })
+        );
+
+        expect(screen.getByText("Clear read").closest("button")).toBeEnabled();
     });
 });

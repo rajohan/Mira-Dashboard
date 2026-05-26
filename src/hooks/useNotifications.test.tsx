@@ -19,6 +19,7 @@ describe("notification hooks", () => {
             status: 200,
             json: async () => ({
                 items: [{ id: 1, title: "Test", isRead: false }],
+                readCount: 2,
                 unreadCount: 1,
             }),
         });
@@ -28,6 +29,7 @@ describe("notification hooks", () => {
             wrapper: createQueryWrapper(),
         });
         await waitFor(() => expect(result.current.data?.unreadCount).toBe(1));
+        expect(result.current.data?.readCount).toBe(2);
     });
 
     it("mutation hooks invalidate notifications", async () => {

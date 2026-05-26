@@ -150,10 +150,12 @@ describe("notifications routes", () => {
 
         const list = await requestJson<{
             items: NotificationItem[];
+            readCount: number;
             unreadCount: number;
         }>(server, "/api/notifications?limit=10");
 
         assert.equal(list.status, 200);
+        assert.equal(list.body.readCount >= 0, true);
         const item = list.body.items.find(
             (notification) => notification.dedupeKey === `${source}:same`
         );
@@ -171,15 +173,16 @@ describe("notifications routes", () => {
         );
         assert.equal(markRead.status, 200);
 
-        const markedList = await requestJson<{ items: NotificationItem[] }>(
-            server,
-            "/api/notifications?limit=10"
-        );
+        const markedList = await requestJson<{
+            items: NotificationItem[];
+            readCount: number;
+        }>(server, "/api/notifications?limit=10");
         assert.equal(
             markedList.body.items.find((notification) => notification.id === item.id)
                 ?.isRead,
             true
         );
+        assert.equal(markedList.body.readCount >= 1, true);
 
         const clearRead = await requestJson<{ ok: true; deleted: number }>(
             server,
