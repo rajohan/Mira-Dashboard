@@ -10,6 +10,13 @@ import { WebSocket } from "ws";
 import { db, ensureTaskAutomationColumn } from "./db.js";
 import gateway from "./gateway.js";
 
+const originalPort = process.env.PORT;
+const originalTrustProxy = process.env.TRUST_PROXY;
+const originalOpenClawHome = process.env.OPENCLAW_HOME;
+const originalGatewayToken = db
+    .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+    .get() as { value: string } | undefined;
+
 process.env.PORT = "0";
 process.env.TRUST_PROXY = "2";
 const openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-openclaw-"));
@@ -64,6 +71,27 @@ describe("server bootstrap", () => {
             });
         });
         await rm(openclawHome, { recursive: true, force: true });
+        if (originalPort === undefined) {
+            delete process.env.PORT;
+        } else {
+            process.env.PORT = originalPort;
+        }
+        if (originalTrustProxy === undefined) {
+            delete process.env.TRUST_PROXY;
+        } else {
+            process.env.TRUST_PROXY = originalTrustProxy;
+        }
+        if (originalOpenClawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = originalOpenClawHome;
+        }
+        db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+        if (originalGatewayToken) {
+            db.prepare(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
+            ).run(originalGatewayToken.value, new Date().toISOString());
+        }
     });
 
     it("parses trust proxy environment values", () => {

@@ -293,16 +293,39 @@ describe("metrics routes", () => {
                     displayLabel: "",
                     channel: "webchat",
                 },
+                {
+                    id: "trailing-model-id",
+                    key: "agent:defaults:secondary",
+                    type: "",
+                    agentType: "defaults",
+                    hookName: "",
+                    kind: "direct",
+                    model: "provider/",
+                    tokenCount: 0,
+                    maxTokens: 200_000,
+                    createdAt: null,
+                    updatedAt: Date.now(),
+                    displayName: "",
+                    label: "Trailing model",
+                    displayLabel: "",
+                    channel: "webchat",
+                },
             ];
 
             assert.deepEqual(__testing.getTokenMetrics(), {
                 total: 0,
-                byModel: { unknown: 0 },
-                sessionsByModel: { unknown: 1 },
+                byModel: { "provider/": 0, unknown: 0 },
+                sessionsByModel: { "provider/": 1, unknown: 1 },
                 byAgent: [
                     {
                         label: "Fallback label",
                         model: "unknown",
+                        tokens: 0,
+                        type: "Unknown",
+                    },
+                    {
+                        label: "Trailing model",
+                        model: "provider/",
                         tokens: 0,
                         type: "Unknown",
                     },

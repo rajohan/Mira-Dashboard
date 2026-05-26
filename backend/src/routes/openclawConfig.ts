@@ -286,6 +286,7 @@ export const __testing = {
     setOpenClawBinForTest: (binPath: string) => {
         openClawBin = binPath;
     },
+    getOpenClawPackageRootForTest: () => openClawPackageRoot,
     setOpenClawPackageRootForTest: (packageRoot: string) => {
         openClawPackageRoot = packageRoot;
     },

@@ -38,7 +38,7 @@ const data = mode === "invalid" ? "not-json" : JSON.stringify(payloads[key]);
 const nullable = mode === "nullable";
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  key + "\t" + data + "\tmoltbook\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t2026-05-11T00:00:00.000Z\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
+  key + "\t" + data + "\tmoltbook\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
   "",
 ].join("\n"));
 `,

@@ -171,10 +171,10 @@ async function startGatewayServer(
 describe("OpenClaw gateway client websocket protocol", () => {
     it("responds to connect challenges with token, client, caps, and signed device auth", async () => {
         let connectFrame: Record<string, unknown> | undefined;
-        const identityFile = path.join(
-            await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-client-ws-")),
-            "device.json"
+        const identityDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-openclaw-client-ws-")
         );
+        const identityFile = path.join(identityDir, "device.json");
         const identity = loadOrCreateDeviceIdentity(identityFile);
         const server = await startGatewayServer((socket) => {
             socket.send(
@@ -239,6 +239,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         } finally {
             client.stop();
             await server.close();
+            await rm(identityDir, { recursive: true, force: true });
         }
     });
 
@@ -749,17 +750,21 @@ describe("OpenClaw gateway client websocket protocol", () => {
             process.platform
         );
 
-        const identityFile = path.join(
-            await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-default-device-")),
-            "device.json"
+        const identityDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-openclaw-default-device-")
         );
-        internals.opts.deviceIdentity = loadOrCreateDeviceIdentity(identityFile);
-        internals.opts.token = "   ";
-        internals.sendConnect({ nonce: "nonce-token-null" });
-        await waitFor(() => defaultConnectParams[1], "device connect params");
-        const deviceParams = defaultConnectParams[1] as Record<string, unknown>;
-        assert.equal(deviceParams.auth, undefined);
-        assert.equal(typeof deviceParams.device, "object");
-        client.request = originalRequest;
+        try {
+            const identityFile = path.join(identityDir, "device.json");
+            internals.opts.deviceIdentity = loadOrCreateDeviceIdentity(identityFile);
+            internals.opts.token = "   ";
+            internals.sendConnect({ nonce: "nonce-token-null" });
+            await waitFor(() => defaultConnectParams[1], "device connect params");
+            const deviceParams = defaultConnectParams[1] as Record<string, unknown>;
+            assert.equal(deviceParams.auth, undefined);
+            assert.equal(typeof deviceParams.device, "object");
+        } finally {
+            client.request = originalRequest;
+            await rm(identityDir, { recursive: true, force: true });
+        }
     });
 });

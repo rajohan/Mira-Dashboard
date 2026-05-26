@@ -75,7 +75,10 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
     try {
         const realAgentsDir = FS.realpathSync(AGENTS_DIR);
         return roots.flatMap((root) => {
-            const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR) as string;
+            const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR);
+            if (!rootDir) {
+                return [];
+            }
 
             try {
                 const expected = Path.join(realAgentsDir, root.relative);

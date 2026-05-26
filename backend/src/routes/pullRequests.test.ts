@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +20,19 @@ const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
     await chmod(filePath, 0o755);
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+        try {
+            await stat(filePath);
+            return;
+        } catch {
+            await new Promise((resolve) => setImmediate(resolve));
+        }
+    }
+    await stat(filePath);
 }
 
 async function installFakeCommands(tempDir: string): Promise<void> {
@@ -77,6 +90,15 @@ if (process.env.FAKE_GH_JSON_LINES === "long-complete-line-with-prefix") {
   process.exit(0);
 }
 if (process.env.FAKE_GH_JSON_LINES === "timeout") {
+  if (process.env.FAKE_GH_READY_FILE) {
+    require("node:fs").writeFileSync(process.env.FAKE_GH_READY_FILE, "ready");
+  }
+  process.on("SIGTERM", () => {
+    if (process.env.FAKE_GH_EXIT_FILE) {
+      require("node:fs").writeFileSync(process.env.FAKE_GH_EXIT_FILE, "exited");
+    }
+    process.exit(0);
+  });
   setTimeout(() => process.exit(0), 10_000);
   return;
 }
@@ -632,11 +654,21 @@ describe("pull request routes", () => {
             }
 
             process.env.FAKE_GH_JSON_LINES = "timeout";
-            await assert.rejects(
-                () => __testing.runGhJsonLines(["api", "graphql"], { timeoutMs: 1 }),
-                /timed out/u
-            );
-            await new Promise((resolve) => setTimeout(resolve, 5_100));
+            const timeoutReadyFile = path.join(tempDir, "gh-timeout-ready");
+            const timeoutExitFile = path.join(tempDir, "gh-timeout-exit");
+            process.env.FAKE_GH_READY_FILE = timeoutReadyFile;
+            process.env.FAKE_GH_EXIT_FILE = timeoutExitFile;
+            try {
+                const timeoutPromise = __testing.runGhJsonLines(["api", "graphql"], {
+                    timeoutMs: 1_000,
+                });
+                await waitForFile(timeoutReadyFile);
+                await assert.rejects(() => timeoutPromise, /timed out/u);
+                await waitForFile(timeoutExitFile);
+            } finally {
+                delete process.env.FAKE_GH_READY_FILE;
+                delete process.env.FAKE_GH_EXIT_FILE;
+            }
 
             const originalPathForSpawnError = process.env.PATH;
             process.env.PATH = tempDir;

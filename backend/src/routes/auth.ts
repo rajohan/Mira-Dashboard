@@ -97,11 +97,7 @@ export default function authRoutes(
         }
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
-        const gatewayToken = stringFallback(
-            typeof request.body?.gatewayToken === "string"
-                ? request.body.gatewayToken
-                : ""
-        ).trim();
+        const gatewayToken = stringFallback(request.body?.gatewayToken).trim();
         if (!username) {
             response.status(400).json({
                 error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",

@@ -200,20 +200,24 @@ describe("OpenClaw config routes", () => {
         assert.equal(response.body.hash, "hash-123");
         assert.equal(response.body.config.model, "codex");
 
-        gateway.request = async (method: string) => {
-            if (method === "config.get") {
-                return { hash: "hash-empty" };
-            }
-            throw new Error(`Unexpected gateway method: ${method}`);
-        };
-        const emptyConfig = await requestJson<{
-            hash: string;
-            config: Record<string, unknown>;
-        }>(server, "/api/backup", { method: "POST" });
-        assert.equal(emptyConfig.status, 200);
-        assert.equal(emptyConfig.body.hash, "hash-empty");
-        assert.deepEqual(emptyConfig.body.config, {});
-        gateway.request = originalRequest;
+        const previousRequest = gateway.request;
+        try {
+            gateway.request = async (method: string) => {
+                if (method === "config.get") {
+                    return { hash: "hash-empty" };
+                }
+                throw new Error(`Unexpected gateway method: ${method}`);
+            };
+            const emptyConfig = await requestJson<{
+                hash: string;
+                config: Record<string, unknown>;
+            }>(server, "/api/backup", { method: "POST" });
+            assert.equal(emptyConfig.status, 200);
+            assert.equal(emptyConfig.body.hash, "hash-empty");
+            assert.deepEqual(emptyConfig.body.config, {});
+        } finally {
+            gateway.request = previousRequest;
+        }
     });
 
     it("covers skill discovery fallbacks and validation edge cases", async () => {
@@ -286,43 +290,48 @@ describe("OpenClaw config routes", () => {
                 "utf8"
             );
             const originalHome = process.env.HOME;
-            process.env.HOME = homeDir;
-            __testing.setOpenClawPackageRootForTest(packageRoot);
-            assert.deepEqual(
-                __testing
-                    .collectExtraSkillDirectories()
-                    .map((skillPath) => path.basename(skillPath)),
-                ["extra-skill"]
-            );
-            const originalReaddirSync = fs.readdirSync;
-            const readdirMock = mock.method(fs, "readdirSync", (root: fs.PathLike) => {
-                if (String(root).includes("dist/extensions")) {
-                    throw new Error("extensions unavailable");
+            const originalPackageRoot = __testing.getOpenClawPackageRootForTest();
+            try {
+                process.env.HOME = homeDir;
+                __testing.setOpenClawPackageRootForTest(packageRoot);
+                assert.deepEqual(
+                    __testing
+                        .collectExtraSkillDirectories()
+                        .map((skillPath) => path.basename(skillPath)),
+                    ["extra-skill"]
+                );
+                const originalReaddirSync = fs.readdirSync;
+                const readdirMock = mock.method(
+                    fs,
+                    "readdirSync",
+                    (root: fs.PathLike) => {
+                        if (String(root).includes("dist/extensions")) {
+                            throw new Error("extensions unavailable");
+                        }
+                        return originalReaddirSync(root, {
+                            withFileTypes: true,
+                        }) as unknown as ReturnType<typeof fs.readdirSync>;
+                    }
+                );
+                try {
+                    assert.deepEqual(__testing.collectExtraSkillDirectories(), []);
+                } finally {
+                    readdirMock.mock.restore();
                 }
-                return originalReaddirSync(root, {
-                    withFileTypes: true,
-                }) as unknown as ReturnType<typeof fs.readdirSync>;
-            });
-            try {
-                assert.deepEqual(__testing.collectExtraSkillDirectories(), []);
-            } finally {
-                readdirMock.mock.restore();
-            }
 
-            const entries = __testing.getConfiguredSkillEntries({
-                skills: {
-                    entries: {
-                        "fallback-skill": { enabled: false },
-                        "configured-only": { description: "Configured only" },
+                const entries = __testing.getConfiguredSkillEntries({
+                    skills: {
+                        entries: {
+                            "fallback-skill": { enabled: false },
+                            "configured-only": { description: "Configured only" },
+                        },
                     },
-                },
-            });
-            assert.deepEqual(Object.keys(entries).sort(), [
-                "configured-only",
-                "fallback-skill",
-            ]);
+                });
+                assert.deepEqual(Object.keys(entries).sort(), [
+                    "configured-only",
+                    "fallback-skill",
+                ]);
 
-            try {
                 const skills = __testing.getSkills({
                     skills: {
                         entries: {
@@ -382,6 +391,7 @@ describe("OpenClaw config routes", () => {
                     true
                 );
             } finally {
+                __testing.setOpenClawPackageRootForTest(originalPackageRoot);
                 if (originalHome === undefined) {
                     delete process.env.HOME;
                 } else {

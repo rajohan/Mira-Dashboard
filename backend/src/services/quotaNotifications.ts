@@ -178,6 +178,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
             }
 
             for (const bucket of THRESHOLDS) {
+                // Non-null: getProviderPercent only returns a percent for quota-backed providers.
                 const payload = getNotificationPayload(provider, bucket, quotas)!;
                 ensureStateRow(provider, bucket);
                 const state = getState(provider, bucket);

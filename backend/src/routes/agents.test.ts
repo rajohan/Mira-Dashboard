@@ -464,6 +464,25 @@ describe("agents routes", () => {
         const { __testing } = await import("./agents.js");
         assert.equal(await __testing.getLatestActivityFromFile("bad!"), null);
         assert.equal(__testing.getSessionFileModTime("bad!"), null);
+        await mkdir(path.join(homeDir, ".openclaw", "agents"), { recursive: true });
+        assert.deepEqual(__testing.getSafeAgentActivityRoots("bad\0agent"), []);
+        const externalSessionsRoot = path.join(homeDir, "external-sessions-root");
+        const escapedActivityAgentDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "escaped-activity-agent"
+        );
+        await mkdir(externalSessionsRoot, { recursive: true });
+        await symlink(externalSessionsRoot, escapedActivityAgentDir);
+        try {
+            assert.deepEqual(
+                __testing.getSafeAgentActivityRoots("escaped-activity-agent"),
+                []
+            );
+        } finally {
+            await rm(escapedActivityAgentDir, { force: true });
+        }
 
         const staleSessionsDir = path.join(
             homeDir,

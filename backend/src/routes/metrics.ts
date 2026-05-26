@@ -255,9 +255,10 @@ function getTokenMetrics(): TokenMetrics {
         byModel[model] = (byModel[model] || 0) + tokens;
 
         // Count sessions by model
-        const modelKey = model.includes("/")
-            ? stringFallback(model.split("/").pop())
+        const parsedModelKey = model.includes("/")
+            ? stringFallback(model.split("/").pop()).trim()
             : model;
+        const modelKey = parsedModelKey || model;
         sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
 
         // Agent data

@@ -6,6 +6,7 @@ import WebSocket from "ws";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const MIN_TICK_INTERVAL_MS = 1_000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
@@ -303,12 +304,16 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (trimmedUrl === "") {
             throw new Error("Gateway URL must be a non-empty string");
         }
-        this.opts.requestTimeoutMs =
+        const requestTimeoutMs =
             typeof this.opts.requestTimeoutMs === "number" &&
             Number.isFinite(this.opts.requestTimeoutMs) &&
             this.opts.requestTimeoutMs > 0
-                ? this.opts.requestTimeoutMs
+                ? Math.trunc(this.opts.requestTimeoutMs)
                 : DEFAULT_REQUEST_TIMEOUT_MS;
+        this.opts.requestTimeoutMs = Math.min(
+            Math.max(requestTimeoutMs, 1),
+            MAX_TIMER_DELAY_MS
+        );
         const ws = new WebSocket(trimmedUrl);
         this.ws = ws;
 
