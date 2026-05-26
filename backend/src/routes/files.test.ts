@@ -27,6 +27,9 @@ async function startServer(workspaceRoot: string): Promise<TestServer> {
 
     const app = express();
     app.use(express.json({ limit: "2mb" }));
+    app.use("/api/files/boom", (_req, _res, next) => {
+        next(new Error("boom"));
+    });
     filesRoutes(app, express);
     const server = http.createServer(app);
 
@@ -96,35 +99,38 @@ describe("files routes", () => {
 
     it("lists workspace files while hiding private dotfiles", async () => {
         await symlink("broken-loop", path.join(workspaceRoot, "broken-loop"));
-        const response = await requestJson<{ files: FileItem[]; root: string }>(
-            server,
-            "/api/files"
-        );
+        try {
+            const response = await requestJson<{ files: FileItem[]; root: string }>(
+                server,
+                "/api/files"
+            );
 
-        assert.equal(response.status, 200);
-        assert.equal(response.body.root, workspaceRoot);
-        assert.deepEqual(
-            response.body.files.map((file) => file.name),
-            [
-                "src",
-                ".env.example",
-                "binary.dat",
-                "broken-loop",
-                "large.png",
-                "large.txt",
-                "tiny.png",
-            ]
-        );
-        assert.equal(response.body.files[0]?.type, "directory");
-        assert.equal(
-            response.body.files.find((file) => file.name === "broken-loop")?.error,
-            true
-        );
-        assert.equal(
-            response.body.files.some((file) => file.name === ".hidden"),
-            false
-        );
-        await rm(path.join(workspaceRoot, "broken-loop"), { force: true });
+            assert.equal(response.status, 200);
+            assert.equal(response.body.root, workspaceRoot);
+            assert.deepEqual(
+                response.body.files.map((file) => file.name),
+                [
+                    "src",
+                    ".env.example",
+                    "binary.dat",
+                    "broken-loop",
+                    "large.png",
+                    "large.txt",
+                    "tiny.png",
+                ]
+            );
+            assert.equal(response.body.files[0]?.type, "directory");
+            assert.equal(
+                response.body.files.find((file) => file.name === "broken-loop")?.error,
+                true
+            );
+            assert.equal(
+                response.body.files.some((file) => file.name === ".hidden"),
+                false
+            );
+        } finally {
+            await rm(path.join(workspaceRoot, "broken-loop"), { force: true });
+        }
     });
 
     it("covers file helper edge cases", async () => {
@@ -158,6 +164,20 @@ describe("files routes", () => {
         assert.equal(text.body.path, "src/app.ts");
         assert.equal(text.body.content, "export const ok = true;\n");
         assert.equal(text.body.isBinary, false);
+
+        const malformedRead = await requestJson<{ error: string }>(
+            server,
+            "/api/files/%E0%A4%A"
+        );
+        assert.equal(malformedRead.status, 400);
+        assert.equal(malformedRead.body.error, "Malformed URL encoding");
+
+        const doubleEncodedMalformedRead = await requestJson<{ error: string }>(
+            server,
+            "/api/files/%25E0%25A4%25A"
+        );
+        assert.equal(doubleEncodedMalformedRead.status, 400);
+        assert.equal(doubleEncodedMalformedRead.body.error, "Malformed URL encoding");
 
         const image = await requestJson<{
             isImage: boolean;
@@ -297,9 +317,28 @@ describe("files routes", () => {
             "/api/files?path=..%2F.."
         );
         assert.equal(deniedList.status, 403);
+
+        const nonUriError = await fetch(`${server.baseUrl}/api/files/boom`);
+        assert.equal(nonUriError.status, 500);
     });
 
     it("writes files, creates parents, and backs up overwritten content", async () => {
+        const malformedWrite = await requestJson<{ error: string }>(
+            server,
+            "/api/files/%E0%A4%A",
+            { method: "PUT", body: { content: "bad" } }
+        );
+        assert.equal(malformedWrite.status, 400);
+        assert.equal(malformedWrite.body.error, "Malformed URL encoding");
+
+        const doubleEncodedMalformedWrite = await requestJson<{ error: string }>(
+            server,
+            "/api/files/%25E0%25A4%25A",
+            { method: "PUT", body: { content: "bad" } }
+        );
+        assert.equal(doubleEncodedMalformedWrite.status, 400);
+        assert.equal(doubleEncodedMalformedWrite.body.error, "Malformed URL encoding");
+
         const created = await requestJson<{
             success: boolean;
             path: string;

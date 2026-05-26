@@ -1083,9 +1083,10 @@ function failDockerExecJob(jobId: string, error: unknown): void {
     if (!current) {
         return;
     }
+    const errMsg = error instanceof Error ? error.message : String(error);
     current.status = "done";
     current.code = 1;
-    current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
+    current.stderr = trimOutput(`${current.stderr}\n${errMsg}`.trim());
     current.endedAt = Date.now();
     cleanupDockerExecJobs();
 }

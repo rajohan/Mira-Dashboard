@@ -1,7 +1,7 @@
 /** Returns an environment variable when it is set, otherwise a fallback. */
 export function envFallback(name: string, fallback: string): string {
     const value = process.env[name];
-    return value || fallback;
+    return value ?? fallback;
 }
 
 /** Converts optional values to strings while preserving empty/null fallback behavior. */

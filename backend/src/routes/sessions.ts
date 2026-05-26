@@ -36,7 +36,7 @@ export default function sessionsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/sessions/:id/action", (async (req, res) => {
-        const sessionKey = stringFallback(req.params.id);
+        const sessionKey = stringFallback(req.params.id).trim();
         const action = stringFallback(req.body?.action).trim().toLowerCase();
         if (!isValidSessionKey(sessionKey)) {
             res.status(400).json({ error: "Invalid session id" });
@@ -70,7 +70,7 @@ export default function sessionsRoutes(app: express.Application): void {
 
     // Delete a session and archive its transcript through OpenClaw.
     app.delete("/api/sessions/:id", (async (req, res) => {
-        const sessionKey = stringFallback(req.params.id);
+        const sessionKey = stringFallback(req.params.id).trim();
         if (!isValidSessionKey(sessionKey)) {
             res.status(400).json({ error: "Invalid session id" });
             return;

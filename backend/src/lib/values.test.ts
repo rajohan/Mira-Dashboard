@@ -17,7 +17,7 @@ describe("value fallback helpers", () => {
             assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "fallback");
 
             process.env.MIRA_VALUE_HELPER_TEST = "";
-            assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "fallback");
+            assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "");
 
             process.env.MIRA_VALUE_HELPER_TEST = "configured";
             assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "configured");

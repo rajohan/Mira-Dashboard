@@ -641,6 +641,22 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.dockerExecJobs.get("state-fail")?.code, 1);
         assert.match(__testing.dockerExecJobs.get("state-fail")?.stderr || "", /after/u);
 
+        __testing.dockerExecJobs.set("primitive-fail", {
+            id: "primitive-fail",
+            containerId: "app",
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+        __testing.failDockerExecJob("primitive-fail", "plain failure");
+        assert.match(
+            __testing.dockerExecJobs.get("primitive-fail")?.stderr || "",
+            /plain failure/u
+        );
+
         __testing.dockerExecJobs.clear();
         const directRun = await __testing.runDockerExecCommand(
             "app",
@@ -1070,26 +1086,33 @@ describe("docker routes", { concurrency: false }, () => {
         ]);
 
         process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS = "1";
-        const sparseEvents = await requestJson<{
-            events: Array<{ id: number; serviceName: string; message: string | null }>;
-        }>(server, "/api/docker/updater/events");
-        assert.equal(sparseEvents.status, 200);
-        assert.deepEqual(sparseEvents.body.events, [
-            {
-                id: 8,
-                managedServiceId: 1,
-                appSlug: "media",
-                serviceName: "",
-                eventType: "",
-                fromTag: null,
-                toTag: null,
-                fromDigest: null,
-                toDigest: null,
-                message: null,
-                createdAt: "",
-            },
-        ]);
-        delete process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS;
+        try {
+            const sparseEvents = await requestJson<{
+                events: Array<{
+                    id: number;
+                    serviceName: string;
+                    message: string | null;
+                }>;
+            }>(server, "/api/docker/updater/events");
+            assert.equal(sparseEvents.status, 200);
+            assert.deepEqual(sparseEvents.body.events, [
+                {
+                    id: 8,
+                    managedServiceId: 1,
+                    appSlug: "media",
+                    serviceName: "",
+                    eventType: "",
+                    fromTag: null,
+                    toTag: null,
+                    fromDigest: null,
+                    toDigest: null,
+                    message: null,
+                    createdAt: "",
+                },
+            ]);
+        } finally {
+            delete process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS;
+        }
 
         const invalid = await requestJson<{ error: string }>(
             server,

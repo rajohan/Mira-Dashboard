@@ -676,6 +676,14 @@ describe("OpenClaw gateway client websocket protocol", () => {
             () => blankUrlClient.start(),
             /Gateway URL must be a non-empty string/u
         );
+        const trimmedUrlServer = await startGatewayServer(() => {});
+        const trimmedUrlClient = new OpenClawGatewayClient({
+            url: `  ${trimmedUrlServer.url}  `,
+        });
+        trimmedUrlClient.start();
+        trimmedUrlClient.stop();
+        await trimmedUrlServer.close();
+
         const fallbackStartClient = new OpenClawGatewayClient({
             url: undefined as unknown as string,
             requestTimeoutMs: Number.NaN,

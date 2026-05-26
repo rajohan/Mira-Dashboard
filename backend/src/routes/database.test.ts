@@ -109,6 +109,60 @@ describe("database routes", () => {
         assert.equal(__testing.stringWithDefault("value", "fallback"), "value");
         assert.equal(__testing.numberFrom(""), 0);
         assert.equal(__testing.numberFrom("12"), 12);
+
+        const originalEnv = {
+            DATABASE_USERNAME: process.env.DATABASE_USERNAME,
+            DATABASE_PASSWORD: process.env.DATABASE_PASSWORD,
+            DATABASE_HOST: process.env.DATABASE_HOST,
+            DATABASE_PORT: process.env.DATABASE_PORT,
+            PGBOUNCER_HOST: process.env.PGBOUNCER_HOST,
+            PGBOUNCER_PORT: process.env.PGBOUNCER_PORT,
+        };
+        try {
+            delete process.env.DATABASE_USERNAME;
+            delete process.env.DATABASE_PASSWORD;
+            delete process.env.DATABASE_HOST;
+            delete process.env.DATABASE_PORT;
+            delete process.env.PGBOUNCER_HOST;
+            delete process.env.PGBOUNCER_PORT;
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://postgres:postgres@postgres:5432/postgres"
+            );
+            assert.equal(
+                __testing.buildPgBouncerUri(),
+                "postgresql://postgres:postgres@pgbouncer:5432/pgbouncer"
+            );
+
+            process.env.DATABASE_USERNAME = "user@name";
+            process.env.DATABASE_PASSWORD = "";
+            process.env.DATABASE_HOST = "db";
+            process.env.DATABASE_PORT = "6543";
+            process.env.PGBOUNCER_HOST = "pool";
+            process.env.PGBOUNCER_PORT = "7654";
+            assert.equal(
+                __testing.buildPostgresUri("custom"),
+                "postgresql://user%40name:@db:6543/custom"
+            );
+            assert.equal(
+                __testing.buildPgBouncerUri(),
+                "postgresql://user%40name:@pool:7654/pgbouncer"
+            );
+
+            process.env.DATABASE_PASSWORD = "p:a/ss#";
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/postgres"
+            );
+        } finally {
+            for (const [key, value] of Object.entries(originalEnv)) {
+                if (value === undefined) {
+                    delete process.env[key];
+                } else {
+                    process.env[key] = value;
+                }
+            }
+        }
     });
 
     it("returns aggregated database overview from Postgres and PgBouncer", async () => {

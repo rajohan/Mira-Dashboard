@@ -47,6 +47,14 @@ interface WriteResponse {
     modified: string;
 }
 
+function decodeRouteFilePath(value: unknown): string | null {
+    try {
+        return decodeURIComponent(stringFallback(value));
+    } catch {
+        return null;
+    }
+}
+
 /** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
@@ -174,7 +182,11 @@ export default function filesRoutes(
         /^\/api\/files\/(.*)$/,
         asyncRoute(
             async (req, res) => {
-                const filePath = decodeURIComponent(stringFallback(req.params[0]));
+                const filePath = decodeRouteFilePath(req.params[0]);
+                if (filePath === null) {
+                    res.status(400).json({ error: "Malformed URL encoding" });
+                    return;
+                }
 
                 let workspaceRoot: string;
                 try {
@@ -331,7 +343,11 @@ export default function filesRoutes(
         express.json(),
         asyncRoute(
             async (req, res) => {
-                const filePath = decodeURIComponent(stringFallback(req.params[0]));
+                const filePath = decodeRouteFilePath(req.params[0]);
+                if (filePath === null) {
+                    res.status(400).json({ error: "Malformed URL encoding" });
+                    return;
+                }
                 const { content } = req.body as { content?: string };
 
                 if (typeof content !== "string") {
@@ -380,5 +396,21 @@ export default function filesRoutes(
             },
             { fallback: "File write failed", logLabel: "[Backend] File write error:" }
         )
+    );
+
+    app.use(
+        "/api/files",
+        (
+            error: unknown,
+            _req: express.Request,
+            res: express.Response,
+            next: express.NextFunction
+        ) => {
+            if (error instanceof URIError) {
+                res.status(400).json({ error: "Malformed URL encoding" });
+                return;
+            }
+            next(error);
+        }
     );
 }

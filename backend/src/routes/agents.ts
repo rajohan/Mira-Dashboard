@@ -1365,9 +1365,9 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
 
-                const { currentTask } = req.body as { currentTask?: string };
+                const { currentTask } = req.body as { currentTask?: unknown };
 
-                if (!currentTask || currentTask.trim().length === 0) {
+                if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
                     res.status(400).json({ error: "Provide currentTask" });
                     return;
                 }
@@ -1377,6 +1377,10 @@ export default function agentsRoutes(app: express.Application): void {
                     Path.join(agentId, "sessions", "metadata.json"),
                     AGENTS_DIR
                 );
+                if (!metadataPath) {
+                    res.status(400).json({ error: "Invalid agent ID" });
+                    return;
+                }
                 const metadataDir = Path.dirname(metadataPath as string);
 
                 // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.

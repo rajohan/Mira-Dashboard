@@ -203,6 +203,11 @@ describe("sessions routes", () => {
             "/api/sessions/agent%3Amain%3Amain/action",
             { method: "POST", body: { action: "stop" } }
         );
+        const trimmedStop = await requestJson<{ success: true; action: string }>(
+            server,
+            "/api/sessions/%20agent%3Amain%3Amain%20/action",
+            { method: "POST", body: { action: "stop" } }
+        );
         const unsupported = await requestJson<{ error: string }>(
             server,
             "/api/sessions/agent%3Amain%3Amain/action",
@@ -216,11 +221,12 @@ describe("sessions routes", () => {
         const deleteResponse = await requestJson<{
             success: true;
             result: { archived: true };
-        }>(server, "/api/sessions/agent%3Amain%3Amain", { method: "DELETE" });
+        }>(server, "/api/sessions/%20agent%3Amain%3Amain%20", { method: "DELETE" });
 
         assert.equal(compact.status, 200);
         assert.equal(reset.status, 200);
         assert.equal(stop.status, 200);
+        assert.equal(trimmedStop.status, 200);
         assert.equal(unsupported.status, 400);
         assert.equal(missingAction.status, 400);
         assert.equal(deleteResponse.status, 200);
@@ -240,7 +246,7 @@ describe("sessions routes", () => {
             { key: "agent:main:main", message: "/compact" },
             { key: "agent:main:main", message: "/reset" },
         ]);
-        assert.deepEqual(aborted, ["agent:main:main"]);
+        assert.deepEqual(aborted, ["agent:main:main", "agent:main:main"]);
         assert.deepEqual(deleted, ["agent:main:main"]);
     });
 

@@ -297,9 +297,10 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (this.closed || this.ws) {
             return;
         }
-        const url =
-            typeof this.opts.url === "string" ? this.opts.url : "ws://127.0.0.1:18789";
-        if (url.trim() === "") {
+        const trimmedUrl = (
+            typeof this.opts.url === "string" ? this.opts.url : "ws://127.0.0.1:18789"
+        ).trim();
+        if (trimmedUrl === "") {
             throw new Error("Gateway URL must be a non-empty string");
         }
         this.opts.requestTimeoutMs =
@@ -308,7 +309,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             this.opts.requestTimeoutMs > 0
                 ? this.opts.requestTimeoutMs
                 : DEFAULT_REQUEST_TIMEOUT_MS;
-        const ws = new WebSocket(url);
+        const ws = new WebSocket(trimmedUrl);
         this.ws = ws;
 
         ws.on("open", () => {

@@ -425,6 +425,10 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath(":", "session-1") || "",
             /agents\/main\/sessions\/session-1\.jsonl$/u
         );
+        assert.match(
+            __testing.getTranscriptPath("agent:my.agent:main", "session-1") || "",
+            /agents\/my\.agent\/sessions\/session-1\.jsonl$/u
+        );
         assert.equal(
             __testing.getTranscriptPath("agent:../main:main", "session-1"),
             null

@@ -740,6 +740,14 @@ describe("agents routes", () => {
         assert.equal(invalid.status, 400);
         assert.equal(invalid.body.error, "Provide currentTask");
 
+        const nonString = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: { task: "Write backend tests" } } }
+        );
+        assert.equal(nonString.status, 400);
+        assert.equal(nonString.body.error, "Provide currentTask");
+
         const firstTask = await requestJson<{ currentTask: string; updatedAt: string }>(
             server,
             `/api/agents/${agentId}/metadata`,
@@ -820,6 +828,24 @@ describe("agents routes", () => {
         );
         assert.equal(invalidMetadata.status, 400);
         assert.equal(invalidMetadata.body.error, "Invalid agent ID");
+
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-outside-"));
+        const symlinkAgentId = "escaped-agent";
+        await symlink(
+            outsideDir,
+            path.join(homeDir, ".openclaw", "agents", symlinkAgentId)
+        );
+        try {
+            const escapedMetadata = await requestJson<{ error: string }>(
+                server,
+                `/api/agents/${symlinkAgentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(escapedMetadata.status, 400);
+            assert.equal(escapedMetadata.body.error, "Invalid agent ID");
+        } finally {
+            await rm(outsideDir, { recursive: true, force: true });
+        }
     });
 
     it("covers agent status route fallbacks for missing agents and default models", async () => {
