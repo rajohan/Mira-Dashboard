@@ -20,6 +20,7 @@ export interface NotificationItem {
 /** Represents the notifications API response. */
 export interface NotificationsResponse {
     items: NotificationItem[];
+    readCount: number;
     unreadCount: number;
 }
 

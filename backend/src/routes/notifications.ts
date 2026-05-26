@@ -76,9 +76,18 @@ export default function notificationsRoutes(app: express.Application): void {
                     )
                     .get() as { count?: number }
             )?.count || 0;
+        const readCount =
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) as count FROM notifications WHERE is_read = 1"
+                    )
+                    .get() as { count?: number }
+            )?.count || 0;
 
         res.json({
             items: rows.map(toResponse),
+            readCount,
             unreadCount,
         });
     }) as RequestHandler);
