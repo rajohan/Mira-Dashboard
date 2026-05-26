@@ -14,6 +14,7 @@ import {
     verifyPassword,
 } from "../auth.js";
 import gateway from "../gateway.js";
+import { stringFallback } from "../lib/values.js";
 
 /** Performs read session ID. */
 function readSessionId(cookieHeader?: string): string | null {
@@ -58,8 +59,19 @@ function validatePassword(password: unknown): string | null {
     return password;
 }
 
+export const __testing = {
+    readSessionId,
+    validateUsername,
+    validatePassword,
+};
+
 /** Registers auth API routes. */
-export default function authRoutes(app: express.Application): void {
+export default function authRoutes(
+    app: express.Application,
+    dependencies: { createUser?: typeof createUser } = {}
+): void {
+    const createAuthUser = dependencies.createUser ?? createUser;
+
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
             bootstrapRequired: bootstrapRequired(),
@@ -83,35 +95,31 @@ export default function authRoutes(app: express.Application): void {
                 .json({ error: "Bootstrap registration is no longer available" });
             return;
         }
-
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
-        const gatewayToken =
+        const gatewayToken = stringFallback(
             typeof request.body?.gatewayToken === "string"
-                ? request.body.gatewayToken.trim()
-                : "";
-
+                ? request.body.gatewayToken
+                : ""
+        ).trim();
         if (!username) {
             response.status(400).json({
                 error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
             });
             return;
         }
-
         if (!password) {
             response.status(400).json({ error: "Password must be 8-256 characters" });
             return;
         }
-
         if (!gatewayToken) {
             response
                 .status(400)
                 .json({ error: "Gateway token is required for first-user setup" });
             return;
         }
-
         try {
-            const user = createUser(username, password);
+            const user = createAuthUser(username, password);
             persistGatewayToken(gatewayToken);
             gateway.init(gatewayToken);
             const sessionId = createSession(user.id);
@@ -123,7 +131,6 @@ export default function authRoutes(app: express.Application): void {
                 response.status(409).json({ error: "Username already exists" });
                 return;
             }
-
             response.status(500).json({ error: "Failed to create first user" });
         }
     });

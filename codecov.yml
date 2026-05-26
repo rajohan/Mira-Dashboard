@@ -23,3 +23,6 @@ flags:
     frontend:
         paths:
             - src/
+    backend:
+        paths:
+            - backend/src/

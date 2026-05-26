@@ -82,7 +82,6 @@ function getNotificationPayload(
             description: `${quotas.openai.percentUsed}% used (5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left)`,
         };
     }
-
     return null;
 }
 
@@ -179,11 +178,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
             }
 
             for (const bucket of THRESHOLDS) {
-                const payload = getNotificationPayload(provider, bucket, quotas);
-                if (!payload) {
-                    continue;
-                }
-
+                const payload = getNotificationPayload(provider, bucket, quotas)!;
                 ensureStateRow(provider, bucket);
                 const state = getState(provider, bucket);
 
@@ -225,3 +220,9 @@ export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS):
         void runQuotaNotificationCheck();
     }, safeInterval).unref();
 }
+
+export const __testing = {
+    getNotificationPayload,
+    getProviderPercent,
+    getState,
+};

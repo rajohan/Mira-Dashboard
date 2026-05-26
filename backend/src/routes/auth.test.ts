@@ -6,6 +6,7 @@ import express from "express";
 
 import { createUser } from "../auth.js";
 import { db } from "../db.js";
+import { __testing as gatewayTesting } from "../gateway.js";
 import authRoutes from "./auth.js";
 
 interface TestServer {
@@ -13,10 +14,12 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function startServer(): Promise<TestServer> {
+async function startServer(
+    dependencies?: Parameters<typeof authRoutes>[1]
+): Promise<TestServer> {
     const app = express();
     app.use(express.json());
-    authRoutes(app);
+    authRoutes(app, dependencies);
     const server = http.createServer(app);
 
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -62,6 +65,149 @@ function cleanupUser(username: string): void {
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
 }
 
+function cleanupAllAuthRows(): void {
+    db.prepare("DELETE FROM auth_sessions").run();
+    db.prepare("DELETE FROM users").run();
+    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+}
+
+describe("auth first-user bootstrap routes", () => {
+    const username = `bootstrap-route-${Date.now()}`;
+    const password = "correct horse battery staple";
+    let server: TestServer;
+
+    before(async () => {
+        cleanupAllAuthRows();
+        server = await startServer();
+    });
+
+    after(async () => {
+        gatewayTesting.resetGatewayStateForTest();
+        await server.close();
+        cleanupUser(username);
+        db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+    });
+
+    it("validates and completes first-user registration", async () => {
+        const loginBeforeBootstrap = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/login",
+            {
+                method: "POST",
+                body: { username, password },
+            }
+        );
+        assert.equal(loginBeforeBootstrap.status, 409);
+        assert.equal(
+            loginBeforeBootstrap.body.error,
+            "Create the first user before logging in"
+        );
+
+        const invalidUsername = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/register-first-user",
+            {
+                method: "POST",
+                body: { username: "no", password, gatewayToken: "token" },
+            }
+        );
+        assert.equal(invalidUsername.status, 400);
+        assert.match(invalidUsername.body.error, /Username/u);
+
+        const invalidPassword = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/register-first-user",
+            {
+                method: "POST",
+                body: { username, password: "short", gatewayToken: "token" },
+            }
+        );
+        assert.equal(invalidPassword.status, 400);
+        assert.match(invalidPassword.body.error, /Password/u);
+
+        const missingGatewayTokenField = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/register-first-user",
+            {
+                method: "POST",
+                body: { username, password },
+            }
+        );
+        assert.equal(missingGatewayTokenField.status, 400);
+        assert.match(missingGatewayTokenField.body.error, /Gateway token/u);
+
+        const missingGatewayToken = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/register-first-user",
+            {
+                method: "POST",
+                body: { username, password, gatewayToken: "   " },
+            }
+        );
+        assert.equal(missingGatewayToken.status, 400);
+        assert.match(missingGatewayToken.body.error, /Gateway token/u);
+
+        const registered = await requestJson<{
+            authenticated: boolean;
+            user: { username: string };
+        }>(server, "/api/auth/register-first-user", {
+            method: "POST",
+            body: {
+                username: ` ${username.toUpperCase()} `,
+                password,
+                gatewayToken: "token",
+            },
+        });
+        assert.equal(registered.status, 201);
+        assert.equal(registered.body.authenticated, true);
+        assert.equal(registered.body.user.username, username);
+        assert.match(
+            registered.headers.get("set-cookie") || "",
+            /mira_dashboard_session=/u
+        );
+    });
+
+    it("maps first-user creation failures", async () => {
+        cleanupAllAuthRows();
+        const duplicateServer = await startServer({
+            createUser: () => {
+                throw new Error("SQLITE_CONSTRAINT_UNIQUE");
+            },
+        });
+        const failingServer = await startServer({
+            createUser: () => {
+                throw "boom";
+            },
+        });
+        try {
+            const duplicate = await requestJson<{ error: string }>(
+                duplicateServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-dupe", password, gatewayToken: "token" },
+                }
+            );
+            assert.equal(duplicate.status, 409);
+            assert.equal(duplicate.body.error, "Username already exists");
+
+            const failed = await requestJson<{ error: string }>(
+                failingServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-fail", password, gatewayToken: "token" },
+                }
+            );
+            assert.equal(failed.status, 500);
+            assert.equal(failed.body.error, "Failed to create first user");
+        } finally {
+            await duplicateServer.close();
+            await failingServer.close();
+        }
+    });
+});
+
 describe("auth routes", () => {
     const username = `backend-route-${Date.now()}`;
     const password = "correct horse battery staple";
@@ -87,6 +233,53 @@ describe("auth routes", () => {
         assert.equal(response.status, 200);
         assert.equal(response.body.bootstrapRequired, false);
         assert.equal(typeof response.body.hasGatewayToken, "boolean");
+    });
+
+    it("covers auth route parsing and validation helpers", async () => {
+        const { __testing } = await import("./auth.js");
+
+        assert.equal(__testing.readSessionId(), null);
+        assert.equal(__testing.readSessionId("other=value"), null);
+        assert.equal(
+            __testing.readSessionId("other=value; mira_dashboard_session=session%201"),
+            "session 1"
+        );
+        assert.equal(__testing.validateUsername("  Raymond_1  "), "raymond_1");
+        assert.equal(__testing.validateUsername("no"), null);
+        assert.equal(__testing.validateUsername(42), null);
+        assert.equal(__testing.validatePassword("12345678"), "12345678");
+        assert.equal(__testing.validatePassword("short"), null);
+        assert.equal(__testing.validatePassword("x".repeat(257)), null);
+        assert.equal(__testing.validatePassword(null), null);
+    });
+
+    it("reports loopback sessions", async () => {
+        const session = await requestJson<{
+            authenticated: boolean;
+            bootstrapRequired: boolean;
+            user: { id: number; username: string };
+        }>(server, "/api/auth/session");
+
+        assert.equal(session.status, 200);
+        assert.equal(session.body.authenticated, true);
+        assert.equal(session.body.bootstrapRequired, false);
+        assert.deepEqual(session.body.user, { id: 0, username: "mira-local" });
+    });
+
+    it("rejects first-user registration after bootstrap is complete", async () => {
+        const response = await requestJson<{ error: string }>(
+            server,
+            "/api/auth/register-first-user",
+            {
+                method: "POST",
+                body: { username: "new-user", password, gatewayToken: "token" },
+            }
+        );
+
+        assert.equal(response.status, 409);
+        assert.deepEqual(response.body, {
+            error: "Bootstrap registration is no longer available",
+        });
     });
 
     it("rejects malformed and invalid login attempts", async () => {
@@ -152,5 +345,14 @@ describe("auth routes", () => {
             ),
             false
         );
+
+        const logoutWithoutCookie = await requestJson<{ ok: true }>(
+            server,
+            "/api/auth/logout",
+            { method: "POST" }
+        );
+
+        assert.equal(logoutWithoutCookie.status, 200);
+        assert.deepEqual(logoutWithoutCookie.body, { ok: true });
     });
 });

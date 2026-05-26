@@ -16,7 +16,12 @@ interface Settings {
     refreshInterval: number;
 }
 
-const SETTINGS_DIR = path.join(process.env.HOME || "", ".openclaw");
+/** Resolves dashboard settings directory from a home directory value. */
+function resolveSettingsDir(home = process.env.HOME): string {
+    return path.join(home || "", ".openclaw");
+}
+
+const SETTINGS_DIR = resolveSettingsDir();
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "dashboard-settings.json");
 
 const DEFAULT_SETTINGS: Settings = {
@@ -134,3 +139,7 @@ export default function settingsRoutes(
         }
     }) as RequestHandler);
 }
+
+export const __testing = {
+    resolveSettingsDir,
+};

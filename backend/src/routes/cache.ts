@@ -9,10 +9,13 @@ import {
     getCacheEntry,
     parseJsonField,
 } from "../lib/cacheStore.js";
+import { errorMessage } from "../lib/errors.js";
+import { envFallback, stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
+let cacheRefreshCwd = N8N_ROOT;
 
 const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     "git.workspace": [
@@ -138,6 +141,23 @@ const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     ],
 };
 
+const cacheRefreshCommandOverrides = new Map<string, string[] | undefined>();
+
+export function setCacheRefreshCommandForTests(
+    key: string,
+    command: string[] | undefined
+): void {
+    if (command) {
+        cacheRefreshCommandOverrides.set(key, command);
+        return;
+    }
+    cacheRefreshCommandOverrides.delete(key);
+}
+
+export function setCacheRefreshCwdForTests(cwd: string | undefined): void {
+    cacheRefreshCwd = cwd ?? N8N_ROOT;
+}
+
 /** Parses JSON field or value. */
 export function parseJsonFieldOrValue(value: string) {
     const parsed = parseJsonField<unknown>(value);
@@ -163,33 +183,32 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
-    const command = CACHE_REFRESH_COMMANDS[key];
+    const command = cacheRefreshCommandOverrides.has(key)
+        ? cacheRefreshCommandOverrides.get(key)
+        : CACHE_REFRESH_COMMANDS[key];
     if (!command) {
         throw new Error(`No refresh command configured for cache key: ${key}`);
     }
-
     const env = {
         ...process.env,
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
+        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
     };
 
     const [file, ...args] = command;
     await execFileAsync(file, args, {
-        cwd: N8N_ROOT,
+        cwd: cacheRefreshCwd,
         env,
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
     });
-
     const row = await getCacheEntry(key);
     if (!row) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
-
     return mapCacheRowForResponse(row);
 }
 
@@ -206,7 +225,7 @@ export default function cacheRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/cache/:key/refresh", (async (req, res) => {
-        const key = String(req.params.key || "").trim();
+        const key = stringFallback(req.params.key).trim();
         if (!key) {
             res.status(400).json({ error: "Missing cache key" });
             return;
@@ -217,13 +236,13 @@ export default function cacheRoutes(app: express.Application): void {
             res.json({ ok: true, entry });
         } catch (error) {
             res.status(500).json({
-                error: error instanceof Error ? error.message : "Cache refresh failed",
+                error: errorMessage(error, "Cache refresh failed"),
             });
         }
     }) as RequestHandler);
 
     app.get("/api/cache/:key", (async (req, res) => {
-        const key = String(req.params.key || "").trim();
+        const key = stringFallback(req.params.key).trim();
         if (!key) {
             res.status(400).json({ error: "Missing cache key" });
             return;

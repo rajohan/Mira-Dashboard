@@ -78,21 +78,23 @@ async function pollLogFile(): Promise<void> {
 }
 
 /** Performs start log watcher. */
+function runLogWatcherTick(): void {
+    if (logPollInFlight) return;
+    logPollInFlight = true;
+    void pollLogFile()
+        .catch((error: unknown) => {
+            console.error("[LogWatcher] Error:", (error as Error).message);
+        })
+        .finally(() => {
+            logPollInFlight = false;
+        });
+}
+
+/** Performs start log watcher. */
 function startLogWatcher(): void {
     if (logWatcher) return;
 
-    logWatcher = setInterval(() => {
-        if (logPollInFlight) return;
-        logPollInFlight = true;
-
-        void pollLogFile()
-            .catch((error: unknown) => {
-                console.error("[LogWatcher] Error:", (error as Error).message);
-            })
-            .finally(() => {
-                logPollInFlight = false;
-            });
-    }, 1000);
+    logWatcher = setInterval(runLogWatcherTick, 1000);
 }
 
 /** Performs send log history. */
@@ -148,6 +150,8 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 
 /** Defines testing. */
 export const __testing = {
+    pollLogFileForTest: pollLogFile,
+    runLogWatcherTickForTest: runLogWatcherTick,
     resetLogWatcherForTest(): void {
         if (logWatcher) {
             clearInterval(logWatcher);
@@ -241,7 +245,6 @@ export default function logsRoutes(app: express.Application): void {
                 }
                 throw error;
             }
-
             if (filePath === realRoot) {
                 res.status(404).json({ error: "Log file not found" });
                 return;

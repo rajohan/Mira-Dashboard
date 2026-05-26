@@ -77,6 +77,10 @@ describe("TTS routes", () => {
         assert.equal(missingText.status, 400);
         assert.equal(missingText.body.error, "Missing text");
 
+        const nonStringText = await postJson<{ error: string }>(server, { text: 42 });
+        assert.equal(nonStringText.status, 400);
+        assert.equal(nonStringText.body.error, "Missing text");
+
         const tooLong = await postJson<{ error: string }>(server, {
             text: "x".repeat(4001),
         });
@@ -123,5 +127,37 @@ describe("TTS routes", () => {
 
         assert.equal(response.status, 429);
         assert.equal(response.body.error, "quota exceeded");
+
+        globalThis.fetch = async () =>
+            ({
+                ok: false,
+                status: 502,
+                text: async () => {
+                    throw new Error("body unavailable");
+                },
+            }) as unknown as Response;
+        const fallback = await postJson<{ error: string }>(server, { text: "hello" });
+        assert.equal(fallback.status, 502);
+        assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
+    });
+
+    it("surfaces speech generation exceptions", async () => {
+        process.env.ELEVENLABS_API_KEY = "test-key";
+        globalThis.fetch = async () => {
+            throw new Error("network down");
+        };
+
+        const response = await postJson<{ error: string }>(server, { text: "hello" });
+
+        assert.equal(response.status, 500);
+        assert.equal(response.body.error, "network down");
+
+        globalThis.fetch = async () => {
+            throw "";
+        };
+
+        const fallback = await postJson<{ error: string }>(server, { text: "hello" });
+        assert.equal(fallback.status, 500);
+        assert.equal(fallback.body.error, "Failed to generate speech");
     });
 });

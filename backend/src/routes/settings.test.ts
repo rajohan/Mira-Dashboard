@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -12,13 +12,16 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function startServer(homeDir: string): Promise<TestServer> {
+async function startServer(
+    homeDir: string,
+    getGatewayStatus = () => ({ gateway: "connected", sessions: 3 })
+): Promise<TestServer> {
     process.env.HOME = homeDir;
     const { default: settingsRoutes } = await import("./settings.js");
 
     const app = express();
     app.use(express.json());
-    settingsRoutes(app, express, () => ({ gateway: "connected", sessions: 3 }));
+    settingsRoutes(app, express, getGatewayStatus);
     const server = http.createServer(app);
 
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -68,6 +71,13 @@ describe("settings routes", () => {
     });
 
     it("returns defaults with gateway status when no settings file exists", async () => {
+        const { __testing } = await import("./settings.js");
+        assert.equal(
+            __testing.resolveSettingsDir("/tmp/settings-home"),
+            path.join("/tmp/settings-home", ".openclaw")
+        );
+        assert.equal(__testing.resolveSettingsDir(""), ".openclaw");
+
         const response = await requestJson<{
             theme: string;
             sidebarCollapsed: boolean;
@@ -125,6 +135,41 @@ describe("settings routes", () => {
         assert.equal(invalidTheme.status, 400);
         assert.equal(invalidTheme.body.error, "Invalid theme");
 
+        const invalidPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: [] }
+        );
+        assert.equal(invalidPayload.status, 400);
+        assert.equal(invalidPayload.body.error, "Settings payload must be an object");
+
+        const invalidSidebar = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { sidebarCollapsed: "yes" } }
+        );
+        assert.equal(invalidSidebar.status, 400);
+        assert.equal(invalidSidebar.body.error, "Invalid sidebarCollapsed setting");
+
+        const invalidModel = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { defaultModel: "" } }
+        );
+        assert.equal(invalidModel.status, 400);
+        assert.equal(invalidModel.body.error, "Invalid defaultModel setting");
+
+        const invalidRefreshInterval = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { refreshInterval: Number.NaN } }
+        );
+        assert.equal(invalidRefreshInterval.status, 400);
+        assert.equal(
+            invalidRefreshInterval.body.error,
+            "Invalid refreshInterval setting"
+        );
+
         const clamped = await requestJson<{
             defaultModel: string;
             refreshInterval: number;
@@ -160,6 +205,43 @@ describe("settings routes", () => {
             assert.equal(response.body.refreshInterval, 5000);
         } finally {
             console.error = originalError;
+        }
+    });
+
+    it("reports gateway-status and save failures", async () => {
+        const failingHomeDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-settings-failing-")
+        );
+        const gatewayFailure = await startServer(failingHomeDir, () => {
+            throw new Error("gateway status failed");
+        });
+        try {
+            const getResponse = await requestJson<{ error: string }>(
+                gatewayFailure,
+                "/api/settings"
+            );
+            assert.equal(getResponse.status, 500);
+            assert.equal(getResponse.body.error, "gateway status failed");
+        } finally {
+            await gatewayFailure.close();
+        }
+
+        await rm(settingsPath, { recursive: true, force: true });
+        await mkdir(settingsPath, { recursive: true });
+        const originalError = console.error;
+        console.error = () => {};
+        try {
+            const putResponse = await requestJson<{ error: string }>(
+                server,
+                "/api/settings",
+                { method: "PUT", body: { theme: "light" } }
+            );
+            assert.equal(putResponse.status, 500);
+            assert.equal(putResponse.body.error, "Failed to save settings");
+        } finally {
+            console.error = originalError;
+            await rm(settingsPath, { recursive: true, force: true });
+            await rm(failingHomeDir, { recursive: true, force: true });
         }
     });
 });

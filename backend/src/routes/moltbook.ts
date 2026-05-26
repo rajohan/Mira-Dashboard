@@ -1,5 +1,6 @@
 import express, { type RequestHandler } from "express";
 
+import { errorMessage } from "../lib/errors.js";
 import {
     fetchCachedMoltbookFeed,
     fetchCachedMoltbookHome,
@@ -15,8 +16,7 @@ export default function moltbookRoutes(app: express.Application): void {
             res.json(cached);
         } catch (error) {
             res.status(503).json({
-                error:
-                    error instanceof Error ? error.message : "Moltbook cache unavailable",
+                error: errorMessage(error, "Moltbook cache unavailable"),
             });
         }
     }) as RequestHandler);
@@ -28,10 +28,7 @@ export default function moltbookRoutes(app: express.Application): void {
             res.json(cached.data);
         } catch (error) {
             res.status(503).json({
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Moltbook feed cache unavailable",
+                error: errorMessage(error, "Moltbook feed cache unavailable"),
             });
         }
     }) as RequestHandler);
@@ -42,10 +39,7 @@ export default function moltbookRoutes(app: express.Application): void {
             res.json(cached.data);
         } catch (error) {
             res.status(503).json({
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Moltbook profile cache unavailable",
+                error: errorMessage(error, "Moltbook profile cache unavailable"),
             });
         }
     }) as RequestHandler);
@@ -56,10 +50,7 @@ export default function moltbookRoutes(app: express.Application): void {
             res.json(cached.data);
         } catch (error) {
             res.status(503).json({
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Moltbook content cache unavailable",
+                error: errorMessage(error, "Moltbook content cache unavailable"),
             });
         }
     }) as RequestHandler);

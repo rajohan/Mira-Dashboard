@@ -30,6 +30,56 @@ async function installFakeCommands(tempDir: string): Promise<void> {
         path.join(binDir, "gh"),
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
+if (process.env.FAKE_GH_JSON_LINES === "partial") {
+  process.stdout.write('{"ok":1}\n\n{"ok":2}');
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "invalid") {
+  process.stdout.write('{bad}\n');
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "invalid-final") {
+  process.stdout.write('{bad}');
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "nonzero") {
+  process.stderr.write("gh failed");
+  process.exit(2);
+}
+if (process.env.FAKE_GH_JSON_LINES === "nonzero-no-stderr") {
+  process.exit(2);
+}
+if (process.env.FAKE_GH_JSON_LINES === "empty-json") {
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "long-buffer") {
+  process.stdout.write("x".repeat(700_000));
+  setTimeout(() => {
+    process.stdout.write("x".repeat(700_000));
+    setTimeout(() => process.exit(0), 20);
+  }, 20);
+  return;
+}
+if (process.env.FAKE_GH_JSON_LINES === "long-line") {
+  process.stdout.write("x".repeat(700_000));
+  setTimeout(() => {
+    process.stdout.write("x".repeat(700_000) + "\n");
+    setTimeout(() => process.exit(0), 20);
+  }, 20);
+  return;
+}
+if (process.env.FAKE_GH_JSON_LINES === "long-complete-line") {
+  process.stdout.write("x".repeat(1_100_000) + "\n");
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "long-complete-line-with-prefix") {
+  process.stdout.write('{"ok":1}\n' + "x".repeat(1_100_000) + "\n");
+  process.exit(0);
+}
+if (process.env.FAKE_GH_JSON_LINES === "timeout") {
+  setTimeout(() => process.exit(0), 10_000);
+  return;
+}
 const pullRequests = [
 {
   number: 10,
@@ -139,6 +189,10 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 if (args[0] === "pr" && ["merge", "close"].includes(args[1])) {
+  if (args[1] === "close") {
+    const comment = args[args.indexOf("--comment") + 1];
+    process.stdout.write("comment=" + comment + "\n");
+  }
   process.stdout.write(args.slice(0, 3).join(" ") + "\n");
   process.exit(0);
 }
@@ -152,11 +206,15 @@ process.exit(1);
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 if (args.join(" ") === "rev-parse --show-toplevel") {
+  if (process.env.FAKE_GIT_ROOT) {
+    process.stdout.write(process.env.FAKE_GIT_ROOT + "\n");
+    process.exit(0);
+  }
   process.stdout.write((process.env.MIRA_DASHBOARD_ROOT || "/home/ubuntu/projects/mira-dashboard") + "\n");
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --abbrev-ref HEAD") {
-  process.stdout.write("main\n");
+  process.stdout.write((process.env.FAKE_GIT_BRANCH || "main") + "\n");
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --short HEAD") {
@@ -164,20 +222,49 @@ if (args.join(" ") === "rev-parse --short HEAD") {
   process.exit(0);
 }
 if (args.join(" ") === "status --short") {
+  if (process.env.FAKE_GIT_DIRTY_PRODUCTION === "1") {
+    process.stdout.write(" M package.json\n");
+  }
   process.exit(0);
 }
 if (args.join(" ") === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+  if (process.env.FAKE_GIT_NO_UPSTREAM === "1") {
+    process.stderr.write("no upstream\n");
+    process.exit(1);
+  }
+  if (process.env.FAKE_GIT_EMPTY_UPSTREAM === "1") {
+    process.stdout.write("\n");
+    process.exit(0);
+  }
   process.stdout.write("origin/main\n");
   process.exit(0);
 }
 if (args.join(" ") === "worktree list --porcelain") {
+  if (process.env.FAKE_GIT_WORKTREE_LIST === "empty") {
+    process.exit(0);
+  }
+  if (process.env.FAKE_GIT_WORKTREE_LIST === "outside") {
+    process.stdout.write("worktree /tmp/outside-worktree\nHEAD deadbeef\nbranch refs/heads/add-playwright-smoke-tests\n\n");
+    process.exit(0);
+  }
+  if (process.env.FAKE_GIT_WORKTREE_LIST === "short-branch") {
+    process.stdout.write("worktree " + process.env.MIRA_DASHBOARD_WORKTREE_ROOT + "/add-playwright-smoke-tests\nHEAD deadbeef\nbranch add-playwright-smoke-tests\n\n");
+    process.exit(0);
+  }
   process.stdout.write("worktree " + process.env.MIRA_DASHBOARD_WORKTREE_ROOT + "/add-playwright-smoke-tests\nHEAD deadbeef\nbranch refs/heads/add-playwright-smoke-tests\n\n");
   process.exit(0);
 }
 if (args[0] === "-C" && args[2] === "status" && args[3] === "--short") {
+  if (process.env.FAKE_GIT_DIRTY_WORKTREE === "1") {
+    process.stdout.write(" M src/App.tsx\n");
+  }
   process.exit(0);
 }
 if (args[0] === "worktree" && args[1] === "remove") {
+  if (process.env.FAKE_GIT_REMOVE_FAIL === "1") {
+    process.stderr.write("remove failed");
+    process.exit(3);
+  }
   process.stdout.write("removed " + args[2] + "\n");
   process.exit(0);
 }
@@ -385,6 +472,253 @@ describe("pull request routes", () => {
         });
     });
 
+    it("covers pull request route helper edge cases", async () => {
+        const { __testing } = await import(`./pullRequests.js?helpers=${Date.now()}`);
+
+        assert.deepEqual(__testing.parseRepoParts("owner/repo"), {
+            owner: "owner",
+            name: "repo",
+        });
+        assert.deepEqual(__testing.parseRepoParts("owner/repo/extra"), {
+            owner: "owner",
+            name: "repo",
+        });
+        assert.throws(() => __testing.parseRepoParts("missing-slash"), {
+            message: "Dashboard repository must be configured as owner/name",
+        });
+        assert.throws(() => __testing.parseRepoParts("/repo"), {
+            message: "Dashboard repository must be configured as owner/name",
+        });
+        assert.throws(() => __testing.parseRepoParts("owner/"), {
+            message: "Dashboard repository must be configured as owner/name",
+        });
+        const parsedRows: Array<{ ok: number }> = [];
+        __testing.parseGhJsonLine("", parsedRows);
+        __testing.parseGhJsonLine("   ", parsedRows);
+        __testing.parseGhJsonLine('{"ok":1}', parsedRows);
+        assert.deepEqual(parsedRows, [{ ok: 1 }]);
+        assert.throws(
+            () => __testing.parseGhJsonLine("x".repeat(1024 * 1024 + 1), parsedRows),
+            /too large/u
+        );
+        assert.deepEqual(
+            __testing.parseGitWorktrees(
+                [
+                    "worktree /tmp/root",
+                    "HEAD abc",
+                    "branch refs/heads/main",
+                    "",
+                    "worktree /tmp/detached",
+                    "HEAD def",
+                    "",
+                ].join("\n")
+            ),
+            [
+                { path: "/tmp/root", head: "abc", branch: "refs/heads/main" },
+                { path: "/tmp/detached", head: "def" },
+            ]
+        );
+        assert.equal(__testing.isPathInsideRoot("/tmp/root/child", "/tmp/root"), true);
+        assert.equal(__testing.isPathInsideRoot("/tmp/root", "/tmp/root"), false);
+        assert.equal(__testing.isPathInsideRoot("/tmp/other", "/tmp/root"), false);
+        assert.equal(__testing.validatePrNumber("10"), 10);
+        assert.throws(() => __testing.validatePrNumber("0"), {
+            message: "Invalid pull request number",
+        });
+        assert.throws(() => __testing.validatePrNumber("1.5"), {
+            message: "Invalid pull request number",
+        });
+        assert.throws(
+            () =>
+                __testing.validateMiraPr({
+                    author: { login: "rajohan" },
+                    baseRefName: "main",
+                    isDraft: false,
+                } as never),
+            { message: "Only Mira-authored pull requests can be managed here" }
+        );
+        assert.throws(
+            () =>
+                __testing.validateMiraPr({
+                    author: { login: "mira-2026" },
+                    baseRefName: "release",
+                    isDraft: false,
+                } as never),
+            { message: "Only main-targeted pull requests can be managed here" }
+        );
+        assert.throws(
+            () =>
+                __testing.validateMiraPr({
+                    author: { login: "mira-2026" },
+                    baseRefName: "main",
+                    isDraft: true,
+                } as never),
+            { message: "Draft pull requests cannot be approved from the dashboard" }
+        );
+        assert.equal(__testing.shellQuote("can't"), String.raw`'can'\''t'`);
+        assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
+    });
+
+    it("covers GitHub JSON-lines parser edge cases", async () => {
+        const { __testing } = await import(`./pullRequests.js?json-lines=${Date.now()}`);
+        const originalScenario = process.env.FAKE_GH_JSON_LINES;
+        try {
+            process.env.FAKE_GH_JSON_LINES = "partial";
+            assert.deepEqual(await __testing.runGhJsonLines(["api", "graphql"]), [
+                { ok: 1 },
+                { ok: 2 },
+            ]);
+
+            process.env.FAKE_GH_JSON_LINES = "invalid";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                SyntaxError
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "nonzero";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /gh failed/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "nonzero-no-stderr";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /GitHub CLI exited with code 2/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "long-buffer";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /too large|Unexpected token/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "long-line";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /too large|Unexpected token/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "long-complete-line";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /too large|Unexpected token/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "long-complete-line-with-prefix";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                /too large|Unexpected token/u
+            );
+
+            process.env.FAKE_GH_JSON_LINES = "invalid-final";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"]),
+                SyntaxError
+            );
+
+            const originalJsonParse = JSON.parse;
+            JSON.parse = () => {
+                throw "non-error parse failure";
+            };
+            try {
+                process.env.FAKE_GH_JSON_LINES = "partial";
+                await assert.rejects(
+                    () => __testing.runGhJsonLines(["api", "graphql"]),
+                    /Failed to parse GitHub CLI output/u
+                );
+            } finally {
+                JSON.parse = originalJsonParse;
+            }
+
+            process.env.FAKE_GH_JSON_LINES = "timeout";
+            await assert.rejects(
+                () => __testing.runGhJsonLines(["api", "graphql"], { timeoutMs: 1 }),
+                /timed out/u
+            );
+            await new Promise((resolve) => setTimeout(resolve, 5_100));
+
+            const originalPathForSpawnError = process.env.PATH;
+            process.env.PATH = tempDir;
+            try {
+                delete process.env.FAKE_GH_JSON_LINES;
+                await assert.rejects(
+                    () => __testing.runGhJsonLines(["api", "graphql"]),
+                    /ENOENT/u
+                );
+            } finally {
+                process.env.PATH = originalPathForSpawnError;
+            }
+            delete process.env.FAKE_GH_JSON_LINES;
+        } finally {
+            if (originalScenario === undefined) {
+                delete process.env.FAKE_GH_JSON_LINES;
+            } else {
+                process.env.FAKE_GH_JSON_LINES = originalScenario;
+            }
+        }
+    });
+
+    it("covers command environment and JSON command helper edge cases", async () => {
+        const { __testing } = await import(`./pullRequests.js?command=${Date.now()}`);
+        const originalMiraToken = process.env.MIRA_GITHUB_TOKEN;
+        const originalGhToken = process.env.GH_TOKEN;
+        const originalGithubToken = process.env.GITHUB_TOKEN;
+        try {
+            delete process.env.MIRA_GITHUB_TOKEN;
+            delete process.env.GH_TOKEN;
+            delete process.env.GITHUB_TOKEN;
+            assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, undefined);
+
+            process.env.GH_TOKEN = "gh-token";
+            assert.equal(__testing.buildCommandEnv().GH_TOKEN, "gh-token");
+            assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "gh-token");
+
+            process.env.MIRA_GITHUB_TOKEN = "mira-token";
+            assert.equal(__testing.buildCommandEnv().GH_TOKEN, "mira-token");
+            assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "mira-token");
+
+            const pullRequest = await __testing.runGhJson(["pr", "view", "10"]);
+            assert.equal(pullRequest.number, 10);
+
+            const oldFakeGhJsonLines = process.env.FAKE_GH_JSON_LINES;
+            try {
+                process.env.FAKE_GH_JSON_LINES = "empty-json";
+                assert.equal(await __testing.runGhJson(["pr", "view", "10"]), null);
+            } finally {
+                if (oldFakeGhJsonLines === undefined) {
+                    delete process.env.FAKE_GH_JSON_LINES;
+                } else {
+                    process.env.FAKE_GH_JSON_LINES = oldFakeGhJsonLines;
+                }
+            }
+
+            const command = await __testing.runCommand("git", [
+                "rev-parse",
+                "--short",
+                "HEAD",
+            ]);
+            assert.equal(command.stdout, "abc1234\n");
+            assert.equal(command.stderr, "");
+        } finally {
+            if (originalMiraToken === undefined) {
+                delete process.env.MIRA_GITHUB_TOKEN;
+            } else {
+                process.env.MIRA_GITHUB_TOKEN = originalMiraToken;
+            }
+            if (originalGhToken === undefined) {
+                delete process.env.GH_TOKEN;
+            } else {
+                process.env.GH_TOKEN = originalGhToken;
+            }
+            if (originalGithubToken === undefined) {
+                delete process.env.GITHUB_TOKEN;
+            } else {
+                process.env.GITHUB_TOKEN = originalGithubToken;
+            }
+        }
+    });
+
     it("rejects invalid pull request numbers before running external commands", async () => {
         const originalConsoleError = console.error;
         console.error = () => {
@@ -447,6 +781,26 @@ describe("pull request routes", () => {
             deploy.body.deployment.note,
             "Build passed; restart + health check scheduled"
         );
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        process.env.FAKE_GIT_WORKTREE_LIST = "short-branch";
+        try {
+            const approveAndDeploy = await requestJson<{
+                ok: boolean;
+                message: string;
+                deployment: { status: string };
+            }>(server, "/api/pull-requests/10/approve", {
+                method: "POST",
+                body: { deploy: true },
+            });
+            assert.equal(approveAndDeploy.status, 200);
+            assert.equal(approveAndDeploy.body.message, "PR #10 merged; deploy started");
+            assert.equal(approveAndDeploy.body.deployment.status, "restart-scheduled");
+        } finally {
+            delete process.env.FAKE_GIT_WORKTREE_LIST;
+        }
     });
 
     it("keeps dashboard actions restricted to Mira-authored pull requests", async () => {
@@ -467,6 +821,139 @@ describe("pull request routes", () => {
                 "Only Mira-authored pull requests can be managed here"
             );
         } finally {
+            console.error = originalConsoleError;
+        }
+    });
+
+    it("reports cleanup warnings for missing, unsafe, or dirty worktrees", async () => {
+        const originalConsoleError = console.error;
+        console.error = () => {
+            // Suppress expected route errors for forced production-checkout failures.
+        };
+
+        try {
+            process.env.FAKE_GIT_WORKTREE_LIST = "empty";
+            const noWorktree = await requestJson<{
+                cleanup: { status: string; branch: string; message: string };
+            }>(server, "/api/pull-requests/10/reject", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(noWorktree.status, 200);
+            assert.deepEqual(noWorktree.body.cleanup, {
+                status: "skipped",
+                branch: "add-playwright-smoke-tests",
+                message: "No local worktree found for add-playwright-smoke-tests",
+            });
+
+            process.env.FAKE_GIT_WORKTREE_LIST = "outside";
+            const outside = await requestJson<{ cleanup: { status: string } }>(
+                server,
+                "/api/pull-requests/10/reject",
+                { method: "POST", body: {} }
+            );
+            assert.equal(outside.status, 200);
+            assert.equal(outside.body.cleanup.status, "warning");
+
+            delete process.env.FAKE_GIT_WORKTREE_LIST;
+            process.env.FAKE_GIT_DIRTY_WORKTREE = "1";
+            const dirty = await requestJson<{
+                cleanup: { status: string; message: string };
+            }>(server, "/api/pull-requests/10/reject", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(dirty.status, 200);
+            assert.equal(dirty.body.cleanup.status, "warning");
+            assert.equal(
+                dirty.body.cleanup.message,
+                "Skipped cleanup for add-playwright-smoke-tests; worktree has local changes"
+            );
+
+            delete process.env.FAKE_GIT_DIRTY_WORKTREE;
+            process.env.FAKE_GIT_REMOVE_FAIL = "1";
+            const removeFailure = await requestJson<{
+                cleanup: { status: string; message: string };
+            }>(server, "/api/pull-requests/10/reject", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(removeFailure.status, 200);
+            assert.equal(removeFailure.body.cleanup.status, "warning");
+            assert.match(removeFailure.body.cleanup.message, /remove failed/u);
+
+            delete process.env.FAKE_GIT_REMOVE_FAIL;
+            process.env.FAKE_GIT_DIRTY_PRODUCTION = "1";
+            const dirtyProduction = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/10/approve",
+                { method: "POST", body: { deploy: false } }
+            );
+            assert.equal(dirtyProduction.status, 500);
+            assert.equal(
+                dirtyProduction.body.error,
+                "Production checkout has local changes; refusing deploy/merge"
+            );
+        } finally {
+            delete process.env.FAKE_GIT_WORKTREE_LIST;
+            delete process.env.FAKE_GIT_DIRTY_WORKTREE;
+            delete process.env.FAKE_GIT_REMOVE_FAIL;
+            delete process.env.FAKE_GIT_DIRTY_PRODUCTION;
+            console.error = originalConsoleError;
+        }
+    });
+
+    it("surfaces production checkout and deploy readiness failures", async () => {
+        const originalConsoleError = console.error;
+        console.error = () => {
+            // Suppress expected route errors for forced deploy failures.
+        };
+
+        try {
+            process.env.FAKE_GIT_NO_UPSTREAM = "1";
+            const checkout = await requestJson<{
+                checkout: { upstream?: string; isSafeForDeploy: boolean };
+            }>(server, "/api/pull-requests/production-checkout");
+            assert.equal(checkout.status, 200);
+            assert.equal(checkout.body.checkout.upstream, undefined);
+            assert.equal(checkout.body.checkout.isSafeForDeploy, true);
+            delete process.env.FAKE_GIT_NO_UPSTREAM;
+
+            process.env.FAKE_GIT_EMPTY_UPSTREAM = "1";
+            const emptyUpstream = await requestJson<{
+                checkout: { upstream?: string; isSafeForDeploy: boolean };
+            }>(server, "/api/pull-requests/production-checkout");
+            assert.equal(emptyUpstream.status, 200);
+            assert.equal(emptyUpstream.body.checkout.upstream, undefined);
+            assert.equal(emptyUpstream.body.checkout.isSafeForDeploy, true);
+            delete process.env.FAKE_GIT_EMPTY_UPSTREAM;
+
+            process.env.FAKE_GIT_ROOT = path.join(tempDir, "not-production");
+            const wrongRoot = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/deploy",
+                { method: "POST", body: {} }
+            );
+            assert.equal(wrongRoot.status, 500);
+            assert.match(wrongRoot.body.error, /Expected production checkout/);
+
+            delete process.env.FAKE_GIT_ROOT;
+            process.env.FAKE_GIT_BRANCH = "preview/pr-10";
+            const wrongBranch = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/deploy",
+                { method: "POST", body: {} }
+            );
+            assert.equal(wrongBranch.status, 500);
+            assert.match(
+                wrongBranch.body.error,
+                /Production checkout must be clean main before deploy/
+            );
+        } finally {
+            delete process.env.FAKE_GIT_NO_UPSTREAM;
+            delete process.env.FAKE_GIT_EMPTY_UPSTREAM;
+            delete process.env.FAKE_GIT_ROOT;
+            delete process.env.FAKE_GIT_BRANCH;
             console.error = originalConsoleError;
         }
     });

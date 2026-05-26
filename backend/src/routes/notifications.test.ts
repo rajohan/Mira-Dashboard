@@ -105,6 +105,17 @@ describe("notifications routes", () => {
         );
         assert.equal(invalidType.status, 400);
         assert.equal(invalidType.body.error, "invalid notification type");
+
+        const defaultType = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Default type", description: "body", source },
+            }
+        );
+        assert.equal(defaultType.status, 200);
+        assert.equal(typeof defaultType.body.id, "number");
     });
 
     it("creates, upserts, lists, reads, clears, and deletes notifications", async () => {
@@ -192,13 +203,105 @@ describe("notifications routes", () => {
         assert.equal(clearRead.status, 200);
         assert.equal(clearRead.body.deleted >= 1, true);
 
+        const deletable = await requestJson<{ ok: true; id: number }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Delete me",
+                    description: "Delete branch",
+                    source,
+                },
+            }
+        );
+        assert.equal(deletable.status, 200);
+
+        const deleteExisting = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            `/api/notifications/${deletable.body.id}`,
+            { method: "DELETE" }
+        );
+        assert.equal(deleteExisting.status, 200);
+        assert.equal(deleteExisting.body.deleted, 1);
+
         const deleteMissing = await requestJson<{ ok: true; deleted: number }>(
             server,
-            `/api/notifications/${item.id}`,
+            `/api/notifications/${deletable.body.id}`,
             { method: "DELETE" }
         );
         assert.equal(deleteMissing.status, 200);
         assert.equal(deleteMissing.body.deleted, 0);
+    });
+
+    it("handles invalid notification ids and malformed stored metadata", async () => {
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Malformed metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:malformed`,
+            "{not-json",
+            "2026-05-11T02:00:00.000Z",
+            "2026-05-11T02:00:00.000Z",
+            "2026-05-11T02:00:00.000Z"
+        );
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Empty metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:empty-metadata`,
+            "",
+            "2026-05-11T02:01:00.000Z",
+            "2026-05-11T02:01:00.000Z",
+            "2026-05-11T02:01:00.000Z"
+        );
+
+        const list = await requestJson<{
+            items: NotificationItem[];
+            unreadCount: number;
+        }>(server, "/api/notifications?limit=not-a-number");
+        assert.equal(list.status, 200);
+        const item = list.body.items.find(
+            (notification) => notification.dedupeKey === `${source}:malformed`
+        );
+        assert.ok(item);
+        assert.deepEqual(item.metadata, {});
+        assert.deepEqual(
+            list.body.items.find(
+                (notification) => notification.dedupeKey === `${source}:empty-metadata`
+            )?.metadata,
+            {}
+        );
+
+        const invalidRead = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/not-a-number/read",
+            { method: "POST" }
+        );
+        assert.equal(invalidRead.status, 400);
+        assert.equal(invalidRead.body.error, "invalid id");
+
+        const invalidDelete = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/0",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidDelete.status, 400);
+        assert.equal(invalidDelete.body.error, "invalid id");
     });
 
     it("marks all unread notifications as read", async () => {
@@ -228,5 +331,29 @@ describe("notifications routes", () => {
             ownItems.every((item) => item.isRead),
             true
         );
+
+        const noReadLeft = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST" }
+        );
+        assert.equal(noReadLeft.status, 200);
+        assert.equal(noReadLeft.body.deleted >= 0, true);
+
+        const stillNoReadLeft = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST" }
+        );
+        assert.equal(stillNoReadLeft.status, 200);
+        assert.equal(stillNoReadLeft.body.deleted, 0);
+
+        const deleteNeverExisted = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/999999999",
+            { method: "DELETE" }
+        );
+        assert.equal(deleteNeverExisted.status, 200);
+        assert.equal(deleteNeverExisted.body.deleted, 0);
     });
 });

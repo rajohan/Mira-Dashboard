@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -25,7 +26,7 @@ async function startServer(homeDir: string): Promise<TestServer> {
     const { default: configFilesRoutes } = await import("./configFiles.js");
 
     const app = express();
-    app.use(express.json({ limit: "2mb" }));
+    app.use(express.json({ limit: "3mb" }));
     configFilesRoutes(app, express);
     const server = http.createServer(app);
 
@@ -138,6 +139,22 @@ describe("config files routes", () => {
         );
         assert.equal(missing.status, 404);
 
+        const cronJobsPath = path.join(openclawRoot, "cron", "jobs.json");
+        const originalCronJobs = await readFile(cronJobsPath, "utf8");
+        await rm(cronJobsPath, { force: true });
+        await mkdir(cronJobsPath);
+        try {
+            const directory = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/cron%2Fjobs.json"
+            );
+            assert.equal(directory.status, 400);
+            assert.equal(directory.body.error, "Path is a directory, not a file");
+        } finally {
+            await rm(cronJobsPath, { recursive: true, force: true });
+            await writeFile(cronJobsPath, originalCronJobs);
+        }
+
         const openclawConfig = path.join(openclawRoot, "openclaw.json");
         const originalOpenclawConfig = await readFile(openclawConfig, "utf8");
         await rm(openclawConfig, { force: true });
@@ -152,6 +169,52 @@ describe("config files routes", () => {
         } finally {
             await rm(openclawConfig, { force: true });
             await writeFile(openclawConfig, originalOpenclawConfig);
+        }
+
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-config-outside-"));
+        await writeFile(path.join(outsideDir, "openclaw.json"), "{}\n");
+        await rm(openclawConfig, { force: true });
+        try {
+            await symlink(path.join(outsideDir, "openclaw.json"), openclawConfig);
+            const outsideSymlink = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(outsideSymlink.status, 403);
+            assert.equal(
+                outsideSymlink.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            await rm(openclawConfig, { force: true });
+            await writeFile(openclawConfig, originalOpenclawConfig);
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+    });
+
+    it("reports unexpected read errors", async () => {
+        const originalOpenSync = fs.openSync;
+        try {
+            fs.openSync = ((target: fs.PathLike, flags: string | number) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath === path.join(openclawRoot, "openclaw.json")) {
+                    const error = new Error("permission denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalOpenSync(target, flags);
+            }) as typeof fs.openSync;
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "permission denied");
+        } finally {
+            fs.openSync = originalOpenSync;
         }
     });
 
@@ -185,9 +248,27 @@ describe("config files routes", () => {
         assert.equal(large.body.content.length, 1024 * 1024);
         assert.equal(large.body.isBinary, false);
         assert.equal(large.body.truncated, true);
+
+        await writeFile(
+            path.join(openclawRoot, "hooks", "transforms", "agentmail.ts"),
+            Buffer.concat([Buffer.from([0]), Buffer.alloc(1024 * 1024, "x")])
+        );
+        const largeBinary = await requestJson<{
+            content: string;
+            isBinary: boolean;
+            truncated: boolean;
+        }>(server, "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts");
+
+        assert.equal(largeBinary.status, 200);
+        assert.equal(largeBinary.body.content, "[Binary file]");
+        assert.equal(largeBinary.body.isBinary, true);
+        assert.equal(largeBinary.body.truncated, true);
     });
 
     it("writes allowed config files and backs up overwritten content", async () => {
+        await rm(path.join(openclawRoot, "hooks", "transforms", "agentmail.ts"), {
+            force: true,
+        });
         const created = await requestJson<{
             success: boolean;
             path: string;
@@ -248,5 +329,120 @@ describe("config files routes", () => {
         await assert.rejects(
             readFile(path.join(openclawRoot, "openclaw.json.bak"), "utf8")
         );
+
+        const oversizedContent = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/openclaw.json",
+            { method: "PUT", body: { content: "x".repeat(2 * 1024 * 1024 + 1) } }
+        );
+        assert.equal(oversizedContent.status, 400);
+        assert.equal(oversizedContent.body.error, "Invalid content");
+
+        const denied = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/not-allowed.json",
+            { method: "PUT", body: { content: "{}\n" } }
+        );
+        assert.equal(denied.status, 403);
+        assert.equal(denied.body.error, "Access denied: file not in allowed list");
+
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-config-write-"));
+        const openclawConfig = path.join(openclawRoot, "openclaw.json");
+        const originalOpenclawConfig = await readFile(openclawConfig, "utf8");
+        await rm(openclawConfig, { force: true });
+        try {
+            await writeFile(path.join(outsideDir, "openclaw.json"), "{}\n");
+            await symlink(path.join(outsideDir, "openclaw.json"), openclawConfig);
+            const outsideSymlink = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(outsideSymlink.status, 403);
+            assert.equal(
+                outsideSymlink.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            await rm(openclawConfig, { force: true });
+            await writeFile(openclawConfig, originalOpenclawConfig);
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+
+        const originalMkdirSync = fs.mkdirSync;
+        try {
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath === openclawRoot) {
+                    const error = new Error(
+                        "root creation denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const unsafePreparedTarget = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(unsafePreparedTarget.status, 403);
+            assert.equal(
+                unsafePreparedTarget.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+        }
+
+        const transformsDir = path.join(openclawRoot, "hooks", "transforms");
+        const outsideParent = await mkdtemp(
+            path.join(os.tmpdir(), "mira-config-parent-")
+        );
+        await rm(transformsDir, { recursive: true, force: true });
+        try {
+            await symlink(outsideParent, transformsDir);
+            const unsafeParent = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export {};\n" } }
+            );
+            assert.equal(unsafeParent.status, 403);
+            assert.equal(
+                unsafeParent.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            await rm(transformsDir, { force: true });
+            await mkdir(transformsDir, { recursive: true });
+            await rm(outsideParent, { recursive: true, force: true });
+        }
+    });
+
+    it("reports backup-copy failures when overwriting config files", async () => {
+        const target = path.join(openclawRoot, "hooks", "transforms", "agentmail.ts");
+        const backup = `${target}.bak`;
+        await writeFile(target, "export const previous = true;\n");
+        await rm(backup, { recursive: true, force: true });
+        await mkdir(backup);
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const next = true;\n" } }
+            );
+            assert.equal(response.status, 500);
+            assert.match(response.body.error, /EISDIR|directory/i);
+            assert.equal(
+                await readFile(target, "utf8"),
+                "export const previous = true;\n"
+            );
+        } finally {
+            await rm(backup, { recursive: true, force: true });
+        }
     });
 });

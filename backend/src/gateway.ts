@@ -5,34 +5,38 @@ import Path from "node:path";
 
 import WebSocket from "ws";
 
+import { errorMessage } from "./lib/errors.js";
 import {
     type DeviceIdentity,
     loadOrCreateDeviceIdentity,
     OpenClawGatewayClient,
     type OpenClawGatewayClientInstance,
+    type OpenClawGatewayClientOptions,
 } from "./lib/openclawGatewayClient.js";
+import { envFallback, stringFallback } from "./lib/values.js";
 
-const DASHBOARD_OPENCLAW_HOME =
-    process.env.MIRA_DASHBOARD_OPENCLAW_HOME ||
-    Path.join(process.cwd(), "data", "openclaw-client");
-
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || Path.join(os.homedir(), ".openclaw");
+const DASHBOARD_OPENCLAW_HOME = envFallback(
+    "MIRA_DASHBOARD_OPENCLAW_HOME",
+    Path.join(process.cwd(), "data", "openclaw-client")
+);
+const OPENCLAW_HOME = envFallback("OPENCLAW_HOME", Path.join(os.homedir(), ".openclaw"));
 
 /** Performs load or create dashboard device IDentity. */
-function loadOrCreateDashboardDeviceIdentity(): DeviceIdentity | undefined {
-    const identityPath = Path.join(
+function loadOrCreateDashboardDeviceIdentity(
+    identityPath = Path.join(
         DASHBOARD_OPENCLAW_HOME,
         ".openclaw",
         "identity",
         "device.json"
-    );
-
+    ),
+    loader = loadOrCreateDeviceIdentity
+): DeviceIdentity | undefined {
     try {
-        return loadOrCreateDeviceIdentity(identityPath);
+        return loader(identityPath);
     } catch (error) {
         console.warn(
             "[Gateway] Failed to load dashboard device identity, continuing without explicit identity:",
-            error instanceof Error ? error.message : String(error)
+            errorMessage(error, String(error))
         );
         return undefined;
     }
@@ -145,6 +149,10 @@ let isGatewayConnected = false;
 let requestId = 1000;
 const pendingRequests = new Map<string, PendingRequest>();
 let currentToken: string | null = null;
+type GatewayClientConstructor = new (
+    options: OpenClawGatewayClientOptions
+) => OpenClawGatewayClientInstance;
+let GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
 
 /** Performs transform session. */
 function transformSession(session: GatewaySession): Session {
@@ -154,7 +162,7 @@ function transformSession(session: GatewaySession): Session {
     const keyParts = key.split(":");
 
     if (keyParts.length >= 2) {
-        agentType = keyParts[1] || "";
+        agentType = stringFallback(keyParts[1]);
     }
 
     let hookName = "";
@@ -162,7 +170,7 @@ function transformSession(session: GatewaySession): Session {
         type = "HOOK";
         const hookIndex = keyParts.indexOf("hook");
         if (hookIndex !== -1 && keyParts[hookIndex + 1]) {
-            hookName = keyParts[hookIndex + 1] || "";
+            hookName = stringFallback(keyParts[hookIndex + 1]);
         }
     } else if (key.includes(":cron:")) {
         type = "CRON";
@@ -328,18 +336,46 @@ function normalizeTimestamp(value: unknown): number | undefined {
 }
 
 /** Returns transcript path. */
+function isPathInsideRoot(root: string, candidate: string): boolean {
+    const relativePath = Path.relative(root, candidate);
+    return !relativePath.startsWith("..") && !Path.isAbsolute(relativePath);
+}
+
+/** Returns candidate when it stays inside root. */
+function resolvePathInsideRoot(root: string, candidate: string): string | null {
+    return isPathInsideRoot(root, candidate) ? candidate : null;
+}
+
+/** Returns transcript path. */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
     if (!sessionId) {
         const session = sessionList.find((entry) => entry.key === sessionKey);
         sessionId = session?.id;
     }
-
     if (!sessionId || sessionId === "unknown") {
         return null;
     }
 
     const agentId = sessionKey.split(":")[1] || "main";
-    return Path.join(OPENCLAW_HOME, "agents", agentId, "sessions", `${sessionId}.jsonl`);
+    const safePathSegment = /^[A-Za-z0-9_-]+$/u;
+    if (!safePathSegment.test(agentId) || !safePathSegment.test(sessionId)) {
+        return null;
+    }
+
+    const openClawRoot = Path.resolve(OPENCLAW_HOME);
+    const transcriptPath = Path.resolve(
+        openClawRoot,
+        "agents",
+        agentId,
+        "sessions",
+        `${sessionId}.jsonl`
+    );
+    return resolvePathInsideRoot(openClawRoot, transcriptPath);
+}
+
+/** Returns whether a failed session index subscription should retry. */
+function shouldRetrySessionIndexSubscription(attempt: number): boolean {
+    return attempt < 3;
 }
 
 /** Performs read raw transcript image messages. */
@@ -348,8 +384,7 @@ function readRawTranscriptImageMessages(
     sessionId?: string
 ): RawTranscriptImageMessage[] {
     const transcriptPath = getTranscriptPath(sessionKey, sessionId);
-
-    if (!transcriptPath || !transcriptPath.startsWith(OPENCLAW_HOME)) {
+    if (!transcriptPath) {
         return [];
     }
 
@@ -374,7 +409,6 @@ function readRawTranscriptImageMessages(
             }
 
             const content = message.content;
-
             if (!Array.isArray(content)) {
                 continue;
             }
@@ -400,7 +434,6 @@ function readRawTranscriptImageMessages(
                               ? (asRecord(block.source)?.media_type as string)
                               : "image/jpeg",
                 }));
-
             if (images.length === 0) {
                 continue;
             }
@@ -451,11 +484,9 @@ function hydrateOmittedChatHistoryImages(
         const omittedImageIndexes = record.content
             .map((block, index) => ({ block: asRecord(block), index }))
             .filter(({ block }) => block && imageBlockHasOmittedData(block));
-
         if (omittedImageIndexes.length === 0) {
             return message;
         }
-
         const role = typeof record.role === "string" ? record.role : "unknown";
         const text = normalizeMessageText(record.content);
         const timestamp = normalizeTimestamp(record.timestamp);
@@ -476,13 +507,12 @@ function hydrateOmittedChatHistoryImages(
                 candidate.text.includes(text);
             return timestampMatches && textMatches;
         });
-
         if (rawMatchIndex === -1) {
             return message;
         }
 
         rawCursor = rawMatchIndex + 1;
-        const rawImages = rawImageMessages[rawMatchIndex]?.images || [];
+        const rawImages = rawImageMessages[rawMatchIndex]!.images;
         let imageCursor = 0;
         return {
             ...record,
@@ -510,7 +540,6 @@ async function refreshSessions(): Promise<void> {
     const payload = (await gatewayClient.request("sessions.list", {})) as {
         sessions?: GatewaySession[];
     };
-
     sessionList = (payload.sessions || []).map(transformSession);
     broadcast({ type: "sessions", sessions: sessionList });
 }
@@ -520,16 +549,13 @@ function init(token: string): void {
     if (currentToken === token && gatewayClient) {
         return;
     }
-
     currentToken = token;
     gatewayClient?.stop();
-
     /** Handles successful Gateway hello negotiation and subscribes to live events. */
     function handleGatewayHelloOk(): void {
         isGatewayConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         const connectedGatewayClient = gatewayClient;
-
         /** Subscribes to Gateway session index events for live session updates. */
         async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
             if (
@@ -539,25 +565,21 @@ function init(token: string): void {
             ) {
                 return;
             }
-
             try {
                 await connectedGatewayClient.request("sessions.subscribe", {});
             } catch (error) {
-                if (attempt < 3) {
+                if (shouldRetrySessionIndexSubscription(attempt)) {
                     const delayMs = 500 * 2 ** attempt;
-
                     /** Retries the session index subscription after backoff. */
                     function retrySessionIndexSubscription(): void {
                         void subscribeToSessionIndexEvents(attempt + 1);
                     }
-
                     setTimeout(retrySessionIndexSubscription, delayMs);
                     return;
                 }
-
                 console.warn(
                     "[Gateway] Failed to subscribe to session index events:",
-                    error instanceof Error ? error.message : String(error)
+                    errorMessage(error, String(error))
                 );
             }
         }
@@ -569,7 +591,6 @@ function init(token: string): void {
             );
         });
     }
-
     /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
     function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
         broadcast({
@@ -586,20 +607,17 @@ function init(token: string): void {
             });
         }
     }
-
     /** Logs Gateway connection failures. */
     function handleGatewayConnectError(err: Error): void {
         console.error("[Gateway] Connect failed:", err.message);
     }
-
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
         isGatewayConnected = false;
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
-
-    gatewayClient = new OpenClawGatewayClient({
-        url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
+    gatewayClient = new GatewayClientCtor({
+        url: envFallback("OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18789"),
         token,
         role: "operator",
         scopes: ["operator.read", "operator.write", "operator.admin"],
@@ -615,7 +633,6 @@ function init(token: string): void {
         onConnectError: handleGatewayConnectError,
         onClose: handleGatewayClose,
     });
-
     gatewayClient.start();
 }
 
@@ -666,7 +683,7 @@ async function forwardRequest(
                         type: "res",
                         id: pending.clientId,
                         ok: false,
-                        error: error instanceof Error ? error.message : String(error),
+                        error: errorMessage(error, String(error)),
                     })
                 );
             }
@@ -706,12 +723,10 @@ function handleClient(ws: WebSocket): void {
                     params?: Record<string, unknown>;
                     id?: string;
                 };
-
                 if (msg.type === "subscribe" && msg.channel === "logs") {
                     logsSubscribe(ws);
                     return;
                 }
-
                 if (msg.type === "unsubscribe" && msg.channel === "logs") {
                     logsUnsubscribe(ws);
                     return;
@@ -740,7 +755,6 @@ function handleClient(ws: WebSocket): void {
                     }
                     return;
                 }
-
                 if ((msg.type === "request" || msg.type === "req") && msg.method) {
                     const ok = await forwardRequest(
                         msg.method,
@@ -838,7 +852,7 @@ async function deleteSession(sessionKey: string): Promise<unknown> {
     } catch (error) {
         console.warn(
             "[Gateway] Failed to refresh sessions after delete:",
-            error instanceof Error ? error.message : String(error)
+            errorMessage(error, String(error))
         );
     }
 
@@ -858,22 +872,48 @@ export const __testing = {
     transformSession,
     enrichRuntimeEventPayload,
     hydrateOmittedChatHistoryImages,
+    loadOrCreateDashboardDeviceIdentity,
     readRawTranscriptImageMessages,
     getTranscriptPath,
+    isPathInsideRoot,
+    resolvePathInsideRoot,
     normalizeMessageText,
     normalizeTimestamp,
     imageBlockHasOmittedData,
+    shouldRetrySessionIndexSubscription,
     sessionHasRunIdentifier,
+    refreshSessions,
+    forwardRequest,
     /** Replaces the in-memory session list for focused gateway tests. */
     setSessionListForTest(sessions: Session[]): void {
         sessionList = sessions;
     },
+    /** Replaces the Gateway client for focused connected-state tests. */
+    setGatewayClientForTest(client: OpenClawGatewayClientInstance | null): void {
+        gatewayClient = client;
+    },
+    /** Replaces the Gateway connected flag for focused connected-state tests. */
+    setGatewayConnectedForTest(connected: boolean): void {
+        isGatewayConnected = connected;
+    },
+    /** Replaces the Gateway client constructor for deterministic init tests. */
+    setGatewayClientConstructorForTest(
+        constructor_: new (
+            options: OpenClawGatewayClientOptions
+        ) => OpenClawGatewayClientInstance
+    ): void {
+        GatewayClientCtor = constructor_;
+    },
     /** Clears mutable gateway state between tests. */
     resetGatewayStateForTest(): void {
+        gatewayClient?.stop();
         subscribers.clear();
         sessionList = [];
         isGatewayConnected = false;
         pendingRequests.clear();
+        gatewayClient = null;
+        GatewayClientCtor = OpenClawGatewayClient;
+        currentToken = null;
         requestId = 1000;
     },
 };

@@ -27,6 +27,10 @@ async function installFakeCommands(tempDir: string): Promise<void> {
     await writeExecutable(
         path.join(binDir, "docker"),
         String.raw`#!${process.execPath}
+if (process.env.FAKE_LOG_ROTATION_EMPTY === "1") {
+  process.stdout.write("\n");
+  process.exit(0);
+}
 process.stdout.write('{"completedAt":"2026-05-11T01:00:00.000Z","ok":true}\n');
 `
     );
@@ -118,6 +122,18 @@ describe("ops routes", () => {
             success: true,
             lastRun: { completedAt: "2026-05-11T01:00:00.000Z", ok: true },
         });
+
+        process.env.FAKE_LOG_ROTATION_EMPTY = "1";
+        try {
+            const empty = await requestJson<{
+                success: boolean;
+                lastRun: null;
+            }>(server, "/api/ops/log-rotation/status");
+            assert.equal(empty.status, 200);
+            assert.deepEqual(empty.body, { success: true, lastRun: null });
+        } finally {
+            delete process.env.FAKE_LOG_ROTATION_EMPTY;
+        }
     });
 
     it("runs dry-run log rotation with node", async () => {
@@ -153,5 +169,23 @@ describe("ops routes", () => {
         );
         assert.equal(response.body.result.args.includes("--dry-run"), false);
         assert.equal(response.body.stderr, "run stderr\n");
+    });
+
+    it("maps command failures to JSON route errors", async () => {
+        await writeExecutable(
+            path.join(tempDir, "bin", "docker"),
+            String.raw`#!${process.execPath}
+process.stderr.write('psql unavailable\n');
+process.exit(12);
+`
+        );
+
+        const response = await requestJson<{ error: string }>(
+            server,
+            "/api/ops/log-rotation/status"
+        );
+
+        assert.equal(response.status, 500);
+        assert.match(response.body.error, /Command failed/);
     });
 });

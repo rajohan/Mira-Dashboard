@@ -147,19 +147,44 @@ describe("sessions routes", () => {
     });
 
     it("returns stats by type, model, tokens, and recent activity", async () => {
-        const response = await requestJson<{
-            total: number;
-            byType: Record<string, number>;
-            byModel: Record<string, number>;
-            totalTokens: number;
-            activeInLastHour: number;
-        }>(server, "/api/sessions/stats");
+        const originalGetSessions = gateway.getSessions;
+        gateway.getSessions = () => [
+            ...sessions,
+            {
+                id: "sparse-id",
+                key: "agent:sparse:main",
+                type: "",
+                agentType: "sparse",
+                hookName: "",
+                kind: "direct",
+                model: "",
+                tokenCount: 0,
+                maxTokens: 0,
+                createdAt: "2026-05-11T00:00:00.000Z",
+                updatedAt: 0,
+                displayName: "Sparse",
+                label: "sparse",
+                displayLabel: "Sparse",
+                channel: "",
+            },
+        ];
+        try {
+            const response = await requestJson<{
+                total: number;
+                byType: Record<string, number>;
+                byModel: Record<string, number>;
+                totalTokens: number;
+                activeInLastHour: number;
+            }>(server, "/api/sessions/stats");
 
-        assert.equal(response.status, 200);
-        assert.deepEqual(response.body.byType, { MAIN: 1, SUBAGENT: 1 });
-        assert.deepEqual(response.body.byModel, { codex: 1, kimi: 1 });
-        assert.equal(response.body.totalTokens, 200);
-        assert.equal(response.body.activeInLastHour, 1);
+            assert.equal(response.status, 200);
+            assert.deepEqual(response.body.byType, { MAIN: 1, SUBAGENT: 1, Unknown: 1 });
+            assert.deepEqual(response.body.byModel, { codex: 1, kimi: 1, Unknown: 1 });
+            assert.equal(response.body.totalTokens, 200);
+            assert.equal(response.body.activeInLastHour, 1);
+        } finally {
+            gateway.getSessions = originalGetSessions;
+        }
     });
 
     it("runs session actions and deletes sessions through the gateway", async () => {
@@ -183,6 +208,11 @@ describe("sessions routes", () => {
             "/api/sessions/agent%3Amain%3Amain/action",
             { method: "POST", body: { action: "launch" } }
         );
+        const missingAction = await requestJson<{ error: string }>(
+            server,
+            "/api/sessions/agent%3Amain%3Amain/action",
+            { method: "POST", body: {} }
+        );
         const deleteResponse = await requestJson<{
             success: true;
             result: { archived: true };
@@ -192,12 +222,71 @@ describe("sessions routes", () => {
         assert.equal(reset.status, 200);
         assert.equal(stop.status, 200);
         assert.equal(unsupported.status, 400);
+        assert.equal(missingAction.status, 400);
         assert.equal(deleteResponse.status, 200);
+        const invalidAction = await requestJson<{ error: string }>(
+            server,
+            "/api/sessions/%20/action",
+            { method: "POST", body: { action: "stop" } }
+        );
+        const invalidDelete = await requestJson<{ error: string }>(
+            server,
+            "/api/sessions/%20",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidAction.status, 400);
+        assert.equal(invalidDelete.status, 400);
         assert.deepEqual(sentMessages, [
             { key: "agent:main:main", message: "/compact" },
             { key: "agent:main:main", message: "/reset" },
         ]);
         assert.deepEqual(aborted, ["agent:main:main"]);
         assert.deepEqual(deleted, ["agent:main:main"]);
+    });
+
+    it("returns gateway errors for session list, stats, actions, and deletes", async () => {
+        gateway.getSessions = () => {
+            throw new Error("sessions unavailable");
+        };
+
+        const list = await requestJson<{ error: string }>(server, "/api/sessions/list");
+        const stats = await requestJson<{ error: string }>(server, "/api/sessions/stats");
+
+        assert.equal(list.status, 500);
+        assert.equal(list.body.error, "sessions unavailable");
+        assert.equal(stats.status, 500);
+        assert.equal(stats.body.error, "sessions unavailable");
+
+        gateway.getSessions = () => [...sessions];
+        gateway.abortSessionRun = async () => {
+            throw new Error("abort failed");
+        };
+        gateway.deleteSession = async () => {
+            throw new Error("delete failed");
+        };
+
+        const action = await requestJson<{ error: string }>(
+            server,
+            "/api/sessions/agent%3Amain%3Amain/action",
+            { method: "POST", body: { action: "stop" } }
+        );
+        const deleteResponse = await requestJson<{ error: string }>(
+            server,
+            "/api/sessions/agent%3Amain%3Amain",
+            { method: "DELETE" }
+        );
+
+        assert.equal(action.status, 500);
+        assert.equal(action.body.error, "abort failed");
+        assert.equal(deleteResponse.status, 500);
+        assert.equal(deleteResponse.body.error, "delete failed");
+
+        gateway.abortSessionRun = async (key: string) => {
+            aborted.push(key);
+        };
+        gateway.deleteSession = async (key: string) => {
+            deleted.push(key);
+            return { archived: true };
+        };
     });
 });

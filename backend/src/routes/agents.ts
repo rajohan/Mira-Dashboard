@@ -1,10 +1,11 @@
-import express, { type RequestHandler } from "express";
+import express from "express";
 import FS from "fs";
 import JSON5 from "json5";
 import Path from "path";
 
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import { asyncRoute } from "../lib/errors.js";
 import {
     guardedPath,
     mkdirGuarded,
@@ -14,7 +15,6 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
-
 const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
@@ -31,6 +31,11 @@ export function isValidAgentId(id: string): boolean {
         id !== ".." &&
         SAFE_AGENT_ID_RE.test(id)
     );
+}
+
+/** Returns the first Express route param value regardless of scalar/array shape. */
+function getRouteParam(value: string | string[] | undefined): string {
+    return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
 /** Returns the canonical sessions directory for a validated agent id. */
@@ -70,15 +75,12 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
     try {
         const realAgentsDir = FS.realpathSync(AGENTS_DIR);
         return roots.flatMap((root) => {
-            const resolved = safePathWithinRoot(root.relative, AGENTS_DIR);
-            if (!resolved) {
-                return [];
-            }
+            const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR) as string;
 
             try {
                 const expected = Path.join(realAgentsDir, root.relative);
-                return FS.realpathSync(resolved) === expected
-                    ? [{ dir: resolved, recursive: root.recursive }]
+                return FS.realpathSync(rootDir) === expected
+                    ? [{ dir: rootDir, recursive: root.recursive }]
                     : [];
             } catch {
                 return [];
@@ -197,7 +199,6 @@ function resolveConfiguredModelName(
     if (!configured) {
         return "unknown";
     }
-
     const aliases = config.defaults?.models || {};
     const matchedEntry = Object.entries(aliases).find(
         ([, value]) => value?.alias === configured
@@ -249,7 +250,7 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                     (session) => typeof session.key === "string" && session.key.length > 0
                 )
                 .map((session) => ({
-                    key: session.key || "",
+                    key: session.key as string,
                     model: session.model || "Unknown",
                     status: session.status,
                     updatedAt: session.updatedAt,
@@ -265,7 +266,6 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     } catch {
         // Fall back to cached sessions below
     }
-
     return cached;
 }
 
@@ -379,7 +379,6 @@ function parseAgentsConfig(): AgentsConfig | null {
         if (parsed.agents && Array.isArray(parsed.agents.list)) {
             return parsed.agents;
         }
-
         return null;
     } catch (error) {
         console.error(
@@ -456,6 +455,25 @@ interface ActivityLogFile {
     group: string;
 }
 
+/** Builds file metadata for one JSONL log, returning null when it cannot be statted. */
+function toActivityLogFile(
+    root: ActivityLogRoot,
+    relativePath: string,
+    fullPath: string,
+    statFile = statGuarded
+): ActivityLogFile | null {
+    try {
+        const mtime = statFile(guardedPath(fullPath)).mtimeMs;
+        const group = `${root.dir}:${relativePath
+            .replace(/\.trajectory\.jsonl$/u, "")
+            .replace(/\.jsonl$/u, "")}`;
+        return { name: relativePath, path: fullPath, mtime, group };
+    } catch {
+        // Ignore files that disappear or become unreadable during scanning.
+        return null;
+    }
+}
+
 /** Lists JSONL activity files in a root while preserving paired file grouping. */
 function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
     const files: ActivityLogFile[] = [];
@@ -495,14 +513,9 @@ function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
                 continue;
             }
 
-            try {
-                const mtime = statGuarded(guardedPath(fullPath)).mtimeMs;
-                const group = `${root.dir}:${relativePath
-                    .replace(/\.trajectory\.jsonl$/u, "")
-                    .replace(/\.jsonl$/u, "")}`;
-                files.push({ name: relativePath, path: fullPath, mtime, group });
-            } catch {
-                // Ignore files that disappear or become unreadable during scanning.
+            const file = toActivityLogFile(root, relativePath, fullPath);
+            if (file) {
+                files.push(file);
             }
         }
     }
@@ -637,9 +650,8 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 
 /** Returns a canonical un-namespaced tool name for activity filtering and labels. */
 function normalizeToolName(toolName: string): string {
-    const unscoped = toolName.includes(".")
-        ? toolName.split(".").pop() || toolName
-        : toolName;
+    const parts = toolName.split(".");
+    const unscoped = toolName.includes(".") ? parts[parts.length - 1] : toolName;
     return unscoped.toLowerCase();
 }
 
@@ -670,7 +682,6 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
     ) {
         return null;
     }
-
     const input = typeof record.payload.input === "string" ? record.payload.input : "";
     if (/tools\.(?:mcp__[^.]+__)?message\s*\(/u.test(input)) {
         return null;
@@ -698,7 +709,6 @@ function getCodexResponseItemActivity(entry: unknown): string | null {
     if (nestedToolName) {
         return summarizeToolActivity(nestedToolName, { raw: input });
     }
-
     return summarizeToolActivity(record.payload.name, { raw: input });
 }
 
@@ -734,8 +744,7 @@ function getTrajectoryActivity(entry: unknown): {
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments:
-                    data.arguments || data.args || data.input || data.parameters || data,
+                arguments: data.arguments || data.args || data.input || data.parameters,
             }),
         };
     }
@@ -748,8 +757,7 @@ function getTrajectoryActivity(entry: unknown): {
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments:
-                    data.arguments || data.args || data.input || data.parameters || data,
+                arguments: data.arguments || data.args || data.input || data.parameters,
             }),
         };
     }
@@ -1056,8 +1064,8 @@ function findBestSessionForAgent(
         const timeB = toTimestamp(b.updatedAt) || 0;
         const keyA = a.key.toLowerCase();
         const keyB = b.key.toLowerCase();
-        const preferredA = preferredKinds.some((part) => keyA.includes(part)) ? 1 : 0;
-        const preferredB = preferredKinds.some((part) => keyB.includes(part)) ? 1 : 0;
+        const preferredA = Number(preferredKinds.some((part) => keyA.includes(part)));
+        const preferredB = Number(preferredKinds.some((part) => keyB.includes(part)));
 
         if (preferredA !== preferredB) {
             return preferredB - preferredA;
@@ -1098,7 +1106,6 @@ function applyGatewaySessionStatus(
     if (!session) {
         return;
     }
-
     status.sessionKey = status.sessionKey || session.key;
     status.channel = getChannelFromSessionKey(session.key);
 
@@ -1163,108 +1170,23 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     };
 }
 
-/** Registers agents API routes. */
-export default function agentsRoutes(app: express.Application): void {
-    app.use("/api/agents/:id/metadata", express.json());
+/** Builds all dashboard agent statuses for a parsed agent config. */
+async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> {
+    const defaultModel = config.defaults?.model?.primary || "unknown";
+    const sessions = await getGatewaySessionsForAgents();
 
-    // Get agent configuration
-    app.get("/api/agents/config", (async (_req, res) => {
-        try {
-            const config = parseAgentsConfig();
-            if (!config) {
-                res.status(404).json({ error: "Agent configuration not found" });
-                return;
-            }
-
-            res.json(config);
-        } catch (error) {
-            console.error("[Agents] Config error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
-
-    // Get all agents with status
-    app.get("/api/agents/status", (async (_req, res) => {
-        try {
-            closeStaleActiveTasks();
-            const config = parseAgentsConfig();
-            if (!config) {
-                res.status(404).json({ error: "Agent configuration not found" });
-                return;
-            }
-
-            const defaultModel = config.defaults?.model?.primary || "unknown";
-            const sessions = await getGatewaySessionsForAgents();
-
-            const agents: AgentStatus[] = await Promise.all(
-                config.list.map(async (agent) => {
-                    const status = await getAgentStatus(agent.id);
-                    const configuredModel = resolveConfiguredModelName(
-                        agent.model?.primary || defaultModel,
-                        config
-                    );
-                    const sessionFromKey = status.sessionKey
-                        ? findSessionByKey(sessions, status.sessionKey)
-                        : undefined;
-                    const matchingSession =
-                        sessionFromKey || findBestSessionForAgent(agent.id, sessions);
-                    if (!sessionFromKey && matchingSession) {
-                        status.sessionKey = matchingSession.key;
-                    }
-                    applyGatewaySessionStatus(status, matchingSession);
-                    status.model =
-                        matchingSession?.model &&
-                        matchingSession.model !== configuredModel
-                            ? matchingSession.model
-                            : configuredModel;
-                    return status;
-                })
-            );
-
-            res.json({ agents, timestamp: Date.now() });
-        } catch (error) {
-            console.error("[Agents] Status error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
-
-    // Get single agent status
-    app.get("/api/agents/:id/status", (async (req, res) => {
-        try {
-            const agentId = Array.isArray(req.params.id)
-                ? req.params.id[0]
-                : req.params.id;
-
-            if (!isValidAgentId(agentId)) {
-                res.status(400).json({ error: "Invalid agent ID" });
-                return;
-            }
-
-            closeStaleActiveTasks();
-            const config = parseAgentsConfig();
-
-            if (!config) {
-                res.status(404).json({ error: "Agent configuration not found" });
-                return;
-            }
-
-            const agentConfig = config.list.find((a) => a.id === agentId);
-            if (!agentConfig) {
-                res.status(404).json({ error: `Agent '${agentId}' not found` });
-                return;
-            }
-
-            const status = await getAgentStatus(agentId);
-            const sessions = await getGatewaySessionsForAgents();
+    return Promise.all(
+        config.list.map(async (agent) => {
+            const status = await getAgentStatus(agent.id);
             const configuredModel = resolveConfiguredModelName(
-                agentConfig.model?.primary || config.defaults?.model?.primary,
+                agent.model?.primary || defaultModel,
                 config
             );
             const sessionFromKey = status.sessionKey
                 ? findSessionByKey(sessions, status.sessionKey)
                 : undefined;
             const matchingSession =
-                sessionFromKey || findBestSessionForAgent(agentId, sessions);
+                sessionFromKey || findBestSessionForAgent(agent.id, sessions);
             if (!sessionFromKey && matchingSession) {
                 status.sessionKey = matchingSession.key;
             }
@@ -1273,137 +1195,262 @@ export default function agentsRoutes(app: express.Application): void {
                 matchingSession?.model && matchingSession.model !== configuredModel
                     ? matchingSession.model
                     : configuredModel;
+            return status;
+        })
+    );
+}
 
-            res.json(status);
-        } catch (error) {
-            console.error("[Agents] Status error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
+/** Builds one dashboard agent status when the id exists in config. */
+async function buildSingleAgentStatus(
+    agentId: string,
+    config: AgentsConfig
+): Promise<AgentStatus | null> {
+    const agentConfig = config.list.find((agent) => agent.id === agentId);
+    if (!agentConfig) {
+        return null;
+    }
 
-    // Latest completed tasks across agents
-    app.get("/api/agents/tasks/history", (async (req, res) => {
-        try {
-            const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 8));
-            closeStaleActiveTasks();
-            const tasks = getLatestCompletedTasks(limit);
-            res.json({ tasks, timestamp: Date.now() });
-        } catch (error) {
-            console.error("[Agents] Task history error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
+    const status = await getAgentStatus(agentId);
+    const sessions = await getGatewaySessionsForAgents();
+    const configuredModel = resolveConfiguredModelName(
+        agentConfig.model?.primary || config.defaults?.model?.primary,
+        config
+    );
+    const sessionFromKey = status.sessionKey
+        ? findSessionByKey(sessions, status.sessionKey)
+        : undefined;
+    const matchingSession = sessionFromKey || findBestSessionForAgent(agentId, sessions);
+    if (!sessionFromKey && matchingSession) {
+        status.sessionKey = matchingSession.key;
+    }
+    applyGatewaySessionStatus(status, matchingSession);
+    status.model =
+        matchingSession?.model && matchingSession.model !== configuredModel
+            ? matchingSession.model
+            : configuredModel;
 
-    // Update agent metadata (current task)
-    app.put("/api/agents/:id/metadata", (async (req, res) => {
-        try {
-            const agentId = Array.isArray(req.params.id)
-                ? req.params.id[0]
-                : req.params.id;
+    return status;
+}
 
-            if (!isValidAgentId(agentId)) {
-                res.status(400).json({ error: "Invalid agent ID" });
-                return;
-            }
-            const safeAgentId = agentId.replaceAll(/[^a-zA-Z0-9._-]/gu, "");
+export const __testing = {
+    getRouteParam,
+    getSafeAgentSessionsDir,
+    getSafeAgentActivityRoots,
+    toDisplayModelName,
+    resolveConfiguredModelName,
+    toTimestamp,
+    cleanTaskText,
+    summarizeToolActivity,
+    normalizeToolName,
+    isVisibleActivityTool,
+    getCodexResponseItemActivity,
+    getTrajectoryActivity,
+    getLatestActivityFromFile,
+    getSessionFileModTime,
+    getGatewaySessionsForAgents,
+    getAgentMetadata,
+    getAgentSessionsFromFiles,
+    toActivityLogFile,
+    listActivityLogFiles,
+    parseAgentsConfig,
+    getAgentStatus,
+    getChannelFromSessionKey,
+    determineStatus,
+    findBestSessionForAgent,
+    findSessionByKey,
+    isGatewaySessionRunning,
+    applyGatewaySessionStatus,
+    buildAgentStatuses,
+    buildSingleAgentStatus,
+};
 
-            const { currentTask } = req.body as { currentTask?: string };
+/** Registers agents API routes. */
+export default function agentsRoutes(app: express.Application): void {
+    app.use("/api/agents/:id/metadata", express.json());
 
-            if (!currentTask || currentTask.trim().length === 0) {
-                res.status(400).json({ error: "Provide currentTask" });
-                return;
-            }
-
-            FS.mkdirSync(AGENTS_DIR, { recursive: true });
-            const metadataPath = safePathWithinRoot(
-                Path.join(safeAgentId, "sessions", "metadata.json"),
-                AGENTS_DIR
-            );
-
-            if (!metadataPath) {
-                res.status(400).json({ error: "Invalid agent metadata path" });
-                return;
-            }
-
-            const metadataDir = Path.dirname(metadataPath);
-
-            // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
-            mkdirGuarded(guardedPath(metadataDir), { recursive: true });
-
-            const realAgentsDir = FS.realpathSync(AGENTS_DIR);
-            const realMetadataDir = FS.realpathSync(metadataDir);
-            if (
-                realMetadataDir !== realAgentsDir &&
-                !realMetadataDir.startsWith(realAgentsDir + Path.sep)
-            ) {
-                res.status(400).json({ error: "Invalid agent metadata path" });
-                return;
-            }
-
-            const safeMetadataPath = Path.join(realMetadataDir, "metadata.json");
-
-            // Read existing metadata or create new (atomic read, no existsSync check)
-            let metadata: AgentMetadata = {};
-            try {
-                // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
-                metadata = JSON5.parse(
-                    await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
-                );
-            } catch {
-                // File doesn't exist or is unreadable; start fresh
-            }
-
-            const safeTask =
-                typeof currentTask === "string"
-                    ? currentTask.trim().slice(0, 100)
-                    : undefined;
-            const currentActive = getActiveHistoryTask(agentId);
-            const ts = nowIso();
-
-            // Auto history handling on task changes
-            if (safeTask && safeTask.length > 0) {
-                if (!currentActive) {
-                    db.prepare(
-                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                    ).run(agentId, safeTask, ts, ts);
-                } else if (currentActive.task === safeTask) {
-                    db.prepare(
-                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                    ).run(ts, currentActive.id);
-                } else {
-                    db.prepare(
-                        `UPDATE agent_task_history
-                         SET status = 'completed', completed_at = ?, last_activity_at = ?
-                         WHERE id = ?`
-                    ).run(ts, ts, currentActive.id);
-
-                    db.prepare(
-                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                    ).run(agentId, safeTask, ts, ts);
+    // Get agent configuration
+    app.get(
+        "/api/agents/config",
+        asyncRoute(
+            async (_req, res) => {
+                const config = parseAgentsConfig();
+                if (!config) {
+                    res.status(404).json({ error: "Agent configuration not found" });
+                    return;
                 }
 
-                metadata.currentTask = safeTask;
+                res.json(config);
+            },
+            { fallback: "Agent config failed", logLabel: "[Agents] Config error:" }
+        )
+    );
+
+    // Get all agents with status
+    app.get(
+        "/api/agents/status",
+        asyncRoute(
+            async (_req, res) => {
+                closeStaleActiveTasks();
+                const config = parseAgentsConfig();
+                if (!config) {
+                    res.status(404).json({ error: "Agent configuration not found" });
+                    return;
+                }
+                const agents = await buildAgentStatuses(config);
+                res.json({ agents, timestamp: Date.now() });
+            },
+            { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
+        )
+    );
+
+    // Get single agent status
+    app.get(
+        "/api/agents/:id/status",
+        asyncRoute(
+            async (req, res) => {
+                const agentId = getRouteParam(req.params.id);
+                if (!isValidAgentId(agentId)) {
+                    res.status(400).json({ error: "Invalid agent ID" });
+                    return;
+                }
+
+                closeStaleActiveTasks();
+                const config = parseAgentsConfig();
+                if (!config) {
+                    res.status(404).json({ error: "Agent configuration not found" });
+                    return;
+                }
+
+                const status = await buildSingleAgentStatus(agentId, config);
+                if (!status) {
+                    res.status(404).json({ error: `Agent '${agentId}' not found` });
+                    return;
+                }
+
+                res.json(status);
+            },
+            { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
+        )
+    );
+
+    // Latest completed tasks across agents
+    app.get(
+        "/api/agents/tasks/history",
+        asyncRoute(
+            async (req, res) => {
+                const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 8));
+                closeStaleActiveTasks();
+                const tasks = getLatestCompletedTasks(limit);
+                res.json({ tasks, timestamp: Date.now() });
+            },
+            {
+                fallback: "Agent task history failed",
+                logLabel: "[Agents] Task history error:",
             }
+        )
+    );
 
-            metadata.updatedAt = ts;
+    // Update agent metadata (current task)
+    app.put(
+        "/api/agents/:id/metadata",
+        asyncRoute(
+            async (req, res) => {
+                const agentId = getRouteParam(req.params.id);
+                if (!isValidAgentId(agentId)) {
+                    res.status(400).json({ error: "Invalid agent ID" });
+                    return;
+                }
 
-            const latestMetadataDir = FS.realpathSync(metadataDir);
-            if (latestMetadataDir !== realMetadataDir) {
-                res.status(400).json({ error: "Invalid agent metadata path" });
-                return;
+                const { currentTask } = req.body as { currentTask?: string };
+
+                if (!currentTask || currentTask.trim().length === 0) {
+                    res.status(400).json({ error: "Provide currentTask" });
+                    return;
+                }
+
+                FS.mkdirSync(AGENTS_DIR, { recursive: true });
+                const metadataPath = safePathWithinRoot(
+                    Path.join(agentId, "sessions", "metadata.json"),
+                    AGENTS_DIR
+                );
+                const metadataDir = Path.dirname(metadataPath as string);
+
+                // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
+                mkdirGuarded(guardedPath(metadataDir), { recursive: true });
+
+                const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+                const realMetadataDir = FS.realpathSync(metadataDir);
+                if (
+                    realMetadataDir !== realAgentsDir &&
+                    !realMetadataDir.startsWith(realAgentsDir + Path.sep)
+                ) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
+
+                const safeMetadataPath = Path.join(realMetadataDir, "metadata.json");
+
+                // Read existing metadata or create new (atomic read, no existsSync check)
+                let metadata: AgentMetadata = {};
+                try {
+                    // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
+                    metadata = JSON5.parse(
+                        await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
+                    );
+                } catch {
+                    // File doesn't exist or is unreadable; start fresh
+                }
+
+                const safeTask = currentTask.trim().slice(0, 100);
+                const currentActive = getActiveHistoryTask(agentId);
+                const ts = nowIso();
+
+                // Auto history handling on task changes
+                if (safeTask && safeTask.length > 0) {
+                    if (!currentActive) {
+                        db.prepare(
+                            `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                        ).run(agentId, safeTask, ts, ts);
+                    } else if (currentActive.task === safeTask) {
+                        db.prepare(
+                            `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                        ).run(ts, currentActive.id);
+                    } else {
+                        db.prepare(
+                            `UPDATE agent_task_history
+                         SET status = 'completed', completed_at = ?, last_activity_at = ?
+                         WHERE id = ?`
+                        ).run(ts, ts, currentActive.id);
+
+                        db.prepare(
+                            `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                        ).run(agentId, safeTask, ts, ts);
+                    }
+
+                    metadata.currentTask = safeTask;
+                }
+
+                metadata.updatedAt = ts;
+
+                const latestMetadataDir = FS.realpathSync(metadataDir);
+                if (latestMetadataDir !== realMetadataDir) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
+
+                // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
+                await writeTextNoFollowGuarded(
+                    guardedPath(Path.join(latestMetadataDir, "metadata.json")),
+                    JSON.stringify(metadata, null, 2)
+                );
+                res.json(metadata);
+            },
+            {
+                fallback: "Agent metadata update failed",
+                logLabel: "[Agents] Metadata update error:",
             }
-
-            // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
-            await writeTextNoFollowGuarded(
-                guardedPath(Path.join(latestMetadataDir, "metadata.json")),
-                JSON.stringify(metadata, null, 2)
-            );
-            res.json(metadata);
-        } catch (error) {
-            console.error("[Agents] Metadata update error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
+        )
+    );
 }

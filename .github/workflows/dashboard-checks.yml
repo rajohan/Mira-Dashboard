@@ -65,6 +65,8 @@ jobs:
         name: backend-checks
         runs-on: ubuntu-latest
         timeout-minutes: 15
+        env:
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         steps:
             - name: Checkout
               uses: actions/checkout@v6
@@ -94,6 +96,25 @@ jobs:
             - name: Test backend coverage
               run: npm run test:coverage
               working-directory: backend
+
+            - name: Upload backend coverage artifact
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: backend-coverage-lcov
+                  path: backend/coverage/lcov.info
+                  if-no-files-found: error
+                  retention-days: 14
+
+            - name: Upload backend coverage to Codecov
+              uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
+              if: ${{ env.CODECOV_TOKEN != '' }}
+              with:
+                  token: ${{ env.CODECOV_TOKEN }}
+                  files: backend/coverage/lcov.info
+                  flags: backend
+                  name: backend
+                  fail_ci_if_error: true
 
     e2e-smoke:
         name: e2e-smoke

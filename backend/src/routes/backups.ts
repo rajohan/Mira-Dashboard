@@ -3,10 +3,18 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
-const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
+import { asyncRoute } from "../lib/errors.js";
+import { envFallback } from "../lib/values.js";
 const N8N_DATABASE = "n8n";
-const DOPPLER_BIN = process.env.DOPPLER_BIN || "/usr/local/bin/doppler";
 const MAX_OUTPUT_CHARS = 100_000;
+
+function getN8nRoot(): string {
+    return envFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
+}
+
+function getDopplerBin(): string {
+    return envFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
+}
 
 /** Represents backup job. */
 interface BackupJob {
@@ -35,7 +43,6 @@ function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
     }
-
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
@@ -44,7 +51,6 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
     if (!activeJobId) {
         return null;
     }
-
     const job = backupJobs.get(activeJobId) ?? null;
     if (!job) {
         clear();
@@ -97,8 +103,8 @@ function createBackupEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
+        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
     };
 }
 
@@ -129,10 +135,10 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     }
 
     const child = spawn(
-        DOPPLER_BIN,
+        getDopplerBin(),
         ["run", "--project", "rajohan", "--config", "prd", "--", "bash", "-lc", command],
         {
-            cwd: N8N_ROOT,
+            cwd: getN8nRoot(),
             env: createBackupEnv(),
         }
     );
@@ -165,19 +171,30 @@ function startBackupJob(type: BackupJob["type"], command: string) {
 
 /** Performs start kopia backup job. */
 function startKopiaBackupJob() {
+    const kopiaStatusScript = `${getN8nRoot()}/scripts/backup-kopia-status.mjs`;
     return startBackupJob(
         "kopia",
-        "/opt/docker/apps/kopia/backup.sh && node /home/ubuntu/projects/n8n/scripts/backup-kopia-status.mjs"
+        `/opt/docker/apps/kopia/backup.sh && node ${kopiaStatusScript}`
     );
 }
 
 /** Performs start walg backup job. */
 function startWalgBackupJob() {
+    const walgStatusScript = `${getN8nRoot()}/scripts/backup-walg-status.mjs`;
     return startBackupJob(
         "walg",
-        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node /home/ubuntu/projects/n8n/scripts/backup-walg-status.mjs"
+        `docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node ${walgStatusScript}`
     );
 }
+
+export const __testing = {
+    trimOutput,
+    getCurrentJob,
+    mapJob,
+    createBackupEnv,
+    getN8nRoot,
+    getDopplerBin,
+};
 
 /** Registers backup API routes. */
 export default function backupRoutes(
@@ -188,35 +205,29 @@ export default function backupRoutes(
         res.json({ job: mapJob(getCurrentKopiaJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
 
-    app.post("/api/backups/kopia/run", (async (_req, res) => {
-        try {
-            const job = startKopiaBackupJob();
-            res.json({ ok: true, job: mapJob(job) });
-        } catch (error) {
-            res.status(500).json({
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Failed to start Kopia backup",
-            });
-        }
-    }) as RequestHandler);
+    app.post(
+        "/api/backups/kopia/run",
+        asyncRoute(
+            async (_req, res) => {
+                const job = startKopiaBackupJob();
+                res.json({ ok: true, job: mapJob(job) });
+            },
+            { fallback: "Failed to start Kopia backup" }
+        )
+    );
 
     app.get("/api/backups/walg", ((_req, res) => {
         res.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
 
-    app.post("/api/backups/walg/run", (async (_req, res) => {
-        try {
-            const job = startWalgBackupJob();
-            res.json({ ok: true, job: mapJob(job) });
-        } catch (error) {
-            res.status(500).json({
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Failed to start WAL-G backup",
-            });
-        }
-    }) as RequestHandler);
+    app.post(
+        "/api/backups/walg/run",
+        asyncRoute(
+            async (_req, res) => {
+                const job = startWalgBackupJob();
+                res.json({ ok: true, job: mapJob(job) });
+            },
+            { fallback: "Failed to start WAL-G backup" }
+        )
+    );
 }

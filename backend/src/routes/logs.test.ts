@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -17,11 +18,16 @@ interface TestServer {
 const logsDir = "/tmp/openclaw";
 const outsideDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-outside-"));
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
+const RealDate = Date;
 
 class FakeWebSocket {
     readonly sent: string[] = [];
+    failSend = false;
 
     send(data: string): void {
+        if (this.failSend) {
+            throw new Error("socket closed");
+        }
         this.sent.push(data);
     }
 }
@@ -92,6 +98,35 @@ describe("logs routes", () => {
         );
     });
 
+    it("handles log info filesystem edge cases", async () => {
+        const originalExistsSync = fs.existsSync;
+        const originalReaddirSync = fs.readdirSync;
+
+        try {
+            fs.existsSync = ((target: fs.PathLike) => {
+                if (target === logsDir) return false;
+                return originalExistsSync(target);
+            }) as typeof fs.existsSync;
+
+            const missingDir = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(missingDir.status, 200);
+            assert.deepEqual(await missingDir.json(), { logs: [] });
+
+            fs.existsSync = originalExistsSync;
+            fs.readdirSync = ((target: fs.PathLike) => {
+                if (target === logsDir) throw new Error("cannot list logs");
+                return originalReaddirSync(target);
+            }) as typeof fs.readdirSync;
+
+            const failedList = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(failedList.status, 500);
+            assert.deepEqual(await failedList.json(), { error: "cannot list logs" });
+        } finally {
+            fs.existsSync = originalExistsSync;
+            fs.readdirSync = originalReaddirSync;
+        }
+    });
+
     it("returns full or tailed log content", async () => {
         const full = await fetch(
             `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(testFiles[1])}`
@@ -120,6 +155,30 @@ describe("logs routes", () => {
         const invalidTailBody = (await invalidTail.json()) as { content: string };
         assert.equal(invalidTail.status, 200);
         assert.equal(invalidTailBody.content, "first\n\nsecond\nthird\n");
+
+        const today = new RealDate().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        await rm(path.join(logsDir, todayFile), { force: true });
+
+        try {
+            globalThis.Date = class extends RealDate {
+                constructor(value?: string | number | Date) {
+                    if (arguments.length === 0) {
+                        super("2099-12-31T12:00:00.000Z");
+                        return;
+                    }
+                    super(value as string);
+                }
+            } as DateConstructor;
+
+            const defaultMissing = await fetch(`${server.baseUrl}/api/logs/content`);
+            assert.equal(defaultMissing.status, 404);
+            assert.deepEqual(await defaultMissing.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            globalThis.Date = RealDate;
+        }
     });
 
     it("rejects traversal and reports missing logs", async () => {
@@ -160,6 +219,20 @@ describe("logs routes", () => {
             error: "Log file not found",
         });
 
+        const rootLink = path.join(logsDir, "root-link.log");
+        await symlink(logsDir, rootLink);
+        try {
+            const rootSymlink = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("root-link.log")}`
+            );
+            assert.equal(rootSymlink.status, 404);
+            assert.deepEqual(await rootSymlink.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            await rm(rootLink, { force: true });
+        }
+
         const loopPath = path.join(logsDir, "loop.log");
         await symlink("loop.log", loopPath);
         try {
@@ -172,6 +245,88 @@ describe("logs routes", () => {
             });
         } finally {
             await rm(loopPath, { force: true });
+        }
+
+        const escapedLink = path.join(logsDir, "outside.log");
+        await symlink(path.join(outsideDir, "secret.log"), escapedLink);
+        try {
+            const symlinkOutside = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent("outside.log")}`
+            );
+            assert.equal(symlinkOutside.status, 403);
+            assert.deepEqual(await symlinkOutside.json(), {
+                error: "Access denied",
+            });
+        } finally {
+            await rm(escapedLink, { force: true });
+        }
+    });
+
+    it("maps log content canonicalization and open failures", async () => {
+        const originalRealpathSync = fs.realpathSync;
+
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    throw Object.assign(new Error("root unavailable"), {
+                        code: "EACCES",
+                    });
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+
+            const rootFailure = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(testFiles[1])}`
+            );
+            assert.equal(rootFailure.status, 500);
+            assert.deepEqual(await rootFailure.json(), { error: "root unavailable" });
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (path.resolve(String(target)) === path.join(logsDir, testFiles[1])) {
+                    throw Object.assign(new Error("candidate unavailable"), {
+                        code: "EACCES",
+                    });
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+
+            const candidateFailure = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(testFiles[1])}`
+            );
+            assert.equal(candidateFailure.status, 500);
+            assert.deepEqual(await candidateFailure.json(), {
+                error: "candidate unavailable",
+            });
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        const racedFile = "openclaw-2099-03-06.log";
+        const racedPath = path.join(logsDir, racedFile);
+        await writeFile(racedPath, "gone\n", "utf8");
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const result = originalRealpathSync(target);
+                if (path.resolve(String(target)) === racedPath) {
+                    fs.rmSync(racedPath, { force: true });
+                }
+                return result;
+            }) as typeof fs.realpathSync;
+
+            const openFailure = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(racedFile)}`
+            );
+            assert.equal(openFailure.status, 404);
+            assert.deepEqual(await openFailure.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(racedPath, { force: true });
         }
     });
 
@@ -229,5 +384,163 @@ describe("logs routes", () => {
         });
 
         __testing.resetLogWatcherForTest();
+    });
+
+    it("ignores missing log files during direct polling", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        await rm(path.join(logsDir, todayFile), { force: true });
+        const ws = new FakeWebSocket();
+        subscribeToLogs(ws as never);
+        try {
+            await __testing.pollLogFileForTest();
+            assert.equal(
+                ws.sent.some((entry) => entry.includes("log_append")),
+                false
+            );
+        } finally {
+            unsubscribeFromLogs(ws as never);
+        }
+    });
+
+    it("sends empty log history when history read fails", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        const todayPath = path.join(logsDir, todayFile);
+        const originalReadFileSync = fs.readFileSync;
+        await writeFile(todayPath, "will fail\n", "utf8");
+
+        try {
+            fs.readFileSync = ((target: fs.PathOrFileDescriptor) => {
+                if (target === todayPath) throw new Error("cannot read history");
+                return originalReadFileSync(target);
+            }) as typeof fs.readFileSync;
+
+            const ws = new FakeWebSocket();
+            subscribeToLogs(ws as never);
+
+            assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+                type: "log_file",
+                file: todayFile,
+            });
+            assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
+                type: "log_history_complete",
+                count: 0,
+            });
+        } finally {
+            fs.readFileSync = originalReadFileSync;
+            __testing.resetLogWatcherForTest();
+            await rm(todayPath, { force: true });
+        }
+    });
+
+    it("polls appended log lines for subscribers and tolerates closed sockets", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        const todayPath = path.join(logsDir, todayFile);
+        await writeFile(todayPath, "initial\n", "utf8");
+
+        const ws = new FakeWebSocket();
+        subscribeToLogs(ws as never);
+        ws.sent.length = 0;
+
+        await __testing.pollLogFileForTest();
+        assert.equal(ws.sent.length, 0);
+
+        await writeFile(todayPath, "initial\nnext one\n\nnext two\n", "utf8");
+        await __testing.pollLogFileForTest();
+
+        assert.deepEqual(
+            ws.sent.map((message) => JSON.parse(message)),
+            [
+                { type: "log", line: "next one" },
+                { type: "log", line: "next two" },
+            ]
+        );
+
+        ws.sent.length = 0;
+        await writeFile(todayPath, "truncated\n", "utf8");
+        await __testing.pollLogFileForTest();
+        assert.deepEqual(
+            ws.sent.map((message) => JSON.parse(message)),
+            [{ type: "log", line: "truncated" }]
+        );
+
+        ws.failSend = true;
+        await writeFile(todayPath, "truncated\nignored send error\n", "utf8");
+        await __testing.pollLogFileForTest();
+        assert.equal(__testing.subscriberCount(), 1);
+
+        unsubscribeFromLogs(ws as never);
+        __testing.resetLogWatcherForTest();
+        await rm(todayPath, { force: true });
+    });
+
+    it("serializes watcher ticks and logs polling errors", async () => {
+        const originalError = console.error;
+        const errors: unknown[][] = [];
+        console.error = (...args: unknown[]) => {
+            errors.push(args);
+        };
+
+        const today = new Date().toISOString().split("T")[0];
+        const todayPath = path.join(logsDir, `openclaw-${today}.log`);
+        await rm(todayPath, { force: true });
+        await symlink("openclaw-missing-target.log", todayPath);
+
+        try {
+            __testing.runLogWatcherTickForTest();
+            __testing.runLogWatcherTickForTest();
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            assert.equal(errors.length, 1);
+            assert.equal(errors[0]?.[0], "[LogWatcher] Error:");
+        } finally {
+            console.error = originalError;
+            await rm(todayPath, { force: true });
+            __testing.resetLogWatcherForTest();
+        }
+    });
+
+    it("maps missing log root to not found", async () => {
+        const originalRealpathSync = fs.realpathSync;
+
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error("missing root") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+
+            const response = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(testFiles[0])}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), {
+                error: "Log file not found",
+            });
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+    });
+
+    it("propagates unexpected polling errors", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayPath = path.join(logsDir, `openclaw-${today}.log`);
+        await rm(todayPath, { force: true });
+        await symlink("openclaw-missing-target.log", todayPath);
+
+        try {
+            await assert.rejects(
+                () => __testing.pollLogFileForTest(),
+                /Failed to resolve path|Log file not found|ENOENT|ELOOP/
+            );
+        } finally {
+            await rm(todayPath, { force: true });
+            __testing.resetLogWatcherForTest();
+        }
     });
 });

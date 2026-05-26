@@ -154,7 +154,6 @@ function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
     }
-
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
@@ -184,7 +183,6 @@ function parseDirectCommand(command: string): { executable: string; args: string
     if (!executable || !EXECUTABLE_RE.test(executable)) {
         throw new ExecValidationError("command must start with an executable path");
     }
-
     return { executable, args: parsedArgs };
 }
 
@@ -342,10 +340,8 @@ function cleanupJobs(): void {
     if (jobs.size <= MAX_JOBS) {
         return;
     }
-
     const entries = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
     const overflow = entries.length - MAX_JOBS;
-
     for (let index = 0; index < overflow; index += 1) {
         const job = entries[index];
         if (job.process && !job.process.killed) {
@@ -354,6 +350,60 @@ function cleanupJobs(): void {
         jobs.delete(job.id);
     }
 }
+
+/** Updates buffered output for a running exec job. */
+function updateExecJobOutput(jobId: string, update: ExecJob): void {
+    const current = jobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.stdout = update.stdout;
+    current.stderr = update.stderr;
+}
+
+/** Marks an exec job as finished successfully. */
+function completeExecJob(jobId: string, result: ExecResponse): void {
+    const current = jobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    current.code = result.code;
+    current.stdout = result.stdout;
+    current.stderr = result.stderr;
+    current.endedAt = Date.now();
+    cleanupJobs();
+}
+
+/** Marks an exec job as finished with an execution error. */
+function failExecJob(jobId: string, error: unknown): void {
+    const current = jobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    current.code = 1;
+    current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
+    current.endedAt = Date.now();
+    cleanupJobs();
+}
+
+/** Defines testing. */
+export const __testing = {
+    cleanupJobs,
+    completeExecJob,
+    execErrorResponse,
+    failExecJob,
+    getApprovedShellCommand,
+    jobs,
+    parseDirectCommand,
+    resolveCwd,
+    trimOutput,
+    updateExecJobOutput,
+};
 
 /** Registers exec API routes. */
 export default function execRoutes(
@@ -403,15 +453,7 @@ export default function execRoutes(
             runPromise = runExecCommand(
                 payload,
                 jobId,
-                (update) => {
-                    const current = jobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.stdout = update.stdout;
-                    current.stderr = update.stderr;
-                },
+                (update) => updateExecJobOutput(jobId, update),
                 { allowTerminalShell: true }
             );
         } catch (error) {
@@ -422,41 +464,15 @@ export default function execRoutes(
         }
 
         void runPromise
-            .then((result) => {
-                const current = jobs.get(jobId);
-                if (!current) {
-                    return;
-                }
-
-                current.status = "done";
-                current.code = result.code;
-                current.stdout = result.stdout;
-                current.stderr = result.stderr;
-                current.endedAt = Date.now();
-                cleanupJobs();
-            })
-            .catch((error) => {
-                const current = jobs.get(jobId);
-                if (!current) {
-                    return;
-                }
-
-                current.status = "done";
-                current.code = 1;
-                current.stderr = trimOutput(
-                    `${current.stderr}\n${(error as Error).message}`.trim()
-                );
-                current.endedAt = Date.now();
-                cleanupJobs();
-            });
+            .then((result) => completeExecJob(jobId, result))
+            .catch((error) => failExecJob(jobId, error));
 
         res.json({ jobId } satisfies ExecStartResponse);
     }) as RequestHandler);
 
     app.post("/api/exec/:jobId/stop", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = String(req.params.jobId);
         const job = jobs.get(jobId);
-
         if (!job) {
             res.status(404).json({ error: "Exec job not found" });
             return;
@@ -494,7 +510,7 @@ export default function execRoutes(
     }) as RequestHandler);
 
     app.get("/api/exec/:jobId", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = String(req.params.jobId);
         const job = jobs.get(jobId);
 
         if (!job) {

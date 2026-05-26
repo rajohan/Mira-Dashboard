@@ -3,8 +3,10 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-const execFileAsync = promisify(execFile);
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
+import { envFallback, stringFallback } from "../lib/values.js";
 
+const execFileAsync = promisify(execFile);
 const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
 const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
@@ -13,18 +15,10 @@ const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
 /** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch((error) => {
-            console.error("[opsRoutes]", error);
-            if (res.headersSent) {
-                next(error);
-                return;
-            }
-            res.status(500).json({
-                error: error instanceof Error ? error.message : "Ops route failed",
-            });
-        });
-    };
+    return baseAsyncRoute(handler, {
+        fallback: "Ops route failed",
+        logLabel: "[opsRoutes]",
+    });
 }
 
 /** Builds n8n script env. */
@@ -34,17 +28,17 @@ function buildN8nScriptEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
+        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
     };
 }
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
+    const username = envFallback("DATABASE_USERNAME", "postgres");
+    const password = envFallback("DATABASE_PASSWORD", "postgres");
+    const host = envFallback("DATABASE_HOST", "postgres");
+    const port = envFallback("DATABASE_PORT", "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
@@ -59,8 +53,7 @@ async function readLogRotationStatus() {
             maxBuffer: 10 * 1024 * 1024,
         }
     );
-
-    const raw = String(stdout || "").trim();
+    const raw = stringFallback(stdout).trim();
     return {
         success: true,
         lastRun: raw ? JSON.parse(raw) : null,
@@ -93,8 +86,8 @@ async function runLogRotation(options: { dryRun: boolean }) {
     );
 
     return {
-        result: JSON.parse(String(stdout || "{}")),
-        stderr: String(stderr || ""),
+        result: JSON.parse(stringFallback(stdout, "{}")),
+        stderr: stringFallback(stderr),
     };
 }
 

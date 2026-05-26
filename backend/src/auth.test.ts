@@ -6,6 +6,7 @@ import {
     clearSessionCookie,
     createSession,
     createUser,
+    findUserByUsername,
     getAuthUserFromRequest,
     getAuthUserFromSessionId,
     getPersistedGatewayToken,
@@ -61,6 +62,8 @@ describe("auth helpers", () => {
 
     it("creates users, sessions, and persisted gateway tokens", () => {
         assert.equal(bootstrapRequired(), true);
+        assert.equal(findUserByUsername("nobody"), null);
+        assert.equal(getAuthUserFromSessionId("missing-session"), null);
 
         const user = createUser("  Raymond  ", "secret");
         assert.equal(user.username, "raymond");

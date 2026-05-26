@@ -63,6 +63,7 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 }
 
 let running = false;
+let monitorTimer: NodeJS.Timeout | undefined;
 
 /** Performs run OpenClaw notification check. */
 export async function runOpenClawNotificationCheck(): Promise<void> {
@@ -75,7 +76,6 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
     try {
         const cached = await fetchCachedSystemHost();
         const version = cached.data.version;
-
         if (!version) {
             throw new Error("OpenClaw version missing from system.host cache");
         }
@@ -112,8 +112,24 @@ export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_M
             ? intervalMs
             : DEFAULT_INTERVAL_MS;
 
+    if (monitorTimer) {
+        clearInterval(monitorTimer);
+        monitorTimer = undefined;
+    }
+
     void runOpenClawNotificationCheck();
-    setInterval(() => {
+    monitorTimer = setInterval(() => {
         void runOpenClawNotificationCheck();
     }, safeInterval).unref();
 }
+
+export const __testing = {
+    getState,
+    stopOpenClawNotificationMonitorForTest: () => {
+        if (!monitorTimer) {
+            return;
+        }
+        clearInterval(monitorTimer);
+        monitorTimer = undefined;
+    },
+};

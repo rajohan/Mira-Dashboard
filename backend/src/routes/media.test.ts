@@ -47,6 +47,7 @@ describe("media routes", () => {
             path.join(mediaRoot, "picture.png"),
             Buffer.from("89504e47", "hex")
         );
+        await writeFile(path.join(mediaRoot, "blob.unknown"), "opaque");
         await mkdir(path.join(mediaRoot, "albums"));
         outsideFile = path.join(tempRoot, "outside.txt");
         await writeFile(outsideFile, "secret");
@@ -76,6 +77,14 @@ describe("media routes", () => {
         );
         assert.equal(image.status, 200);
         assert.equal(image.headers.get("content-type"), "image/png");
+
+        const unknown = await fetch(
+            `${server.baseUrl}/api/media?path=${encodeURIComponent(
+                path.join(mediaRoot, "blob.unknown")
+            )}`
+        );
+        assert.equal(unknown.status, 200);
+        assert.equal(unknown.headers.get("content-type"), "application/octet-stream");
     });
 
     it("rejects missing, external, and symlink-escaped media paths", async () => {

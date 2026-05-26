@@ -7,6 +7,7 @@ import {
 } from "../constants/taskActors.js";
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import { objectFallback } from "../lib/values.js";
 
 /** Defines status. */
 type Status = "todo" | "in-progress" | "blocked" | "done";
@@ -173,7 +174,6 @@ function normalizeCronJobs(payload: unknown): CronJob[] {
     if (Array.isArray(value.items)) {
         return value.items;
     }
-
     return [];
 }
 
@@ -225,7 +225,6 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
             return `Every ${minutes}m`;
         }
     }
-
     if (schedule.kind === "at") {
         return stringFromRecord(schedule, "at");
     }
@@ -324,8 +323,25 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
     db.prepare(
         `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
          VALUES (?, ?, ?, ?)`
-    ).run(taskId, eventType, JSON.stringify(payload || {}), new Date().toISOString());
+    ).run(
+        taskId,
+        eventType,
+        JSON.stringify(objectFallback(payload as object | null | undefined)),
+        new Date().toISOString()
+    );
 }
+
+/** Defines testing. */
+export const __testing = {
+    derivePriority,
+    formatScheduleSummary,
+    labelsFromTask,
+    normalizeAutomationInput,
+    normalizeCronJobs,
+    normalizeStatus,
+    parseRecordJson,
+    toFrontendTask,
+};
 
 /** Registers tasks API routes. */
 export default function tasksRoutes(
@@ -464,7 +480,6 @@ export default function tasksRoutes(
             labels?: string[];
             automation?: TaskAutomationInput | null;
         };
-
         const labels = updates.labels ?? labelsFromTask(existing);
         const nextStatus = normalizeStatus(
             labels.includes("done")
@@ -523,7 +538,6 @@ export default function tasksRoutes(
     app.post("/api/tasks/:id/assign", express.json(), (async (req, res) => {
         const id = Number(req.params.id);
         const { assignee } = req.body as { assignee?: string | null };
-
         if (!Number.isInteger(id)) {
             res.status(400).json({ error: "Invalid request" });
             return;

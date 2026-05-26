@@ -92,7 +92,6 @@ export function readFromOpenFile(fd: number, byteLength: number): Buffer {
         if (bytesRead === 0) break;
         offset += bytesRead;
     }
-
     return offset === byteLength ? buffer : buffer.subarray(0, offset);
 }
 

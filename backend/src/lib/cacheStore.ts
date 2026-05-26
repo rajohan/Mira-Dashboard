@@ -71,6 +71,10 @@ function buildPostgresUri(database = "n8n") {
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
+export const __testing = {
+    buildPostgresUri,
+};
+
 /** Performs query n8n cache. */
 async function queryN8nCache(sql: string) {
     const uri = buildPostgresUri("n8n");

@@ -5,13 +5,24 @@ import { promisify } from "node:util";
 import express, { type RequestHandler } from "express";
 
 import { parseTable } from "../lib/cacheStore.js";
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
+import {
+    arrayFallback,
+    envFallback,
+    nullableString,
+    objectFallback,
+    stringFallback,
+} from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
-
-const DOCKER_ROOT = process.env.MIRA_DOCKER_ROOT || "/opt/docker";
-const DOCKER_COMPOSE_WRAPPER =
-    process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
-    `${DOCKER_ROOT}/bin/docker-compose-doppler`;
+const DOCKER_ROOT = envFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+let dockerBin = envFallback("MIRA_DOCKER_BIN", "docker");
+let updaterNodeBin = envFallback("MIRA_UPDATER_NODE_BIN", "node");
+let updaterCwd = envFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
+const DOCKER_COMPOSE_WRAPPER = envFallback(
+    "MIRA_DOCKER_COMPOSE_WRAPPER",
+    `${DOCKER_ROOT}/bin/docker-compose-doppler`
+);
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const N8N_DATABASE = "n8n";
@@ -251,22 +262,20 @@ interface DockerExecJob {
     process?: ChildProcess;
 }
 
+type DockerExecResult = {
+    code: number | null;
+    stdout: string;
+    stderr: string;
+};
+
 const dockerExecJobs = new Map<string, DockerExecJob>();
 
-/** Performs async route. */
+/** Wraps docker routes with consistent route logging. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch((error) => {
-            console.error("[dockerRoutes]", error);
-            if (res.headersSent) {
-                next(error);
-                return;
-            }
-            res.status(500).json({
-                error: error instanceof Error ? error.message : "Docker route failed",
-            });
-        });
-    };
+    return baseAsyncRoute(handler, {
+        fallback: "Docker route failed",
+        logLabel: "[dockerRoutes]",
+    });
 }
 
 /** Performs trim output. */
@@ -274,7 +283,6 @@ function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
     }
-
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
@@ -302,17 +310,17 @@ function parseJsonField<T>(value: string | undefined): T | null {
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
+    const username = encodeURIComponent(envFallback("DATABASE_USERNAME", "postgres"));
+    const password = encodeURIComponent(envFallback("DATABASE_PASSWORD", "postgres"));
+    const host = envFallback("DATABASE_HOST", "postgres");
+    const port = envFallback("DATABASE_PORT", "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
 /** Performs query n8n. */
 async function queryN8n(sql: string): Promise<string> {
     const { stdout } = await execFileAsync(
-        "docker",
+        dockerBin,
         [
             "exec",
             "postgres",
@@ -346,7 +354,7 @@ async function queryN8nTsvRows<T extends object>(
     const copySql = String.raw`COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\t', NULL '');`;
 
     await execFileAsync(
-        "docker",
+        dockerBin,
         ["exec", "postgres", "psql", buildPostgresUri(), "-qAt", "-c", copySql],
         {
             cwd: DOCKER_ROOT,
@@ -357,7 +365,7 @@ async function queryN8nTsvRows<T extends object>(
 
     try {
         const { stdout } = await execFileAsync(
-            "docker",
+            dockerBin,
             ["exec", "postgres", "cat", tempFile],
             {
                 cwd: DOCKER_ROOT,
@@ -376,7 +384,7 @@ async function queryN8nTsvRows<T extends object>(
         });
     } finally {
         try {
-            await execFileAsync("docker", ["exec", "postgres", "rm", "-f", tempFile], {
+            await execFileAsync(dockerBin, ["exec", "postgres", "rm", "-f", tempFile], {
                 cwd: DOCKER_ROOT,
                 env: process.env,
             });
@@ -451,13 +459,12 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         return 0;
     }
 
-    const match = sizeRaw.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?B)$/i);
+    const match = sizeRaw.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([A-Z]*B)$/iu);
     if (!match) {
         return 0;
     }
-
-    const value = Number.parseFloat(match[1] || "0");
-    const unit = (match[2] || "B").toUpperCase();
+    const value = Number.parseFloat(stringFallback(match[1], "0"));
+    const unit = stringFallback(match[2], "B").toUpperCase();
     const multipliers: Record<string, number> = {
         B: 1,
         KB: 1024,
@@ -466,13 +473,12 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         TB: 1024 ** 4,
         PB: 1024 ** 5,
     };
-
-    return Math.round(value * (multipliers[unit] || 1));
+    return Math.round(value * (multipliers[unit] ?? 1));
 }
 
 /** Performs run docker. */
 async function runDocker(args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync("docker", args, {
+    const { stdout } = await execFileAsync(dockerBin, args, {
         cwd: DOCKER_ROOT,
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
@@ -509,7 +515,7 @@ async function getContainerInspectMap(containerIds: string[]) {
     const map = new Map<string, DockerInspectRow>();
 
     for (const row of inspectRows) {
-        const fullId = String(row.Id || "");
+        const fullId = stringFallback(row.Id);
         if (!fullId) {
             continue;
         }
@@ -535,14 +541,14 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
 
     return psRows.map((row) => {
         const inspect = inspectMap.get(row.ID);
-        const labels = inspect?.Config?.Labels || {};
-        const networks = inspect?.NetworkSettings?.Networks || {};
+        const labels = objectFallback(inspect?.Config?.Labels);
+        const networks = objectFallback(inspect?.NetworkSettings?.Networks);
         const stats = statsById.get(row.ID);
 
         const ipAddresses = Object.fromEntries(
             Object.entries(networks).map(([name, value]) => [
                 name,
-                String((value as { IPAddress?: string }).IPAddress || ""),
+                stringFallback((value as { IPAddress?: string }).IPAddress),
             ])
         );
 
@@ -550,7 +556,7 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
             id: row.ID,
             name: row.Names,
             image: row.Image,
-            imageId: String(inspect?.Image || ""),
+            imageId: stringFallback(inspect?.Image),
             command: row.Command,
             createdAt: String(inspect?.Created || row.CreatedAt),
             startedAt: inspect?.State?.StartedAt || null,
@@ -566,10 +572,10 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
             ipAddresses,
             mounts: Array.isArray(inspect?.Mounts)
                 ? inspect.Mounts.map((mount) => ({
-                      type: String(mount.Type || ""),
-                      source: String(mount.Source || ""),
-                      destination: String(mount.Destination || ""),
-                      mode: String(mount.Mode || ""),
+                      type: stringFallback(mount.Type),
+                      source: stringFallback(mount.Source),
+                      destination: stringFallback(mount.Destination),
+                      mode: stringFallback(mount.Mode),
                       readOnly: Boolean(mount.RW === false),
                       name: mount.Name ? String(mount.Name) : undefined,
                   }))
@@ -594,31 +600,28 @@ async function getContainerDetails(
 ): Promise<DockerContainerDetails | null> {
     const containers = await getContainers();
     const summary = containers.find((container) => container.id.startsWith(containerId));
-
     if (!summary) {
         return null;
     }
 
     const inspectMap = await getContainerInspectMap([summary.id]);
     const inspect = inspectMap.get(summary.id);
-
     if (!inspect) {
         return null;
     }
-
-    const labels = (inspect.Config?.Labels || {}) as Record<string, string>;
-    const networks = Object.entries(inspect.NetworkSettings?.Networks || {}).map(
-        ([name, value]) => ({
-            name,
-            ipAddress: String(value.IPAddress || ""),
-            gateway: String(value.Gateway || ""),
-            macAddress: String(value.MacAddress || ""),
-        })
-    );
+    const labels = objectFallback(inspect.Config?.Labels) as Record<string, string>;
+    const networks = Object.entries(
+        objectFallback(inspect.NetworkSettings?.Networks)
+    ).map(([name, value]) => ({
+        name,
+        ipAddress: stringFallback(value.IPAddress),
+        gateway: stringFallback(value.Gateway),
+        macAddress: stringFallback(value.MacAddress),
+    }));
 
     return {
         ...summary,
-        env: Array.isArray(inspect.Config?.Env) ? inspect.Config.Env.map(String) : [],
+        env: arrayFallback(inspect.Config?.Env).map(String),
         labels,
         networks,
     };
@@ -716,18 +719,18 @@ async function getDockerUpdaterServices() {
         id: Number(row.id),
         appSlug: row.app_slug,
         serviceName: row.service_name,
-        composeImageRef: row.compose_image_ref || null,
+        composeImageRef: nullableString(row.compose_image_ref),
         imageRepo: row.image_repo,
-        currentTag: row.current_tag || null,
-        currentDigest: row.current_digest || null,
-        latestTag: row.latest_tag || null,
-        latestDigest: row.latest_digest || null,
+        currentTag: nullableString(row.current_tag),
+        currentDigest: nullableString(row.current_digest),
+        latestTag: nullableString(row.latest_tag),
+        latestDigest: nullableString(row.latest_digest),
         policy: row.policy,
         pinMode: row.pin_mode,
         enabled: row.enabled === "true",
-        lastCheckedAt: row.last_checked_at || null,
-        lastUpdatedAt: row.last_updated_at || null,
-        lastStatus: row.last_status || null,
+        lastCheckedAt: nullableString(row.last_checked_at),
+        lastUpdatedAt: nullableString(row.last_updated_at),
+        lastStatus: nullableString(row.last_status),
         updateAvailable: hasUpdaterCandidate(row),
         metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
     }));
@@ -769,18 +772,18 @@ async function getDockerUpdaterServiceById(serviceId: number) {
         id: Number(row.id),
         appSlug: row.app_slug,
         serviceName: row.service_name,
-        composeImageRef: row.compose_image_ref || null,
+        composeImageRef: nullableString(row.compose_image_ref),
         imageRepo: row.image_repo,
-        currentTag: row.current_tag || null,
-        currentDigest: row.current_digest || null,
-        latestTag: row.latest_tag || null,
-        latestDigest: row.latest_digest || null,
+        currentTag: nullableString(row.current_tag),
+        currentDigest: nullableString(row.current_digest),
+        latestTag: nullableString(row.latest_tag),
+        latestDigest: nullableString(row.latest_digest),
         policy: row.policy,
         pinMode: row.pin_mode,
         enabled: row.enabled === "true",
-        lastCheckedAt: row.last_checked_at || null,
-        lastUpdatedAt: row.last_updated_at || null,
-        lastStatus: row.last_status || null,
+        lastCheckedAt: nullableString(row.last_checked_at),
+        lastUpdatedAt: nullableString(row.last_updated_at),
+        lastStatus: nullableString(row.last_status),
         updateAvailable: hasUpdaterCandidate(row),
         metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
     };
@@ -799,8 +802,8 @@ async function runManualUpdaterForService(serviceId: number) {
     const steps: DockerUpdaterRunResult[] = [manual];
     if (!manual.ok) {
         return {
-            output: extractTrailingJson(String(manual.stdout || "{}")),
-            stderr: String(manual.stderr || ""),
+            output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
+            stderr: stringFallback(manual.stderr),
             steps,
         };
     }
@@ -811,7 +814,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(notify);
     if (!notify.ok) {
         return {
-            output: extractTrailingJson(String(manual.stdout || "{}")),
+            output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
             stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
             steps,
         };
@@ -823,7 +826,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(discord);
 
     return {
-        output: extractTrailingJson(String(manual.stdout || "{}")),
+        output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
         stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
         steps,
     };
@@ -839,13 +842,13 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
+        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
     };
 
     try {
-        const { stdout, stderr } = await execFileAsync("node", args, {
-            cwd: "/home/ubuntu/projects/n8n",
+        const { stdout, stderr } = await execFileAsync(updaterNodeBin, args, {
+            cwd: updaterCwd,
             env,
             maxBuffer: 20 * 1024 * 1024,
         });
@@ -853,16 +856,16 @@ async function runUpdaterCommand(
         return {
             step,
             ok: true,
-            stdout: String(stdout || ""),
-            stderr: String(stderr || ""),
+            stdout: stringFallback(stdout),
+            stderr: stringFallback(stderr),
         };
     } catch (error) {
         const execError = error as Error & { stdout?: string; stderr?: string };
         return {
             step,
             ok: false,
-            stdout: String(execError.stdout || ""),
-            stderr: String(execError.stderr || execError.message || ""),
+            stdout: stringFallback(execError.stdout),
+            stderr: stringFallback(execError.stderr, execError.message),
         };
     }
 }
@@ -952,10 +955,10 @@ async function getDockerUpdaterEvents(limit: number) {
         appSlug: row.app_slug,
         serviceName: row.service_name,
         eventType: row.event_type,
-        fromTag: row.from_tag || null,
-        toTag: row.to_tag || null,
-        fromDigest: row.from_digest || null,
-        toDigest: row.to_digest || null,
+        fromTag: nullableString(row.from_tag),
+        toTag: nullableString(row.to_tag),
+        fromDigest: nullableString(row.from_digest),
+        toDigest: nullableString(row.to_digest),
         message: null, // Message excluded from list view due to newlines
         createdAt: row.created_at,
     }));
@@ -967,7 +970,6 @@ async function runContainerAction(
     action: DockerActionRequest["action"]
 ) {
     const details = await getContainerDetails(containerId);
-
     if (!details) {
         throw new Error("Container not found");
     }
@@ -994,9 +996,9 @@ async function runDockerExecCommand(
     command: string,
     jobId: string,
     onUpdate?: (stdout: string, stderr: string) => void
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn("docker", ["exec", containerId, "sh", "-lc", command], {
+        const child = spawn(dockerBin, ["exec", containerId, "sh", "-lc", command], {
             cwd: DOCKER_ROOT,
             env: process.env,
             detached: true,
@@ -1039,12 +1041,10 @@ function cleanupDockerExecJobs() {
     if (dockerExecJobs.size <= MAX_JOBS) {
         return;
     }
-
     const entries = [...dockerExecJobs.values()].sort(
         (a, b) => a.startedAt - b.startedAt
     );
     const overflow = entries.length - MAX_JOBS;
-
     for (let index = 0; index < overflow; index += 1) {
         const job = entries[index];
         if (job.process && !job.process.killed) {
@@ -1053,6 +1053,71 @@ function cleanupDockerExecJobs() {
         dockerExecJobs.delete(job.id);
     }
 }
+
+function updateDockerExecJobOutput(jobId: string, stdout: string, stderr: string): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.stdout = stdout;
+    current.stderr = stderr;
+}
+
+function completeDockerExecJob(jobId: string, result: DockerExecResult): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    current.code = result.code;
+    current.stdout = result.stdout;
+    current.stderr = result.stderr;
+    current.endedAt = Date.now();
+    cleanupDockerExecJobs();
+}
+
+function failDockerExecJob(jobId: string, error: unknown): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+    current.status = "done";
+    current.code = 1;
+    current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
+    current.endedAt = Date.now();
+    cleanupDockerExecJobs();
+}
+
+export const __testing = {
+    asyncRoute,
+    buildPostgresUri,
+    trimOutput,
+    parseJsonLines,
+    parseJsonField,
+    hasUpdaterCandidate,
+    extractTrailingJson,
+    dockerExecJobs,
+    cleanupDockerExecJobs,
+    runDockerExecCommand,
+    setDockerBinForTests: (nextDockerBin: string) => {
+        dockerBin = nextDockerBin;
+    },
+    setUpdaterNodeBinForTests: (nextUpdaterNodeBin: string) => {
+        updaterNodeBin = nextUpdaterNodeBin;
+    },
+    setUpdaterCwdForTests: (nextUpdaterCwd: string) => {
+        updaterCwd = nextUpdaterCwd;
+    },
+    updateDockerExecJobOutput,
+    completeDockerExecJob,
+    failDockerExecJob,
+    parseLabels,
+    parsePorts,
+    parseDockerSizeToBytes,
+    getContainerInspectMap,
+};
 
 /** Registers docker API routes. */
 export default function dockerRoutes(app: express.Application): void {
@@ -1105,7 +1170,7 @@ export default function dockerRoutes(app: express.Application): void {
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerManualUpdateRequest;
             const routeServiceId = Number.parseInt(
-                String(req.params.serviceId || ""),
+                stringFallback(req.params.serviceId),
                 10
             );
             const serviceId = Number.isFinite(routeServiceId)
@@ -1155,7 +1220,7 @@ export default function dockerRoutes(app: express.Application): void {
         "/api/docker/containers/:containerId",
         asyncRoute(async (req, res) => {
             const details = await getContainerDetails(
-                String(req.params.containerId || "")
+                stringFallback(req.params.containerId)
             );
             if (!details) {
                 res.status(404).json({ error: "Container not found" });
@@ -1169,13 +1234,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/containers/:containerId/logs",
         asyncRoute(async (req, res) => {
-            const containerId = String(req.params.containerId || "");
+            const containerId = stringFallback(req.params.containerId);
             const tail = Math.max(
                 50,
-                Number.parseInt(String(req.query.tail || "200"), 10) || 200
+                Number.parseInt(stringFallback(req.query.tail, "200"), 10) || 200
             );
             const { stdout, stderr } = await execFileAsync(
-                "docker",
+                dockerBin,
                 ["logs", "--tail", String(tail), containerId],
                 {
                     cwd: DOCKER_ROOT,
@@ -1197,7 +1262,7 @@ export default function dockerRoutes(app: express.Application): void {
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerActionRequest;
             const result = await runContainerAction(
-                String(req.params.containerId || ""),
+                stringFallback(req.params.containerId),
                 payload.action
             );
             res.json(result);
@@ -1225,7 +1290,7 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/images/:imageId",
         asyncRoute(async (req, res) => {
-            await runDocker(["image", "rm", String(req.params.imageId || "")]);
+            await runDocker(["image", "rm", stringFallback(req.params.imageId)]);
             res.json({ success: true });
         })
     );
@@ -1241,7 +1306,7 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/volumes/:volumeName",
         asyncRoute(async (req, res) => {
-            await runDocker(["volume", "rm", String(req.params.volumeName || "")]);
+            await runDocker(["volume", "rm", stringFallback(req.params.volumeName)]);
             res.json({ success: true });
         })
     );
@@ -1295,50 +1360,17 @@ export default function dockerRoutes(app: express.Application): void {
                 payload.containerId,
                 payload.command,
                 jobId,
-                (stdout, stderr) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.stdout = stdout;
-                    current.stderr = stderr;
-                }
+                (stdout, stderr) => updateDockerExecJobOutput(jobId, stdout, stderr)
             )
-                .then((result) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.status = "done";
-                    current.code = result.code;
-                    current.stdout = result.stdout;
-                    current.stderr = result.stderr;
-                    current.endedAt = Date.now();
-                    cleanupDockerExecJobs();
-                })
-                .catch((error) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.status = "done";
-                    current.code = 1;
-                    current.stderr = trimOutput(
-                        `${current.stderr}\n${(error as Error).message}`.trim()
-                    );
-                    current.endedAt = Date.now();
-                    cleanupDockerExecJobs();
-                });
+                .then((result) => completeDockerExecJob(jobId, result))
+                .catch((error) => failDockerExecJob(jobId, error));
 
             res.json({ jobId });
         })
     );
 
     app.get("/api/docker/exec/:jobId", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = stringFallback(req.params.jobId);
         const job = dockerExecJobs.get(jobId);
 
         if (!job) {
@@ -1359,9 +1391,8 @@ export default function dockerRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/docker/exec/:jobId/stop", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = stringFallback(req.params.jobId);
         const job = dockerExecJobs.get(jobId);
-
         if (!job) {
             res.status(404).json({ error: "Docker exec job not found" });
             return;
@@ -1371,18 +1402,15 @@ export default function dockerRoutes(app: express.Application): void {
             res.status(400).json({ error: "Job is not running" });
             return;
         }
-
         if (!job.process || job.process.killed) {
             res.status(400).json({ error: "Process not available" });
             return;
         }
-
         try {
             process.kill(-job.process.pid!, "SIGTERM");
         } catch {
             job.process.kill("SIGTERM");
         }
-
         res.json({ success: true });
     }) as RequestHandler);
 }

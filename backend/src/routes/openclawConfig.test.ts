@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import os from "node:os";
+import path from "node:path";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
 import gateway from "../gateway.js";
-import openClawConfigRoutes from "./openclawConfig.js";
+import openClawConfigRoutes, { __testing } from "./openclawConfig.js";
 
 interface TestServer {
     baseUrl: string;
@@ -195,5 +199,321 @@ describe("OpenClaw config routes", () => {
         assert.match(response.body.createdAt, /^\d{4}-\d{2}-\d{2}T/u);
         assert.equal(response.body.hash, "hash-123");
         assert.equal(response.body.config.model, "codex");
+
+        gateway.request = async (method: string) => {
+            if (method === "config.get") {
+                return { hash: "hash-empty" };
+            }
+            throw new Error(`Unexpected gateway method: ${method}`);
+        };
+        const emptyConfig = await requestJson<{
+            hash: string;
+            config: Record<string, unknown>;
+        }>(server, "/api/backup", { method: "POST" });
+        assert.equal(emptyConfig.status, 200);
+        assert.equal(emptyConfig.body.hash, "hash-empty");
+        assert.deepEqual(emptyConfig.body.config, {});
+        gateway.request = originalRequest;
+    });
+
+    it("covers skill discovery fallbacks and validation edge cases", async () => {
+        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-skills-"));
+        try {
+            const fallbackSkill = path.join(tempDir, "fallback-skill");
+            const describedSkill = path.join(tempDir, "described-skill");
+            await mkdir(fallbackSkill, { recursive: true });
+            await mkdir(describedSkill, { recursive: true });
+            await writeFile(
+                path.join(fallbackSkill, "SKILL.md"),
+                "---\n---\n# Title\nFirst useful line\n",
+                "utf8"
+            );
+            await writeFile(
+                path.join(describedSkill, "SKILL.md"),
+                "description: 'Quoted description'\n",
+                "utf8"
+            );
+
+            assert.equal(
+                __testing.readSkillDescription(fallbackSkill),
+                "First useful line"
+            );
+            assert.equal(
+                __testing.readSkillDescription(describedSkill),
+                "Quoted description"
+            );
+            assert.equal(
+                __testing.readSkillDescription(path.join(tempDir, "missing")),
+                undefined
+            );
+            assert.deepEqual(
+                __testing
+                    .collectSkillDirectories(tempDir)
+                    .map((skillPath) => path.basename(skillPath)),
+                ["described-skill", "fallback-skill"]
+            );
+            assert.deepEqual(
+                __testing.collectSkillDirectories(path.join(tempDir, "missing")),
+                []
+            );
+            const packageRoot = path.join(tempDir, "package-root");
+            const packageSkill = path.join(packageRoot, "skills", "builtin-skill");
+            const extensionSkill = path.join(
+                packageRoot,
+                "dist/extensions/example/skills/extra-skill"
+            );
+            const homeDir = path.join(tempDir, "home");
+            const workspaceSkill = path.join(
+                homeDir,
+                ".openclaw/workspace/skills/workspace-skill"
+            );
+            await mkdir(packageSkill, { recursive: true });
+            await mkdir(extensionSkill, { recursive: true });
+            await mkdir(workspaceSkill, { recursive: true });
+            await writeFile(
+                path.join(packageSkill, "SKILL.md"),
+                "Builtin skill\n",
+                "utf8"
+            );
+            await writeFile(
+                path.join(extensionSkill, "SKILL.md"),
+                "Extra skill\n",
+                "utf8"
+            );
+            await writeFile(
+                path.join(workspaceSkill, "SKILL.md"),
+                "Workspace skill\n",
+                "utf8"
+            );
+            const originalHome = process.env.HOME;
+            process.env.HOME = homeDir;
+            __testing.setOpenClawPackageRootForTest(packageRoot);
+            assert.deepEqual(
+                __testing
+                    .collectExtraSkillDirectories()
+                    .map((skillPath) => path.basename(skillPath)),
+                ["extra-skill"]
+            );
+            const originalReaddirSync = fs.readdirSync;
+            const readdirMock = mock.method(fs, "readdirSync", (root: fs.PathLike) => {
+                if (String(root).includes("dist/extensions")) {
+                    throw new Error("extensions unavailable");
+                }
+                return originalReaddirSync(root, {
+                    withFileTypes: true,
+                }) as unknown as ReturnType<typeof fs.readdirSync>;
+            });
+            try {
+                assert.deepEqual(__testing.collectExtraSkillDirectories(), []);
+            } finally {
+                readdirMock.mock.restore();
+            }
+
+            const entries = __testing.getConfiguredSkillEntries({
+                skills: {
+                    entries: {
+                        "fallback-skill": { enabled: false },
+                        "configured-only": { description: "Configured only" },
+                    },
+                },
+            });
+            assert.deepEqual(Object.keys(entries).sort(), [
+                "configured-only",
+                "fallback-skill",
+            ]);
+
+            try {
+                const skills = __testing.getSkills({
+                    skills: {
+                        entries: {
+                            "configured-only": {
+                                enabled: false,
+                                description: "Configured only",
+                            },
+                            "workspace-skill": {
+                                enabled: false,
+                                description: "Should not replace discovered skill",
+                            },
+                            "builtin-skill": {
+                                enabled: false,
+                                description: "Should not replace built-in skill",
+                            },
+                            "extra-skill": {
+                                enabled: false,
+                                description: "Should not replace extension skill",
+                            },
+                        },
+                    },
+                });
+                assert.equal(
+                    skills.some(
+                        (skill) =>
+                            skill.name === "workspace-skill" &&
+                            skill.enabled === false &&
+                            skill.source === "workspace"
+                    ),
+                    true
+                );
+                assert.equal(
+                    skills.some(
+                        (skill) =>
+                            skill.name === "builtin-skill" &&
+                            skill.enabled === false &&
+                            skill.source === "builtin"
+                    ),
+                    true
+                );
+                assert.equal(
+                    skills.some(
+                        (skill) =>
+                            skill.name === "extra-skill" &&
+                            skill.enabled === false &&
+                            skill.source === "extra"
+                    ),
+                    true
+                );
+                assert.equal(
+                    skills.some(
+                        (skill) =>
+                            skill.name === "configured-only" &&
+                            skill.enabled === false &&
+                            skill.source === "extra"
+                    ),
+                    true
+                );
+            } finally {
+                if (originalHome === undefined) {
+                    delete process.env.HOME;
+                } else {
+                    process.env.HOME = originalHome;
+                }
+            }
+            assert.deepEqual(__testing.getConfiguredSkillEntries(), {});
+            assert.deepEqual(
+                __testing.getConfiguredSkillEntries({ skills: { entries: [] } }),
+                {}
+            );
+            assert.deepEqual(
+                __testing.getConfiguredSkillEntries({ skills: "invalid" }),
+                {}
+            );
+            assert.equal(
+                __testing
+                    .getSkills({
+                        skills: {
+                            entries: {
+                                "primitive-entry": "enabled",
+                            },
+                        },
+                    })
+                    .some(
+                        (skill) =>
+                            skill.name === "primitive-entry" &&
+                            skill.enabled === true &&
+                            skill.description === undefined
+                    ),
+                true
+            );
+
+            assert.equal(__testing.isValidSkillName("ok-skill"), true);
+            assert.equal(__testing.isValidSkillName(""), false);
+            assert.equal(__testing.isValidSkillName("x".repeat(129)), false);
+            assert.equal(__testing.isValidSkillName("bad/name"), false);
+            assert.equal(__testing.isValidSkillName(String.raw`bad\name`), false);
+            assert.equal(__testing.isValidSkillName("__proto__"), false);
+            assert.equal(__testing.isValidSkillName("prototype"), false);
+            assert.equal(__testing.isValidSkillName("constructor"), false);
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    it("reports config, skills, backup, restart, and skill toggle errors", async () => {
+        gateway.request = async () => {
+            throw new Error("gateway failed");
+        };
+
+        const config = await requestJson<{ error: string }>(server, "/api/config");
+        assert.equal(config.body.error, "gateway failed");
+        const skills = await requestJson<{ error: string }>(server, "/api/skills");
+        assert.equal(skills.body.error, "gateway failed");
+        const backup = await requestJson<{ error: string }>(server, "/api/backup", {
+            method: "POST",
+        });
+        assert.equal(backup.body.error, "gateway failed");
+        const invalidName = await requestJson<{ error: string }>(
+            server,
+            "/api/skills/bad%2Fname",
+            {
+                method: "POST",
+                body: { enabled: true },
+            }
+        );
+        assert.equal(invalidName.body.error, "Invalid skill name");
+        const invalidEnabled = await requestJson<{ error: string }>(
+            server,
+            "/api/skills/custom-skill",
+            {
+                method: "POST",
+                body: { enabled: "yes" },
+            }
+        );
+        assert.equal(invalidEnabled.body.error, "Invalid enabled value");
+        const toggleFailure = await requestJson<{ error: string }>(
+            server,
+            "/api/skills/custom-skill",
+            {
+                method: "POST",
+                body: { enabled: true },
+            }
+        );
+        assert.equal(toggleFailure.body.error, "gateway failed");
+    });
+
+    it("runs restart through an injected OpenClaw binary", async () => {
+        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-bin-"));
+        try {
+            const binPath = path.join(tempDir, "openclaw");
+            await writeFile(
+                binPath,
+                String.raw`#!${process.execPath}
+process.exit(0);
+`,
+                "utf8"
+            );
+            await import("node:fs/promises").then(({ chmod }) => chmod(binPath, 0o755));
+            __testing.setOpenClawBinForTest(binPath);
+
+            const restart = await requestJson<{ ok: boolean }>(server, "/api/restart", {
+                method: "POST",
+            });
+
+            assert.equal(restart.status, 200);
+            assert.deepEqual(restart.body, { ok: true });
+
+            const failingBinPath = path.join(tempDir, "openclaw-fail");
+            await writeFile(
+                failingBinPath,
+                String.raw`#!${process.execPath}
+throw new Error("restart failed");
+`,
+                "utf8"
+            );
+            await import("node:fs/promises").then(({ chmod }) =>
+                chmod(failingBinPath, 0o755)
+            );
+            __testing.setOpenClawBinForTest(failingBinPath);
+
+            const failedRestart = await requestJson<{ error: string }>(
+                server,
+                "/api/restart",
+                { method: "POST" }
+            );
+
+            assert.equal(failedRestart.status, 500);
+            assert.match(failedRestart.body.error, /Command failed/u);
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 });

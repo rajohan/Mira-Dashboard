@@ -9,6 +9,13 @@ const dbPath = path.join(dataDir, "mira-dashboard.db");
 /** Defines db. */
 export const db = new DatabaseSync(dbPath);
 
+interface MigrationDatabase {
+    exec(sql: string): unknown;
+    prepare(sql: string): {
+        all(): Array<Record<string, unknown>>;
+    };
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,10 +120,15 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `);
 
-const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{
-    name: string;
-}>;
+/** Ensures older task databases have the automation column. */
+export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
+    const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
 
-if (!taskColumns.some((column) => column.name === "automation_json")) {
-    db.exec("ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'");
+    if (!taskColumns.some((column) => column.name === "automation_json")) {
+        targetDb.exec(
+            "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'"
+        );
+    }
 }
+
+ensureTaskAutomationColumn(db);

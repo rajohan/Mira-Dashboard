@@ -136,7 +136,6 @@ export function findUserByUsername(username: string): UserRow | null {
              WHERE username = ?`
         )
         .get(normalizeUsername(username)) as UserRow | undefined;
-
     return row || null;
 }
 

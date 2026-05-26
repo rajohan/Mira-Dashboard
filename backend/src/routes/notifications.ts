@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
+import { nullableString, objectFallback } from "../lib/values.js";
 import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 
 /** Defines notification type. */
@@ -96,11 +97,11 @@ export default function notificationsRoutes(app: express.Application): void {
         const title = (req.body?.title || "").toString().trim();
         const description = (req.body?.description || "").toString().trim();
         const type = (req.body?.type || "info").toString() as NotificationType;
-        const source = req.body?.source ? String(req.body.source) : null;
-        const dedupeKey = req.body?.dedupeKey ? String(req.body.dedupeKey) : null;
+        const source = nullableString(req.body?.source);
+        const dedupeKey = nullableString(req.body?.dedupeKey);
         const metadata =
             req.body?.metadata && typeof req.body.metadata === "object"
-                ? req.body.metadata
+                ? objectFallback(req.body.metadata)
                 : {};
         const occurredAt = req.body?.occurredAt
             ? String(req.body.occurredAt)
@@ -150,7 +151,7 @@ export default function notificationsRoutes(app: express.Application): void {
         );
 
         pruneReadNotifications();
-        res.json({ ok: true, id: result.lastInsertRowid ?? null });
+        res.json({ ok: true, id: result.lastInsertRowid });
     }) as RequestHandler);
 
     app.post("/api/notifications/mark-all-read", ((_, res) => {
@@ -162,7 +163,7 @@ export default function notificationsRoutes(app: express.Application): void {
 
     app.post("/api/notifications/clear-read", ((_, res) => {
         const result = db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
-        res.json({ ok: true, deleted: result.changes ?? 0 });
+        res.json({ ok: true, deleted: result.changes });
     }) as RequestHandler);
 
     app.post("/api/notifications/:id/read", ((req, res) => {
@@ -187,6 +188,6 @@ export default function notificationsRoutes(app: express.Application): void {
         }
 
         const result = db.prepare("DELETE FROM notifications WHERE id = ?").run(id);
-        res.json({ ok: true, deleted: result.changes ?? 0 });
+        res.json({ ok: true, deleted: result.changes || 0 });
     }) as RequestHandler);
 }

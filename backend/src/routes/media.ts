@@ -2,7 +2,9 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || "/home/ubuntu/.openclaw";
+import { envFallback, stringFallback } from "../lib/values.js";
+
+const OPENCLAW_HOME = envFallback("OPENCLAW_HOME", "/home/ubuntu/.openclaw");
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const REAL_MEDIA_ROOT = fs.realpathSync(MEDIA_ROOT);
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
@@ -30,7 +32,7 @@ function mimeTypeFromPath(filePath: string): string {
 /** Registers media API routes. */
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
-        const requestedPath = String(request.query.path || "");
+        const requestedPath = stringFallback(request.query.path);
         const fullPath = path.resolve(requestedPath);
 
         if (!requestedPath || !fullPath.startsWith(`${MEDIA_ROOT}${path.sep}`)) {

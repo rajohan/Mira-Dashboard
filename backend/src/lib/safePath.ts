@@ -91,10 +91,6 @@ export function prepareSafeWriteTargetWithinRoot(
         fs.mkdirSync(Buffer.from(canonicalRoot), { recursive: true });
 
         const realRoot = fs.realpathSync(canonicalRoot);
-        if (realRoot !== canonicalRoot) {
-            return null;
-        }
-
         const normalizedRoot = realRoot + path.sep;
         const resolvedTarget = path.resolve(fullPath);
 
@@ -110,7 +106,6 @@ export function prepareSafeWriteTargetWithinRoot(
             try {
                 const realAncestor = fs.realpathSync(existingAncestor);
                 const ancestorStat = fs.statSync(Buffer.from(realAncestor));
-
                 if (!ancestorStat.isDirectory()) {
                     return null;
                 }
@@ -135,7 +130,6 @@ export function prepareSafeWriteTargetWithinRoot(
 
                     const realNextParent = fs.realpathSync(nextParent);
                     const nextParentStat = fs.statSync(Buffer.from(realNextParent));
-
                     if (!nextParentStat.isDirectory()) {
                         return null;
                     }

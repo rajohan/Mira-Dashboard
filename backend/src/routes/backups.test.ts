@@ -7,6 +7,9 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
+import backupRoutes from "./backups.js";
+import { __testing as backupTesting } from "./backups.js";
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -22,6 +25,10 @@ async function installFakeDoppler(tempDir: string): Promise<string> {
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 const command = args.at(-1) || "";
+if (process.env.FAKE_BACKUP_SIGNAL === "1") {
+    process.kill(process.pid, "SIGTERM");
+    return;
+}
 process.stdout.write("started backup\n" + command + "\n");
 process.stderr.write("backup warning\n");
 setTimeout(() => process.exit(0), 10);
@@ -35,7 +42,27 @@ setTimeout(() => process.exit(0), 10);
 async function startServer(tempDir: string): Promise<TestServer> {
     process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
     process.env.MIRA_N8N_ROOT = tempDir;
-    const { default: backupRoutes } = await import(`./backups.js?test=${Date.now()}`);
+    const app = express();
+    app.use(express.json());
+    backupRoutes(app, express);
+    const server = http.createServer(app);
+
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+
+    return {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () => new Promise((resolve) => server.close(() => resolve())),
+    };
+}
+
+async function startServerWithDoppler(
+    tempDir: string,
+    dopplerBin: string
+): Promise<TestServer> {
+    process.env.DOPPLER_BIN = dopplerBin;
+    process.env.MIRA_N8N_ROOT = tempDir;
     const app = express();
     app.use(express.json());
     backupRoutes(app, express);
@@ -137,6 +164,24 @@ describe("backup routes", () => {
         assert.equal(done.stderr, "backup warning\n");
     });
 
+    it("returns the active job when a Kopia backup is already running", async () => {
+        const first = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+        const second = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+        assert.equal(second.status, 200);
+        assert.equal(second.body.ok, true);
+        assert.equal(second.body.job.id, first.body.job.id);
+        assert.equal(second.body.job.status, "running");
+
+        await waitForDone(server, "/api/backups/kopia");
+    });
+
     it("starts and completes WAL-G backup jobs through Doppler", async () => {
         const started = await requestJson<{
             ok: boolean;
@@ -154,5 +199,75 @@ describe("backup routes", () => {
         assert.equal(done.code, 0);
         assert.match(done.stdout, /backup-walg-status\.mjs/);
         assert.equal(done.stderr, "backup warning\n");
+    });
+
+    it("maps signaled backup exits to interrupted status code", async () => {
+        process.env.FAKE_BACKUP_SIGNAL = "1";
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.status, "running");
+            assert.equal(started.body.job.code, null);
+
+            const done = await waitForDone(server, "/api/backups/kopia");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 130);
+        } finally {
+            delete process.env.FAKE_BACKUP_SIGNAL;
+        }
+    });
+
+    it("marks jobs done when the backup process fails to spawn", async () => {
+        const brokenTempDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-backup-broken-")
+        );
+        const brokenServer = await startServerWithDoppler(
+            brokenTempDir,
+            path.join(brokenTempDir, "missing-doppler")
+        );
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(brokenServer, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.status, "running");
+            assert.equal(started.body.job.code, null);
+
+            const done = await waitForDone(brokenServer, "/api/backups/walg");
+            assert.equal(done.status, "done");
+            assert.notEqual(done.code, 0);
+            assert.match(done.stderr, /ENOENT|missing-doppler/);
+        } finally {
+            await brokenServer.close();
+            process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
+            process.env.MIRA_N8N_ROOT = tempDir;
+            await rm(brokenTempDir, { recursive: true, force: true });
+        }
+    });
+
+    it("covers backup helper edge cases directly", async () => {
+        let cleared = false;
+        const missing = backupTesting.getCurrentJob("missing-job", () => {
+            cleared = true;
+        });
+
+        assert.equal(missing, null);
+        assert.equal(cleared, true);
+        assert.equal(
+            backupTesting.getCurrentJob(null, () => {}),
+            null
+        );
+        assert.equal(backupTesting.mapJob(null), null);
+        assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
+        assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
+        assert.equal(backupTesting.getN8nRoot(), tempDir);
+        assert.equal(typeof backupTesting.getDopplerBin(), "string");
     });
 });

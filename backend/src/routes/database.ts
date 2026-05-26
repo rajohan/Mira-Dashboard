@@ -3,6 +3,9 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
+import { errorMessage } from "../lib/errors.js";
+import { stringFallback } from "../lib/values.js";
+
 const execFileAsync = promisify(execFile);
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
@@ -93,6 +96,22 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
+export const __testing = {
+    numberFrom,
+    parseTable,
+    stringWithDefault,
+};
+
+/** Returns a string value or a fallback using the route's existing falsy-value behavior. */
+function stringWithDefault(value: string | null | undefined, fallback: string): string {
+    return value || fallback;
+}
+
+/** Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior. */
+function numberFrom(value: string | null | undefined): number {
+    return Number(value || 0);
+}
+
 /** Runs a shell command inside a Docker container and returns raw stdout. */
 async function runDockerExec(container: string, command: string) {
     const options: ExecFileOptionsWithStringEncoding = {
@@ -110,19 +129,19 @@ async function runDockerExec(container: string, command: string) {
 
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
+    const username = stringWithDefault(process.env.DATABASE_USERNAME, "postgres");
+    const password = stringWithDefault(process.env.DATABASE_PASSWORD, "postgres");
+    const host = stringWithDefault(process.env.DATABASE_HOST, "postgres");
+    const port = stringWithDefault(process.env.DATABASE_PORT, "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
 /** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.PGBOUNCER_HOST || "pgbouncer";
-    const port = process.env.PGBOUNCER_PORT || "5432";
+    const username = stringWithDefault(process.env.DATABASE_USERNAME, "postgres");
+    const password = stringWithDefault(process.env.DATABASE_PASSWORD, "postgres");
+    const host = stringWithDefault(process.env.PGBOUNCER_HOST, "pgbouncer");
+    const port = stringWithDefault(process.env.PGBOUNCER_PORT, "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
@@ -191,20 +210,24 @@ async function getTorrentCounts() {
         return torrentCountCache.data;
     }
 
-    const cometCount =
+    const cometCount = stringFallback(
         parseTable<{ count: string }>(
             await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet")
-        )[0]?.count ?? "0";
+        )[0]?.count,
+        "0"
+    );
 
-    const bitmagnetCount =
+    const bitmagnetCount = stringFallback(
         parseTable<{ count: string }>(
             await queryPostgres(
                 "SELECT count(*)::text AS count FROM torrents;",
                 "bitmagnet"
             )
-        )[0]?.count ?? "0";
+        )[0]?.count,
+        "0"
+    );
 
-    const data = { comet: Number(cometCount), bitmagnet: Number(bitmagnetCount) };
+    const data = { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
     torrentCountCache = { data, timestamp: Date.now() };
     return data;
 }
@@ -267,14 +290,13 @@ async function getDatabaseOverview() {
         LIMIT 25;
     `);
     const deadTupleRows = allDeadTupleRows
-        .sort((a, b) => Number(b.n_dead_tup || 0) - Number(a.n_dead_tup || 0))
+        .sort((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
         .slice(0, 25);
 
     const pgStatStatementsResult = await queryPostgres(`
         SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
     `);
     const pgStatStatementsEnabled = pgStatStatementsResult.includes("pg_stat_statements");
-
     const topQueries = pgStatStatementsEnabled
         ? (parseTable<TopQueryRow>(
               await queryPostgres(String.raw`
@@ -301,42 +323,42 @@ async function getDatabaseOverview() {
     );
 
     const connections = Object.fromEntries(
-        connectionRows.map((row) => [row.state || "unknown", Number(row.count || 0)])
+        connectionRows.map((row) => [
+            stringWithDefault(row.state, "unknown"),
+            numberFrom(row.count),
+        ])
     );
     const totalDatabaseSizeBytes = sumBy(databaseRows, (row) =>
-        Number(row.size_bytes || 0)
+        numberFrom(row.size_bytes)
     );
-    const totalBackends = sumBy(databaseRows, (row) => Number(row.numbackends || 0));
+    const totalBackends = sumBy(databaseRows, (row) => numberFrom(row.numbackends));
     const averageCacheHitRatio =
         databaseRows.length > 0
-            ? sumBy(databaseRows, (row) => Number(row.cache_hit_ratio || 0)) /
+            ? sumBy(databaseRows, (row) => numberFrom(row.cache_hit_ratio)) /
               databaseRows.length
             : 0;
-
-    const waitingClients = sumBy(pgBouncerPools, (row) => Number(row.cl_waiting || 0));
+    const waitingClients = sumBy(pgBouncerPools, (row) => numberFrom(row.cl_waiting));
     const clientConnections = sumBy(
         pgBouncerPools,
-        (row) => Number(row.cl_active || 0) + Number(row.cl_waiting || 0)
+        (row) => numberFrom(row.cl_active) + numberFrom(row.cl_waiting)
     );
     const serverConnections = sumBy(
         pgBouncerPools,
         (row) =>
-            Number(row.sv_active || 0) +
-            Number(row.sv_idle || 0) +
-            Number(row.sv_used || 0)
+            numberFrom(row.sv_active) + numberFrom(row.sv_idle) + numberFrom(row.sv_used)
     );
     let maxWait = 0;
     for (const row of pgBouncerPools) {
-        maxWait = Math.max(maxWait, Number(row.maxwait || 0));
+        maxWait = Math.max(maxWait, numberFrom(row.maxwait));
     }
     const avgQueryTime =
         pgBouncerStats.length > 0
-            ? sumBy(pgBouncerStats, (row) => Number(row.avg_query_time || 0)) /
+            ? sumBy(pgBouncerStats, (row) => numberFrom(row.avg_query_time)) /
               pgBouncerStats.length
             : 0;
     const avgTransactionTime =
         pgBouncerStats.length > 0
-            ? sumBy(pgBouncerStats, (row) => Number(row.avg_xact_time || 0)) /
+            ? sumBy(pgBouncerStats, (row) => numberFrom(row.avg_xact_time)) /
               pgBouncerStats.length
             : 0;
 
@@ -373,7 +395,7 @@ export default function databaseRoutes(app: express.Application): void {
             res.json(data);
         } catch (error) {
             res.status(500).json({
-                error: error instanceof Error ? error.message : String(error),
+                error: errorMessage(error, String(error)),
             });
         }
     }) as RequestHandler);

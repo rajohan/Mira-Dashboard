@@ -13,7 +13,7 @@
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
         "test": "node --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\"",
-        "test:coverage": "node --experimental-test-coverage --test-coverage-lines=79 --test-coverage-branches=64 --test-coverage-functions=72 --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\""
+        "test:coverage": "c8 --all --src src --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\""
     },
     "dependencies": {
         "@types/shell-quote": "^1.7.5",
@@ -29,6 +29,7 @@
         "@types/express": "^5.0.6",
         "@types/node": "^25.9.1",
         "@types/ws": "^8.18.1",
+        "c8": "^11.0.0",
         "eslint": "^10.4.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",

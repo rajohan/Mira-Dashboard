@@ -43,10 +43,10 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+export const app = express();
 
 /** Parses Express trust-proxy config from environment strings. */
-function parseTrustProxy(value: string | undefined): boolean | number | string {
+export function parseTrustProxy(value?: string): boolean | number | string {
     if (value === undefined || value.trim() === "") {
         return "loopback";
     }
@@ -65,15 +65,24 @@ function parseTrustProxy(value: string | undefined): boolean | number | string {
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 app.use(express.json());
-const server = http.createServer(app);
+export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const frontendPath = path.join(__dirname, "..", "..", "dist");
 
-const backendCommit = (() => {
+type ExecSyncCommand = (
+    command: string,
+    options: Parameters<typeof execSync>[1]
+) => Buffer | string;
+
+/** Resolves the current backend git commit for health responses. */
+export function resolveBackendCommit(
+    repoRoot = path.join(__dirname, "..", ".."),
+    execCommand: ExecSyncCommand = execSync
+): string {
     try {
-        return execSync("git rev-parse --short HEAD", {
-            cwd: path.join(__dirname, "..", ".."),
+        return execCommand("git rev-parse --short HEAD", {
+            cwd: repoRoot,
             stdio: ["ignore", "pipe", "ignore"],
         })
             .toString()
@@ -81,7 +90,14 @@ const backendCommit = (() => {
     } catch {
         return "unknown";
     }
-})();
+}
+
+const backendCommit = resolveBackendCommit();
+
+/** Resolves the port the backend should listen on. */
+export function resolveListenPort(value = process.env.PORT): string | number {
+    return value || 3100;
+}
 
 // =====================
 // API Routes
@@ -125,7 +141,8 @@ const authLimiter = rateLimit({
 app.use("/api/auth", authLimiter);
 app.use("/api", apiLimiter);
 
-app.get("/api/sessions", (request, response) => {
+/** Returns dashboard sessions for authenticated requests. */
+export const sessionsHandler: express.RequestHandler = (request, response) => {
     const user = getAuthUserFromRequest(request);
     if (!user) {
         response.status(401).json({ error: "Unauthorized" });
@@ -133,17 +150,21 @@ app.get("/api/sessions", (request, response) => {
     }
 
     response.json(gateway.getSessions());
-});
+};
+
+app.get("/api/sessions", sessionsHandler);
 
 authRoutes(app);
-app.use("/api", (request, response, next) => {
+/** Applies API auth while leaving auth bootstrap/login routes public. */
+export const apiAuthMiddleware: express.RequestHandler = (request, response, next) => {
     if (request.path.startsWith("/auth")) {
         next();
         return;
     }
-
     requireAuth(request, response, next);
-});
+};
+
+app.use("/api", apiAuthMiddleware);
 
 // Route modules
 filesRoutes(app, express);
@@ -176,7 +197,11 @@ staticRoutes(app, frontendPath);
 // =====================
 // WebSocket
 // =====================
-wss.on("connection", (ws: WebSocket, request) => {
+/** Handles one dashboard WebSocket connection after authenticating the request. */
+export function handleWebSocketConnection(
+    ws: WebSocket,
+    request: http.IncomingMessage
+): void {
     const user = getAuthUserFromRequest(request);
     if (!user) {
         ws.close(4401, "Unauthorized");
@@ -184,13 +209,15 @@ wss.on("connection", (ws: WebSocket, request) => {
     }
 
     gateway.handleClient(ws);
-});
+}
+
+wss.on("connection", handleWebSocketConnection);
 
 // =====================
 // Start Server
 // =====================
-const PORT = process.env.PORT || 3100;
-server.listen(PORT, () => {
+/** Starts Gateway and notification monitors after the HTTP server is listening. */
+export function handleServerListening(): void {
     const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
     if (token) {
         gateway.init(token);
@@ -202,4 +229,7 @@ server.listen(PORT, () => {
 
     startQuotaNotificationMonitor();
     startOpenClawNotificationMonitor();
-});
+}
+
+const PORT = resolveListenPort();
+server.listen(PORT, handleServerListening);
