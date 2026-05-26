@@ -8,6 +8,10 @@ const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", "/home/ubuntu/.opencl
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 
+export const __testing = {
+    mediaRoot: MEDIA_ROOT,
+};
+
 const MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

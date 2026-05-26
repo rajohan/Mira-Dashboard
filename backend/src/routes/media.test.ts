@@ -93,6 +93,7 @@ describe("media routes", () => {
             process.env.OPENCLAW_HOME = "";
             const module = await import(`./media.js?blank=${Date.now()}`);
             assert.equal(typeof module.default, "function");
+            assert.equal(module.__testing.mediaRoot, "/home/ubuntu/.openclaw/media");
         } finally {
             if (originalOpenClawHome === undefined) {
                 delete process.env.OPENCLAW_HOME;

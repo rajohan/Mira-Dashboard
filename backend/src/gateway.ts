@@ -563,8 +563,12 @@ function init(token: string): void {
     if (currentToken === token && gatewayClient) {
         return;
     }
+    const previousGatewayClient = gatewayClient;
+    gatewayClient = null;
+    isGatewayConnected = false;
+    broadcast({ type: "disconnected", gatewayConnected: false });
     currentToken = token;
-    gatewayClient?.stop();
+    previousGatewayClient?.stop();
     /** Returns whether this callback belongs to the active Gateway client. */
     function isCurrentGatewayClient(): boolean {
         return gatewayClient === thisGatewayClient;

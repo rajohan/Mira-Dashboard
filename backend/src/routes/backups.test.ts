@@ -268,9 +268,17 @@ describe("backup routes", () => {
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
         assert.equal(backupTesting.getN8nRoot(), tempDir);
-        process.env.MIRA_N8N_ROOT = "";
-        assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");
-        process.env.MIRA_N8N_ROOT = tempDir;
+        const previousN8nRoot = process.env.MIRA_N8N_ROOT;
+        try {
+            process.env.MIRA_N8N_ROOT = "";
+            assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");
+        } finally {
+            if (previousN8nRoot === undefined) {
+                delete process.env.MIRA_N8N_ROOT;
+            } else {
+                process.env.MIRA_N8N_ROOT = previousN8nRoot;
+            }
+        }
         const previousDopplerBin = process.env.DOPPLER_BIN;
         try {
             process.env.DOPPLER_BIN = "";

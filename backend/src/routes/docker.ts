@@ -8,7 +8,6 @@ import { parseTable } from "../lib/cacheStore.js";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
 import {
     arrayFallback,
-    envFallback,
     nonEmptyEnvFallback,
     nullableString,
     objectFallback,
@@ -847,8 +846,8 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
-        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
+        DB_POSTGRESDB_USER: nonEmptyEnvFallback("DATABASE_USERNAME", "postgres"),
+        DB_POSTGRESDB_PASSWORD: nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres"),
     };
 
     try {
