@@ -516,6 +516,9 @@ describe("docker routes", { concurrency: false }, () => {
         try {
             const module = await import(`./docker.js?env=${Date.now()}`);
             assert.equal(typeof module.default, "function");
+            process.env.MIRA_DOCKER_ROOT = "";
+            const defaultModule = await import(`./docker.js?blank=${Date.now()}`);
+            assert.equal(typeof defaultModule.default, "function");
         } finally {
             for (const [key, value] of Object.entries(originalEnv)) {
                 if (value === undefined) {

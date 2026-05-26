@@ -133,6 +133,21 @@ describe("files routes", () => {
         }
     });
 
+    it("falls back to the default workspace root when WORKSPACE_ROOT is blank", async () => {
+        const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
+        try {
+            process.env.WORKSPACE_ROOT = "";
+            const module = await import(`./files.js?blank=${Date.now()}`);
+            assert.equal(typeof module.default, "function");
+        } finally {
+            if (originalWorkspaceRoot === undefined) {
+                delete process.env.WORKSPACE_ROOT;
+            } else {
+                process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+            }
+        }
+    });
+
     it("covers file helper edge cases", async () => {
         const { __testing } = await import("./files.js");
 

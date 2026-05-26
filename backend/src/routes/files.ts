@@ -12,9 +12,12 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
-import { envFallback, stringFallback } from "../lib/values.js";
+import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const WORKSPACE_ROOT = envFallback("WORKSPACE_ROOT", "/home/ubuntu/.openclaw/workspace");
+const WORKSPACE_ROOT = nonEmptyEnvFallback(
+    "WORKSPACE_ROOT",
+    "/home/ubuntu/.openclaw/workspace"
+);
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
 /** Represents file item. */

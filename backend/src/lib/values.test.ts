@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
     arrayFallback,
     envFallback,
+    nonEmptyEnvFallback,
     nullableString,
     objectFallback,
     stringFallback,
@@ -15,12 +16,24 @@ describe("value fallback helpers", () => {
         try {
             delete process.env.MIRA_VALUE_HELPER_TEST;
             assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "fallback");
+            assert.equal(
+                nonEmptyEnvFallback("MIRA_VALUE_HELPER_TEST", "fallback"),
+                "fallback"
+            );
 
             process.env.MIRA_VALUE_HELPER_TEST = "";
             assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "");
+            assert.equal(
+                nonEmptyEnvFallback("MIRA_VALUE_HELPER_TEST", "fallback"),
+                "fallback"
+            );
 
             process.env.MIRA_VALUE_HELPER_TEST = "configured";
             assert.equal(envFallback("MIRA_VALUE_HELPER_TEST", "fallback"), "configured");
+            assert.equal(
+                nonEmptyEnvFallback("MIRA_VALUE_HELPER_TEST", "fallback"),
+                "configured"
+            );
         } finally {
             if (original === undefined) {
                 delete process.env.MIRA_VALUE_HELPER_TEST;

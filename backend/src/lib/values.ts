@@ -4,6 +4,11 @@ export function envFallback(name: string, fallback: string): string {
     return value ?? fallback;
 }
 
+/** Returns an environment variable when it is non-empty, otherwise a fallback. */
+export function nonEmptyEnvFallback(name: string, fallback: string): string {
+    return process.env[name] || fallback;
+}
+
 /** Converts optional values to strings while preserving empty/null fallback behavior. */
 export function stringFallback(value?: unknown, fallback = ""): string {
     return value == null ? fallback : String(value);

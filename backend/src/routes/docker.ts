@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
@@ -9,14 +10,15 @@ import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
 import {
     arrayFallback,
     envFallback,
+    nonEmptyEnvFallback,
     nullableString,
     objectFallback,
     stringFallback,
 } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
-const DOCKER_ROOT = envFallback("MIRA_DOCKER_ROOT", "/opt/docker");
-let dockerBin = process.env.MIRA_DOCKER_BIN || "docker";
+const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 let updaterNodeBin = envFallback("MIRA_UPDATER_NODE_BIN", "node");
 let updaterCwd = envFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
 const DOCKER_COMPOSE_WRAPPER = envFallback(
@@ -350,7 +352,7 @@ async function queryN8nTsvRows<T extends object>(
     columns: string[]
 ): Promise<T[]> {
     // Simple approach: use tab-separated output without header
-    const tempFile = `/tmp/updater-events-${Date.now()}.tsv`;
+    const tempFile = `${os.tmpdir().replaceAll("\\", "/").replace(/\/$/u, "")}/updater-events-${process.pid}-${randomUUID()}.tsv`;
     const copySql = String.raw`COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\t', NULL '');`;
 
     await execFileAsync(

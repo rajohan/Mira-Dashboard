@@ -6,16 +6,16 @@ import { promisify } from "node:util";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
-import { envFallback } from "../lib/values.js";
+import { nonEmptyEnvFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
-const DASHBOARD_ROOT = envFallback(
+const DASHBOARD_ROOT = nonEmptyEnvFallback(
     "MIRA_DASHBOARD_ROOT",
     "/home/ubuntu/projects/mira-dashboard"
 );
-const DASHBOARD_WORKTREE_ROOT = envFallback(
+const DASHBOARD_WORKTREE_ROOT = nonEmptyEnvFallback(
     "MIRA_DASHBOARD_WORKTREE_ROOT",
     "/home/ubuntu/projects/mira-dashboard-worktrees"
 );
@@ -224,11 +224,11 @@ async function runGhJsonLines<T>(
         let stdoutBuffer = "";
         let stderr = "";
         let settled = false;
+        let forceKillTimer: NodeJS.Timeout | null = null;
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
-            setTimeout(() => {
-                child.kill("SIGKILL");
-            }, 5_000).unref();
+            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceKillTimer.unref();
             settle(() => reject(new Error("GitHub CLI command timed out")));
         }, options.timeoutMs || 60_000);
 
@@ -238,6 +238,9 @@ async function runGhJsonLines<T>(
             }
             settled = true;
             clearTimeout(timeout);
+            if (forceKillTimer) {
+                clearTimeout(forceKillTimer);
+            }
             callback();
         };
 

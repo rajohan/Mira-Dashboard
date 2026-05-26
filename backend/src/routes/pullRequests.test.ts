@@ -661,10 +661,19 @@ describe("pull request routes", () => {
 
     it("covers command environment and JSON command helper edge cases", async () => {
         const { __testing } = await import(`./pullRequests.js?command=${Date.now()}`);
+        const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
+        const originalDashboardWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         const originalMiraToken = process.env.MIRA_GITHUB_TOKEN;
         const originalGhToken = process.env.GH_TOKEN;
         const originalGithubToken = process.env.GITHUB_TOKEN;
         try {
+            process.env.MIRA_DASHBOARD_ROOT = "";
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = "";
+            const moduleWithDefaultRoots = await import(
+                `./pullRequests.js?roots=${Date.now()}`
+            );
+            assert.equal(typeof moduleWithDefaultRoots.default, "function");
+
             delete process.env.MIRA_GITHUB_TOKEN;
             delete process.env.GH_TOKEN;
             delete process.env.GITHUB_TOKEN;
@@ -705,6 +714,16 @@ describe("pull request routes", () => {
             assert.equal(command.stdout, "abc1234\n");
             assert.equal(command.stderr, "");
         } finally {
+            if (originalDashboardRoot === undefined) {
+                delete process.env.MIRA_DASHBOARD_ROOT;
+            } else {
+                process.env.MIRA_DASHBOARD_ROOT = originalDashboardRoot;
+            }
+            if (originalDashboardWorktreeRoot === undefined) {
+                delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+            } else {
+                process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalDashboardWorktreeRoot;
+            }
             if (originalMiraToken === undefined) {
                 delete process.env.MIRA_GITHUB_TOKEN;
             } else {

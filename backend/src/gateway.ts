@@ -13,13 +13,16 @@ import {
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
 } from "./lib/openclawGatewayClient.js";
-import { envFallback, stringFallback } from "./lib/values.js";
+import { envFallback, nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
 
 const DASHBOARD_OPENCLAW_HOME = envFallback(
     "MIRA_DASHBOARD_OPENCLAW_HOME",
     Path.join(process.cwd(), "data", "openclaw-client")
 );
-const OPENCLAW_HOME = envFallback("OPENCLAW_HOME", Path.join(os.homedir(), ".openclaw"));
+const OPENCLAW_HOME = nonEmptyEnvFallback(
+    "OPENCLAW_HOME",
+    Path.join(os.homedir(), ".openclaw")
+);
 
 /** Performs load or create dashboard device IDentity. */
 function loadOrCreateDashboardDeviceIdentity(
@@ -559,22 +562,24 @@ function init(token: string): void {
     }
     currentToken = token;
     gatewayClient?.stop();
+    /** Returns whether this callback belongs to the active Gateway client. */
+    function isCurrentGatewayClient(): boolean {
+        return gatewayClient === thisGatewayClient;
+    }
     /** Handles successful Gateway hello negotiation and subscribes to live events. */
     function handleGatewayHelloOk(): void {
+        if (!isCurrentGatewayClient()) {
+            return;
+        }
         isGatewayConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
-        const connectedGatewayClient = gatewayClient;
         /** Subscribes to Gateway session index events for live session updates. */
         async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
-            if (
-                !connectedGatewayClient ||
-                connectedGatewayClient !== gatewayClient ||
-                !isGatewayConnected
-            ) {
+            if (!isCurrentGatewayClient() || !isGatewayConnected) {
                 return;
             }
             try {
-                await connectedGatewayClient.request("sessions.subscribe", {});
+                await thisGatewayClient.request("sessions.subscribe", {});
             } catch (error) {
                 if (shouldRetrySessionIndexSubscription(attempt)) {
                     const delayMs = 500 * 2 ** attempt;
@@ -601,6 +606,9 @@ function init(token: string): void {
     }
     /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
     function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
+        if (!isCurrentGatewayClient()) {
+            return;
+        }
         broadcast({
             type: "event",
             event: evt.event,
@@ -617,14 +625,20 @@ function init(token: string): void {
     }
     /** Logs Gateway connection failures. */
     function handleGatewayConnectError(err: Error): void {
+        if (!isCurrentGatewayClient()) {
+            return;
+        }
         console.error("[Gateway] Connect failed:", err.message);
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
+        if (!isCurrentGatewayClient()) {
+            return;
+        }
         isGatewayConnected = false;
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
-    gatewayClient = new GatewayClientCtor({
+    const thisGatewayClient = new GatewayClientCtor({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
         role: "operator",
@@ -641,7 +655,8 @@ function init(token: string): void {
         onConnectError: handleGatewayConnectError,
         onClose: handleGatewayClose,
     });
-    gatewayClient.start();
+    gatewayClient = thisGatewayClient;
+    thisGatewayClient.start();
 }
 
 /** Performs forward request. */

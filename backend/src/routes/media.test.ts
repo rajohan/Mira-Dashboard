@@ -87,6 +87,21 @@ describe("media routes", () => {
         assert.equal(unknown.headers.get("content-type"), "application/octet-stream");
     });
 
+    it("falls back to the default media root when OPENCLAW_HOME is blank", async () => {
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        try {
+            process.env.OPENCLAW_HOME = "";
+            const module = await import(`./media.js?blank=${Date.now()}`);
+            assert.equal(typeof module.default, "function");
+        } finally {
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+        }
+    });
+
     it("rejects missing, external, and symlink-escaped media paths", async () => {
         const missing = await fetch(
             `${server.baseUrl}/api/media?path=${encodeURIComponent(

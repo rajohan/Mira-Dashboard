@@ -4,16 +4,16 @@ import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute } from "../lib/errors.js";
-import { envFallback } from "../lib/values.js";
+import { envFallback, nonEmptyEnvFallback } from "../lib/values.js";
 const N8N_DATABASE = "n8n";
 const MAX_OUTPUT_CHARS = 100_000;
 
 function getN8nRoot(): string {
-    return envFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
+    return nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
 }
 
 function getDopplerBin(): string {
-    return process.env.DOPPLER_BIN || "/usr/local/bin/doppler";
+    return nonEmptyEnvFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
 }
 
 function shellQuote(value: string): string {

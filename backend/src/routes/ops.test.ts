@@ -134,6 +134,30 @@ describe("ops routes", () => {
         } finally {
             delete process.env.FAKE_LOG_ROTATION_EMPTY;
         }
+
+        const originalUsername = process.env.DATABASE_USERNAME;
+        const originalPassword = process.env.DATABASE_PASSWORD;
+        try {
+            process.env.DATABASE_USERNAME = "";
+            process.env.DATABASE_PASSWORD = "";
+            const defaultCredentials = await requestJson<{
+                success: boolean;
+                lastRun: { completedAt: string; ok: boolean };
+            }>(server, "/api/ops/log-rotation/status");
+            assert.equal(defaultCredentials.status, 200);
+            assert.equal(defaultCredentials.body.success, true);
+        } finally {
+            if (originalUsername === undefined) {
+                delete process.env.DATABASE_USERNAME;
+            } else {
+                process.env.DATABASE_USERNAME = originalUsername;
+            }
+            if (originalPassword === undefined) {
+                delete process.env.DATABASE_PASSWORD;
+            } else {
+                process.env.DATABASE_PASSWORD = originalPassword;
+            }
+        }
     });
 
     it("runs dry-run log rotation with node", async () => {

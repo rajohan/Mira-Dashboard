@@ -160,10 +160,15 @@ describe("gateway state and helper utilities", () => {
 
             process.env.OPENCLAW_GATEWAY_URL = "ws://gateway.example";
             gateway.init("token-d");
-            assert.equal(
-                CapturingGatewayClient.instances[3]?.options.url,
-                "ws://gateway.example"
-            );
+            const active = CapturingGatewayClient.instances[3];
+            assert.equal(active?.options.url, "ws://gateway.example");
+            active?.options.onHelloOk?.({ type: "hello.ok" });
+            assert.equal(gateway.isConnected(), true);
+            successful?.options.onHelloOk?.({ type: "hello.ok" });
+            successful?.options.onEvent?.({ event: "sessions.updated", payload: {} });
+            successful?.options.onConnectError?.(new Error("stale connect failed"));
+            successful?.options.onClose?.(1006, "stale");
+            assert.equal(gateway.isConnected(), true);
         } finally {
             if (originalGatewayUrl === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_URL;

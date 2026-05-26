@@ -2,9 +2,9 @@ import express, { type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 
-import { envFallback, stringFallback } from "../lib/values.js";
+import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const OPENCLAW_HOME = envFallback("OPENCLAW_HOME", "/home/ubuntu/.openclaw");
+const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", "/home/ubuntu/.openclaw");
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const REAL_MEDIA_ROOT = fs.realpathSync(MEDIA_ROOT);
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;

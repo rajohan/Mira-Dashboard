@@ -4,10 +4,10 @@ import { promisify } from "node:util";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import { envFallback, stringFallback } from "../lib/values.js";
+import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
-const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
+const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
 const N8N_DATABASE = "n8n";
 const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
 const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;
@@ -35,8 +35,8 @@ function buildN8nScriptEnv() {
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = envFallback("DATABASE_USERNAME", "postgres");
-    const password = envFallback("DATABASE_PASSWORD", "postgres");
+    const username = nonEmptyEnvFallback("DATABASE_USERNAME", "postgres");
+    const password = nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres");
     const host = envFallback("DATABASE_HOST", "postgres");
     const port = envFallback("DATABASE_PORT", "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
