@@ -2328,6 +2328,13 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.call",
+                data: { name: "exec", cmd: "npm run flat" },
+            }),
+            { activity: "exec npm run flat" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
                 data: { name: "exec", parameters: { cmd: "npm run typecheck" } },
             }),
             { activity: "exec npm run typecheck" }
@@ -2365,7 +2372,14 @@ describe("agents routes", () => {
                 type: "tool.result",
                 data: { name: "exec" },
             }),
-            {}
+            { activity: "exec" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", cmd: "npm run result:flat" },
+            }),
+            { activity: "exec npm run result:flat" }
         );
 
         const sessions = [

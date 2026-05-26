@@ -16,6 +16,10 @@ function getDopplerBin(): string {
     return envFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
 }
 
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+}
+
 /** Represents backup job. */
 interface BackupJob {
     id: string;
@@ -174,7 +178,7 @@ function startKopiaBackupJob() {
     const kopiaStatusScript = `${getN8nRoot()}/scripts/backup-kopia-status.mjs`;
     return startBackupJob(
         "kopia",
-        `/opt/docker/apps/kopia/backup.sh && node ${kopiaStatusScript}`
+        `/opt/docker/apps/kopia/backup.sh && node ${shellQuote(kopiaStatusScript)}`
     );
 }
 
@@ -183,7 +187,7 @@ function startWalgBackupJob() {
     const walgStatusScript = `${getN8nRoot()}/scripts/backup-walg-status.mjs`;
     return startBackupJob(
         "walg",
-        `docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node ${walgStatusScript}`
+        `docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node ${shellQuote(walgStatusScript)}`
     );
 }
 
@@ -194,6 +198,7 @@ export const __testing = {
     createBackupEnv,
     getN8nRoot,
     getDopplerBin,
+    shellQuote,
 };
 
 /** Registers backup API routes. */

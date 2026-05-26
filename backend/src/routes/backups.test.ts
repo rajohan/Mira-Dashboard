@@ -269,5 +269,9 @@ describe("backup routes", () => {
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
         assert.equal(backupTesting.getN8nRoot(), tempDir);
         assert.equal(typeof backupTesting.getDopplerBin(), "string");
+        assert.equal(
+            backupTesting.shellQuote("/srv/mira dashboard/it's/scripts/status.mjs"),
+            String.raw`'/srv/mira dashboard/it'\''s/scripts/status.mjs'`
+        );
     });
 });

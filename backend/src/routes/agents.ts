@@ -661,6 +661,10 @@ function isVisibleActivityTool(toolName: string): boolean {
     return normalizedToolName !== "message";
 }
 
+function getTrajectoryToolArguments(data: Record<string, unknown>): unknown {
+    return data.arguments ?? data.args ?? data.input ?? data.parameters ?? data;
+}
+
 /** Extracts nested tool activity from Codex response-item session logs. */
 function getCodexResponseItemActivity(entry: unknown): string | null {
     if (!entry || typeof entry !== "object") {
@@ -744,7 +748,7 @@ function getTrajectoryActivity(entry: unknown): {
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments: data.arguments || data.args || data.input || data.parameters,
+                arguments: getTrajectoryToolArguments(data as Record<string, unknown>),
             }),
         };
     }
@@ -752,12 +756,11 @@ function getTrajectoryActivity(entry: unknown): {
     if (
         record.type === "tool.result" &&
         typeof data.name === "string" &&
-        isVisibleActivityTool(data.name) &&
-        (data.arguments || data.args || data.input || data.parameters)
+        isVisibleActivityTool(data.name)
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments: data.arguments || data.args || data.input || data.parameters,
+                arguments: getTrajectoryToolArguments(data as Record<string, unknown>),
             }),
         };
     }
@@ -1243,6 +1246,7 @@ export const __testing = {
     summarizeToolActivity,
     normalizeToolName,
     isVisibleActivityTool,
+    getTrajectoryToolArguments,
     getCodexResponseItemActivity,
     getTrajectoryActivity,
     getLatestActivityFromFile,
