@@ -36,7 +36,7 @@ export function getCronStateValue(job: CronJob, key: string): unknown {
 
 /** Formats cron timestamp for display. */
 export function formatCronTimestamp(value: unknown): string {
-    if (typeof value !== "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
         return "—";
     }
 
@@ -45,18 +45,19 @@ export function formatCronTimestamp(value: unknown): string {
 
 /** Formats cron last status for display. */
 export function formatCronLastStatus(value: unknown): string {
-    if (typeof value !== "string" || value.length === 0) {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized) {
         return "UNKNOWN";
     }
 
-    return value.toUpperCase();
+    return normalized.toUpperCase();
 }
 
 /** Returns cron status variant. */
 export function getCronStatusVariant(
     value: string
 ): "success" | "warning" | "error" | "default" {
-    const normalized = value.toLowerCase();
+    const normalized = value.trim().toLowerCase();
     if (normalized === "ok" || normalized === "success") {
         return "success";
     }

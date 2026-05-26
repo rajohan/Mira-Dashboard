@@ -52,17 +52,20 @@ describe("cron utils", () => {
 
     it("formats timestamps and statuses", () => {
         expect(formatCronTimestamp("bad")).toBe("—");
+        expect(formatCronTimestamp(Number.NaN)).toBe("—");
+        expect(formatCronTimestamp(Infinity)).toBe("—");
         expect(formatCronTimestamp(new Date(2026, 4, 10, 6, 7).getTime())).toBe(
             "10.05.2026, 06:07"
         );
         const missingStatus: string | undefined = undefined;
         expect(formatCronLastStatus(missingStatus)).toBe("UNKNOWN");
         expect(formatCronLastStatus("")).toBe("UNKNOWN");
+        expect(formatCronLastStatus("  ok  ")).toBe("OK");
         expect(formatCronLastStatus("success")).toBe("SUCCESS");
     });
 
     it("maps status variants", () => {
-        expect(getCronStatusVariant("ok")).toBe("success");
+        expect(getCronStatusVariant(" ok ")).toBe("success");
         expect(getCronStatusVariant("success")).toBe("success");
         expect(getCronStatusVariant("running")).toBe("warning");
         expect(getCronStatusVariant("error")).toBe("error");
