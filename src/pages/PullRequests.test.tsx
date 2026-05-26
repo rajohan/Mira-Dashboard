@@ -308,6 +308,61 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
 
+    it("blocks merge actions until CI checks pass", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ conclusion: "FAILURE", name: "ci" }],
+                        title: "Failing dashboard change",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Checks failed")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toHaveAttribute(
+            "title",
+            "CI checks must pass before merging from the dashboard"
+        );
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("does not show expected checks as passed", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ status: "EXPECTED", name: "ci" }],
+                        title: "Waiting for checks",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Checks running")).toBeInTheDocument();
+        expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
     it("blocks production actions when checkout is off main", () => {
         mockPullRequests({
             checkout: {

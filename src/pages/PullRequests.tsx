@@ -49,6 +49,7 @@ void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 const MIRA_AUTHOR = "mira-2026";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
+const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 
 /** Returns whether mira pull request. */
 function isMiraPullRequest(pr: PullRequestSummary): boolean {
@@ -119,19 +120,55 @@ function summarizeChecks(checks: unknown[] | undefined) {
         (check): check is Record<string, unknown> =>
             Boolean(check) && typeof check === "object" && !Array.isArray(check)
     );
-    const values = records.map((check) =>
-        String(check.conclusion || check.status || "").toLowerCase()
-    );
+    const values = records.map((check) => {
+        const conclusion = normalizedCheckValue(check.conclusion);
+        return conclusion || normalizedCheckValue(check.status ?? check.state);
+    });
 
     if (values.some((value) => ["failure", "failed", "error"].includes(value))) {
         return { label: "Checks failed", variant: "error" as const };
     }
 
-    if (values.some((value) => ["queued", "pending", "in_progress"].includes(value))) {
+    if (pullRequestChecksPassed(checks)) {
+        return { label: "Checks passed", variant: "success" as const };
+    }
+
+    if (
+        values.some((value) =>
+            ["queued", "pending", "in_progress", "expected", "waiting"].includes(value)
+        )
+    ) {
         return { label: "Checks running", variant: "warning" as const };
     }
 
-    return { label: "Checks passed", variant: "success" as const };
+    return { label: "Checks pending", variant: "warning" as const };
+}
+
+/** Returns whether pull request checks are conclusively passing. */
+function pullRequestChecksPassed(checks: unknown[] | undefined): boolean {
+    const records = (checks || []).filter(
+        (check): check is Record<string, unknown> =>
+            Boolean(check) && typeof check === "object" && !Array.isArray(check)
+    );
+
+    if (records.length === 0) {
+        return false;
+    }
+
+    return records.every((check) => {
+        const conclusion = normalizedCheckValue(check.conclusion);
+        if (conclusion) {
+            return PASSING_CHECK_VALUES.has(conclusion);
+        }
+
+        const status = normalizedCheckValue(check.status ?? check.state);
+        return PASSING_CHECK_VALUES.has(status);
+    });
+}
+
+/** Normalizes a GitHub check status or conclusion. */
+function normalizedCheckValue(value: unknown): string {
+    return typeof value === "string" ? value.toLowerCase() : "";
 }
 
 /** Performs deployment variant. */
@@ -514,73 +551,73 @@ export function PullRequests() {
                                         deployed from the dashboard.
                                     </p>
                                 </div>
-                                {miraPullRequests.map((pr) => (
-                                    <PullRequestCard
-                                        key={pr.number}
-                                        pr={pr}
-                                        actions={
-                                            <>
-                                                <Button
-                                                    variant="primary"
-                                                    onClick={() =>
-                                                        setPendingAction({
-                                                            type: "merge-deploy",
-                                                            pr,
-                                                        })
-                                                    }
-                                                    disabled={
-                                                        isActionPending ||
-                                                        isProductionActionBlocked ||
-                                                        pr.isDraft
-                                                    }
-                                                    title={
-                                                        pr.isDraft
-                                                            ? "Draft pull requests cannot be merged from the dashboard"
-                                                            : undefined
-                                                    }
-                                                >
-                                                    <Rocket className="h-4 w-4" />
-                                                    Merge + deploy
-                                                </Button>
-                                                <Button
-                                                    variant="secondary"
-                                                    onClick={() =>
-                                                        setPendingAction({
-                                                            type: "merge",
-                                                            pr,
-                                                        })
-                                                    }
-                                                    disabled={
-                                                        isActionPending ||
-                                                        isProductionActionBlocked ||
-                                                        pr.isDraft
-                                                    }
-                                                    title={
-                                                        pr.isDraft
-                                                            ? "Draft pull requests cannot be merged from the dashboard"
-                                                            : undefined
-                                                    }
-                                                >
-                                                    <GitMerge className="h-4 w-4" />
-                                                    Merge only
-                                                </Button>
-                                                <Button
-                                                    variant="danger"
-                                                    onClick={() =>
-                                                        setPendingAction({
-                                                            type: "reject",
-                                                            pr,
-                                                        })
-                                                    }
-                                                    disabled={isActionPending}
-                                                >
-                                                    <XCircle className="h-4 w-4" />
-                                                    Reject
-                                                </Button>
-                                            </>
-                                        }
-                                    />
-                                ))}
+                                {miraPullRequests.map((pr) => {
+                                    const checksPassed = pullRequestChecksPassed(
+                                        pr.statusCheckRollup
+                                    );
+                                    const mergeDisabled =
+                                        isActionPending ||
+                                        isProductionActionBlocked ||
+                                        pr.isDraft ||
+                                        !checksPassed;
+                                    const mergeTitle = pr.isDraft
+                                        ? "Draft pull requests cannot be merged from the dashboard"
+                                        : checksPassed
+                                          ? undefined
+                                          : "CI checks must pass before merging from the dashboard";
+
+                                    return (
+                                        <PullRequestCard
+                                            key={pr.number}
+                                            pr={pr}
+                                            actions={
+                                                <>
+                                                    <Button
+                                                        variant="primary"
+                                                        onClick={() =>
+                                                            setPendingAction({
+                                                                type: "merge-deploy",
+                                                                pr,
+                                                            })
+                                                        }
+                                                        disabled={mergeDisabled}
+                                                        title={mergeTitle}
+                                                    >
+                                                        <Rocket className="h-4 w-4" />
+                                                        Merge + deploy
+                                                    </Button>
+                                                    <Button
+                                                        variant="secondary"
+                                                        onClick={() =>
+                                                            setPendingAction({
+                                                                type: "merge",
+                                                                pr,
+                                                            })
+                                                        }
+                                                        disabled={mergeDisabled}
+                                                        title={mergeTitle}
+                                                    >
+                                                        <GitMerge className="h-4 w-4" />
+                                                        Merge only
+                                                    </Button>
+                                                    <Button
+                                                        variant="danger"
+                                                        onClick={() =>
+                                                            setPendingAction({
+                                                                type: "reject",
+                                                                pr,
+                                                            })
+                                                        }
+                                                        disabled={isActionPending}
+                                                    >
+                                                        <XCircle className="h-4 w-4" />
+                                                        Reject
+                                                    </Button>
+                                                </>
+                                            }
+                                        />
+                                    );
+                                })}
                             </section>
                         ) : null}
 

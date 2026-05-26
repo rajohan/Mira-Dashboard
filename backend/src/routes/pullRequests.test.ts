@@ -131,7 +131,7 @@ const pullRequests = [
   mergeable: "MERGEABLE",
   mergeStateStatus: "CLEAN",
   reviewDecision: "",
-  statusCheckRollup: [],
+  statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
   additions: 12,
   deletions: 3,
   changedFiles: 4
@@ -216,6 +216,28 @@ if (args[0] === "api" && args[1] === "graphql") {
 }
 if (args[0] === "pr" && args[1] === "view") {
   const requested = Number(args[2]);
+  if (requested === 13) {
+    process.stdout.write(JSON.stringify({
+      number: 13,
+      title: "Pending CI",
+      body: "Do not merge yet",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/13",
+      headRefName: "pending-ci",
+      baseRefName: "main",
+      author: { login: "mira-2026" },
+      createdAt: "2026-05-10T03:00:00Z",
+      updatedAt: "2026-05-14T00:00:00Z",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "",
+      statusCheckRollup: [{ status: "PENDING", name: "ci" }],
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
   const pr = pullRequests.find((candidate) => candidate.number === requested);
   if (!pr) {
     process.stderr.write("pull request not found");
@@ -516,7 +538,7 @@ describe("pull request routes", () => {
                 mergeable: "MERGEABLE",
                 mergeStateStatus: "CLEAN",
                 reviewDecision: "",
-                statusCheckRollup: [],
+                statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 12,
                 deletions: 3,
                 changedFiles: 4,
@@ -1122,6 +1144,40 @@ describe("pull request routes", () => {
                 response.body.error,
                 "Only Mira-authored pull requests can be managed here"
             );
+        } finally {
+            console.error = originalConsoleError;
+        }
+    });
+
+    it("blocks approval until CI checks have passed while still allowing rejection", async () => {
+        const originalConsoleError = console.error;
+        console.error = () => {
+            // Suppress the expected route error for this negative-path assertion.
+        };
+        try {
+            const approval = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/13/approve",
+                { method: "POST", body: { deploy: false } }
+            );
+
+            assert.equal(approval.status, 500);
+            assert.equal(
+                approval.body.error,
+                "Pull request CI checks must pass before approval"
+            );
+
+            const rejection = await requestJson<{
+                message: string;
+                cleanup: { status: string };
+            }>(server, "/api/pull-requests/13/reject", {
+                method: "POST",
+                body: { comment: "Not ready yet" },
+            });
+
+            assert.equal(rejection.status, 200);
+            assert.equal(rejection.body.message, "PR #13 closed");
+            assert.equal(rejection.body.cleanup.status, "skipped");
         } finally {
             console.error = originalConsoleError;
         }
