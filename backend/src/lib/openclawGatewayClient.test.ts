@@ -643,38 +643,57 @@ describe("OpenClaw gateway client websocket protocol", () => {
 
     it("schedules and clears reconnect timers", async () => {
         const { client, internals } = createProtocolClient();
+        const originalStart = client.start;
+        let reconnectStarts = 0;
+        client.start = () => {
+            reconnectStarts++;
+        };
 
-        internals.closed = false;
-        internals.backoffMs = 1;
-        internals.scheduleReconnect();
-        assert.ok(internals.reconnectTimer);
-        await waitFor(() => internals.reconnectTimer === null || undefined, "reconnect");
-        internals.closed = false;
-        internals.scheduleReconnect();
-        assert.ok(internals.reconnectTimer);
-        client.stop();
-        assert.equal(internals.reconnectTimer, null);
+        try {
+            internals.closed = false;
+            internals.backoffMs = 1;
+            internals.scheduleReconnect();
+            assert.ok(internals.reconnectTimer);
+            await waitFor(
+                () =>
+                    internals.reconnectTimer === null && reconnectStarts === 1
+                        ? true
+                        : undefined,
+                "reconnect"
+            );
+            internals.closed = false;
+            internals.scheduleReconnect();
+            assert.ok(internals.reconnectTimer);
+            client.stop();
+            assert.equal(internals.reconnectTimer, null);
 
-        internals.closed = true;
-        internals.scheduleReconnect();
+            internals.closed = true;
+            internals.scheduleReconnect();
+        } finally {
+            client.start = originalStart;
+            client.stop();
+        }
     });
 
     it("starts and stops tick watching around stale connections", async () => {
         const { errors, internals } = createProtocolClient();
+        const tickTimer = internals as unknown as {
+            tickTimer: { _onTimeout: () => void } | null;
+        };
 
         internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
         internals.tickIntervalMs = 1;
         internals.lastTickAt = Date.now() - 10_000;
         internals.startTickWatch();
-        await waitFor(
-            () => errors.find((message) => message === "gateway tick timeout"),
-            "tick timeout"
-        );
+        assert.ok(tickTimer.tickTimer);
+        tickTimer.tickTimer._onTimeout();
+        assert.equal(errors.includes("gateway tick timeout"), true);
         internals.stopTickWatch();
 
         internals.ws = null;
         internals.startTickWatch();
-        await new Promise((resolve) => setTimeout(resolve, 1_050));
+        assert.ok(tickTimer.tickTimer);
+        tickTimer.tickTimer._onTimeout();
         internals.stopTickWatch();
     });
 
