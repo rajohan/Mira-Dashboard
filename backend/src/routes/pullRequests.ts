@@ -229,19 +229,24 @@ async function runGhJsonLines<T>(
             child.kill("SIGTERM");
             forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
             forceKillTimer.unref();
-            settle(() => reject(new Error("GitHub CLI command timed out")));
+            settle(() => reject(new Error("GitHub CLI command timed out")), {
+                keepForceKillTimer: true,
+            });
         }, options.timeoutMs || 60_000);
 
-        const settle = (callback: () => void) => {
+        const settle = (
+            callback: () => void,
+            options: { keepForceKillTimer?: boolean } = {}
+        ) => {
             if (settled) {
+                if (forceKillTimer && !options.keepForceKillTimer) {
+                    clearTimeout(forceKillTimer);
+                    forceKillTimer = null;
+                }
                 return;
             }
             settled = true;
             clearTimeout(timeout);
-            if (forceKillTimer) {
-                clearTimeout(forceKillTimer);
-                forceKillTimer = null;
-            }
             callback();
         };
 

@@ -440,7 +440,7 @@ describe("OpenClaw config routes", () => {
                         (skill) =>
                             skill.name === "primitive-entry" &&
                             skill.enabled === true &&
-                            skill.description === undefined
+                            skill.description === ""
                     ),
                 true
             );
@@ -459,49 +459,55 @@ describe("OpenClaw config routes", () => {
     });
 
     it("reports config, skills, backup, restart, and skill toggle errors", async () => {
+        const originalRequest = gateway.request;
         gateway.request = async () => {
             throw new Error("gateway failed");
         };
 
-        const config = await requestJson<{ error: string }>(server, "/api/config");
-        assert.equal(config.body.error, "gateway failed");
-        const skills = await requestJson<{ error: string }>(server, "/api/skills");
-        assert.equal(skills.body.error, "gateway failed");
-        const backup = await requestJson<{ error: string }>(server, "/api/backup", {
-            method: "POST",
-        });
-        assert.equal(backup.body.error, "gateway failed");
-        const invalidName = await requestJson<{ error: string }>(
-            server,
-            "/api/skills/bad%2Fname",
-            {
+        try {
+            const config = await requestJson<{ error: string }>(server, "/api/config");
+            assert.equal(config.body.error, "gateway failed");
+            const skills = await requestJson<{ error: string }>(server, "/api/skills");
+            assert.equal(skills.body.error, "gateway failed");
+            const backup = await requestJson<{ error: string }>(server, "/api/backup", {
                 method: "POST",
-                body: { enabled: true },
-            }
-        );
-        assert.equal(invalidName.body.error, "Invalid skill name");
-        const invalidEnabled = await requestJson<{ error: string }>(
-            server,
-            "/api/skills/custom-skill",
-            {
-                method: "POST",
-                body: { enabled: "yes" },
-            }
-        );
-        assert.equal(invalidEnabled.body.error, "Invalid enabled value");
-        const toggleFailure = await requestJson<{ error: string }>(
-            server,
-            "/api/skills/custom-skill",
-            {
-                method: "POST",
-                body: { enabled: true },
-            }
-        );
-        assert.equal(toggleFailure.body.error, "gateway failed");
+            });
+            assert.equal(backup.body.error, "gateway failed");
+            const invalidName = await requestJson<{ error: string }>(
+                server,
+                "/api/skills/bad%2Fname",
+                {
+                    method: "POST",
+                    body: { enabled: true },
+                }
+            );
+            assert.equal(invalidName.body.error, "Invalid skill name");
+            const invalidEnabled = await requestJson<{ error: string }>(
+                server,
+                "/api/skills/custom-skill",
+                {
+                    method: "POST",
+                    body: { enabled: "yes" },
+                }
+            );
+            assert.equal(invalidEnabled.body.error, "Invalid enabled value");
+            const toggleFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/skills/custom-skill",
+                {
+                    method: "POST",
+                    body: { enabled: true },
+                }
+            );
+            assert.equal(toggleFailure.body.error, "gateway failed");
+        } finally {
+            gateway.request = originalRequest;
+        }
     });
 
     it("runs restart through an injected OpenClaw binary", async () => {
         const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-bin-"));
+        const originalOpenClawBin = __testing.getOpenClawBinForTest();
         try {
             const binPath = path.join(tempDir, "openclaw");
             await writeFile(
@@ -543,7 +549,18 @@ throw new Error("restart failed");
             assert.equal(failedRestart.status, 500);
             assert.match(failedRestart.body.error, /Command failed/u);
         } finally {
+            __testing.setOpenClawBinForTest(originalOpenClawBin);
             await rm(tempDir, { recursive: true, force: true });
+        }
+        try {
+            __testing.setOpenClawBinForTest(undefined);
+            assert.equal(
+                __testing.getOpenClawBinForTest(),
+                process.env.OPENCLAW_BIN ||
+                    path.join(os.homedir(), ".npm-global/bin/openclaw")
+            );
+        } finally {
+            __testing.setOpenClawBinForTest(originalOpenClawBin);
         }
     });
 });

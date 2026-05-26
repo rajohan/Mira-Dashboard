@@ -174,7 +174,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
             name,
             path: `skills.entries.${name}`,
             enabled: entry.enabled !== false,
-            description: entry.description,
+            description: typeof entry.description === "string" ? entry.description : "",
             source: "extra",
         });
     }
@@ -283,8 +283,12 @@ export const __testing = {
     getSkills,
     isValidSkillName,
     readSkillDescription,
-    setOpenClawBinForTest: (binPath: string) => {
-        openClawBin = binPath;
+    getOpenClawBinForTest: () => openClawBin,
+    setOpenClawBinForTest: (binPath: string | undefined) => {
+        openClawBin =
+            binPath ||
+            process.env.OPENCLAW_BIN ||
+            path.join(os.homedir(), ".npm-global/bin/openclaw");
     },
     getOpenClawPackageRootForTest: () => openClawPackageRoot,
     setOpenClawPackageRootForTest: (packageRoot: string) => {

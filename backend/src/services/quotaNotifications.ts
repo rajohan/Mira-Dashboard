@@ -85,6 +85,22 @@ function getNotificationPayload(
     return null;
 }
 
+/** Returns a notification payload or skips inconsistent quota snapshots. */
+function getProviderNotificationPayload(
+    provider: ProviderKey,
+    bucket: number,
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+) {
+    const payload = getNotificationPayload(provider, bucket, quotas);
+    if (!payload) {
+        console.warn(
+            `[QuotaNotifications] Missing notification payload for ${provider} ${bucket}%`
+        );
+        return null;
+    }
+    return payload;
+}
+
 /** Performs ensure state row. */
 function ensureStateRow(provider: ProviderKey, bucket: number): void {
     db.prepare(
@@ -151,6 +167,40 @@ function insertNotification(
     pruneReadNotifications();
 }
 
+/** Handles one quota threshold bucket. */
+function handleQuotaBucket(
+    provider: ProviderKey,
+    bucket: number,
+    percent: number,
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>,
+    occurredAt: string
+): void {
+    const payload = getProviderNotificationPayload(provider, bucket, quotas);
+    if (!payload) {
+        return;
+    }
+    ensureStateRow(provider, bucket);
+    const state = getState(provider, bucket);
+
+    let isArmed = state.is_armed;
+
+    if (isArmed === 1 && percent >= bucket) {
+        insertNotification(
+            provider,
+            bucket,
+            percent,
+            occurredAt,
+            payload.title,
+            payload.description
+        );
+        isArmed = 0;
+    } else if (percent < bucket - HYSTERESIS) {
+        isArmed = 1;
+    }
+
+    setState(provider, bucket, isArmed);
+}
+
 let running = false;
 
 /** Performs run quota notification check. */
@@ -178,28 +228,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
             }
 
             for (const bucket of THRESHOLDS) {
-                // Non-null: getProviderPercent only returns a percent for quota-backed providers.
-                const payload = getNotificationPayload(provider, bucket, quotas)!;
-                ensureStateRow(provider, bucket);
-                const state = getState(provider, bucket);
-
-                let isArmed = state.is_armed;
-
-                if (isArmed === 1 && percent >= bucket) {
-                    insertNotification(
-                        provider,
-                        bucket,
-                        percent,
-                        occurredAt,
-                        payload.title,
-                        payload.description
-                    );
-                    isArmed = 0;
-                } else if (percent < bucket - HYSTERESIS) {
-                    isArmed = 1;
-                }
-
-                setState(provider, bucket, isArmed);
+                handleQuotaBucket(provider, bucket, percent, quotas, occurredAt);
             }
         }
     } catch (error) {
@@ -224,6 +253,8 @@ export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS):
 
 export const __testing = {
     getNotificationPayload,
+    getProviderNotificationPayload,
     getProviderPercent,
     getState,
+    handleQuotaBucket,
 };

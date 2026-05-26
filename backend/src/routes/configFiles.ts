@@ -71,11 +71,19 @@ function resolveOpenclawRoot(): string | null {
 /** Performs list config files. */
 function listConfigFiles(openclawRoot: string): ConfigFile[] {
     const files: ConfigFile[] = [];
+    const rootReal = fs.realpathSync(openclawRoot);
 
     for (const relPath of ALLOWED_CONFIG_FILES) {
         const fullPath = path.join(openclawRoot, relPath);
         try {
-            const stat = fs.statSync(fullPath);
+            const resolvedFullPath = fs.realpathSync(fullPath);
+            if (
+                resolvedFullPath !== rootReal &&
+                !resolvedFullPath.startsWith(rootReal + path.sep)
+            ) {
+                continue;
+            }
+            const stat = fs.statSync(resolvedFullPath);
             files.push({
                 name: path.basename(relPath),
                 path: "config:" + relPath, // Prefix to distinguish from workspace files

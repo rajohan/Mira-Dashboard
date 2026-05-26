@@ -1,5 +1,6 @@
 import express, { type RequestHandler } from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import {
@@ -17,8 +18,8 @@ interface Settings {
 }
 
 /** Resolves dashboard settings directory from a home directory value. */
-function resolveSettingsDir(home = process.env.HOME): string {
-    return path.join(home || "", ".openclaw");
+function resolveSettingsDir(home = process.env.HOME || os.homedir()): string {
+    return path.resolve(path.join(home, ".openclaw"));
 }
 
 const SETTINGS_DIR = resolveSettingsDir();

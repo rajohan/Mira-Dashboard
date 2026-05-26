@@ -39,7 +39,7 @@ function buildPostgresUri(database = N8N_DATABASE) {
     const password = nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres");
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
 /** Performs read log rotation status. */

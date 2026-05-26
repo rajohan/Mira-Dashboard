@@ -85,7 +85,25 @@ describe("settings routes", () => {
             __testing.resolveSettingsDir("/tmp/settings-home"),
             path.join("/tmp/settings-home", ".openclaw")
         );
-        assert.equal(__testing.resolveSettingsDir(""), ".openclaw");
+        assert.equal(__testing.resolveSettingsDir(""), path.resolve(".openclaw"));
+        assert.equal(
+            __testing.resolveSettingsDir(),
+            path.join(os.homedir(), ".openclaw")
+        );
+        const originalHome = process.env.HOME;
+        try {
+            delete process.env.HOME;
+            assert.equal(
+                __testing.resolveSettingsDir(),
+                path.join(os.homedir(), ".openclaw")
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+        }
 
         const response = await requestJson<{
             theme: string;

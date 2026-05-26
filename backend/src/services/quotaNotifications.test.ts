@@ -308,6 +308,30 @@ describe("quota notifications", () => {
         assert.equal(quotaTesting.getProviderPercent("openrouter", quotas), null);
         assert.equal(quotaTesting.getProviderPercent("synthetic", quotas), 10);
         assert.equal(quotaTesting.getNotificationPayload("openrouter", 80, quotas), null);
+        const originalWarn = console.warn;
+        const warnings: unknown[][] = [];
+        console.warn = (...args: unknown[]) => {
+            warnings.push(args);
+        };
+        try {
+            assert.equal(
+                quotaTesting.getProviderNotificationPayload("openrouter", 80, quotas),
+                null
+            );
+            quotaTesting.handleQuotaBucket(
+                "openrouter",
+                80,
+                90,
+                quotas,
+                new Date(quotas.checkedAt).toISOString()
+            );
+        } finally {
+            console.warn = originalWarn;
+        }
+        assert.equal(
+            warnings[0]?.[0],
+            "[QuotaNotifications] Missing notification payload for openrouter 80%"
+        );
         assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
             title: "Synthetic.new usage high (80%)",
             description: "5h 100% left · weekly 3 left",

@@ -211,7 +211,7 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 if (args[0] === "pr" && ["merge", "close"].includes(args[1])) {
-  if (args[1] === "close") {
+  if (args[1] === "close" && args.includes("--comment")) {
     const comment = args[args.indexOf("--comment") + 1];
     process.stdout.write("comment=" + comment + "\n");
   }

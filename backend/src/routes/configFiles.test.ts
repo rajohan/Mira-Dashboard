@@ -104,34 +104,63 @@ describe("config files routes", () => {
     });
 
     it("lists only whitelisted config files that exist", async () => {
-        const response = await requestJson<{ files: ConfigFileItem[]; root: string }>(
-            server,
-            "/api/config-files"
+        const outsideConfig = path.join(homeDir, "outside-agentmail.ts");
+        const symlinkedConfig = path.join(
+            openclawRoot,
+            "hooks",
+            "transforms",
+            "agentmail.ts"
         );
+        await writeFile(outsideConfig, "export default {};\n");
+        await symlink(outsideConfig, symlinkedConfig);
+        try {
+            const response = await requestJson<{ files: ConfigFileItem[]; root: string }>(
+                server,
+                "/api/config-files"
+            );
 
-        assert.equal(response.status, 200);
-        assert.equal(response.body.root, openclawRoot);
-        assert.deepEqual(
-            response.body.files.map((file) => ({
-                name: file.name,
-                path: file.path,
-                relPath: file.relPath,
-                type: file.type,
-            })),
-            [
-                {
-                    name: "openclaw.json",
-                    path: "config:openclaw.json",
-                    relPath: "openclaw.json",
-                    type: "file",
-                },
-                {
-                    name: "jobs.json",
-                    path: "config:cron/jobs.json",
-                    relPath: "cron/jobs.json",
-                    type: "file",
-                },
-            ]
+            assert.equal(response.status, 200);
+            assert.equal(response.body.root, openclawRoot);
+            assert.deepEqual(
+                response.body.files.map((file) => ({
+                    name: file.name,
+                    path: file.path,
+                    relPath: file.relPath,
+                    type: file.type,
+                })),
+                [
+                    {
+                        name: "openclaw.json",
+                        path: "config:openclaw.json",
+                        relPath: "openclaw.json",
+                        type: "file",
+                    },
+                    {
+                        name: "jobs.json",
+                        path: "config:cron/jobs.json",
+                        relPath: "cron/jobs.json",
+                        type: "file",
+                    },
+                ]
+            );
+            assert.equal(
+                response.body.files.some(
+                    (file) => file.relPath === "hooks/transforms/agentmail.ts"
+                ),
+                false
+            );
+        } finally {
+            await rm(symlinkedConfig, { force: true });
+        }
+
+        const responseWithoutOptionalFile = await requestJson<{
+            files: ConfigFileItem[];
+        }>(server, "/api/config-files");
+        assert.equal(
+            responseWithoutOptionalFile.body.files.some(
+                (file) => file.relPath === "hooks/transforms/agentmail.ts"
+            ),
+            false
         );
     });
 

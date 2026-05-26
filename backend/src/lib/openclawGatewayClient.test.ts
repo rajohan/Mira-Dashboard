@@ -759,13 +759,27 @@ describe("OpenClaw gateway client websocket protocol", () => {
         fallbackStartClient.stop();
     });
 
-    it("does not restart an already running client", () => {
-        const { client, internals } = createProtocolClient();
+    it("does not restart an already running client", async () => {
+        let connections = 0;
+        const server = await startGatewayServer(() => {
+            connections++;
+        });
+        const client = new OpenClawGatewayClient({ url: server.url });
 
-        client.start();
-        internals.closed = true;
-        client.start();
-        client.stop();
+        try {
+            client.start();
+            await waitFor(
+                () => (connections === 1 ? connections : undefined),
+                "connection"
+            );
+            const internals = client as unknown as TestGatewayClientInternals;
+            internals.closed = true;
+            client.start();
+            assert.equal(connections, 1);
+        } finally {
+            client.stop();
+            await server.close();
+        }
     });
 
     it("reports sendConnect request failures", async () => {
