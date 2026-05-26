@@ -6,7 +6,6 @@ import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", "/home/ubuntu/.openclaw");
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
-const REAL_MEDIA_ROOT = fs.realpathSync(MEDIA_ROOT);
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 
 const MIME_TYPES: Record<string, string> = {
@@ -46,7 +45,8 @@ export default function mediaRoutes(app: express.Application): void {
         }
 
         const realPath = fs.realpathSync(fullPath);
-        if (!realPath.startsWith(`${REAL_MEDIA_ROOT}${path.sep}`)) {
+        const realMediaRoot = fs.realpathSync(MEDIA_ROOT);
+        if (!realPath.startsWith(`${realMediaRoot}${path.sep}`)) {
             response.status(403).json({ error: "Access denied" });
             return;
         }
