@@ -271,9 +271,14 @@ describe("OpenClaw config routes", () => {
                 homeDir,
                 ".openclaw/workspace/skills/workspace-skill"
             );
+            const unconfiguredSkill = path.join(
+                homeDir,
+                ".openclaw/workspace/skills/unconfigured-skill"
+            );
             await mkdir(packageSkill, { recursive: true });
             await mkdir(extensionSkill, { recursive: true });
             await mkdir(workspaceSkill, { recursive: true });
+            await mkdir(unconfiguredSkill, { recursive: true });
             await writeFile(
                 path.join(packageSkill, "SKILL.md"),
                 "Builtin skill\n",
@@ -287,6 +292,11 @@ describe("OpenClaw config routes", () => {
             await writeFile(
                 path.join(workspaceSkill, "SKILL.md"),
                 "Workspace skill\n",
+                "utf8"
+            );
+            await writeFile(
+                path.join(unconfiguredSkill, "SKILL.md"),
+                "Unconfigured skill\n",
                 "utf8"
             );
             const originalHome = process.env.HOME;
@@ -359,6 +369,16 @@ describe("OpenClaw config routes", () => {
                         (skill) =>
                             skill.name === "workspace-skill" &&
                             skill.enabled === false &&
+                            skill.source === "workspace"
+                    ),
+                    true
+                );
+                assert.equal(
+                    skills.some(
+                        (skill) =>
+                            skill.name === "unconfigured-skill" &&
+                            skill.enabled === true &&
+                            skill.description === "Unconfigured skill" &&
                             skill.source === "workspace"
                     ),
                     true
