@@ -10,7 +10,8 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
-const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
+import { envFallback } from "../lib/values.js";
+const OPENCLAW_ROOT = `${envFallback("HOME", "")}/.openclaw`;
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 
