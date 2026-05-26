@@ -222,12 +222,17 @@ describe("server bootstrap", () => {
         gateway.init = (token: string) => {
             initializedToken = token;
         };
+        const originalToken = process.env.OPENCLAW_TOKEN;
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
         } finally {
-            delete process.env.OPENCLAW_TOKEN;
+            if (originalToken === undefined) {
+                delete process.env.OPENCLAW_TOKEN;
+            } else {
+                process.env.OPENCLAW_TOKEN = originalToken;
+            }
             gateway.init = originalInit;
         }
     });

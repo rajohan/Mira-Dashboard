@@ -14,6 +14,66 @@ import {
     OpenClawGatewayClient,
 } from "./openclawGatewayClient.js";
 
+type TestGatewayClientInternals = {
+    handleMessage: (raw: string) => void;
+    pending: Map<
+        string,
+        {
+            timeout: NodeJS.Timeout;
+            resolve: (value: unknown) => void;
+            reject: (error: Error) => void;
+            method: string;
+        }
+    >;
+    rejectAllPending: (error: Error) => void;
+    scheduleReconnect: () => void;
+    sendConnect: (payload?: { nonce?: string }) => void;
+    startTickWatch: () => void;
+    stopTickWatch: () => void;
+    armConnectChallengeTimeout: () => void;
+    backoffMs: number;
+    connectChallengeTimer: NodeJS.Timeout | null;
+    ws: {
+        close: (code?: number, reason?: string) => void;
+        readyState: number;
+        send: (data: string) => void;
+    } | null;
+    closed: boolean;
+    reconnectTimer: NodeJS.Timeout | null;
+    tickIntervalMs: number;
+    lastTickAt: number;
+    opts: {
+        onConnectError?: (error: Error) => void;
+        requestTimeoutMs?: number;
+        deviceIdentity?: {
+            deviceId: string;
+            publicKeyPem: string;
+            privateKeyPem: string;
+        };
+        token?: string;
+    };
+};
+
+function createProtocolClient(): {
+    client: OpenClawGatewayClient;
+    events: GatewayEvent[];
+    errors: string[];
+    internals: TestGatewayClientInternals;
+} {
+    const events: GatewayEvent[] = [];
+    const errors: string[] = [];
+    const client = new OpenClawGatewayClient({
+        onConnectError: (error) => errors.push(error.message),
+        onEvent: (event) => events.push(event),
+    });
+    return {
+        client,
+        events,
+        errors,
+        internals: client as unknown as TestGatewayClientInternals,
+    };
+}
+
 describe("OpenClaw gateway client identity", () => {
     let tempDir: string;
     let identityPath: string;
@@ -441,53 +501,8 @@ describe("OpenClaw gateway client websocket protocol", () => {
         }
     });
 
-    it("covers direct protocol edge cases without relying on network timing", async () => {
-        const events: GatewayEvent[] = [];
-        const errors: string[] = [];
-        const client = new OpenClawGatewayClient({
-            onConnectError: (error) => errors.push(error.message),
-            onEvent: (event) => events.push(event),
-        });
-        const internals = client as unknown as {
-            handleMessage: (raw: string) => void;
-            pending: Map<
-                string,
-                {
-                    timeout: NodeJS.Timeout;
-                    resolve: (value: unknown) => void;
-                    reject: (error: Error) => void;
-                    method: string;
-                }
-            >;
-            rejectAllPending: (error: Error) => void;
-            scheduleReconnect: () => void;
-            sendConnect: (payload?: { nonce?: string }) => void;
-            startTickWatch: () => void;
-            stopTickWatch: () => void;
-            armConnectChallengeTimeout: () => void;
-            backoffMs: number;
-            connectChallengeTimer: NodeJS.Timeout | null;
-            ws: {
-                close: (code?: number, reason?: string) => void;
-                readyState: number;
-                send: (data: string) => void;
-            } | null;
-            closed: boolean;
-            reconnectTimer: NodeJS.Timeout | null;
-            tickIntervalMs: number;
-            lastTickAt: number;
-            requestId: number;
-            opts: {
-                onConnectError?: (error: Error) => void;
-                requestTimeoutMs?: number;
-                deviceIdentity?: {
-                    deviceId: string;
-                    publicKeyPem: string;
-                    privateKeyPem: string;
-                };
-                token?: string;
-            };
-        };
+    it("ignores malformed server messages and forwards events", () => {
+        const { events, internals } = createProtocolClient();
 
         internals.handleMessage(JSON.stringify({ type: "noop" }));
         internals.handleMessage(JSON.stringify({ type: "res" }));
@@ -504,6 +519,10 @@ describe("OpenClaw gateway client websocket protocol", () => {
             JSON.stringify({ type: "event", event: "custom", payload: { ok: true } })
         );
         assert.equal(events.at(-1)?.event, "custom");
+    });
+
+    it("handles pending request responses and overflow", async () => {
+        const { client, internals } = createProtocolClient();
 
         await new Promise((resolve) => {
             internals.pending.set("hello-bad-policy", {
@@ -576,40 +595,54 @@ describe("OpenClaw gateway client websocket protocol", () => {
             /closed/u
         );
 
-        internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
-        for (let i = 0; i < 1000; i++) {
-            internals.pending.set(`overflow-${i}`, {
-                timeout: setTimeout(() => {}, 1000),
-                method: "overflow",
-                resolve: () => {},
-                reject: () => {},
-            });
+        try {
+            internals.ws = {
+                readyState: WebSocket.OPEN,
+                send: () => {},
+                close: () => {},
+            };
+            for (let i = 0; i < 1000; i++) {
+                internals.pending.set(`overflow-${i}`, {
+                    timeout: setTimeout(() => {}, 1000),
+                    method: "overflow",
+                    resolve: () => {},
+                    reject: () => {},
+                });
+            }
+            await assert.rejects(client.request("overflow"), /Too many pending/u);
+        } finally {
+            for (const pending of internals.pending.values()) {
+                clearTimeout(pending.timeout);
+            }
+            internals.pending.clear();
+            client.stop();
         }
-        await assert.rejects(client.request("overflow"), /Too many pending/u);
-        for (const pending of internals.pending.values()) {
-            clearTimeout(pending.timeout);
-        }
-        internals.pending.clear();
+    });
 
-        const closedFrames: Array<{ code?: number; reason?: string }> = [];
+    it("rejects failed sends", async () => {
+        const { client, internals } = createProtocolClient();
         internals.ws = {
             readyState: WebSocket.OPEN,
             send: () => {
                 throw new Error("send failed");
             },
-            close: (code?: number, reason?: string) =>
-                closedFrames.push({ code, reason }),
+            close: () => {},
         };
-        await assert.rejects(client.request("send.failure"), /send failed/u);
 
-        internals.ws = {
-            readyState: WebSocket.CLOSED,
-            send: () => {},
-            close: (code?: number, reason?: string) =>
-                closedFrames.push({ code, reason }),
-        };
+        await assert.rejects(client.request("send.failure"), /send failed/u);
+        client.stop();
+    });
+
+    it("reports missing connect challenge nonces", () => {
+        const { errors, internals } = createProtocolClient();
+        internals.ws = { readyState: WebSocket.CLOSED, send: () => {}, close: () => {} };
+
         internals.sendConnect({ nonce: "nonce" });
         assert.equal(errors.at(-1), "gateway connect challenge missing nonce");
+    });
+
+    it("schedules and clears reconnect timers", async () => {
+        const { client, internals } = createProtocolClient();
 
         internals.closed = false;
         internals.backoffMs = 1;
@@ -621,6 +654,13 @@ describe("OpenClaw gateway client websocket protocol", () => {
         assert.ok(internals.reconnectTimer);
         client.stop();
         assert.equal(internals.reconnectTimer, null);
+
+        internals.closed = true;
+        internals.scheduleReconnect();
+    });
+
+    it("starts and stops tick watching around stale connections", async () => {
+        const { errors, internals } = createProtocolClient();
 
         internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
         internals.tickIntervalMs = 1;
@@ -636,7 +676,10 @@ describe("OpenClaw gateway client websocket protocol", () => {
         internals.startTickWatch();
         await new Promise((resolve) => setTimeout(resolve, 1_050));
         internals.stopTickWatch();
+    });
 
+    it("handles connect challenge timeouts", () => {
+        const { errors, internals } = createProtocolClient();
         const challengeCloses: Array<{ code?: number; reason?: string }> = [];
         internals.ws = {
             readyState: WebSocket.OPEN,
@@ -644,6 +687,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
             close: (code?: number, reason?: string) =>
                 challengeCloses.push({ code, reason }),
         };
+
         internals.armConnectChallengeTimeout();
         assert.ok(internals.connectChallengeTimer);
         const challengeTimer = internals.connectChallengeTimer as unknown as {
@@ -668,10 +712,9 @@ describe("OpenClaw gateway client websocket protocol", () => {
         assert.ok(timerToClear);
         clearTimeout(timerToClear);
         internals.connectChallengeTimer = null;
+    });
 
-        internals.closed = true;
-        internals.scheduleReconnect();
-
+    it("validates and normalizes start URLs and request timeouts", async () => {
         const blankUrlClient = new OpenClawGatewayClient({ url: "   " });
         assert.throws(
             () => blankUrlClient.start(),
@@ -695,21 +738,24 @@ describe("OpenClaw gateway client websocket protocol", () => {
         fallbackStartClient.start();
         assert.equal(fallbackStartInternals.opts.requestTimeoutMs, 30_000);
         fallbackStartClient.stop();
+    });
+
+    it("does not restart an already running client", () => {
+        const { client, internals } = createProtocolClient();
 
         client.start();
         internals.closed = true;
         client.start();
+        client.stop();
+    });
 
+    it("reports sendConnect request failures", async () => {
+        const { client, errors, internals } = createProtocolClient();
         const originalRequest = client.request;
         client.request = async () => {
             throw "connect failed";
         };
-        internals.ws = {
-            readyState: WebSocket.OPEN,
-            send: () => {},
-            close: (code?: number, reason?: string) =>
-                closedFrames.push({ code, reason }),
-        };
+        internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
         internals.sendConnect({ nonce: "nonce-2" });
         await waitFor(
             () => errors.find((message) => message === "connect failed"),
@@ -725,8 +771,13 @@ describe("OpenClaw gateway client websocket protocol", () => {
             "error connect failure"
         );
         client.request = originalRequest;
+        client.stop();
+    });
 
+    it("sends default and device connect params", async () => {
+        const { client, internals } = createProtocolClient();
         const defaultConnectParams: unknown[] = [];
+        const originalRequest = client.request;
         internals.opts = { onConnectError: internals.opts.onConnectError } as never;
         client.request = async (_method: string, params?: unknown) => {
             defaultConnectParams.push(params);
@@ -765,6 +816,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         } finally {
             client.request = originalRequest;
             await rm(identityDir, { recursive: true, force: true });
+            client.stop();
         }
     });
 });

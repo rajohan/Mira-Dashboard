@@ -16,22 +16,31 @@ async function startServer(
     homeDir: string,
     getGatewayStatus = () => ({ gateway: "connected", sessions: 3 })
 ): Promise<TestServer> {
+    const originalHome = process.env.HOME;
     process.env.HOME = homeDir;
-    const { default: settingsRoutes } = await import("./settings.js");
+    try {
+        const { default: settingsRoutes } = await import("./settings.js");
 
-    const app = express();
-    app.use(express.json());
-    settingsRoutes(app, express, getGatewayStatus);
-    const server = http.createServer(app);
+        const app = express();
+        app.use(express.json());
+        settingsRoutes(app, express, getGatewayStatus);
+        const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () => new Promise((resolve) => server.close(() => resolve())),
+        };
+    } finally {
+        if (originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = originalHome;
+        }
+    }
 }
 
 async function requestJson<T>(

@@ -238,6 +238,10 @@ async function runGhJsonLines<T>(
             }
             settled = true;
             clearTimeout(timeout);
+            if (forceKillTimer) {
+                clearTimeout(forceKillTimer);
+                forceKillTimer = null;
+            }
             callback();
         };
 

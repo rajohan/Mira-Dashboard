@@ -14,7 +14,6 @@ import {
     verifyPassword,
 } from "../auth.js";
 import gateway from "../gateway.js";
-import { stringFallback } from "../lib/values.js";
 
 /** Performs read session ID. */
 function readSessionId(cookieHeader?: string): string | null {
@@ -97,7 +96,7 @@ export default function authRoutes(
         }
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
-        const gatewayToken = stringFallback(request.body?.gatewayToken).trim();
+        const rawGatewayToken = request.body?.gatewayToken;
         if (!username) {
             response.status(400).json({
                 error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
@@ -108,12 +107,13 @@ export default function authRoutes(
             response.status(400).json({ error: "Password must be 8-256 characters" });
             return;
         }
-        if (!gatewayToken) {
+        if (typeof rawGatewayToken !== "string" || !rawGatewayToken.trim()) {
             response
                 .status(400)
                 .json({ error: "Gateway token is required for first-user setup" });
             return;
         }
+        const gatewayToken = rawGatewayToken.trim();
         try {
             const user = createAuthUser(username, password);
             persistGatewayToken(gatewayToken);
