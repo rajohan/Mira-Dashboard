@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
@@ -10,11 +11,6 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
-const homeDir = process.env.HOME;
-if (!homeDir) {
-    throw new Error("HOME must be configured before loading config file routes");
-}
-const OPENCLAW_ROOT = path.join(homeDir, ".openclaw");
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 
@@ -63,12 +59,21 @@ function isBinaryFile(content: string): boolean {
     return false;
 }
 
+/** Resolves the OpenClaw root without falling back to a root-level path. */
+function resolveOpenclawRoot(): string | null {
+    const homeDir = process.env.HOME || os.homedir();
+    if (!homeDir || homeDir === path.parse(homeDir).root) {
+        return null;
+    }
+    return path.join(homeDir, ".openclaw");
+}
+
 /** Performs list config files. */
-function listConfigFiles(): ConfigFile[] {
+function listConfigFiles(openclawRoot: string): ConfigFile[] {
     const files: ConfigFile[] = [];
 
     for (const relPath of ALLOWED_CONFIG_FILES) {
-        const fullPath = path.join(OPENCLAW_ROOT, relPath);
+        const fullPath = path.join(openclawRoot, relPath);
         try {
             const stat = fs.statSync(fullPath);
             files.push({
@@ -97,8 +102,16 @@ export default function configFilesRoutes(
         "/api/config-files",
         asyncRoute(
             async (_req, res) => {
-                const files = listConfigFiles();
-                res.json({ files, root: OPENCLAW_ROOT });
+                const openclawRoot = resolveOpenclawRoot();
+                if (!openclawRoot) {
+                    res.status(500).json({
+                        error: "Server misconfigured: HOME is not configured",
+                    });
+                    return;
+                }
+
+                const files = listConfigFiles(openclawRoot);
+                res.json({ files, root: openclawRoot });
             },
             { fallback: "Config file list failed", logLabel: "[ConfigFiles] List error:" }
         )
@@ -119,11 +132,19 @@ export default function configFilesRoutes(
                     return;
                 }
 
-                const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
+                const openclawRoot = resolveOpenclawRoot();
+                if (!openclawRoot) {
+                    res.status(500).json({
+                        error: "Server misconfigured: HOME is not configured",
+                    });
+                    return;
+                }
+
+                const fullPath = safePathWithinRoot(filePath, openclawRoot);
 
                 if (!fullPath) {
                     try {
-                        fs.realpathSync(path.resolve(OPENCLAW_ROOT, filePath));
+                        fs.realpathSync(path.resolve(openclawRoot, filePath));
                     } catch (error) {
                         const code = (error as NodeJS.ErrnoException).code;
                         if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
@@ -227,7 +248,15 @@ export default function configFilesRoutes(
                     return;
                 }
 
-                const fullPath = safePathWithinRoot(filePath, OPENCLAW_ROOT);
+                const openclawRoot = resolveOpenclawRoot();
+                if (!openclawRoot) {
+                    res.status(500).json({
+                        error: "Server misconfigured: HOME is not configured",
+                    });
+                    return;
+                }
+
+                const fullPath = safePathWithinRoot(filePath, openclawRoot);
                 if (!fullPath) {
                     res.status(403).json({
                         error: "Access denied: path outside allowed root",
@@ -237,7 +266,7 @@ export default function configFilesRoutes(
 
                 const safeFullPath = prepareSafeWriteTargetWithinRoot(
                     fullPath,
-                    OPENCLAW_ROOT
+                    openclawRoot
                 );
                 if (!safeFullPath) {
                     res.status(403).json({

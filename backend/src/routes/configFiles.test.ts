@@ -21,23 +21,46 @@ interface ConfigFileItem {
     size: number;
 }
 
-async function startServer(homeDir: string): Promise<TestServer> {
-    process.env.HOME = homeDir;
-    const { default: configFilesRoutes } = await import("./configFiles.js");
-
-    const app = express();
-    app.use(express.json({ limit: "3mb" }));
-    configFilesRoutes(app, express);
-    const server = http.createServer(app);
-
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
-
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+async function startServer(homeDir?: string): Promise<TestServer> {
+    const originalHome = process.env.HOME;
+    if (homeDir === undefined) {
+        delete process.env.HOME;
+    } else {
+        process.env.HOME = homeDir;
+    }
+    const restoreHome = () => {
+        if (originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = originalHome;
+        }
     };
+
+    try {
+        const { default: configFilesRoutes } = await import("./configFiles.js");
+        const app = express();
+        app.use(express.json({ limit: "3mb" }));
+        configFilesRoutes(app, express);
+        const server = http.createServer(app);
+
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
+
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () =>
+                new Promise((resolve) =>
+                    server.close(() => {
+                        restoreHome();
+                        resolve();
+                    })
+                ),
+        };
+    } catch (error) {
+        restoreHome();
+        throw error;
+    }
 }
 
 async function requestJson<T>(
@@ -110,6 +133,39 @@ describe("config files routes", () => {
                 },
             ]
         );
+    });
+
+    it("reports missing home configuration per request", async () => {
+        const originalHomedir = os.homedir;
+        let misconfiguredServer: TestServer | undefined;
+        try {
+            os.homedir = (() => "/") as typeof os.homedir;
+            misconfiguredServer = await startServer();
+            const list = await requestJson<{ error: string }>(
+                misconfiguredServer,
+                "/api/config-files"
+            );
+            const read = await requestJson<{ error: string }>(
+                misconfiguredServer,
+                "/api/config-files/openclaw.json"
+            );
+            const write = await requestJson<{ error: string }>(
+                misconfiguredServer,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+
+            for (const response of [list, read, write]) {
+                assert.equal(response.status, 500);
+                assert.equal(
+                    response.body.error,
+                    "Server misconfigured: HOME is not configured"
+                );
+            }
+        } finally {
+            os.homedir = originalHomedir;
+            await misconfiguredServer?.close();
+        }
     });
 
     it("reads config files and blocks non-whitelisted paths", async () => {
