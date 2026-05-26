@@ -268,6 +268,14 @@ describe("backup routes", () => {
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
         assert.equal(backupTesting.getN8nRoot(), tempDir);
+        const previousDopplerBin = process.env.DOPPLER_BIN;
+        process.env.DOPPLER_BIN = "";
+        assert.equal(backupTesting.getDopplerBin(), "/usr/local/bin/doppler");
+        if (previousDopplerBin === undefined) {
+            delete process.env.DOPPLER_BIN;
+        } else {
+            process.env.DOPPLER_BIN = previousDopplerBin;
+        }
         assert.equal(typeof backupTesting.getDopplerBin(), "string");
         assert.equal(
             backupTesting.shellQuote("/srv/mira dashboard/it's/scripts/status.mjs"),

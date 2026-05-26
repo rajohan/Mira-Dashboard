@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it, mock } from "node:test";
@@ -118,8 +119,10 @@ describe("gateway state and helper utilities", () => {
         const error = mock.method(console, "error", () => {});
         CapturingGatewayClient.instances = [];
         __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
+        const originalGatewayUrl = process.env.OPENCLAW_GATEWAY_URL;
 
         try {
+            process.env.OPENCLAW_GATEWAY_URL = "";
             gateway.init("token-a");
             assert.equal(gateway.isConnected(), false);
             gateway.init("token-a");
@@ -131,6 +134,7 @@ describe("gateway state and helper utilities", () => {
 
             const latest = CapturingGatewayClient.instances[1];
             assert.equal(latest?.options.clientName, "gateway-client");
+            assert.equal(latest?.options.url, "ws://127.0.0.1:18789");
             latest?.failures.set("sessions.subscribe", new Error("subscribe failed"));
             latest?.failures.set("sessions.list", new Error("refresh failed"));
             latest?.options.onHelloOk?.({ type: "hello.ok" });
@@ -153,7 +157,19 @@ describe("gateway state and helper utilities", () => {
                 method: "sessions.list",
                 params: {},
             });
+
+            process.env.OPENCLAW_GATEWAY_URL = "ws://gateway.example";
+            gateway.init("token-d");
+            assert.equal(
+                CapturingGatewayClient.instances[3]?.options.url,
+                "ws://gateway.example"
+            );
         } finally {
+            if (originalGatewayUrl === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_URL;
+            } else {
+                process.env.OPENCLAW_GATEWAY_URL = originalGatewayUrl;
+            }
             __testing.resetGatewayStateForTest();
             warn.mock.restore();
             error.mock.restore();
@@ -416,11 +432,25 @@ describe("gateway state and helper utilities", () => {
                     message.images[0]?.mimeType === "image/jpeg"
             )
         );
+        const readFileSync = mock.method(fs, "readFileSync", () => {
+            throw new Error("read denied");
+        });
+        try {
+            assert.deepEqual(
+                __testing.readRawTranscriptImageMessages("agent:main:main", "session-1"),
+                []
+            );
+        } finally {
+            readFileSync.mock.restore();
+        }
 
         assert.deepEqual(__testing.hydrateOmittedChatHistoryImages({ messages: [] }), {
             messages: [],
         });
         assert.equal(__testing.getTranscriptPath("agent:main:unknown"), null);
+        const dottedAgentDir = path.join(openclawHome, "agents", "my.agent", "sessions");
+        await mkdir(dottedAgentDir, { recursive: true });
+        await writeFile(path.join(dottedAgentDir, "session-1.jsonl"), "", "utf8");
         assert.match(
             __testing.getTranscriptPath(":", "session-1") || "",
             /agents\/main\/sessions\/session-1\.jsonl$/u
@@ -435,6 +465,16 @@ describe("gateway state and helper utilities", () => {
         );
         assert.equal(
             __testing.getTranscriptPath("agent:main:main", "../session-1"),
+            null
+        );
+        const outsideTranscript = path.join(openclawHome, "outside.jsonl");
+        await writeFile(outsideTranscript, "", "utf8");
+        await symlink(
+            outsideTranscript,
+            path.join(transcriptDir, "linked-session.jsonl")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:main:main", "linked-session"),
             null
         );
         assert.equal(

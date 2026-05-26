@@ -13,7 +13,7 @@ function getN8nRoot(): string {
 }
 
 function getDopplerBin(): string {
-    return envFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
+    return process.env.DOPPLER_BIN || "/usr/local/bin/doppler";
 }
 
 function shellQuote(value: string): string {

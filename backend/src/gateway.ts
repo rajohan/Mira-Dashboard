@@ -363,14 +363,22 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     }
 
     const openClawRoot = Path.resolve(OPENCLAW_HOME);
-    const transcriptPath = Path.resolve(
-        openClawRoot,
-        "agents",
-        agentId,
-        "sessions",
-        `${sessionId}.jsonl`
-    );
-    return resolvePathInsideRoot(openClawRoot, transcriptPath);
+    const agentsSessionsRoot = Path.resolve(openClawRoot, "agents", agentId, "sessions");
+    const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
+    let realAgentsSessionsRoot: string;
+    let realTranscriptPath: string;
+    try {
+        realAgentsSessionsRoot = fs.realpathSync(agentsSessionsRoot);
+        realTranscriptPath = fs.realpathSync(transcriptPath);
+    } catch {
+        return null;
+    }
+
+    if (!realTranscriptPath.startsWith(`${realAgentsSessionsRoot}${Path.sep}`)) {
+        return null;
+    }
+
+    return resolvePathInsideRoot(openClawRoot, realTranscriptPath);
 }
 
 /** Returns whether a failed session index subscription should retry. */
@@ -617,7 +625,7 @@ function init(token: string): void {
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     gatewayClient = new GatewayClientCtor({
-        url: envFallback("OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18789"),
+        url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
         role: "operator",
         scopes: ["operator.read", "operator.write", "operator.admin"],

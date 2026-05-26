@@ -16,7 +16,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = envFallback("MIRA_DOCKER_ROOT", "/opt/docker");
-let dockerBin = envFallback("MIRA_DOCKER_BIN", "docker");
+let dockerBin = process.env.MIRA_DOCKER_BIN || "docker";
 let updaterNodeBin = envFallback("MIRA_UPDATER_NODE_BIN", "node");
 let updaterCwd = envFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
 const DOCKER_COMPOSE_WRAPPER = envFallback(

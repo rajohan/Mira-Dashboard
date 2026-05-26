@@ -25,22 +25,28 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
     }
 
     await new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            child.off("exit", done);
+            resolve();
+        };
         const timeout = setTimeout(() => {
-            try {
-                child.kill("SIGKILL");
-            } catch {
-                // Process may already have exited.
+            if (!child.kill("SIGKILL")) {
+                done();
             }
         }, 100);
-        child.once("exit", () => {
-            clearTimeout(timeout);
-            resolve();
-        });
+        child.once("exit", done);
         try {
-            child.kill("SIGTERM");
+            if (!child.kill("SIGTERM")) {
+                done();
+            }
         } catch {
-            clearTimeout(timeout);
-            resolve();
+            done();
         }
     });
 }
@@ -500,9 +506,11 @@ describe("docker routes", { concurrency: false }, () => {
     it("loads docker route module with configured docker environment", async () => {
         const originalEnv = {
             MIRA_DOCKER_ROOT: process.env.MIRA_DOCKER_ROOT,
+            MIRA_DOCKER_BIN: process.env.MIRA_DOCKER_BIN,
             MIRA_DOCKER_COMPOSE_WRAPPER: process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
         };
         process.env.MIRA_DOCKER_ROOT = "/tmp/custom-docker-root";
+        process.env.MIRA_DOCKER_BIN = "/tmp/custom-docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = "/tmp/custom-compose-wrapper";
 
         try {

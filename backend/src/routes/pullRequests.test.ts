@@ -674,6 +674,10 @@ describe("pull request routes", () => {
             assert.equal(__testing.buildCommandEnv().GH_TOKEN, "gh-token");
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "gh-token");
 
+            process.env.MIRA_GITHUB_TOKEN = "";
+            assert.equal(__testing.buildCommandEnv().GH_TOKEN, "gh-token");
+            assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "gh-token");
+
             process.env.MIRA_GITHUB_TOKEN = "mira-token";
             assert.equal(__testing.buildCommandEnv().GH_TOKEN, "mira-token");
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "mira-token");
