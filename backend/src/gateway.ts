@@ -13,9 +13,9 @@ import {
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
 } from "./lib/openclawGatewayClient.js";
-import { envFallback, nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
+import { nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
 
-const DASHBOARD_OPENCLAW_HOME = envFallback(
+const DASHBOARD_OPENCLAW_HOME = nonEmptyEnvFallback(
     "MIRA_DASHBOARD_OPENCLAW_HOME",
     Path.join(process.cwd(), "data", "openclaw-client")
 );
@@ -360,17 +360,20 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     }
 
     const agentId = sessionKey.split(":")[1] || "main";
-    const safePathSegment = /^[A-Za-z0-9._-]+$/u;
-    if (!safePathSegment.test(agentId) || !safePathSegment.test(sessionId)) {
+    const safeAgentPathSegment = /^[A-Za-z0-9._-]+$/u;
+    const safeSessionPathSegment = /^[A-Za-z0-9:._-]+$/u;
+    if (!safeAgentPathSegment.test(agentId) || !safeSessionPathSegment.test(sessionId)) {
         return null;
     }
 
     const openClawRoot = Path.resolve(OPENCLAW_HOME);
     const agentsSessionsRoot = Path.resolve(openClawRoot, "agents", agentId, "sessions");
     const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
+    let realOpenClawRoot: string;
     let realAgentsSessionsRoot: string;
     let realTranscriptPath: string;
     try {
+        realOpenClawRoot = fs.realpathSync(openClawRoot);
         realAgentsSessionsRoot = fs.realpathSync(agentsSessionsRoot);
         realTranscriptPath = fs.realpathSync(transcriptPath);
     } catch {
@@ -381,7 +384,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         return null;
     }
 
-    return resolvePathInsideRoot(openClawRoot, realTranscriptPath);
+    return resolvePathInsideRoot(realOpenClawRoot, realTranscriptPath);
 }
 
 /** Returns whether a failed session index subscription should retry. */

@@ -472,6 +472,11 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:main:main", "../session-1"),
             null
         );
+        await writeFile(path.join(transcriptDir, "agent:main:main.jsonl"), "", "utf8");
+        assert.match(
+            __testing.getTranscriptPath("agent:main:main", "agent:main:main") || "",
+            /agents\/main\/sessions\/agent:main:main\.jsonl$/u
+        );
         const outsideTranscript = path.join(openclawHome, "outside.jsonl");
         await writeFile(outsideTranscript, "", "utf8");
         await symlink(

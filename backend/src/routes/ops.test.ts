@@ -137,9 +137,13 @@ describe("ops routes", () => {
 
         const originalUsername = process.env.DATABASE_USERNAME;
         const originalPassword = process.env.DATABASE_PASSWORD;
+        const originalHost = process.env.DATABASE_HOST;
+        const originalPort = process.env.DATABASE_PORT;
         try {
             process.env.DATABASE_USERNAME = "";
             process.env.DATABASE_PASSWORD = "";
+            process.env.DATABASE_HOST = "";
+            process.env.DATABASE_PORT = "";
             const defaultCredentials = await requestJson<{
                 success: boolean;
                 lastRun: { completedAt: string; ok: boolean };
@@ -156,6 +160,16 @@ describe("ops routes", () => {
                 delete process.env.DATABASE_PASSWORD;
             } else {
                 process.env.DATABASE_PASSWORD = originalPassword;
+            }
+            if (originalHost === undefined) {
+                delete process.env.DATABASE_HOST;
+            } else {
+                process.env.DATABASE_HOST = originalHost;
+            }
+            if (originalPort === undefined) {
+                delete process.env.DATABASE_PORT;
+            } else {
+                process.env.DATABASE_PORT = originalPort;
             }
         }
     });

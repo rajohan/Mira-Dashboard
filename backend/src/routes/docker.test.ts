@@ -478,6 +478,14 @@ describe("docker routes", { concurrency: false }, () => {
                 __testing.buildPostgresUri("custom"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom"
             );
+            process.env.DATABASE_USERNAME = "";
+            process.env.DATABASE_PASSWORD = "";
+            process.env.DATABASE_HOST = "";
+            process.env.DATABASE_PORT = "";
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://postgres:postgres@postgres:5432/n8n"
+            );
         } finally {
             for (const [key, value] of Object.entries(originalEnv)) {
                 if (value === undefined) {
@@ -508,15 +516,23 @@ describe("docker routes", { concurrency: false }, () => {
             MIRA_DOCKER_ROOT: process.env.MIRA_DOCKER_ROOT,
             MIRA_DOCKER_BIN: process.env.MIRA_DOCKER_BIN,
             MIRA_DOCKER_COMPOSE_WRAPPER: process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
+            MIRA_UPDATER_NODE_BIN: process.env.MIRA_UPDATER_NODE_BIN,
+            MIRA_UPDATER_CWD: process.env.MIRA_UPDATER_CWD,
         };
         process.env.MIRA_DOCKER_ROOT = "/tmp/custom-docker-root";
         process.env.MIRA_DOCKER_BIN = "/tmp/custom-docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = "/tmp/custom-compose-wrapper";
+        process.env.MIRA_UPDATER_NODE_BIN = "/tmp/custom-node";
+        process.env.MIRA_UPDATER_CWD = "/tmp/custom-updater";
 
         try {
             const module = await import(`./docker.js?env=${Date.now()}`);
             assert.equal(typeof module.default, "function");
             process.env.MIRA_DOCKER_ROOT = "";
+            process.env.MIRA_DOCKER_BIN = "";
+            process.env.MIRA_DOCKER_COMPOSE_WRAPPER = "";
+            process.env.MIRA_UPDATER_NODE_BIN = "";
+            process.env.MIRA_UPDATER_CWD = "";
             const defaultModule = await import(`./docker.js?blank=${Date.now()}`);
             assert.equal(typeof defaultModule.default, "function");
         } finally {

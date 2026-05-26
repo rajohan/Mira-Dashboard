@@ -1,6 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import os from "node:os";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
@@ -19,9 +18,9 @@ import {
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
 let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
-let updaterNodeBin = envFallback("MIRA_UPDATER_NODE_BIN", "node");
-let updaterCwd = envFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
-const DOCKER_COMPOSE_WRAPPER = envFallback(
+let updaterNodeBin = nonEmptyEnvFallback("MIRA_UPDATER_NODE_BIN", "node");
+let updaterCwd = nonEmptyEnvFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
+const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
     "MIRA_DOCKER_COMPOSE_WRAPPER",
     `${DOCKER_ROOT}/bin/docker-compose-doppler`
 );
@@ -312,10 +311,14 @@ function parseJsonField<T>(value: string | undefined): T | null {
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = encodeURIComponent(envFallback("DATABASE_USERNAME", "postgres"));
-    const password = encodeURIComponent(envFallback("DATABASE_PASSWORD", "postgres"));
-    const host = envFallback("DATABASE_HOST", "postgres");
-    const port = envFallback("DATABASE_PORT", "5432");
+    const username = encodeURIComponent(
+        nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+    );
+    const password = encodeURIComponent(
+        nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+    );
+    const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
+    const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
@@ -352,7 +355,7 @@ async function queryN8nTsvRows<T extends object>(
     columns: string[]
 ): Promise<T[]> {
     // Simple approach: use tab-separated output without header
-    const tempFile = `${os.tmpdir().replaceAll("\\", "/").replace(/\/$/u, "")}/updater-events-${process.pid}-${randomUUID()}.tsv`;
+    const tempFile = `/tmp/updater-events-${process.pid}-${randomUUID()}.tsv`;
     const copySql = String.raw`COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\t', NULL '');`;
 
     await execFileAsync(

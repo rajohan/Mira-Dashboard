@@ -37,8 +37,8 @@ function buildN8nScriptEnv() {
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = nonEmptyEnvFallback("DATABASE_USERNAME", "postgres");
     const password = nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres");
-    const host = envFallback("DATABASE_HOST", "postgres");
-    const port = envFallback("DATABASE_PORT", "5432");
+    const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
+    const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
     return `postgresql://${username}:${password}@${host}:${port}/${database}`;
 }
 
