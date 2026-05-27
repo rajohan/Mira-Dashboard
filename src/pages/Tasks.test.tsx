@@ -405,7 +405,7 @@ describe("Tasks page", () => {
         expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
 
         await user.clear(screen.getByPlaceholderText("Search tasks..."));
-        await user.type(screen.getByPlaceholderText("Search tasks..."), "42");
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "#42");
         expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
 
         await user.click(screen.getByRole("button", { name: "Raymond" }));

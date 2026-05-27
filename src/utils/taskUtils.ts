@@ -89,6 +89,11 @@ function taskSearchValueMatches(value: string | undefined, query: string): boole
     return Boolean(value?.toLowerCase().includes(query));
 }
 
+/** Returns searchable task number variants. */
+function getTaskNumberSearchValues(taskNumber: number): string[] {
+    return [taskNumber.toString(), `#${taskNumber}`];
+}
+
 /** Returns whether a task matches task board search text. */
 export function taskMatchesSearch(task: Task, search: string): boolean {
     const query = search.trim().toLowerCase();
@@ -98,7 +103,7 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
     }
 
     const searchableValues = [
-        task.number.toString(),
+        ...getTaskNumberSearchValues(task.number),
         task.title,
         task.body,
         ...task.labels.map(getTaskLabelSearchValue),
