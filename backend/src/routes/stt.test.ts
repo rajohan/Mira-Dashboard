@@ -196,6 +196,16 @@ describe("STT routes", () => {
             provider: "elevenlabs",
             text: "recording.wav",
         });
+
+        globalThis.fetch = async (_url, init) => {
+            const file = (init?.body as FormData).get("file") as File;
+            return Response.json({ text: `${file.name}:${file.type}` });
+        };
+        assert.equal(
+            await __testing.transcribeWithElevenLabs(Buffer.from([1]), "   "),
+            "recording.webm:application/octet-stream"
+        );
+
         globalThis.fetch = async () => Response.json({});
         const missingWords = await transcribe(server, Buffer.from([1]));
         assert.deepEqual(await missingWords.json(), { provider: "elevenlabs", text: "" });

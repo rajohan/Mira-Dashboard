@@ -817,6 +817,16 @@ describe("agents routes", () => {
             ["Write backend tests"]
         );
 
+        await writeFile(metadataPath, "{ malformed", "utf8");
+        const malformedMetadata = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "Should not overwrite" } }
+        );
+        assert.equal(malformedMetadata.status, 500);
+        assert.match(malformedMetadata.body.error, /JSON5|parse|invalid/u);
+        assert.equal(await readFile(metadataPath, "utf8"), "{ malformed");
+
         const history = await requestJson<{
             tasks: Array<{ agentId: string; task: string; status: string }>;
         }>(server, "/api/agents/tasks/history?limit=5");
@@ -2984,6 +2994,10 @@ describe("agents routes", () => {
             gateway.request = async () => ({ sessions: [] });
             const sessions = await __testing.getGatewaySessionsForAgents();
             assert.equal(sessions[0]?.model, "cached-model");
+
+            gateway.request = async () => ({ sessions: [{ key: "" }] });
+            const emptyFilteredSessions = await __testing.getGatewaySessionsForAgents();
+            assert.equal(emptyFilteredSessions[0]?.model, "cached-model");
         } finally {
             gateway.getSessions = previousGatewaySessions;
             gateway.request = previousGatewayRequest;

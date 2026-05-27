@@ -397,11 +397,13 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_UPDATER_NODE_BIN = originalUpdaterNodeBin;
         }
+        __testing.setUpdaterNodeBinForTests(originalUpdaterNodeBin);
         if (originalUpdaterCwd === undefined) {
             delete process.env.MIRA_UPDATER_CWD;
         } else {
             process.env.MIRA_UPDATER_CWD = originalUpdaterCwd;
         }
+        __testing.setUpdaterCwdForTests(originalUpdaterCwd);
         await rm(tempDir, { recursive: true, force: true });
     });
 

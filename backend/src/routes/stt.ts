@@ -72,10 +72,11 @@ async function transcribeWithElevenLabs(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ELEVENLABS_TIMEOUT_MS);
     const formData = new FormData();
-    const fileName = `recording${audioExtension(contentType)}`;
+    const safeContentType = contentType?.trim() || undefined;
+    const fileName = `recording${audioExtension(safeContentType)}`;
     const audioBytes = Uint8Array.from(audioBuffer);
     const audioBlob = new Blob([audioBytes], {
-        type: stringFallback(contentType, "application/octet-stream"),
+        type: stringFallback(safeContentType, "application/octet-stream"),
     });
 
     formData.append("file", audioBlob, fileName);
@@ -156,5 +157,6 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
 
 export const __testing = {
     audioExtension,
+    transcribeWithElevenLabs,
     transcriptTextFromElevenLabs,
 };

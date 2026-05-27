@@ -1109,11 +1109,14 @@ export const __testing = {
     setDockerBinForTests: (nextDockerBin: string) => {
         dockerBin = nextDockerBin;
     },
-    setUpdaterNodeBinForTests: (nextUpdaterNodeBin: string) => {
-        updaterNodeBin = nextUpdaterNodeBin;
+    setUpdaterNodeBinForTests: (nextUpdaterNodeBin: string | undefined) => {
+        updaterNodeBin =
+            nextUpdaterNodeBin || nonEmptyEnvFallback("MIRA_UPDATER_NODE_BIN", "node");
     },
-    setUpdaterCwdForTests: (nextUpdaterCwd: string) => {
-        updaterCwd = nextUpdaterCwd;
+    setUpdaterCwdForTests: (nextUpdaterCwd: string | undefined) => {
+        updaterCwd =
+            nextUpdaterCwd ||
+            nonEmptyEnvFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
     },
     updateDockerExecJobOutput,
     completeDockerExecJob,

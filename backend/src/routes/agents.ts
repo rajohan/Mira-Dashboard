@@ -248,7 +248,7 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
         };
 
         if (Array.isArray(result.sessions) && result.sessions.length > 0) {
-            return result.sessions
+            const sessions = result.sessions
                 .filter(
                     (session) => typeof session.key === "string" && session.key.length > 0
                 )
@@ -265,6 +265,9 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                     isRunning: session.isRunning,
                     running: session.running,
                 }));
+            if (sessions.length > 0) {
+                return sessions;
+            }
         }
     } catch {
         // Fall back to cached sessions below
@@ -1408,8 +1411,10 @@ export default function agentsRoutes(app: express.Application): void {
                     metadata = JSON5.parse(
                         await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
                     );
-                } catch {
-                    // File doesn't exist or is unreadable; start fresh
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                        throw error;
+                    }
                 }
 
                 const safeTask = currentTask.trim().slice(0, 100);
