@@ -895,4 +895,28 @@ describe("gateway state and helper utilities", () => {
             warn.mock.restore();
         }
     });
+
+    it("sends session request responses before refresh failures are reported", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.delete", { deleted: true });
+        client.failures.set("sessions.list", new Error("refresh unavailable"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        const forwarded = await __testing.forwardRequest(
+            "sessions.delete",
+            { key: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "session-delete"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+            type: "res",
+            id: "session-delete",
+            ok: true,
+            payload: { deleted: true },
+        });
+    });
 });

@@ -16,6 +16,34 @@ interface MigrationDatabase {
     };
 }
 
+const TASK_AUTOMATION_COLUMN_SQL =
+    "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
+
+function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
+    const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
+    return taskColumns.some((column) => column.name === "automation_json");
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        /duplicate column name:\s*automation_json/u.test(error.message)
+    );
+}
+
+function isTransientSqliteLock(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        ("code" in error
+            ? error.code === "SQLITE_BUSY" || error.code === "SQLITE_LOCKED"
+            : /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(error.message))
+    );
+}
+
+function sleepSync(milliseconds: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,13 +150,37 @@ CREATE TABLE IF NOT EXISTS app_config (
 
 /** Ensures older task databases have the automation column. */
 export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
-    const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
-
-    if (!taskColumns.some((column) => column.name === "automation_json")) {
-        targetDb.exec(
-            "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'"
-        );
+    if (taskAutomationColumnExists(targetDb)) {
+        return;
     }
+
+    let lastError: unknown;
+
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
+        }
+
+        try {
+            targetDb.exec(TASK_AUTOMATION_COLUMN_SQL);
+            return;
+        } catch (error) {
+            if (isDuplicateColumnError(error) || taskAutomationColumnExists(targetDb)) {
+                return;
+            }
+
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+
+    if (taskAutomationColumnExists(targetDb)) {
+        return;
+    }
+
+    throw lastError;
 }
 
 ensureTaskAutomationColumn(db);

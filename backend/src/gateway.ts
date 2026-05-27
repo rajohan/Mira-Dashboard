@@ -691,9 +691,6 @@ async function forwardRequest(
             }
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
-            if (method.startsWith("sessions.")) {
-                await refreshSessions();
-            }
             if (pending?.clientWs.readyState === WebSocket.OPEN) {
                 pending.clientWs.send(
                     JSON.stringify({
@@ -703,6 +700,9 @@ async function forwardRequest(
                         payload,
                     })
                 );
+            }
+            if (method.startsWith("sessions.")) {
+                await refreshSessions();
             }
         } catch (error) {
             const pending = pendingRequests.get(id);

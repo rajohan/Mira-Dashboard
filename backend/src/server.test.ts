@@ -102,9 +102,13 @@ describe("server bootstrap", () => {
         assert.equal(parseTrustProxy("2"), 2);
         assert.equal(parseTrustProxy("public-proxy"), "public-proxy");
         assert.equal(parseTrustProxy(" loopback "), "loopback");
-        assert.equal(resolveListenPort("1234"), "1234");
-        assert.equal(resolveListenPort(" 3100 "), "3100");
+        assert.equal(resolveListenPort("1234"), 1234);
+        assert.equal(resolveListenPort(" 3100 "), 3100);
+        assert.equal(resolveListenPort("0"), 0);
         assert.equal(resolveListenPort(""), 3100);
+        assert.equal(resolveListenPort("dashboard.sock"), 3100);
+        assert.equal(resolveListenPort("1234abc"), 3100);
+        assert.equal(resolveListenPort("65536"), 3100);
         const configuredPort = process.env.PORT;
         delete process.env.PORT;
         try {
@@ -136,6 +140,78 @@ describe("server bootstrap", () => {
             }),
         });
         assert.deepEqual(executedSql, []);
+
+        let lockedAttempts = 0;
+        ensureTaskAutomationColumn({
+            exec: () => {
+                lockedAttempts += 1;
+                if (lockedAttempts < 3) {
+                    const error = new Error("database is locked") as Error & {
+                        code: string;
+                    };
+                    error.code = "SQLITE_LOCKED";
+                    throw error;
+                }
+            },
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
+        assert.equal(lockedAttempts, 3);
+
+        const nonTransientError = new Error("disk unavailable");
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {
+                        throw nonTransientError;
+                    },
+                    prepare: () => ({
+                        all: () => [{ name: "id" }],
+                    }),
+                }),
+            nonTransientError
+        );
+
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {
+                        throw new Error("SQLITE_BUSY");
+                    },
+                    prepare: () => ({
+                        all: () => [{ name: "id" }],
+                    }),
+                }),
+            /SQLITE_BUSY/u
+        );
+
+        let resolvedAfterRetries = 0;
+        let resolvedAfterRetryChecks = 0;
+        ensureTaskAutomationColumn({
+            exec: () => {
+                resolvedAfterRetries += 1;
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    resolvedAfterRetryChecks += 1;
+                    return resolvedAfterRetryChecks >= 6
+                        ? [{ name: "automation_json" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(resolvedAfterRetries, 4);
+
+        ensureTaskAutomationColumn({
+            exec: () => {
+                throw new Error("duplicate column name: automation_json");
+            },
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
 
         assert.equal(
             resolveBackendCommit("/missing", () => {

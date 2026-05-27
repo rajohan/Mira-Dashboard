@@ -165,19 +165,23 @@ describe("backup routes", () => {
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
-        const first = await requestJson<{
+        const firstRequest = requestJson<{
             ok: boolean;
             job: { id: string; type: string; status: string };
         }>(server, "/api/backups/kopia/run", { method: "POST" });
-        const second = await requestJson<{
+        const secondRequest = requestJson<{
             ok: boolean;
             job: { id: string; type: string; status: string };
         }>(server, "/api/backups/kopia/run", { method: "POST" });
+        const [firstResp, secondResp] = await Promise.all([firstRequest, secondRequest]);
 
-        assert.equal(second.status, 200);
-        assert.equal(second.body.ok, true);
-        assert.equal(second.body.job.id, first.body.job.id);
-        assert.equal(second.body.job.status, "running");
+        assert.equal(firstResp.status, 200);
+        assert.equal(firstResp.body.ok, true);
+        assert.equal(firstResp.body.job.status, "running");
+        assert.equal(secondResp.status, 200);
+        assert.equal(secondResp.body.ok, true);
+        assert.equal(secondResp.body.job.id, firstResp.body.job.id);
+        assert.equal(secondResp.body.job.status, "running");
 
         await waitForDone(server, "/api/backups/kopia");
     });

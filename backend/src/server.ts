@@ -95,9 +95,14 @@ export function resolveBackendCommit(
 const backendCommit = resolveBackendCommit();
 
 /** Resolves the port the backend should listen on. */
-export function resolveListenPort(value = process.env.PORT): string | number {
+export function resolveListenPort(value = process.env.PORT): number {
     const trimmed = value?.trim() ?? "";
-    return trimmed || 3100;
+    if (!/^\d+$/u.test(trimmed)) {
+        return 3100;
+    }
+
+    const port = Number(trimmed);
+    return port <= 65_535 ? port : 3100;
 }
 
 // =====================
