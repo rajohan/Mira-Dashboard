@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -23,7 +24,9 @@ interface FileItem {
 
 async function startServer(workspaceRoot: string): Promise<TestServer> {
     process.env.WORKSPACE_ROOT = workspaceRoot;
-    const { default: filesRoutes } = await import(`./files.js?test=${Date.now()}`);
+    const { default: filesRoutes } = await import(
+        `./files.js?test=${crypto.randomUUID()}`
+    );
 
     const app = express();
     app.use(express.json({ limit: "2mb" }));
@@ -137,7 +140,7 @@ describe("files routes", () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
         try {
             process.env.WORKSPACE_ROOT = "";
-            const module = await import(`./files.js?blank=${Date.now()}`);
+            const module = await import(`./files.js?blank=${crypto.randomUUID()}`);
             assert.equal(typeof module.default, "function");
         } finally {
             if (originalWorkspaceRoot === undefined) {

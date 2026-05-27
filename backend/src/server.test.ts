@@ -110,7 +110,11 @@ describe("server bootstrap", () => {
         try {
             assert.equal(resolveListenPort(), 3100);
         } finally {
-            process.env.PORT = configuredPort;
+            if (configuredPort === undefined) {
+                delete process.env.PORT;
+            } else {
+                process.env.PORT = configuredPort;
+            }
         }
     });
 

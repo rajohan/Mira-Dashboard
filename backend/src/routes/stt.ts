@@ -138,11 +138,14 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
                 );
                 response.json({ provider: "elevenlabs", text });
             } catch (error) {
+                const message =
+                    error instanceof Error
+                        ? error.message
+                        : typeof error === "string"
+                          ? error
+                          : undefined;
                 response.status(500).json({
-                    error: stringFallback(
-                        (error as Error).message,
-                        "Failed to transcribe audio"
-                    ),
+                    error: stringFallback(message, "Failed to transcribe audio"),
                 });
             } finally {
                 activeTranscription = false;

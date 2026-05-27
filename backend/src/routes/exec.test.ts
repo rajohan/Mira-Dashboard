@@ -192,6 +192,22 @@ describe("exec routes", () => {
         __testing.failExecJob("state-fail", new Error("after"));
         assert.equal(__testing.jobs.get("state-fail")?.code, 1);
         assert.match(__testing.jobs.get("state-fail")?.stderr || "", /after/u);
+
+        __testing.jobs.set("primitive-fail", {
+            id: "primitive-fail",
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+        __testing.failExecJob("primitive-fail", "plain failure");
+        assert.equal(__testing.jobs.get("primitive-fail")?.code, 1);
+        assert.match(
+            __testing.jobs.get("primitive-fail")?.stderr || "",
+            /plain failure/u
+        );
     });
 
     it("runs one-shot commands with explicit args", async () => {

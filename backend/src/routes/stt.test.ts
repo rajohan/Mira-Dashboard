@@ -122,6 +122,22 @@ describe("STT routes", () => {
         assert.deepEqual(await error.json(), {
             error: "ElevenLabs STT failed (400): bad audio",
         });
+
+        globalThis.fetch = async () => {
+            throw "network unavailable";
+        };
+        const stringError = await transcribe(server, Buffer.from([1, 2, 3]));
+        assert.equal(stringError.status, 500);
+        assert.deepEqual(await stringError.json(), { error: "network unavailable" });
+
+        globalThis.fetch = async () => {
+            throw null;
+        };
+        const unknownError = await transcribe(server, Buffer.from([1, 2, 3]));
+        assert.equal(unknownError.status, 500);
+        assert.deepEqual(await unknownError.json(), {
+            error: "Failed to transcribe audio",
+        });
     });
 
     it("handles content type variants, empty transcripts, and concurrent requests", async () => {

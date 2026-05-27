@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -488,8 +489,18 @@ describe("OpenClaw gateway client websocket protocol", () => {
             await server.close();
         }
 
+        const refusedServer = net.createServer();
+        await new Promise<void>((resolve) =>
+            refusedServer.listen(0, "127.0.0.1", resolve)
+        );
+        const refusedAddress = refusedServer.address();
+        assert.ok(refusedAddress && typeof refusedAddress === "object");
+        await new Promise<void>((resolve, reject) =>
+            refusedServer.close((error) => (error ? reject(error) : resolve()))
+        );
+
         const failing = new OpenClawGatewayClient({
-            url: "ws://127.0.0.1:1",
+            url: `ws://127.0.0.1:${refusedAddress.port}`,
             onConnectError: (error) => errors.push(error.message),
         });
         try {

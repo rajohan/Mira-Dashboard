@@ -334,6 +334,27 @@ async function requestJson<T>(
     };
 }
 
+async function withFakeUpdaterFailStep<T>(
+    value: string | undefined,
+    callback: () => Promise<T>
+): Promise<T> {
+    const previous = process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
+    try {
+        if (value === undefined) {
+            delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
+        } else {
+            process.env.MIRA_FAKE_UPDATER_FAIL_STEP = value;
+        }
+        return await callback();
+    } finally {
+        if (previous === undefined) {
+            delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
+        } else {
+            process.env.MIRA_FAKE_UPDATER_FAIL_STEP = previous;
+        }
+    }
+}
+
 describe("docker routes", { concurrency: false }, () => {
     let server: TestServer;
     let tempDir: string;
@@ -1175,91 +1196,96 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("runs updater pipelines and reports step failures", async () => {
-        delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
-        const run = await requestJson<{
-            success: boolean;
-            steps: Array<{ step: string; ok: boolean }>;
-        }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
-        assert.equal(run.status, 200);
-        assert.equal(run.body.success, true);
-        assert.deepEqual(
-            run.body.steps.map((step) => step.step),
-            ["register", "poll", "auto-update", "notify", "discord"]
-        );
-
-        process.env.MIRA_FAKE_UPDATER_FAIL_STEP = "poll";
-        const failedRun = await requestJson<{
-            success: boolean;
-            steps: Array<{ step: string; ok: boolean; stderr: string }>;
-        }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
-        assert.equal(failedRun.status, 200);
-        assert.equal(failedRun.body.success, false);
-        assert.deepEqual(
-            failedRun.body.steps.map((step) => step.step),
-            ["register", "poll"]
-        );
-        assert.equal(failedRun.body.steps[1]?.stderr, "poll failed\n");
-
-        for (const step of ["register", "auto-update", "notify"]) {
-            process.env.MIRA_FAKE_UPDATER_FAIL_STEP = step;
-            const stepFailure = await requestJson<{
+        await withFakeUpdaterFailStep(undefined, async () => {
+            const run = await requestJson<{
                 success: boolean;
                 steps: Array<{ step: string; ok: boolean }>;
             }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
-            assert.equal(stepFailure.status, 200);
-            assert.equal(stepFailure.body.success, false);
-            assert.equal(stepFailure.body.steps.at(-1)?.step, step);
+            assert.equal(run.status, 200);
+            assert.equal(run.body.success, true);
+            assert.deepEqual(
+                run.body.steps.map((step) => step.step),
+                ["register", "poll", "auto-update", "notify", "discord"]
+            );
+        });
+
+        await withFakeUpdaterFailStep("poll", async () => {
+            const failedRun = await requestJson<{
+                success: boolean;
+                steps: Array<{ step: string; ok: boolean; stderr: string }>;
+            }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
+            assert.equal(failedRun.status, 200);
+            assert.equal(failedRun.body.success, false);
+            assert.deepEqual(
+                failedRun.body.steps.map((step) => step.step),
+                ["register", "poll"]
+            );
+            assert.equal(failedRun.body.steps[1]?.stderr, "poll failed\n");
+        });
+
+        for (const step of ["register", "auto-update", "notify"]) {
+            await withFakeUpdaterFailStep(step, async () => {
+                const stepFailure = await requestJson<{
+                    success: boolean;
+                    steps: Array<{ step: string; ok: boolean }>;
+                }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
+                assert.equal(stepFailure.status, 200);
+                assert.equal(stepFailure.body.success, false);
+                assert.equal(stepFailure.body.steps.at(-1)?.step, step);
+            });
         }
-        delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
     });
 
     it("runs manual updater notification steps and keeps partial failure details", async () => {
-        const success = await requestJson<{
-            success: boolean;
-            result: { step: string; ok: boolean };
-            stderr: string;
-        }>(server, "/api/docker/updater/services/1/update", {
-            method: "POST",
-            body: {},
+        await withFakeUpdaterFailStep(undefined, async () => {
+            const success = await requestJson<{
+                success: boolean;
+                result: { step: string; ok: boolean };
+                stderr: string;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(success.status, 200);
+            assert.equal(success.body.success, true);
+            assert.deepEqual(success.body.result, { step: "manual-update", ok: true });
         });
-        assert.equal(success.status, 200);
-        assert.equal(success.body.success, true);
-        assert.deepEqual(success.body.result, { step: "manual-update", ok: true });
 
-        process.env.MIRA_FAKE_UPDATER_FAIL_STEP = "notify";
-        const notifyFailure = await requestJson<{
-            success: boolean;
-            result: { step: string; ok: boolean };
-            stderr: string;
-        }>(server, "/api/docker/updater/services/1/update", {
-            method: "POST",
-            body: {},
+        await withFakeUpdaterFailStep("notify", async () => {
+            const notifyFailure = await requestJson<{
+                success: boolean;
+                result: { step: string; ok: boolean };
+                stderr: string;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(notifyFailure.status, 200);
+            assert.equal(notifyFailure.body.success, true);
+            assert.deepEqual(notifyFailure.body.result, {
+                step: "manual-update",
+                ok: true,
+            });
+            assert.equal(notifyFailure.body.stderr, "notify failed\n");
         });
-        assert.equal(notifyFailure.status, 200);
-        assert.equal(notifyFailure.body.success, true);
-        assert.deepEqual(notifyFailure.body.result, {
-            step: "manual-update",
-            ok: true,
-        });
-        assert.equal(notifyFailure.body.stderr, "notify failed\n");
 
-        process.env.MIRA_FAKE_UPDATER_FAIL_STEP = "manual-update";
-        const manualFailure = await requestJson<{
-            success: boolean;
-            result: { step: string; ok: boolean };
-            stderr: string;
-        }>(server, "/api/docker/updater/services/1/update", {
-            method: "POST",
-            body: {},
+        await withFakeUpdaterFailStep("manual-update", async () => {
+            const manualFailure = await requestJson<{
+                success: boolean;
+                result: { step: string; ok: boolean };
+                stderr: string;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(manualFailure.status, 200);
+            assert.equal(manualFailure.body.success, true);
+            assert.deepEqual(manualFailure.body.result, {
+                step: "manual-update",
+                ok: false,
+            });
+            assert.equal(manualFailure.body.stderr, "manual-update failed\n");
         });
-        assert.equal(manualFailure.status, 200);
-        assert.equal(manualFailure.body.success, true);
-        assert.deepEqual(manualFailure.body.result, {
-            step: "manual-update",
-            ok: false,
-        });
-        assert.equal(manualFailure.body.stderr, "manual-update failed\n");
-        delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
     });
 
     it("starts and reads docker exec jobs", async () => {

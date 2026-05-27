@@ -150,21 +150,31 @@ export const __testing = {
 
 /** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {
-    app.post("/api/terminal/complete", express.json(), async (req, res) => {
-        const { partial, cwd } = req.body as CompletionRequest;
+    app.post(
+        "/api/terminal/complete",
+        express.json({ strict: false }),
+        async (req, res) => {
+            const body = req.body;
+            if (!body || typeof body !== "object") {
+                res.status(400).json({ error: "Missing or invalid body" });
+                return;
+            }
 
-        if (!partial || typeof partial !== "string" || partial.includes("\0")) {
-            res.status(400).json({ error: "Missing or invalid partial" });
-            return;
+            const { partial, cwd } = body as CompletionRequest;
+
+            if (!partial || typeof partial !== "string" || partial.includes("\0")) {
+                res.status(400).json({ error: "Missing or invalid partial" });
+                return;
+            }
+            if (cwd !== undefined && typeof cwd !== "string") {
+                res.status(400).json({ error: "Missing or invalid cwd" });
+                return;
+            }
+            const resolvedCwd = typeof cwd === "string" ? cwd : HOME_DIR;
+            const result = await getCompletions(partial, resolvedCwd);
+            res.json(result);
         }
-        if (cwd !== undefined && typeof cwd !== "string") {
-            res.status(400).json({ error: "Missing or invalid cwd" });
-            return;
-        }
-        const resolvedCwd = typeof cwd === "string" ? cwd : HOME_DIR;
-        const result = await getCompletions(partial, resolvedCwd);
-        res.json(result);
-    });
+    );
 
     app.post("/api/terminal/cd", express.json(), async (req, res) => {
         const { path: targetPath, cwd } = req.body as CdRequest;

@@ -523,6 +523,33 @@ describe("pull request routes", () => {
             () => __testing.parseGhJsonLine("x".repeat(1024 * 1024 + 1), parsedRows),
             /too large/u
         );
+        const clearCalls: NodeJS.Timeout[] = [];
+        const forceTimer = setTimeout(() => {}, 10_000);
+        forceTimer.unref();
+        assert.equal(
+            __testing.clearForceKillTimerIfAllowed(
+                forceTimer,
+                {},
+                false,
+                (timer: NodeJS.Timeout) => clearCalls.push(timer)
+            ),
+            null
+        );
+        assert.deepEqual(clearCalls, [forceTimer]);
+        assert.equal(
+            __testing.clearForceKillTimerIfAllowed(forceTimer, {}, true),
+            forceTimer
+        );
+        assert.equal(
+            __testing.clearForceKillTimerIfAllowed(
+                forceTimer,
+                { keepForceKillTimer: true },
+                false
+            ),
+            forceTimer
+        );
+        assert.equal(__testing.clearForceKillTimerIfAllowed(null, {}, false), null);
+        clearTimeout(forceTimer);
         assert.deepEqual(
             __testing.parseGitWorktrees(
                 [

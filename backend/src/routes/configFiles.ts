@@ -68,6 +68,14 @@ function resolveOpenclawRoot(): string | null {
     return path.join(homeDir, ".openclaw");
 }
 
+function decodeConfigPath(encodedPath: string): string | null {
+    try {
+        return decodeURIComponent(encodedPath);
+    } catch {
+        return null;
+    }
+}
+
 /** Performs list config files. */
 function listConfigFiles(openclawRoot: string): ConfigFile[] {
     const files: ConfigFile[] = [];
@@ -110,6 +118,22 @@ export default function configFilesRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
+    app.use((req, res, next) => {
+        if (
+            (req.method === "GET" || req.method === "PUT") &&
+            req.originalUrl.startsWith("/api/config-files/")
+        ) {
+            const rawPath = req.originalUrl
+                .slice("/api/config-files/".length)
+                .split("?")[0];
+            if (decodeConfigPath(rawPath) === null) {
+                res.status(400).json({ error: "Malformed config file path" });
+                return;
+            }
+        }
+        next();
+    });
+
     // List config files
     app.get(
         "/api/config-files",
@@ -135,7 +159,7 @@ export default function configFilesRoutes(
         /^\/api\/config-files\/(.*)$/,
         asyncRoute(
             async (req, res) => {
-                const filePath = decodeURIComponent(req.params[0]);
+                const filePath = req.params[0];
 
                 // Check if file is in whitelist
                 if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
@@ -237,7 +261,7 @@ export default function configFilesRoutes(
         express.json({ limit: `${MAX_CONFIG_WRITE_SIZE}b` }),
         asyncRoute(
             async (req, res) => {
-                const filePath = decodeURIComponent(req.params[0]);
+                const filePath = req.params[0];
                 const { content } = req.body as { content?: string };
 
                 if (content === undefined) {

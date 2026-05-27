@@ -209,6 +209,19 @@ function parseGhJsonLine<T>(line: string, rows: T[]): void {
     rows.push(JSON.parse(line) as T);
 }
 
+function clearForceKillTimerIfAllowed(
+    forceKillTimer: NodeJS.Timeout | null,
+    options: { keepForceKillTimer?: boolean },
+    preserveForceKillTimer: boolean,
+    clearTimer: (timer: NodeJS.Timeout) => void = clearTimeout
+): NodeJS.Timeout | null {
+    if (!forceKillTimer || options.keepForceKillTimer || preserveForceKillTimer) {
+        return forceKillTimer;
+    }
+    clearTimer(forceKillTimer);
+    return null;
+}
+
 /** Streams newline-delimited JSON values from a GitHub CLI command. */
 async function runGhJsonLines<T>(
     args: string[],
@@ -225,10 +238,12 @@ async function runGhJsonLines<T>(
         let stderr = "";
         let settled = false;
         let forceKillTimer: NodeJS.Timeout | null = null;
+        let preserveForceKillTimer = false;
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
             forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
             forceKillTimer.unref();
+            preserveForceKillTimer = true;
             settle(() => reject(new Error("GitHub CLI command timed out")), {
                 keepForceKillTimer: true,
             });
@@ -239,10 +254,11 @@ async function runGhJsonLines<T>(
             options: { keepForceKillTimer?: boolean } = {}
         ) => {
             if (settled) {
-                if (forceKillTimer && !options.keepForceKillTimer) {
-                    clearTimeout(forceKillTimer);
-                    forceKillTimer = null;
-                }
+                forceKillTimer = clearForceKillTimerIfAllowed(
+                    forceKillTimer,
+                    options,
+                    preserveForceKillTimer
+                );
                 return;
             }
             settled = true;
@@ -821,6 +837,7 @@ export const __testing = {
     runCommand,
     runGhJson,
     parseGhJsonLine,
+    clearForceKillTimerIfAllowed,
     parseRepoParts,
     runGhJsonLines,
     parseGitWorktrees,

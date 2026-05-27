@@ -386,7 +386,8 @@ function failExecJob(jobId: string, error: unknown): void {
 
     current.status = "done";
     current.code = 1;
-    current.stderr = trimOutput(`${current.stderr}\n${(error as Error).message}`.trim());
+    const message = error instanceof Error ? error.message : String(error);
+    current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
     current.endedAt = Date.now();
     cleanupJobs();
 }

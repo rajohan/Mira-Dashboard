@@ -295,6 +295,23 @@ describe("config files routes", () => {
         }
     });
 
+    it("returns 400 for malformed encoded config paths", async () => {
+        const read = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/%E0"
+        );
+        const write = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/%E0",
+            { method: "PUT", body: { content: "{}\n" } }
+        );
+
+        for (const response of [read, write]) {
+            assert.equal(response.status, 400);
+            assert.equal(response.body.error, "Malformed config file path");
+        }
+    });
+
     it("reports unexpected read errors", async () => {
         const originalOpenSync = fs.openSync;
         try {
