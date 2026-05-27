@@ -10,11 +10,10 @@ import express from "express";
 import { setCacheStoreDockerBinForTests } from "../lib/cacheStore.js";
 import cacheRoutes from "./cache.js";
 import {
+    __testing,
     mapCacheRowForResponse,
     parseJsonFieldOrValue,
     refreshCacheKey,
-    setCacheRefreshCommandForTests,
-    setCacheRefreshCwdForTests,
 } from "./cache.js";
 
 const baseRow = {
@@ -81,15 +80,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-route-"));
-        setCacheRefreshCwdForTests(tempDir);
+        __testing.setCacheRefreshCwdForTests(tempDir);
         await installFakeDocker(tempDir);
         server = await startServer();
     });
 
     after(async () => {
         await server.close();
-        setCacheRefreshCommandForTests("quotas.summary", undefined);
-        setCacheRefreshCwdForTests(undefined);
+        __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
+        __testing.setCacheRefreshCwdForTests(undefined);
         setCacheStoreDockerBinForTests(undefined);
         await rm(tempDir, { recursive: true, force: true });
     });
@@ -196,11 +195,11 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     it("refreshes configured cache keys and reports missing refreshed rows", async () => {
         const refreshCommand = ["/bin/sh", "-c", "exit 0"];
 
-        setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
+        __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
         const refreshed = await refreshCacheKey("quotas.summary");
         assert.equal(refreshed.key, "quotas.summary");
 
-        setCacheRefreshCommandForTests("missing.key", refreshCommand);
+        __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
         await assert.rejects(() => refreshCacheKey("missing.key"), {
             message: "Cache key not found after refresh: missing.key",
         });

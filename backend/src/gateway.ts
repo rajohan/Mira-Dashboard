@@ -545,15 +545,28 @@ function hydrateOmittedChatHistoryImages(
     return history;
 }
 
+function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): boolean {
+    return gatewayClient === expectedClient;
+}
+
 /** Performs refresh sessions. */
-async function refreshSessions(): Promise<void> {
-    if (!gatewayClient || !isGatewayConnected) {
+async function refreshSessions(
+    expectedClient: OpenClawGatewayClientInstance | null = gatewayClient
+): Promise<void> {
+    if (
+        !expectedClient ||
+        !isGatewayConnected ||
+        !isCurrentGatewayClient(expectedClient)
+    ) {
         return;
     }
 
-    const payload = (await gatewayClient.request("sessions.list", {})) as {
+    const payload = (await expectedClient.request("sessions.list", {})) as {
         sessions?: GatewaySession[];
     };
+    if (!isCurrentGatewayClient(expectedClient)) {
+        return;
+    }
     sessionList = (payload.sessions || []).map(transformSession);
     broadcast({ type: "sessions", sessions: sessionList });
 }
@@ -570,19 +583,19 @@ function init(token: string): void {
     currentToken = token;
     previousGatewayClient?.stop();
     /** Returns whether this callback belongs to the active Gateway client. */
-    function isCurrentGatewayClient(): boolean {
-        return gatewayClient === thisGatewayClient;
+    function isCurrentInitGatewayClient(): boolean {
+        return isCurrentGatewayClient(thisGatewayClient);
     }
     /** Handles successful Gateway hello negotiation and subscribes to live events. */
     function handleGatewayHelloOk(): void {
-        if (!isCurrentGatewayClient()) {
+        if (!isCurrentInitGatewayClient()) {
             return;
         }
         isGatewayConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
         async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
-            if (!isCurrentGatewayClient() || !isGatewayConnected) {
+            if (!isCurrentInitGatewayClient() || !isGatewayConnected) {
                 return;
             }
             try {
@@ -604,7 +617,7 @@ function init(token: string): void {
             }
         }
         void subscribeToSessionIndexEvents();
-        void refreshSessions().catch((error) => {
+        void refreshSessions(thisGatewayClient).catch((error) => {
             console.error(
                 "[Gateway] Failed to refresh sessions:",
                 (error as Error).message
@@ -613,7 +626,7 @@ function init(token: string): void {
     }
     /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
     function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
-        if (!isCurrentGatewayClient()) {
+        if (!isCurrentInitGatewayClient()) {
             return;
         }
         broadcast({
@@ -622,7 +635,7 @@ function init(token: string): void {
             payload: enrichRuntimeEventPayload(evt.event, evt.payload),
         });
         if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
-            void refreshSessions().catch((error) => {
+            void refreshSessions(thisGatewayClient).catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
                     (error as Error).message
@@ -632,14 +645,14 @@ function init(token: string): void {
     }
     /** Logs Gateway connection failures. */
     function handleGatewayConnectError(err: Error): void {
-        if (!isCurrentGatewayClient()) {
+        if (!isCurrentInitGatewayClient()) {
             return;
         }
         console.error("[Gateway] Connect failed:", err.message);
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
-        if (!isCurrentGatewayClient()) {
+        if (!isCurrentInitGatewayClient()) {
             return;
         }
         isGatewayConnected = false;
@@ -702,7 +715,7 @@ async function forwardRequest(
                 );
             }
             if (method.startsWith("sessions.")) {
-                await refreshSessions();
+                await refreshSessions(gatewayClient);
             }
         } catch (error) {
             const pending = pendingRequests.get(id);
@@ -724,7 +737,7 @@ async function forwardRequest(
     try {
         await gatewayClient.request(method, params);
         if (method.startsWith("sessions.")) {
-            await refreshSessions();
+            await refreshSessions(gatewayClient);
         }
         return true;
     } catch {

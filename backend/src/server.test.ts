@@ -177,6 +177,19 @@ describe("server bootstrap", () => {
             () =>
                 ensureTaskAutomationColumn({
                     exec: () => {
+                        throw "SQLITE_LOCKED";
+                    },
+                    prepare: () => ({
+                        all: () => [{ name: "id" }],
+                    }),
+                }),
+            /SQLITE_LOCKED/u
+        );
+
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
                     prepare: () => ({
@@ -288,6 +301,16 @@ describe("server bootstrap", () => {
             nextCalled = true;
         });
         assert.equal(nextCalled, true);
+
+        apiAuthMiddleware(
+            { ...request, path: "/authorize" } as never,
+            response as never,
+            () => {}
+        );
+        assert.deepEqual(responses.at(-1), {
+            status: 401,
+            body: { error: "Unauthorized" },
+        });
 
         apiAuthMiddleware(request as never, response as never, () => {});
         assert.deepEqual(responses.at(-1), {

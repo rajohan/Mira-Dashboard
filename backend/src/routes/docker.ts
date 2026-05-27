@@ -477,7 +477,11 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         TB: 1024 ** 4,
         PB: 1024 ** 5,
     };
-    return Math.round(value * (multipliers[unit] ?? 1));
+    const multiplier = multipliers[unit];
+    if (!multiplier) {
+        return 0;
+    }
+    return Math.round(value * multiplier);
 }
 
 /** Performs run docker. */
@@ -806,7 +810,7 @@ async function runManualUpdaterForService(serviceId: number) {
     const steps: DockerUpdaterRunResult[] = [manual];
     if (!manual.ok) {
         return {
-            output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
+            output: extractTrailingJson(manual.stdout || "{}"),
             stderr: stringFallback(manual.stderr),
             steps,
         };
@@ -818,7 +822,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(notify);
     if (!notify.ok) {
         return {
-            output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
+            output: extractTrailingJson(manual.stdout || "{}"),
             stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
             steps,
         };
@@ -830,7 +834,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(discord);
 
     return {
-        output: extractTrailingJson(stringFallback(manual.stdout, "{}")),
+        output: extractTrailingJson(manual.stdout || "{}"),
         stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
         steps,
     };

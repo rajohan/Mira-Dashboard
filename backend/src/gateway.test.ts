@@ -658,6 +658,29 @@ describe("gateway state and helper utilities", () => {
         throwingWs.emit("close");
     });
 
+    it("discards stale session refresh results from replaced clients", async () => {
+        const staleClient = new FakeGatewayClient();
+        let releaseRefresh!: () => void;
+        staleClient.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            return {
+                sessions: [{ key: "agent:main:main", updatedAt: 1 }],
+            };
+        };
+
+        __testing.setGatewayClientForTest(staleClient as never);
+        __testing.setGatewayConnectedForTest(true);
+        const refresh = __testing.refreshSessions(staleClient as never);
+        const currentClient = new FakeGatewayClient();
+        __testing.setGatewayClientForTest(currentClient as never);
+        releaseRefresh();
+        await refresh;
+
+        assert.deepEqual(gateway.getSessions(), []);
+    });
+
     it("handles log subscription request aliases", async () => {
         const ws = new FakeWebSocket();
         gateway.handleClient(ws as unknown as WebSocket);

@@ -217,7 +217,7 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
   process.stdout.write("started long exec\n");
   setInterval(() => {}, 1000);
 }
-if (args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+else if (args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
   process.stdout.write("exec stdout\n");
   process.stderr.write("exec stderr\n");
   process.exit(0);
@@ -273,11 +273,15 @@ const stepByScript = {
 };
 const step = stepByScript[script] || "unknown";
 if (process.env.MIRA_FAKE_UPDATER_FAIL_STEP === step) {
-  process.stdout.write(JSON.stringify({ step, ok: false }) + "\n");
+  if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
+    process.stdout.write(JSON.stringify({ step, ok: false }) + "\n");
+  }
   process.stderr.write(step + " failed\n");
   process.exit(1);
 }
-process.stdout.write("log before json\n" + JSON.stringify({ step, ok: true }) + "\n");
+if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
+  process.stdout.write("log before json\n" + JSON.stringify({ step, ok: true }) + "\n");
+}
 process.stderr.write(process.env.MIRA_FAKE_UPDATER_STDERR || "");
 `,
         "utf8"
@@ -379,6 +383,7 @@ describe("docker routes", { concurrency: false }, () => {
         __testing.dockerExecJobs.clear();
         process.env.PATH = originalPath;
         delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
+        delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
         delete process.env.MIRA_FAKE_UPDATER_STDERR;
         delete process.env.MIRA_FAKE_DOCKER_EMPTY;
         delete process.env.MIRA_FAKE_DOCKER_SPARSE;
@@ -477,7 +482,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.parseDockerSizeToBytes("4TB"), 4 * 1024 ** 4);
         assert.equal(__testing.parseDockerSizeToBytes("5PB"), 5 * 1024 ** 5);
         assert.equal(__testing.parseDockerSizeToBytes("1.5 MB"), 1_572_864);
-        assert.equal(__testing.parseDockerSizeToBytes("1XB"), 1);
+        assert.equal(__testing.parseDockerSizeToBytes("1XB"), 0);
         assert.equal(__testing.trimOutput("x".repeat(120_000)).length, 100_000);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
         __testing.setUpdaterNodeBinForTests("node");
@@ -1288,6 +1293,51 @@ describe("docker routes", { concurrency: false }, () => {
             });
             assert.equal(manualFailure.body.stderr, "manual-update failed\n");
         });
+
+        process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP = "manual-update";
+        try {
+            await withFakeUpdaterFailStep(undefined, async () => {
+                const blankSuccess = await requestJson<{
+                    success: boolean;
+                    result: Record<string, never>;
+                }>(server, "/api/docker/updater/services/1/update", {
+                    method: "POST",
+                    body: {},
+                });
+                assert.equal(blankSuccess.status, 200);
+                assert.deepEqual(blankSuccess.body.result, {});
+            });
+
+            await withFakeUpdaterFailStep("manual-update", async () => {
+                const blankManualFailure = await requestJson<{
+                    success: boolean;
+                    result: Record<string, never>;
+                    stderr: string;
+                }>(server, "/api/docker/updater/services/1/update", {
+                    method: "POST",
+                    body: {},
+                });
+                assert.equal(blankManualFailure.status, 200);
+                assert.deepEqual(blankManualFailure.body.result, {});
+                assert.equal(blankManualFailure.body.stderr, "manual-update failed\n");
+            });
+
+            await withFakeUpdaterFailStep("notify", async () => {
+                const blankNotifyFailure = await requestJson<{
+                    success: boolean;
+                    result: Record<string, never>;
+                    stderr: string;
+                }>(server, "/api/docker/updater/services/1/update", {
+                    method: "POST",
+                    body: {},
+                });
+                assert.equal(blankNotifyFailure.status, 200);
+                assert.deepEqual(blankNotifyFailure.body.result, {});
+                assert.equal(blankNotifyFailure.body.stderr, "notify failed\n");
+            });
+        } finally {
+            delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
+        }
     });
 
     it("starts and reads docker exec jobs", async () => {

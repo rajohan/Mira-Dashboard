@@ -166,7 +166,7 @@ export default function terminalRoutes(app: express.Application): void {
                 res.status(400).json({ error: "Missing or invalid partial" });
                 return;
             }
-            if (cwd !== undefined && typeof cwd !== "string") {
+            if (cwd !== undefined && (typeof cwd !== "string" || cwd.trim() === "")) {
                 res.status(400).json({ error: "Missing or invalid cwd" });
                 return;
             }

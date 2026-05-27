@@ -38,14 +38,18 @@ process.stdout.write('{"completedAt":"2026-05-11T01:00:00.000Z","ok":true}\n');
         path.join(binDir, "node"),
         String.raw`#!${process.execPath}
 process.stderr.write('dry-run stderr\n');
-process.stdout.write(JSON.stringify({ ok: true, mode: 'dry-run', args: process.argv.slice(2) }));
+if (process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY !== "1") {
+  process.stdout.write(JSON.stringify({ ok: true, mode: 'dry-run', args: process.argv.slice(2) }));
+}
 `
     );
     await writeExecutable(
         path.join(binDir, "sudo"),
         String.raw`#!${process.execPath}
 process.stderr.write('run stderr\n');
-process.stdout.write(JSON.stringify({ ok: true, mode: 'run', args: process.argv.slice(2) }));
+if (process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY !== "1") {
+  process.stdout.write(JSON.stringify({ ok: true, mode: 'run', args: process.argv.slice(2) }));
+}
 `
     );
 
@@ -108,6 +112,7 @@ describe("ops routes", () => {
         } else {
             process.env.MIRA_N8N_ROOT = originalN8nRoot;
         }
+        delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
         await rm(tempDir, { recursive: true, force: true });
     });
 
@@ -186,6 +191,18 @@ describe("ops routes", () => {
         assert.equal(response.body.result.mode, "dry-run");
         assert.equal(response.body.result.args.includes("--dry-run"), true);
         assert.equal(response.body.stderr, "dry-run stderr\n");
+
+        process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY = "1";
+        try {
+            const empty = await requestJson<{
+                success: boolean;
+                result: Record<string, never>;
+            }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
+            assert.equal(empty.status, 200);
+            assert.deepEqual(empty.body.result, {});
+        } finally {
+            delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
+        }
     });
 
     it("runs real log rotation through sudo preserve-env wrapper", async () => {

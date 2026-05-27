@@ -2993,11 +2993,11 @@ describe("agents routes", () => {
 
             gateway.request = async () => ({ sessions: [] });
             const sessions = await __testing.getGatewaySessionsForAgents();
-            assert.equal(sessions[0]?.model, "cached-model");
+            assert.deepEqual(sessions, []);
 
             gateway.request = async () => ({ sessions: [{ key: "" }] });
             const emptyFilteredSessions = await __testing.getGatewaySessionsForAgents();
-            assert.equal(emptyFilteredSessions[0]?.model, "cached-model");
+            assert.deepEqual(emptyFilteredSessions, []);
         } finally {
             gateway.getSessions = previousGatewaySessions;
             gateway.request = previousGatewayRequest;

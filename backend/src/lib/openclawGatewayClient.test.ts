@@ -158,6 +158,10 @@ describe("OpenClaw gateway client helpers", () => {
         assert.equal(__testing.asError("plain").message, "plain");
         const existingError = new Error("existing");
         assert.equal(__testing.asError(existingError), existingError);
+        const stoppedClient = new OpenClawGatewayClient({
+            url: "ws://127.0.0.1:1",
+        });
+        stoppedClient.stop();
         assert.equal(
             __testing.buildDeviceAuthPayloadV3({
                 deviceId: "device",
@@ -504,6 +508,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
             onConnectError: (error) => errors.push(error.message),
         });
         try {
+            errors.length = 0;
             failing.start();
             await waitFor(() => errors.at(-1), "connect error");
             assert.equal(typeof errors.at(-1), "string");
@@ -657,7 +662,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         const { errors, internals } = createProtocolClient();
         internals.ws = { readyState: WebSocket.CLOSED, send: () => {}, close: () => {} };
 
-        internals.sendConnect({ nonce: "nonce" });
+        internals.sendConnect();
         assert.equal(errors.at(-1), "gateway connect challenge missing nonce");
     });
 

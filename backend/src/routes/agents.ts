@@ -247,8 +247,8 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
             }>;
         };
 
-        if (Array.isArray(result.sessions) && result.sessions.length > 0) {
-            const sessions = result.sessions
+        if (Array.isArray(result.sessions)) {
+            return result.sessions
                 .filter(
                     (session) => typeof session.key === "string" && session.key.length > 0
                 )
@@ -265,9 +265,6 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                     isRunning: session.isRunning,
                     running: session.running,
                 }));
-            if (sessions.length > 0) {
-                return sessions;
-            }
         }
     } catch {
         // Fall back to cached sessions below

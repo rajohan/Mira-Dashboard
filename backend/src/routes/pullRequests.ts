@@ -254,7 +254,8 @@ async function runGhJsonLines<T>(
             options: { keepForceKillTimer?: boolean } = {}
         ) => {
             if (settled) {
-                preserveForceKillTimer = Boolean(options.keepForceKillTimer);
+                preserveForceKillTimer =
+                    preserveForceKillTimer || Boolean(options.keepForceKillTimer);
                 forceKillTimer = clearForceKillTimerIfAllowed(
                     forceKillTimer,
                     options,
@@ -264,7 +265,8 @@ async function runGhJsonLines<T>(
             }
             settled = true;
             clearTimeout(timeout);
-            preserveForceKillTimer = Boolean(options.keepForceKillTimer);
+            preserveForceKillTimer =
+                preserveForceKillTimer || Boolean(options.keepForceKillTimer);
             forceKillTimer = clearForceKillTimerIfAllowed(
                 forceKillTimer,
                 options,

@@ -86,7 +86,7 @@ async function runLogRotation(options: { dryRun: boolean }) {
     );
 
     return {
-        result: JSON.parse(stringFallback(stdout, "{}")),
+        result: JSON.parse(stdout || "{}"),
         stderr: stringFallback(stderr),
     };
 }

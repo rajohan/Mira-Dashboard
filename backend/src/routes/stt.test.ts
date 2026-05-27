@@ -144,10 +144,15 @@ describe("STT routes", () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         const fileNames: string[] = [];
         let releaseFetch!: () => void;
+        let resolveStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            resolveStarted = resolve;
+        });
         const blockedFetch = new Promise<Response>((resolve) => {
             releaseFetch = () => resolve(Response.json(null));
         });
         globalThis.fetch = async (_url, init) => {
+            resolveStarted();
             const body = init?.body;
             assert.equal(body instanceof FormData, true);
             const file = (body as FormData).get("file") as File;
@@ -156,6 +161,7 @@ describe("STT routes", () => {
         };
 
         const first = transcribe(server, Buffer.from([1, 2, 3]), "audio/mpeg");
+        await started;
         const busy = await transcribe(server, Buffer.from([4, 5, 6]), "audio/ogg");
         assert.equal(busy.status, 429);
         assert.deepEqual(await busy.json(), {

@@ -533,6 +533,15 @@ describe("exec routes", () => {
         const originalKill = process.kill;
         const jobId = "running-with-fallback-kill";
         let fallbackKilled = false;
+        const fakeProcess = {
+            killed: false,
+            pid: 123_456,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                fallbackKilled = true;
+                return true;
+            },
+        };
         __testing.jobs.set(jobId, {
             id: jobId,
             status: "running",
@@ -541,15 +550,7 @@ describe("exec routes", () => {
             stderr: "",
             startedAt: Date.now(),
             endedAt: null,
-            process: {
-                killed: false,
-                pid: 123_456,
-                kill(signal: NodeJS.Signals): boolean {
-                    assert.equal(signal, "SIGTERM");
-                    fallbackKilled = true;
-                    return true;
-                },
-            } as never,
+            process: fakeProcess as never,
         });
 
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
@@ -567,6 +568,7 @@ describe("exec routes", () => {
 
             assert.equal(stop.status, 200);
             assert.equal(fallbackKilled, true);
+            fakeProcess.killed = true;
         } finally {
             process.kill = originalKill;
             __testing.jobs.delete(jobId);

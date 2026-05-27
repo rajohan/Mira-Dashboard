@@ -143,7 +143,7 @@ const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
 
 const cacheRefreshCommandOverrides = new Map<string, string[] | undefined>();
 
-export function setCacheRefreshCommandForTests(
+function setCacheRefreshCommandForTests(
     key: string,
     command: string[] | undefined
 ): void {
@@ -154,9 +154,14 @@ export function setCacheRefreshCommandForTests(
     cacheRefreshCommandOverrides.delete(key);
 }
 
-export function setCacheRefreshCwdForTests(cwd: string | undefined): void {
+function setCacheRefreshCwdForTests(cwd: string | undefined): void {
     cacheRefreshCwd = cwd ?? N8N_ROOT;
 }
+
+export const __testing = {
+    setCacheRefreshCommandForTests,
+    setCacheRefreshCwdForTests,
+};
 
 /** Parses JSON field or value. */
 export function parseJsonFieldOrValue(value: string) {

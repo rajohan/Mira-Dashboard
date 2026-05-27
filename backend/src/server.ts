@@ -119,6 +119,11 @@ const healthHandler: express.RequestHandler = (_req, res) => {
     });
 };
 
+/** Returns whether an API-relative path belongs to the auth route tree. */
+export function isAuthRoute(pathname: string): boolean {
+    return pathname === "/auth" || pathname.startsWith("/auth/");
+}
+
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
@@ -130,7 +135,7 @@ const apiLimiter = rateLimit({
     max: 600,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (request) => request.path.startsWith("/auth"),
+    skip: (request) => isAuthRoute(request.path),
     message: { error: "Too many requests, please try again later" },
 });
 
@@ -163,7 +168,7 @@ app.get("/api/sessions", sessionsHandler);
 authRoutes(app);
 /** Applies API auth while leaving auth bootstrap/login routes public. */
 export const apiAuthMiddleware: express.RequestHandler = (request, response, next) => {
-    if (request.path.startsWith("/auth")) {
+    if (isAuthRoute(request.path)) {
         next();
         return;
     }

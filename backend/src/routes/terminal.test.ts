@@ -181,6 +181,14 @@ describe("terminal routes", () => {
         assert.equal(invalidCwd.status, 400);
         assert.equal(invalidCwd.body.error, "Missing or invalid cwd");
 
+        const emptyCwd = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "definitely-missing", cwd: "   " }
+        );
+        assert.equal(emptyCwd.status, 400);
+        assert.equal(emptyCwd.body.error, "Missing or invalid cwd");
+
         const missingBody = await requestJson<{ error: string }>(
             server,
             "/api/terminal/complete",

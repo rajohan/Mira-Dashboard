@@ -32,12 +32,12 @@ function isDuplicateColumnError(error: unknown): boolean {
 }
 
 function isTransientSqliteLock(error: unknown): boolean {
-    return (
-        error instanceof Error &&
-        ("code" in error
-            ? error.code === "SQLITE_BUSY" || error.code === "SQLITE_LOCKED"
-            : /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(error.message))
-    );
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const code = "code" in error ? String(error.code).toUpperCase() : "";
+    const message = error.message.toUpperCase();
+    return /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message}`);
 }
 
 function sleepSync(milliseconds: number): void {
