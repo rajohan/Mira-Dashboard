@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it, mock } from "node:test";
+import { after, before, beforeEach, describe, it, mock } from "node:test";
 
 import WebSocket from "ws";
 
@@ -106,6 +106,10 @@ const { __testing } = gatewayModule;
 
 describe("gateway state and helper utilities", () => {
     before(() => {
+        __testing.resetGatewayStateForTest();
+    });
+
+    beforeEach(() => {
         __testing.resetGatewayStateForTest();
     });
 
@@ -572,6 +576,13 @@ describe("gateway state and helper utilities", () => {
     });
 
     it("normalizes primitive helpers and disconnected gateway behavior", async () => {
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
+
         assert.equal(__testing.normalizeMessageText("  hello  "), "hello");
         assert.equal(
             __testing.normalizeMessageText([
@@ -613,6 +624,12 @@ describe("gateway state and helper utilities", () => {
     });
 
     it("handles WebSocket clients and disconnected request responses", async () => {
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
         const ws = new FakeWebSocket();
 
         gateway.handleClient(ws as unknown as WebSocket);

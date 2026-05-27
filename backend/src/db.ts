@@ -165,11 +165,21 @@ export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
             targetDb.exec(TASK_AUTOMATION_COLUMN_SQL);
             return;
         } catch (error) {
-            if (isDuplicateColumnError(error) || taskAutomationColumnExists(targetDb)) {
+            lastError = error;
+            if (isDuplicateColumnError(error)) {
                 return;
             }
 
-            lastError = error;
+            try {
+                if (taskAutomationColumnExists(targetDb)) {
+                    return;
+                }
+            } catch (columnError) {
+                if (!isTransientSqliteLock(columnError)) {
+                    throw columnError;
+                }
+            }
+
             if (!isTransientSqliteLock(error)) {
                 throw error;
             }

@@ -159,6 +159,62 @@ describe("server bootstrap", () => {
         });
         assert.equal(lockedAttempts, 3);
 
+        let concurrentPrepareChecks = 0;
+        ensureTaskAutomationColumn({
+            exec: () => {
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    concurrentPrepareChecks += 1;
+                    return concurrentPrepareChecks >= 2
+                        ? [{ name: "automation_json" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(concurrentPrepareChecks, 2);
+
+        let transientRecheckAttempts = 0;
+        ensureTaskAutomationColumn({
+            exec: () => {
+                transientRecheckAttempts += 1;
+                if (transientRecheckAttempts === 1) {
+                    throw new Error("SQLITE_BUSY");
+                }
+            },
+            prepare: () => ({
+                all: () => {
+                    if (transientRecheckAttempts === 1) {
+                        throw new Error("SQLITE_BUSY");
+                    }
+                    return [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(transientRecheckAttempts, 2);
+
+        const recheckError = new Error("recheck failed");
+        let recheckPrepareCalls = 0;
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {
+                        throw new Error("SQLITE_BUSY");
+                    },
+                    prepare: () => ({
+                        all: () => {
+                            recheckPrepareCalls += 1;
+                            if (recheckPrepareCalls === 1) {
+                                return [{ name: "id" }];
+                            }
+                            throw recheckError;
+                        },
+                    }),
+                }),
+            recheckError
+        );
+
         const nonTransientError = new Error("disk unavailable");
         assert.throws(
             () =>

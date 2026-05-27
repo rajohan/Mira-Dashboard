@@ -817,6 +817,7 @@ async function runManualUpdaterForService(serviceId: number) {
 
     if (!manual.ok) {
         return {
+            success: false,
             output: parsedOutput,
             stderr: stringFallback(manual.stderr),
             steps,
@@ -829,6 +830,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(notify);
     if (!notify.ok) {
         return {
+            success: false,
             output: parsedOutput,
             stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
             steps,
@@ -841,6 +843,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(discord);
 
     return {
+        success: manual.ok && notify.ok && discord.ok,
         output: parsedOutput,
         stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
         steps,
@@ -1219,7 +1222,7 @@ export default function dockerRoutes(app: express.Application): void {
 
             const result = await runManualUpdaterForService(serviceId);
             res.json({
-                success: true,
+                success: result.success,
                 service,
                 result: result.output,
                 stderr: result.stderr,

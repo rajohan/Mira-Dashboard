@@ -1275,7 +1275,7 @@ describe("docker routes", { concurrency: false }, () => {
                 body: {},
             });
             assert.equal(notifyFailure.status, 200);
-            assert.equal(notifyFailure.body.success, true);
+            assert.equal(notifyFailure.body.success, false);
             assert.deepEqual(notifyFailure.body.result, {
                 step: "manual-update",
                 ok: true,
@@ -1293,7 +1293,7 @@ describe("docker routes", { concurrency: false }, () => {
                 body: {},
             });
             assert.equal(manualFailure.status, 200);
-            assert.equal(manualFailure.body.success, true);
+            assert.equal(manualFailure.body.success, false);
             assert.deepEqual(manualFailure.body.result, {
                 step: "manual-update",
                 ok: false,
@@ -1325,6 +1325,7 @@ describe("docker routes", { concurrency: false }, () => {
                     body: {},
                 });
                 assert.equal(blankManualFailure.status, 200);
+                assert.equal(blankManualFailure.body.success, false);
                 assert.deepEqual(blankManualFailure.body.result, {});
                 assert.equal(blankManualFailure.body.stderr, "manual-update failed\n");
             });
@@ -1339,6 +1340,7 @@ describe("docker routes", { concurrency: false }, () => {
                     body: {},
                 });
                 assert.equal(blankNotifyFailure.status, 200);
+                assert.equal(blankNotifyFailure.body.success, false);
                 assert.deepEqual(blankNotifyFailure.body.result, {});
                 assert.equal(blankNotifyFailure.body.stderr, "notify failed\n");
             });
@@ -1368,6 +1370,7 @@ describe("docker routes", { concurrency: false }, () => {
                     body: {},
                 });
                 assert.equal(malformedManualFailure.status, 200);
+                assert.equal(malformedManualFailure.body.success, false);
                 assert.deepEqual(malformedManualFailure.body.result, {});
                 assert.equal(
                     malformedManualFailure.body.stderr,

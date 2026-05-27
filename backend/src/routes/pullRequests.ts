@@ -311,10 +311,14 @@ async function runGhJsonLines<T>(
         });
 
         child.on("error", (error) => {
+            preserveForceKillTimer = false;
+            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => reject(error));
         });
 
         child.on("close", (code) => {
+            preserveForceKillTimer = false;
+            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => {
                 if (code !== 0) {
                     reject(new Error(stderr || `GitHub CLI exited with code ${code}`));

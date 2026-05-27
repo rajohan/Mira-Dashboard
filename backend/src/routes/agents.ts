@@ -653,10 +653,9 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 
 /** Returns a canonical un-namespaced tool name for activity filtering and labels. */
 function normalizeToolName(toolName: string): string {
-    const mcpUnscoped = toolName.replace(/^mcp__.+?__/, "");
-    const parts = mcpUnscoped.split(".");
-    const unscoped = mcpUnscoped.includes(".") ? parts[parts.length - 1] : mcpUnscoped;
-    return unscoped.toLowerCase();
+    const parts = toolName.split(".");
+    const unscoped = toolName.includes(".") ? parts[parts.length - 1] : toolName;
+    return unscoped.replace(/^mcp__.+?__/, "").toLowerCase();
 }
 
 /** Returns whether a tool should be shown as user-facing current activity. */

@@ -187,11 +187,6 @@ describe("OpenClaw update notifications", () => {
     });
 
     it("starts the monitor with a safe interval fallback", async () => {
-        startOpenClawNotificationMonitor(1);
-        stopOpenClawNotificationMonitorForTest();
-        stopOpenClawNotificationMonitorForTest();
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
         const originalSetInterval = globalThis.setInterval;
         let scheduledInterval = 0;
         let callbackRuns = 0;
@@ -199,12 +194,14 @@ describe("OpenClaw update notifications", () => {
             scheduledInterval = intervalMs ?? 0;
             callback();
             callbackRuns += 1;
-            return { unref: () => {} } as unknown as NodeJS.Timeout;
+            const timer = { unref: () => timer } as unknown as NodeJS.Timeout;
+            return timer;
         }) as typeof setInterval;
         try {
-            startOpenClawNotificationMonitor(60_000);
-            assert.equal(scheduledInterval, 60_000);
+            startOpenClawNotificationMonitor(1);
+            assert.equal(scheduledInterval, 60 * 60 * 1000);
             assert.equal(callbackRuns, 1);
+            stopOpenClawNotificationMonitorForTest();
             stopOpenClawNotificationMonitorForTest();
             await new Promise((resolve) => setTimeout(resolve, 100));
         } finally {

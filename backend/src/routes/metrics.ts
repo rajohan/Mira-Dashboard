@@ -193,7 +193,7 @@ function getSystemMetrics(): SystemMetricsResponse {
             encoding: "utf8",
         });
         const parts = dfOutput.trim().split(/\s+/);
-        if (parts.length >= 4) {
+        if (parts.length >= 5) {
             diskTotal = Number.parseInt(parts[1], 10);
             diskUsed = Number.parseInt(parts[2], 10);
             diskPercent = Number.parseInt(parts[4], 10);

@@ -214,25 +214,28 @@ export default function filesRoutes(
                     return;
                 }
 
+                let file: fs.promises.FileHandle | undefined;
                 let fullPath: string;
                 try {
-                    const candidateStats = fs.lstatSync(candidatePath);
-                    if (candidateStats.isSymbolicLink()) {
-                        res.status(403).json({
-                            error: "Access denied: symlinks are not readable",
-                        });
-                        return;
-                    }
+                    file = await openReadNoFollowGuarded(guardedPath(candidatePath));
                     fullPath = fs.realpathSync(candidatePath);
                 } catch (error) {
+                    if (file) {
+                        await file.close();
+                    }
                     const code = (error as NodeJS.ErrnoException).code;
                     if (
                         code === "ENOENT" ||
                         code === "ENOTDIR" ||
-                        code === "ELOOP" ||
                         code === "ERR_INVALID_ARG_VALUE"
                     ) {
                         res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                    if (code === "ELOOP") {
+                        res.status(403).json({
+                            error: "Access denied: symlinks are not readable",
+                        });
                         return;
                     }
                     throw error;
@@ -245,28 +248,8 @@ export default function filesRoutes(
                     res.status(403).json({
                         error: "Access denied: path outside workspace",
                     });
+                    if (file) await file.close();
                     return;
-                }
-
-                // Open file first to avoid TOCTOU race between stat and read.
-                // O_NOFOLLOW rejects a final-component symlink if the path is swapped
-                // after canonicalization but before open.
-                let file: fs.promises.FileHandle | undefined;
-                try {
-                    file = await openReadNoFollowGuarded(guardedPath(fullPath));
-                } catch (error) {
-                    const code = (error as NodeJS.ErrnoException).code;
-                    if (code === "ENOENT") {
-                        res.status(404).json({ error: "File not found" });
-                        return;
-                    }
-                    if (code === "ELOOP") {
-                        res.status(403).json({
-                            error: "Access denied: symlinks are not readable",
-                        });
-                        return;
-                    }
-                    throw error;
                 }
 
                 try {
