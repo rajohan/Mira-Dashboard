@@ -808,9 +808,16 @@ async function runManualUpdaterForService(serviceId: number) {
     ]);
 
     const steps: DockerUpdaterRunResult[] = [manual];
+    let parsedOutput: unknown;
+    try {
+        parsedOutput = extractTrailingJson(manual.stdout || "{}");
+    } catch {
+        parsedOutput = {};
+    }
+
     if (!manual.ok) {
         return {
-            output: extractTrailingJson(manual.stdout || "{}"),
+            output: parsedOutput,
             stderr: stringFallback(manual.stderr),
             steps,
         };
@@ -822,7 +829,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(notify);
     if (!notify.ok) {
         return {
-            output: extractTrailingJson(manual.stdout || "{}"),
+            output: parsedOutput,
             stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
             steps,
         };
@@ -834,7 +841,7 @@ async function runManualUpdaterForService(serviceId: number) {
     steps.push(discord);
 
     return {
-        output: extractTrailingJson(manual.stdout || "{}"),
+        output: parsedOutput,
         stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
         steps,
     };

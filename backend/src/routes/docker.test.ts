@@ -273,11 +273,17 @@ const stepByScript = {
 };
 const step = stepByScript[script] || "unknown";
 if (process.env.MIRA_FAKE_UPDATER_FAIL_STEP === step) {
-  if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
+  if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
+    process.stdout.write("not-json\n");
+  } else if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
     process.stdout.write(JSON.stringify({ step, ok: false }) + "\n");
   }
   process.stderr.write(step + " failed\n");
   process.exit(1);
+}
+if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
+  process.stdout.write("not-json\n");
+  process.exit(0);
 }
 if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
   process.stdout.write("log before json\n" + JSON.stringify({ step, ok: true }) + "\n");
@@ -384,6 +390,7 @@ describe("docker routes", { concurrency: false }, () => {
         process.env.PATH = originalPath;
         delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
         delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
+        delete process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP;
         delete process.env.MIRA_FAKE_UPDATER_STDERR;
         delete process.env.MIRA_FAKE_DOCKER_EMPTY;
         delete process.env.MIRA_FAKE_DOCKER_SPARSE;
@@ -1337,6 +1344,38 @@ describe("docker routes", { concurrency: false }, () => {
             });
         } finally {
             delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
+        }
+
+        process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP = "manual-update";
+        try {
+            const malformedSuccess = await requestJson<{
+                success: boolean;
+                result: Record<string, never>;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(malformedSuccess.status, 200);
+            assert.deepEqual(malformedSuccess.body.result, {});
+
+            await withFakeUpdaterFailStep("manual-update", async () => {
+                const malformedManualFailure = await requestJson<{
+                    success: boolean;
+                    result: Record<string, never>;
+                    stderr: string;
+                }>(server, "/api/docker/updater/services/1/update", {
+                    method: "POST",
+                    body: {},
+                });
+                assert.equal(malformedManualFailure.status, 200);
+                assert.deepEqual(malformedManualFailure.body.result, {});
+                assert.equal(
+                    malformedManualFailure.body.stderr,
+                    "manual-update failed\n"
+                );
+            });
+        } finally {
+            delete process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP;
         }
     });
 

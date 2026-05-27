@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -227,20 +228,29 @@ describe("ops routes", () => {
     });
 
     it("maps command failures to JSON route errors", async () => {
-        await writeExecutable(
-            path.join(tempDir, "bin", "docker"),
-            String.raw`#!${process.execPath}
+        const dockerPath = path.join(tempDir, "bin", "docker");
+        const originalDocker = fs.readFileSync(dockerPath, "utf8");
+        const originalMode = fs.statSync(dockerPath).mode & 0o777;
+
+        try {
+            await writeExecutable(
+                dockerPath,
+                String.raw`#!${process.execPath}
 process.stderr.write('psql unavailable\n');
 process.exit(12);
 `
-        );
+            );
 
-        const response = await requestJson<{ error: string }>(
-            server,
-            "/api/ops/log-rotation/status"
-        );
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/ops/log-rotation/status"
+            );
 
-        assert.equal(response.status, 500);
-        assert.match(response.body.error, /Command failed/);
+            assert.equal(response.status, 500);
+            assert.match(response.body.error, /Command failed/);
+        } finally {
+            fs.writeFileSync(dockerPath, originalDocker, "utf8");
+            fs.chmodSync(dockerPath, originalMode);
+        }
     });
 });

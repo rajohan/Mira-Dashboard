@@ -225,7 +225,9 @@ describe("agents routes", () => {
             __testing.normalizeToolName("functions.exec_command"),
             "exec_command"
         );
+        assert.equal(__testing.normalizeToolName("mcp__github__message"), "message");
         assert.equal(__testing.isVisibleActivityTool("message"), false);
+        assert.equal(__testing.isVisibleActivityTool("mcp__github__message"), false);
         assert.equal(__testing.getSafeAgentSessionsDir("../main"), null);
         assert.deepEqual(__testing.getSafeAgentActivityRoots("../main"), []);
         assert.equal(__testing.determineStatus(null), "idle");
@@ -816,6 +818,15 @@ describe("agents routes", () => {
             completed.map((row) => row.task),
             ["Write backend tests"]
         );
+
+        await writeFile(metadataPath, "null", "utf8");
+        const nullMetadata = await requestJson<{ currentTask: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "Recover null metadata" } }
+        );
+        assert.equal(nullMetadata.status, 200);
+        assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
 
         await writeFile(metadataPath, "{ malformed", "utf8");
         const malformedMetadata = await requestJson<{ error: string }>(

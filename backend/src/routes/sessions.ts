@@ -4,7 +4,7 @@ import gateway from "../gateway.js";
 import { stringFallback } from "../lib/values.js";
 
 function isValidSessionKey(sessionKey: string): boolean {
-    return sessionKey.trim().length > 0;
+    return sessionKey.length > 0;
 }
 
 /** Registers sessions API routes. */

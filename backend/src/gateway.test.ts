@@ -681,6 +681,28 @@ describe("gateway state and helper utilities", () => {
         assert.deepEqual(gateway.getSessions(), []);
     });
 
+    it("discards session refresh results when the Gateway disconnects mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRefresh!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            return {
+                sessions: [{ key: "agent:main:main", updatedAt: 1 }],
+            };
+        };
+
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+        const refresh = __testing.refreshSessions(client as never);
+        __testing.setGatewayConnectedForTest(false);
+        releaseRefresh();
+        await refresh;
+
+        assert.deepEqual(gateway.getSessions(), []);
+    });
+
     it("handles log subscription request aliases", async () => {
         const ws = new FakeWebSocket();
         gateway.handleClient(ws as unknown as WebSocket);

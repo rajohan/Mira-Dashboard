@@ -564,7 +564,7 @@ async function refreshSessions(
     const payload = (await expectedClient.request("sessions.list", {})) as {
         sessions?: GatewaySession[];
     };
-    if (!isCurrentGatewayClient(expectedClient)) {
+    if (!isGatewayConnected || !isCurrentGatewayClient(expectedClient)) {
         return;
     }
     sessionList = (payload.sessions || []).map(transformSession);

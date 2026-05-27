@@ -653,8 +653,9 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
 
 /** Returns a canonical un-namespaced tool name for activity filtering and labels. */
 function normalizeToolName(toolName: string): string {
-    const parts = toolName.split(".");
-    const unscoped = toolName.includes(".") ? parts[parts.length - 1] : toolName;
+    const mcpUnscoped = toolName.replace(/^mcp__.+?__/, "");
+    const parts = mcpUnscoped.split(".");
+    const unscoped = mcpUnscoped.includes(".") ? parts[parts.length - 1] : mcpUnscoped;
     return unscoped.toLowerCase();
 }
 
@@ -1405,9 +1406,15 @@ export default function agentsRoutes(app: express.Application): void {
                 let metadata: AgentMetadata = {};
                 try {
                     // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
-                    metadata = JSON5.parse(
+                    const parsedMetadata = JSON5.parse(
                         await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
-                    );
+                    ) as unknown;
+                    metadata =
+                        parsedMetadata &&
+                        typeof parsedMetadata === "object" &&
+                        !Array.isArray(parsedMetadata)
+                            ? (parsedMetadata as AgentMetadata)
+                            : {};
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                         throw error;
