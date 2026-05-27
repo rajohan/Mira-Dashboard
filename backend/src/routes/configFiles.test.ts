@@ -197,6 +197,24 @@ describe("config files routes", () => {
         }
     });
 
+    it("returns an empty list when the OpenClaw root does not exist", async () => {
+        const emptyHomeDir = await mkdtemp(path.join(os.tmpdir(), "mira-empty-home-"));
+        const emptyServer = await startServer(emptyHomeDir);
+        try {
+            const response = await requestJson<{ files: ConfigFileItem[]; root: string }>(
+                emptyServer,
+                "/api/config-files"
+            );
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.root, path.join(emptyHomeDir, ".openclaw"));
+            assert.deepEqual(response.body.files, []);
+        } finally {
+            await emptyServer.close();
+            await rm(emptyHomeDir, { recursive: true, force: true });
+        }
+    });
+
     it("reads config files and blocks non-whitelisted paths", async () => {
         const response = await requestJson<{
             path: string;

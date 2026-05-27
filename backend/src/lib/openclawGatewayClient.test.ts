@@ -524,22 +524,31 @@ describe("OpenClaw gateway client websocket protocol", () => {
     it("handles pending request responses and overflow", async () => {
         const { client, internals } = createProtocolClient();
 
-        await new Promise((resolve) => {
-            internals.pending.set("hello-bad-policy", {
-                timeout: setTimeout(() => {}, 1000),
-                method: "connect",
-                resolve,
-                reject: () => {},
+        const helloBadPolicyTimeout = setTimeout(() => {}, 50);
+        try {
+            await new Promise((resolve) => {
+                internals.pending.set("hello-bad-policy", {
+                    timeout: helloBadPolicyTimeout,
+                    method: "connect",
+                    resolve,
+                    reject: () => {},
+                });
+                internals.handleMessage(
+                    JSON.stringify({
+                        type: "res",
+                        id: "hello-bad-policy",
+                        ok: true,
+                        payload: {
+                            type: "hello-ok",
+                            policy: { tickIntervalMs: "bad" },
+                        },
+                    })
+                );
             });
-            internals.handleMessage(
-                JSON.stringify({
-                    type: "res",
-                    id: "hello-bad-policy",
-                    ok: true,
-                    payload: { type: "hello-ok", policy: { tickIntervalMs: "bad" } },
-                })
-            );
-        });
+        } finally {
+            clearTimeout(helloBadPolicyTimeout);
+            internals.pending.delete("hello-bad-policy");
+        }
         assert.equal(internals.tickIntervalMs, 30_000);
 
         await assert.rejects(

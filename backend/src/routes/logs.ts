@@ -77,7 +77,7 @@ async function pollLogFile(): Promise<void> {
     }
 }
 
-/** Performs start log watcher. */
+/** Performs a single tick of the log watcher. */
 function runLogWatcherTick(): void {
     if (logPollInFlight) return;
     logPollInFlight = true;

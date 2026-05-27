@@ -850,10 +850,8 @@ describe("agents routes", () => {
 
         const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-outside-"));
         const symlinkAgentId = "escaped-agent";
-        await symlink(
-            outsideDir,
-            path.join(homeDir, ".openclaw", "agents", symlinkAgentId)
-        );
+        const symlinkPath = path.join(homeDir, ".openclaw", "agents", symlinkAgentId);
+        await symlink(outsideDir, symlinkPath);
         try {
             const escapedMetadata = await requestJson<{ error: string }>(
                 server,
@@ -863,6 +861,7 @@ describe("agents routes", () => {
             assert.equal(escapedMetadata.status, 400);
             assert.equal(escapedMetadata.body.error, "Invalid agent ID");
         } finally {
+            await rm(symlinkPath, { force: true });
             await rm(outsideDir, { recursive: true, force: true });
         }
     });

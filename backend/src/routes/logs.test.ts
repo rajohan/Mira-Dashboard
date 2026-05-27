@@ -20,6 +20,15 @@ const outsideDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-outside-"
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
 const RealDate = Date;
 
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 500) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.fail(`Timed out waiting for ${label}`);
+}
+
 class FakeWebSocket {
     readonly sent: string[] = [];
     failSend = false;
@@ -162,12 +171,12 @@ describe("logs routes", () => {
 
         try {
             globalThis.Date = class extends RealDate {
-                constructor(value?: string | number | Date) {
-                    if (arguments.length === 0) {
+                constructor(...args: unknown[]) {
+                    if (args.length === 0) {
                         super("2099-12-31T12:00:00.000Z");
                         return;
                     }
-                    super(value as string);
+                    super(...(args as [string | number | Date]));
                 }
             } as DateConstructor;
 
@@ -491,7 +500,7 @@ describe("logs routes", () => {
         try {
             __testing.runLogWatcherTickForTest();
             __testing.runLogWatcherTickForTest();
-            await new Promise((resolve) => setTimeout(resolve, 20));
+            await waitFor(() => errors.length === 1, "log watcher error");
 
             assert.equal(errors.length, 1);
             assert.equal(errors[0]?.[0], "[LogWatcher] Error:");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,44 @@ interface TestServer {
 }
 
 const originalRequest = gateway.request;
+
+async function withTempSkills(
+    callback: (context: {
+        tempDir: string;
+        packageRoot: string;
+        homeDir: string;
+    }) => Promise<void> | void
+): Promise<void> {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-skills-"));
+    const packageRoot = path.join(tempDir, "package-root");
+    const homeDir = path.join(tempDir, "home");
+    try {
+        await callback({ tempDir, packageRoot, homeDir });
+    } finally {
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+async function withSkillEnvironment(
+    packageRoot: string,
+    homeDir: string,
+    callback: () => Promise<void> | void
+): Promise<void> {
+    const originalHome = process.env.HOME;
+    const originalPackageRoot = __testing.getOpenClawPackageRootForTest();
+    try {
+        process.env.HOME = homeDir;
+        __testing.setOpenClawPackageRootForTest(packageRoot);
+        await callback();
+    } finally {
+        __testing.setOpenClawPackageRootForTest(originalPackageRoot);
+        if (originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = originalHome;
+        }
+    }
+}
 
 async function startServer(): Promise<TestServer> {
     const app = express();
@@ -220,9 +258,8 @@ describe("OpenClaw config routes", () => {
         }
     });
 
-    it("covers skill discovery fallbacks and validation edge cases", async () => {
-        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-skills-"));
-        try {
+    it("parses skill descriptions", async () => {
+        await withTempSkills(async ({ tempDir }) => {
             const fallbackSkill = path.join(tempDir, "fallback-skill");
             const describedSkill = path.join(tempDir, "described-skill");
             await mkdir(fallbackSkill, { recursive: true });
@@ -250,6 +287,18 @@ describe("OpenClaw config routes", () => {
                 __testing.readSkillDescription(path.join(tempDir, "missing")),
                 undefined
             );
+        });
+    });
+
+    it("collects skill directories", async () => {
+        await withTempSkills(async ({ tempDir }) => {
+            const fallbackSkill = path.join(tempDir, "fallback-skill");
+            const describedSkill = path.join(tempDir, "described-skill");
+            await mkdir(fallbackSkill, { recursive: true });
+            await mkdir(describedSkill, { recursive: true });
+            await writeFile(path.join(fallbackSkill, "SKILL.md"), "Fallback\n", "utf8");
+            await writeFile(path.join(describedSkill, "SKILL.md"), "Described\n", "utf8");
+
             assert.deepEqual(
                 __testing
                     .collectSkillDirectories(tempDir)
@@ -260,13 +309,59 @@ describe("OpenClaw config routes", () => {
                 __testing.collectSkillDirectories(path.join(tempDir, "missing")),
                 []
             );
-            const packageRoot = path.join(tempDir, "package-root");
+        });
+    });
+
+    it("collects extra skill directories and tolerates extension scan failures", async () => {
+        await withTempSkills(async ({ packageRoot, homeDir }) => {
+            const extensionSkill = path.join(
+                packageRoot,
+                "dist/extensions/example/skills/extra-skill"
+            );
+            await mkdir(extensionSkill, { recursive: true });
+            await writeFile(
+                path.join(extensionSkill, "SKILL.md"),
+                "Extra skill\n",
+                "utf8"
+            );
+
+            await withSkillEnvironment(packageRoot, homeDir, () => {
+                assert.deepEqual(
+                    __testing
+                        .collectExtraSkillDirectories()
+                        .map((skillPath) => path.basename(skillPath)),
+                    ["extra-skill"]
+                );
+
+                const originalReaddirSync = fs.readdirSync;
+                const readdirMock = mock.method(
+                    fs,
+                    "readdirSync",
+                    (root: fs.PathLike) => {
+                        if (String(root).includes("dist/extensions")) {
+                            throw new Error("extensions unavailable");
+                        }
+                        return originalReaddirSync(root, {
+                            withFileTypes: true,
+                        }) as unknown as ReturnType<typeof fs.readdirSync>;
+                    }
+                );
+                try {
+                    assert.deepEqual(__testing.collectExtraSkillDirectories(), []);
+                } finally {
+                    readdirMock.mock.restore();
+                }
+            });
+        });
+    });
+
+    it("merges configured and discovered skills", async () => {
+        await withTempSkills(async ({ packageRoot, homeDir }) => {
             const packageSkill = path.join(packageRoot, "skills", "builtin-skill");
             const extensionSkill = path.join(
                 packageRoot,
                 "dist/extensions/example/skills/extra-skill"
             );
-            const homeDir = path.join(tempDir, "home");
             const workspaceSkill = path.join(
                 homeDir,
                 ".openclaw/workspace/skills/workspace-skill"
@@ -299,36 +394,8 @@ describe("OpenClaw config routes", () => {
                 "Unconfigured skill\n",
                 "utf8"
             );
-            const originalHome = process.env.HOME;
-            const originalPackageRoot = __testing.getOpenClawPackageRootForTest();
-            try {
-                process.env.HOME = homeDir;
-                __testing.setOpenClawPackageRootForTest(packageRoot);
-                assert.deepEqual(
-                    __testing
-                        .collectExtraSkillDirectories()
-                        .map((skillPath) => path.basename(skillPath)),
-                    ["extra-skill"]
-                );
-                const originalReaddirSync = fs.readdirSync;
-                const readdirMock = mock.method(
-                    fs,
-                    "readdirSync",
-                    (root: fs.PathLike) => {
-                        if (String(root).includes("dist/extensions")) {
-                            throw new Error("extensions unavailable");
-                        }
-                        return originalReaddirSync(root, {
-                            withFileTypes: true,
-                        }) as unknown as ReturnType<typeof fs.readdirSync>;
-                    }
-                );
-                try {
-                    assert.deepEqual(__testing.collectExtraSkillDirectories(), []);
-                } finally {
-                    readdirMock.mock.restore();
-                }
 
+            await withSkillEnvironment(packageRoot, homeDir, () => {
                 const entries = __testing.getConfiguredSkillEntries({
                     skills: {
                         entries: {
@@ -410,52 +477,45 @@ describe("OpenClaw config routes", () => {
                     ),
                     true
                 );
-            } finally {
-                __testing.setOpenClawPackageRootForTest(originalPackageRoot);
-                if (originalHome === undefined) {
-                    delete process.env.HOME;
-                } else {
-                    process.env.HOME = originalHome;
-                }
-            }
-            assert.deepEqual(__testing.getConfiguredSkillEntries(), {});
-            assert.deepEqual(
-                __testing.getConfiguredSkillEntries({ skills: { entries: [] } }),
-                {}
-            );
-            assert.deepEqual(
-                __testing.getConfiguredSkillEntries({ skills: "invalid" }),
-                {}
-            );
-            assert.equal(
-                __testing
-                    .getSkills({
-                        skills: {
-                            entries: {
-                                "primitive-entry": "enabled",
-                            },
-                        },
-                    })
-                    .some(
-                        (skill) =>
-                            skill.name === "primitive-entry" &&
-                            skill.enabled === true &&
-                            skill.description === ""
-                    ),
-                true
-            );
+            });
+        });
+    });
 
-            assert.equal(__testing.isValidSkillName("ok-skill"), true);
-            assert.equal(__testing.isValidSkillName(""), false);
-            assert.equal(__testing.isValidSkillName("x".repeat(129)), false);
-            assert.equal(__testing.isValidSkillName("bad/name"), false);
-            assert.equal(__testing.isValidSkillName(String.raw`bad\name`), false);
-            assert.equal(__testing.isValidSkillName("__proto__"), false);
-            assert.equal(__testing.isValidSkillName("prototype"), false);
-            assert.equal(__testing.isValidSkillName("constructor"), false);
-        } finally {
-            await rm(tempDir, { recursive: true, force: true });
-        }
+    it("handles configured skill entry edge cases", () => {
+        assert.deepEqual(__testing.getConfiguredSkillEntries(), {});
+        assert.deepEqual(
+            __testing.getConfiguredSkillEntries({ skills: { entries: [] } }),
+            {}
+        );
+        assert.deepEqual(__testing.getConfiguredSkillEntries({ skills: "invalid" }), {});
+        assert.equal(
+            __testing
+                .getSkills({
+                    skills: {
+                        entries: {
+                            "primitive-entry": "enabled",
+                        },
+                    },
+                })
+                .some(
+                    (skill) =>
+                        skill.name === "primitive-entry" &&
+                        skill.enabled === true &&
+                        skill.description === ""
+                ),
+            true
+        );
+    });
+
+    it("validates skill names", () => {
+        assert.equal(__testing.isValidSkillName("ok-skill"), true);
+        assert.equal(__testing.isValidSkillName(""), false);
+        assert.equal(__testing.isValidSkillName("x".repeat(129)), false);
+        assert.equal(__testing.isValidSkillName("bad/name"), false);
+        assert.equal(__testing.isValidSkillName(String.raw`bad\name`), false);
+        assert.equal(__testing.isValidSkillName("__proto__"), false);
+        assert.equal(__testing.isValidSkillName("prototype"), false);
+        assert.equal(__testing.isValidSkillName("constructor"), false);
     });
 
     it("reports config, skills, backup, restart, and skill toggle errors", async () => {
@@ -517,7 +577,7 @@ process.exit(0);
 `,
                 "utf8"
             );
-            await import("node:fs/promises").then(({ chmod }) => chmod(binPath, 0o755));
+            await chmod(binPath, 0o755);
             __testing.setOpenClawBinForTest(binPath);
 
             const restart = await requestJson<{ ok: boolean }>(server, "/api/restart", {
@@ -535,9 +595,7 @@ throw new Error("restart failed");
 `,
                 "utf8"
             );
-            await import("node:fs/promises").then(({ chmod }) =>
-                chmod(failingBinPath, 0o755)
-            );
+            await chmod(failingBinPath, 0o755);
             __testing.setOpenClawBinForTest(failingBinPath);
 
             const failedRestart = await requestJson<{ error: string }>(
