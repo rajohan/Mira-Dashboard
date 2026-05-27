@@ -216,6 +216,13 @@ export default function filesRoutes(
 
                 let fullPath: string;
                 try {
+                    const candidateStats = fs.lstatSync(candidatePath);
+                    if (candidateStats.isSymbolicLink()) {
+                        res.status(403).json({
+                            error: "Access denied: symlinks are not readable",
+                        });
+                        return;
+                    }
                     fullPath = fs.realpathSync(candidatePath);
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;

@@ -264,11 +264,6 @@ describe("files routes", () => {
 
         const readLinkPath = path.join(workspaceRoot, "read-link.ts");
         await symlink("src/app.ts", readLinkPath);
-        const originalRealpathSync = fs.realpathSync;
-        fs.realpathSync = ((target: fs.PathLike) =>
-            target === readLinkPath
-                ? readLinkPath
-                : originalRealpathSync(target)) as typeof fs.realpathSync;
         try {
             const finalSymlink = await requestJson<{ error: string }>(
                 server,
@@ -280,7 +275,6 @@ describe("files routes", () => {
                 "Access denied: symlinks are not readable"
             );
         } finally {
-            fs.realpathSync = originalRealpathSync;
             await rm(readLinkPath, { force: true });
         }
 
@@ -297,8 +291,11 @@ describe("files routes", () => {
                 server,
                 "/api/files/loop"
             );
-            assert.equal(symlinkLoop.status, 404);
-            assert.equal(symlinkLoop.body.error, "File not found");
+            assert.equal(symlinkLoop.status, 403);
+            assert.equal(
+                symlinkLoop.body.error,
+                "Access denied: symlinks are not readable"
+            );
         } finally {
             await rm(path.join(workspaceRoot, "loop"), { force: true });
         }

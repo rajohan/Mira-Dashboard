@@ -7,6 +7,7 @@ import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", "/home/ubuntu/.openclaw");
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
+let cachedRealMediaRoot: string | undefined;
 
 export const __testing = {
     mediaRoot: MEDIA_ROOT,
@@ -32,6 +33,12 @@ function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
+/** Resolves and caches the canonical media root after it exists. */
+function getRealMediaRoot(): string {
+    cachedRealMediaRoot ??= fs.realpathSync(MEDIA_ROOT);
+    return cachedRealMediaRoot;
+}
+
 /** Registers media API routes. */
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
@@ -49,7 +56,7 @@ export default function mediaRoutes(app: express.Application): void {
         }
 
         const realPath = fs.realpathSync(fullPath);
-        const realMediaRoot = fs.realpathSync(MEDIA_ROOT);
+        const realMediaRoot = getRealMediaRoot();
         if (!realPath.startsWith(`${realMediaRoot}${path.sep}`)) {
             response.status(403).json({ error: "Access denied" });
             return;

@@ -85,7 +85,9 @@ describe("guarded filesystem helpers", () => {
             await writeFile(realTarget, "real", "utf8");
             await symlink(realTarget, linkTarget);
 
+            const originalContent = await readFile(realTarget, "utf8");
             await assert.rejects(() => writeTextNoFollowGuarded(linkTarget, "blocked"));
+            assert.equal(await readFile(realTarget, "utf8"), originalContent);
             const realStat = await stat(realTarget);
             assert.equal(realStat.isFile(), true);
         } finally {

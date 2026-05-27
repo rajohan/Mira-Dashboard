@@ -60,7 +60,7 @@ export function parseTrustProxy(value?: string): boolean | number | string {
         return numeric;
     }
 
-    return value;
+    return normalized;
 }
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
@@ -96,7 +96,8 @@ const backendCommit = resolveBackendCommit();
 
 /** Resolves the port the backend should listen on. */
 export function resolveListenPort(value = process.env.PORT): string | number {
-    return value || 3100;
+    const trimmed = value?.trim() ?? "";
+    return trimmed || 3100;
 }
 
 // =====================

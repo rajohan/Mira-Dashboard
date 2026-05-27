@@ -173,6 +173,14 @@ describe("terminal routes", () => {
             commonPrefix: "",
         });
 
+        const invalidCwd = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "definitely-missing", cwd: false }
+        );
+        assert.equal(invalidCwd.status, 400);
+        assert.equal(invalidCwd.body.error, "Missing or invalid cwd");
+
         const nullByte = await requestJson<{ error: string }>(
             server,
             "/api/terminal/complete",

@@ -101,8 +101,17 @@ describe("server bootstrap", () => {
         assert.equal(parseTrustProxy("FALSE"), false);
         assert.equal(parseTrustProxy("2"), 2);
         assert.equal(parseTrustProxy("public-proxy"), "public-proxy");
+        assert.equal(parseTrustProxy(" loopback "), "loopback");
         assert.equal(resolveListenPort("1234"), "1234");
+        assert.equal(resolveListenPort(" 3100 "), "3100");
         assert.equal(resolveListenPort(""), 3100);
+        const configuredPort = process.env.PORT;
+        delete process.env.PORT;
+        try {
+            assert.equal(resolveListenPort(), 3100);
+        } finally {
+            process.env.PORT = configuredPort;
+        }
     });
 
     it("covers database migration and commit fallback helpers", () => {
