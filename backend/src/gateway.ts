@@ -364,10 +364,14 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         return null;
     }
 
-    const agentId = parts[1] || "main";
+    const agentId = parts[1];
     const safeAgentPathSegment = /^[A-Za-z0-9._-]+$/u;
     const safeSessionPathSegment = /^[A-Za-z0-9:._-]+$/u;
-    if (!safeAgentPathSegment.test(agentId) || !safeSessionPathSegment.test(sessionId)) {
+    if (
+        !agentId ||
+        !safeAgentPathSegment.test(agentId) ||
+        !safeSessionPathSegment.test(sessionId)
+    ) {
         return null;
     }
 

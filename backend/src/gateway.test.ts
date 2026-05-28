@@ -509,10 +509,8 @@ describe("gateway state and helper utilities", () => {
         const dottedAgentDir = path.join(openclawHome, "agents", "my.agent", "sessions");
         await mkdir(dottedAgentDir, { recursive: true });
         await writeFile(path.join(dottedAgentDir, "session-1.jsonl"), "", "utf8");
-        assert.match(
-            __testing.getTranscriptPath("agent:", "session-1") || "",
-            /agents\/main\/sessions\/session-1\.jsonl$/u
-        );
+        assert.equal(__testing.getTranscriptPath("agent:", "session-1"), null);
+        assert.equal(__testing.getTranscriptPath("agent::main", "session-1"), null);
         assert.match(
             __testing.getTranscriptPath("agent:my.agent:main", "session-1") || "",
             /agents\/my\.agent\/sessions\/session-1\.jsonl$/u

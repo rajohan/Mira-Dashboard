@@ -232,6 +232,7 @@ export default function configFilesRoutes(
                             });
                             return;
                         }
+                        realOpenedPath = fs.realpathSync(fullPath);
                     }
                     if (
                         realOpenedPath !== realOpenclawRoot &&

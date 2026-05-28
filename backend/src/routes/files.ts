@@ -16,8 +16,10 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
-    const baseRoot = process.env.OPENCLAW_HOME || os.homedir();
-    return path.join(baseRoot, ".openclaw", "workspace");
+    const openclawHome = process.env.OPENCLAW_HOME;
+    return openclawHome
+        ? path.join(openclawHome, "workspace")
+        : path.join(os.homedir(), ".openclaw", "workspace");
 }
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());

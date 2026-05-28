@@ -247,7 +247,7 @@ describe("files routes", () => {
             process.env.OPENCLAW_HOME = "/tmp/openclaw-home";
             assert.equal(
                 __testing.getDefaultWorkspaceRoot(),
-                path.join("/tmp/openclaw-home", ".openclaw", "workspace")
+                path.join("/tmp/openclaw-home", "workspace")
             );
             assert.equal(__testing.listDirectory("../../outside"), null);
             assert.deepEqual(__testing.listDirectory("src/app.ts"), []);

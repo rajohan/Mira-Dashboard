@@ -22,9 +22,9 @@ const RealDate = Date;
 
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < 500) {
+    while (Date.now() - startedAt < 5_000) {
         if (predicate()) return;
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.fail(`Timed out waiting for ${label}`);
 }

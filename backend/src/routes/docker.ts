@@ -571,7 +571,7 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
             image: row.Image,
             imageId: stringFallback(inspect?.Image),
             command: row.Command,
-            createdAt: String(inspect?.Created || row.CreatedAt),
+            createdAt: stringFallback(inspect?.Created ?? row.CreatedAt),
             startedAt: inspect?.State?.StartedAt || null,
             finishedAt: inspect?.State?.FinishedAt || null,
             runningFor: row.RunningFor,
