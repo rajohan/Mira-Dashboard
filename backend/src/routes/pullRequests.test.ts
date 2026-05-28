@@ -317,25 +317,70 @@ process.stdout.write("sudo " + process.argv.slice(2).join(" ") + "\n");
 }
 
 async function startServer(tempDir: string): Promise<TestServer> {
+    const previousCwd = process.cwd();
+    const previousDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
+    const previousWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
     process.chdir(tempDir);
     process.env.MIRA_DASHBOARD_ROOT = tempDir;
     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
-    const { default: pullRequestsRoutes } = await import(
-        `./pullRequests.js?test=${Date.now()}`
-    );
-    const app = express();
-    app.use(express.json());
-    pullRequestsRoutes(app);
-    const server = http.createServer(app);
+    let server: http.Server | undefined;
+    try {
+        const { default: pullRequestsRoutes } = await import(
+            `./pullRequests.js?test=${Date.now()}`
+        );
+        const app = express();
+        app.use(express.json());
+        pullRequestsRoutes(app);
+        server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve, reject) => {
+            const onListening = () => {
+                server?.off("error", onError);
+                resolve();
+            };
+            const onError = (error: Error) => {
+                server?.off("listening", onListening);
+                process.chdir(previousCwd);
+                if (previousDashboardRoot === undefined) {
+                    delete process.env.MIRA_DASHBOARD_ROOT;
+                } else {
+                    process.env.MIRA_DASHBOARD_ROOT = previousDashboardRoot;
+                }
+                if (previousWorktreeRoot === undefined) {
+                    delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+                } else {
+                    process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
+                }
+                reject(error);
+            };
+            server?.once("listening", onListening);
+            server?.once("error", onError);
+            server?.listen(0);
+        });
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () => new Promise((resolve) => server?.close(() => resolve())),
+        };
+    } catch (error) {
+        if (server?.listening) {
+            await new Promise((resolve) => server?.close(() => resolve(null)));
+        }
+        process.chdir(previousCwd);
+        if (previousDashboardRoot === undefined) {
+            delete process.env.MIRA_DASHBOARD_ROOT;
+        } else {
+            process.env.MIRA_DASHBOARD_ROOT = previousDashboardRoot;
+        }
+        if (previousWorktreeRoot === undefined) {
+            delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+        } else {
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
+        }
+        throw error;
+    }
 }
 
 async function requestJson<T>(

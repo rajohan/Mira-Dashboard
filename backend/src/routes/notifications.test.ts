@@ -158,6 +158,7 @@ describe("notifications routes", () => {
         );
 
         assert.equal(upsert.status, 200);
+        assert.equal(upsert.body.id, first.body.id);
 
         const list = await requestJson<{
             items: NotificationItem[];

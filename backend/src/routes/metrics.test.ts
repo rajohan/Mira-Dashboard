@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, before, describe, it } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 
 import express from "express";
 
@@ -156,15 +155,41 @@ describe("metrics routes", () => {
     });
 
     it("returns network deltas on later samples and reports route errors", async () => {
-        await delay(5);
-        const secondSample = await fetch(`${server.baseUrl}/api/metrics`);
-        const secondBody = (await secondSample.json()) as {
-            network: { downloadMbps: number; uploadMbps: number };
-        };
+        const originalNow = Date.now;
+        let now = 1_700_000_000_000;
+        let rxBytes = 1_000_000;
+        let txBytes = 2_000_000;
+        try {
+            Date.now = () => now;
+            __testing.resetNetworkSample();
+            __testing.setDepsForTest({
+                readdirSync: () => ["enp0s6"] as never,
+                readFileSync: (filePath: unknown) => {
+                    const pathText = String(filePath);
+                    return String(
+                        pathText.endsWith("rx_bytes") ? rxBytes : txBytes
+                    ) as never;
+                },
+            });
 
-        assert.equal(secondSample.status, 200);
-        assert.equal(typeof secondBody.network.downloadMbps, "number");
-        assert.equal(typeof secondBody.network.uploadMbps, "number");
+            await fetch(`${server.baseUrl}/api/metrics`);
+            now += 1000;
+            rxBytes += 1_000_000;
+            txBytes += 500_000;
+
+            const secondSample = await fetch(`${server.baseUrl}/api/metrics`);
+            const secondBody = (await secondSample.json()) as {
+                network: { downloadMbps: number; uploadMbps: number };
+            };
+
+            assert.equal(secondSample.status, 200);
+            assert.equal(secondBody.network.downloadMbps, 8);
+            assert.equal(secondBody.network.uploadMbps, 4);
+        } finally {
+            Date.now = originalNow;
+            __testing.resetDepsForTest();
+            __testing.resetNetworkSample();
+        }
 
         const original = gateway.getSessions;
         try {

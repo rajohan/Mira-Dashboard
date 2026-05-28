@@ -133,7 +133,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     /** Adds one discovered skill to the response map with configured state. */
     const addSkill = (skillPath: string, source: SkillSource) => {
         const name = path.basename(skillPath);
-        const entry = (entries[name] || {}) as {
+        const entry = objectFallback(entries[name] as object | null | undefined) as {
             enabled?: boolean;
             description?: string;
         };
@@ -141,7 +141,10 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
             name,
             path: `skills.entries.${name}`,
             enabled: entry.enabled !== false,
-            description: entry.description || readSkillDescription(skillPath),
+            description:
+                typeof entry.description === "string"
+                    ? entry.description
+                    : readSkillDescription(skillPath),
             source,
         });
     };

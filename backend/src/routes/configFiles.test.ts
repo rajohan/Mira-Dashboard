@@ -162,6 +162,21 @@ describe("config files routes", () => {
             ),
             false
         );
+
+        await mkdir(symlinkedConfig);
+        try {
+            const responseWithDirectory = await requestJson<{
+                files: ConfigFileItem[];
+            }>(server, "/api/config-files");
+            assert.equal(
+                responseWithDirectory.body.files.some(
+                    (file) => file.relPath === "hooks/transforms/agentmail.ts"
+                ),
+                false
+            );
+        } finally {
+            await rm(symlinkedConfig, { recursive: true, force: true });
+        }
     });
 
     it("reports missing home configuration per request", async () => {

@@ -136,9 +136,10 @@ export default function notificationsRoutes(app: express.Application): void {
                 metadata_json = excluded.metadata_json,
                 updated_at = excluded.updated_at,
                 occurred_at = excluded.occurred_at
+            RETURNING id
         `);
 
-        const result = insert.run(
+        const row = insert.get(
             title,
             description,
             type,
@@ -151,7 +152,7 @@ export default function notificationsRoutes(app: express.Application): void {
         );
 
         pruneReadNotifications();
-        res.json({ ok: true, id: result.lastInsertRowid });
+        res.json({ ok: true, id: (row as { id: number }).id });
     }) as RequestHandler);
 
     app.post("/api/notifications/mark-all-read", ((_, res) => {

@@ -436,6 +436,7 @@ describe("OpenClaw config routes", () => {
                         (skill) =>
                             skill.name === "workspace-skill" &&
                             skill.enabled === false &&
+                            skill.description === "Should not replace discovered skill" &&
                             skill.source === "workspace"
                     ),
                     true

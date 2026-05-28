@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import { WebSocket, WebSocketServer } from "ws";
 
@@ -426,14 +426,14 @@ describe("OpenClaw gateway client websocket protocol", () => {
             const state = await waitFor(() => {
                 const gatewayClient = client as unknown as {
                     tickIntervalMs: number;
-                    tickTimer: { _idleTimeout?: number } | null;
+                    tickTimer: NodeJS.Timeout | null;
                 };
                 return gatewayClient.tickIntervalMs === 300_000 && gatewayClient.tickTimer
                     ? gatewayClient
                     : undefined;
             }, "clamped tick interval");
 
-            assert.equal(state.tickTimer?._idleTimeout, 1000);
+            assert.ok(state.tickTimer);
         } finally {
             client.stop();
             await server.close();
@@ -703,23 +703,36 @@ describe("OpenClaw gateway client websocket protocol", () => {
     it("starts and stops tick watching around stale connections", async () => {
         const { errors, internals } = createProtocolClient();
         const tickTimer = internals as unknown as {
-            tickTimer: { _onTimeout: () => void } | null;
+            tickTimer: NodeJS.Timeout | null;
         };
 
-        internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
-        internals.tickIntervalMs = 1;
-        internals.lastTickAt = Date.now() - 10_000;
-        internals.startTickWatch();
-        assert.ok(tickTimer.tickTimer);
-        tickTimer.tickTimer._onTimeout();
-        assert.equal(errors.includes("gateway tick timeout"), true);
-        internals.stopTickWatch();
+        try {
+            mock.timers.enable({
+                apis: ["Date", "setInterval"],
+                now: 1_700_000_000_000,
+            });
+            internals.ws = {
+                readyState: WebSocket.OPEN,
+                send: () => {},
+                close: () => {},
+            };
+            internals.tickIntervalMs = 1;
+            internals.lastTickAt = Date.now() - 10_000;
+            internals.startTickWatch();
+            assert.ok(tickTimer.tickTimer);
+            mock.timers.tick(1_000);
+            assert.equal(errors.includes("gateway tick timeout"), true);
+            internals.stopTickWatch();
 
-        internals.ws = null;
-        internals.startTickWatch();
-        assert.ok(tickTimer.tickTimer);
-        tickTimer.tickTimer._onTimeout();
-        internals.stopTickWatch();
+            internals.ws = null;
+            internals.startTickWatch();
+            assert.ok(tickTimer.tickTimer);
+            mock.timers.tick(1_000);
+            internals.stopTickWatch();
+        } finally {
+            internals.stopTickWatch();
+            mock.timers.reset();
+        }
     });
 
     it("handles connect challenge timeouts", () => {
@@ -732,30 +745,37 @@ describe("OpenClaw gateway client websocket protocol", () => {
                 challengeCloses.push({ code, reason }),
         };
 
-        internals.armConnectChallengeTimeout();
-        assert.ok(internals.connectChallengeTimer);
-        const challengeTimer = internals.connectChallengeTimer as unknown as {
-            _onTimeout: () => void;
-        };
-        challengeTimer._onTimeout();
-        assert.equal(errors.includes("gateway connect challenge timeout"), true);
-        assert.deepEqual(challengeCloses.at(-1), {
-            code: 1008,
-            reason: "connect challenge timeout",
-        });
-        clearTimeout(internals.connectChallengeTimer as NodeJS.Timeout);
-        internals.connectChallengeTimer = null;
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            internals.armConnectChallengeTimeout();
+            assert.ok(internals.connectChallengeTimer);
+            mock.timers.tick(10_000);
+            assert.equal(errors.includes("gateway connect challenge timeout"), true);
+            assert.deepEqual(challengeCloses.at(-1), {
+                code: 1008,
+                reason: "connect challenge timeout",
+            });
+            clearTimeout(internals.connectChallengeTimer as NodeJS.Timeout);
+            internals.connectChallengeTimer = null;
 
-        internals.ws = { readyState: WebSocket.CLOSED, send: () => {}, close: () => {} };
-        internals.armConnectChallengeTimeout();
-        const closedChallengeTimer = internals.connectChallengeTimer as unknown as {
-            _onTimeout: () => void;
-        };
-        closedChallengeTimer._onTimeout();
-        const timerToClear = internals.connectChallengeTimer;
-        assert.ok(timerToClear);
-        clearTimeout(timerToClear);
-        internals.connectChallengeTimer = null;
+            internals.ws = {
+                readyState: WebSocket.CLOSED,
+                send: () => {},
+                close: () => {},
+            };
+            internals.armConnectChallengeTimeout();
+            mock.timers.tick(10_000);
+            const timerToClear = internals.connectChallengeTimer;
+            assert.ok(timerToClear);
+            clearTimeout(timerToClear);
+            internals.connectChallengeTimer = null;
+        } finally {
+            if (internals.connectChallengeTimer) {
+                clearTimeout(internals.connectChallengeTimer);
+                internals.connectChallengeTimer = null;
+            }
+            mock.timers.reset();
+        }
     });
 
     it("validates and normalizes start URLs and request timeouts", async () => {

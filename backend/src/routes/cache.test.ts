@@ -64,7 +64,19 @@ async function startServer(): Promise<TestServer> {
     cacheRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const onListening = () => {
+            server.off("error", onError);
+            resolve();
+        };
+        const onError = (error: Error) => {
+            server.off("listening", onListening);
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 

@@ -162,11 +162,44 @@ describe("files routes", () => {
 
     it("falls back to the default workspace root when WORKSPACE_ROOT is blank", async () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
+        let blankServer: TestServer | undefined;
         try {
             process.env.WORKSPACE_ROOT = "";
-            const module = await import(`./files.js?blank=${crypto.randomUUID()}`);
-            assert.equal(typeof module.default, "function");
+            const { default: filesRoutes } = await import(
+                `./files.js?blank=${crypto.randomUUID()}`
+            );
+            const app = express();
+            app.use(express.json({ limit: "2mb" }));
+            filesRoutes(app, express);
+            const httpServer = http.createServer(app);
+            await new Promise<void>((resolve, reject) => {
+                const onListening = () => {
+                    httpServer.off("error", onError);
+                    resolve();
+                };
+                const onError = (error: Error) => {
+                    httpServer.off("listening", onListening);
+                    reject(error);
+                };
+                httpServer.once("listening", onListening);
+                httpServer.once("error", onError);
+                httpServer.listen(0);
+            });
+            const address = httpServer.address();
+            assert.ok(address && typeof address === "object");
+            blankServer = {
+                baseUrl: `http://127.0.0.1:${address.port}`,
+                close: () => new Promise((resolve) => httpServer.close(() => resolve())),
+            };
+
+            const response = await requestJson<{ root: string; files: FileItem[] }>(
+                blankServer,
+                "/api/files"
+            );
+            assert.equal(response.status, 200);
+            assert.equal(response.body.root, "/home/ubuntu/.openclaw/workspace");
         } finally {
+            await blankServer?.close();
             if (originalWorkspaceRoot === undefined) {
                 delete process.env.WORKSPACE_ROOT;
             } else {
@@ -230,8 +263,8 @@ describe("files routes", () => {
             server,
             "/api/files/%25E0%25A4%25A"
         );
-        assert.equal(doubleEncodedMalformedRead.status, 400);
-        assert.equal(doubleEncodedMalformedRead.body.error, "Malformed URL encoding");
+        assert.equal(doubleEncodedMalformedRead.status, 404);
+        assert.equal(doubleEncodedMalformedRead.body.error, "File not found");
 
         const image = await requestJson<{
             isImage: boolean;
@@ -382,13 +415,13 @@ describe("files routes", () => {
         assert.equal(malformedWrite.status, 400);
         assert.equal(malformedWrite.body.error, "Malformed URL encoding");
 
-        const doubleEncodedMalformedWrite = await requestJson<{ error: string }>(
+        const doubleEncodedWrite = await requestJson<{ success: boolean; path: string }>(
             server,
-            "/api/files/%25E0%25A4%25A",
-            { method: "PUT", body: { content: "bad" } }
+            "/api/files/double%252Fencoded.txt",
+            { method: "PUT", body: { content: "literal percent path" } }
         );
-        assert.equal(doubleEncodedMalformedWrite.status, 400);
-        assert.equal(doubleEncodedMalformedWrite.body.error, "Malformed URL encoding");
+        assert.equal(doubleEncodedWrite.status, 200);
+        assert.equal(doubleEncodedWrite.body.path, "double%2Fencoded.txt");
 
         const created = await requestJson<{
             success: boolean;

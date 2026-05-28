@@ -71,37 +71,42 @@ describe("server bootstrap", () => {
     });
 
     after(async () => {
-        await new Promise<void>((resolve, reject) => {
-            server.close((error) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
+        try {
+            if (server.listening) {
+                await new Promise<void>((resolve, reject) => {
+                    server.close((error) => {
+                        if (error) {
+                            reject(error);
+                            return;
+                        }
 
-                resolve();
-            });
-        });
-        await rm(openclawHome, { recursive: true, force: true });
-        if (originalPort === undefined) {
-            delete process.env.PORT;
-        } else {
-            process.env.PORT = originalPort;
-        }
-        if (originalTrustProxy === undefined) {
-            delete process.env.TRUST_PROXY;
-        } else {
-            process.env.TRUST_PROXY = originalTrustProxy;
-        }
-        if (originalOpenClawHome === undefined) {
-            delete process.env.OPENCLAW_HOME;
-        } else {
-            process.env.OPENCLAW_HOME = originalOpenClawHome;
-        }
-        db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
-        if (originalGatewayToken) {
-            db.prepare(
-                "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
-            ).run(originalGatewayToken.value, new Date().toISOString());
+                        resolve();
+                    });
+                });
+            }
+        } finally {
+            await rm(openclawHome, { recursive: true, force: true });
+            if (originalPort === undefined) {
+                delete process.env.PORT;
+            } else {
+                process.env.PORT = originalPort;
+            }
+            if (originalTrustProxy === undefined) {
+                delete process.env.TRUST_PROXY;
+            } else {
+                process.env.TRUST_PROXY = originalTrustProxy;
+            }
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+            if (originalGatewayToken) {
+                db.prepare(
+                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
+                ).run(originalGatewayToken.value, new Date().toISOString());
+            }
         }
     });
 

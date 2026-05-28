@@ -97,6 +97,9 @@ function listConfigFiles(openclawRoot: string): ConfigFile[] {
                 continue;
             }
             const stat = fs.statSync(resolvedFullPath);
+            if (!stat.isFile()) {
+                continue;
+            }
             files.push({
                 name: path.basename(relPath),
                 path: "config:" + relPath, // Prefix to distinguish from workspace files

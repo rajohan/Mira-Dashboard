@@ -50,12 +50,8 @@ interface WriteResponse {
     modified: string;
 }
 
-function decodeRouteFilePath(value: unknown): string | null {
-    try {
-        return decodeURIComponent(stringFallback(value));
-    } catch {
-        return null;
-    }
+function decodeRouteFilePath(value: unknown): string {
+    return stringFallback(value);
 }
 
 /** Returns whether binary file. */
@@ -193,10 +189,6 @@ export default function filesRoutes(
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);
-                if (filePath === null) {
-                    res.status(400).json({ error: "Malformed URL encoding" });
-                    return;
-                }
 
                 let workspaceRoot: string;
                 try {
@@ -344,10 +336,6 @@ export default function filesRoutes(
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);
-                if (filePath === null) {
-                    res.status(400).json({ error: "Malformed URL encoding" });
-                    return;
-                }
                 const { content } = req.body as { content?: string };
 
                 if (typeof content !== "string") {

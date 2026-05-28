@@ -360,7 +360,8 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     }
 
     request(method: string, params: unknown = {}): Promise<unknown> {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        const ws = this.ws;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
         }
         if (this.pending.size >= OpenClawGatewayClient.MAX_PENDING_REQUESTS) {
@@ -383,7 +384,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
             this.pending.set(id, { resolve, reject, timeout });
             try {
-                this.ws?.send(JSON.stringify(frame));
+                ws.send(JSON.stringify(frame));
             } catch (error) {
                 this.pending.delete(id);
                 clearTimeout(timeout);
