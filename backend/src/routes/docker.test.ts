@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -36,7 +37,11 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
             resolve();
         };
         const timeout = setTimeout(() => {
-            if (!child.kill("SIGKILL")) {
+            try {
+                if (!child.kill("SIGKILL")) {
+                    done();
+                }
+            } catch {
                 done();
             }
         }, 100);
@@ -420,7 +425,7 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("covers docker parser helper edge cases", async () => {
-        const { __testing } = await import(`./docker.js?helpers=${Date.now()}`);
+        const { __testing } = await import(`./docker.js?helpers=${randomUUID()}`);
 
         assert.deepEqual(__testing.parseJsonLines(' {"a":1}\n\n'), [{ a: 1 }]);
         assert.equal(__testing.parseJsonField(), null);
@@ -561,14 +566,14 @@ describe("docker routes", { concurrency: false }, () => {
         process.env.MIRA_UPDATER_CWD = "/tmp/custom-updater";
 
         try {
-            const module = await import(`./docker.js?env=${Date.now()}`);
+            const module = await import(`./docker.js?env=${randomUUID()}`);
             assert.equal(typeof module.default, "function");
             process.env.MIRA_DOCKER_ROOT = "";
             process.env.MIRA_DOCKER_BIN = "";
             process.env.MIRA_DOCKER_COMPOSE_WRAPPER = "";
             process.env.MIRA_UPDATER_NODE_BIN = "";
             process.env.MIRA_UPDATER_CWD = "";
-            const defaultModule = await import(`./docker.js?blank=${Date.now()}`);
+            const defaultModule = await import(`./docker.js?blank=${randomUUID()}`);
             assert.equal(typeof defaultModule.default, "function");
         } finally {
             for (const [key, value] of Object.entries(originalEnv)) {

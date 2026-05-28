@@ -79,6 +79,14 @@ describe("terminal routes", () => {
         assert.equal(status, 400);
         assert.equal("error" in body, true);
 
+        const blankPartial = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "   ", cwd: tempDir }
+        );
+        assert.equal(blankPartial.status, 400);
+        assert.equal(blankPartial.body.error, "Missing or invalid partial");
+
         const completionResponse = await requestJson<{
             completions: Array<{ completion: string; display: string; type: string }>;
             commonPrefix: string;

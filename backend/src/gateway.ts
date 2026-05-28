@@ -689,13 +689,14 @@ async function forwardRequest(
     if (!gatewayClient || !isGatewayConnected) {
         return false;
     }
+    const activeGateway = gatewayClient;
 
     if (clientWs && clientId) {
         const id = String(++requestId);
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            let payload = await gatewayClient.request(method, params);
+            let payload = await activeGateway.request(method, params);
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
@@ -715,7 +716,7 @@ async function forwardRequest(
                 );
             }
             if (method.startsWith("sessions.")) {
-                await refreshSessions(gatewayClient);
+                await refreshSessions(activeGateway);
             }
         } catch (error) {
             const pending = pendingRequests.get(id);
@@ -735,9 +736,9 @@ async function forwardRequest(
     }
 
     try {
-        await gatewayClient.request(method, params);
+        await activeGateway.request(method, params);
         if (method.startsWith("sessions.")) {
-            await refreshSessions(gatewayClient);
+            await refreshSessions(activeGateway);
         }
         return true;
     } catch {

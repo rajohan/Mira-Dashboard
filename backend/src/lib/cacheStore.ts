@@ -66,9 +66,11 @@ async function runDockerExec(container: string, command: string) {
 function buildPostgresUri(database = "n8n") {
     const username = process.env.DATABASE_USERNAME || "postgres";
     const password = process.env.DATABASE_PASSWORD || "postgres";
+    const encodedUsername = encodeURIComponent(username);
+    const encodedPassword = encodeURIComponent(password);
     const host = process.env.DATABASE_HOST || "postgres";
     const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${database}`;
 }
 
 export const __testing = {
