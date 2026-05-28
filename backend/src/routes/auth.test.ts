@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -24,7 +24,16 @@ async function startServer(
     authRoutes(app, dependencies);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+            reject(error);
+        };
+        server.once("error", onError);
+        server.listen(0, () => {
+            server.off("error", onError);
+            resolve();
+        });
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -228,6 +237,22 @@ describe("auth routes", () => {
     after(async () => {
         await server.close();
         cleanupUser(username);
+    });
+
+    it("rejects server startup listen errors", async () => {
+        const listen = mock.method(
+            http.Server.prototype,
+            "listen",
+            function listen(this: http.Server) {
+                this.emit("error", new Error("listen failed"));
+                return this;
+            }
+        );
+        try {
+            await assert.rejects(startServer(), /listen failed/u);
+        } finally {
+            listen.mock.restore();
+        }
     });
 
     it("reports bootstrap state without exposing secrets", async () => {

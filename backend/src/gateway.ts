@@ -685,7 +685,15 @@ function init(token: string): void {
         onClose: handleGatewayClose,
     });
     gatewayClient = thisGatewayClient;
-    thisGatewayClient.start();
+    try {
+        thisGatewayClient.start();
+    } catch (error) {
+        if (gatewayClient === thisGatewayClient) {
+            gatewayClient = null;
+            currentToken = null;
+        }
+        throw error;
+    }
 }
 
 /** Performs forward request. */

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 import { WebSocket } from "ws";
 
@@ -567,15 +568,22 @@ describe("server bootstrap", () => {
     });
 
     it("runs the startup module as a direct entrypoint", async () => {
-        const child = spawn(process.execPath, ["--import", "tsx", "src/serverStart.ts"], {
-            cwd: process.cwd(),
-            env: {
-                ...process.env,
-                OPENCLAW_TOKEN: "test-token",
-                PORT: "0",
-            },
-            stdio: "ignore",
-        });
+        const serverStartEntrypoint = fileURLToPath(
+            new URL("serverStart.ts", import.meta.url)
+        );
+        const child = spawn(
+            process.execPath,
+            ["--import", "tsx", serverStartEntrypoint],
+            {
+                cwd: process.cwd(),
+                env: {
+                    ...process.env,
+                    OPENCLAW_TOKEN: "test-token",
+                    PORT: "0",
+                },
+                stdio: "ignore",
+            }
+        );
         try {
             await delay(300);
             assert.equal(child.exitCode, null);

@@ -92,6 +92,13 @@ class CapturingGatewayClient extends FakeGatewayClient {
     }
 }
 
+/** Throws synchronously from start to exercise init rollback. */
+class ThrowingStartGatewayClient extends CapturingGatewayClient {
+    override start(): void {
+        throw new Error("start failed");
+    }
+}
+
 /** Waits one tick so async WebSocket handlers can settle. */
 async function waitForAsyncHandlers(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
@@ -179,6 +186,15 @@ describe("gateway state and helper utilities", () => {
             successful?.options.onConnectError?.(new Error("stale connect failed"));
             successful?.options.onClose?.(1006, "stale");
             assert.equal(gateway.isConnected(), true);
+
+            __testing.setGatewayClientConstructorForTest(ThrowingStartGatewayClient);
+            assert.throws(() => gateway.init("token-throws"), /start failed/u);
+            __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
+            gateway.init("token-throws");
+            assert.equal(
+                CapturingGatewayClient.instances.at(-1)?.options.token,
+                "token-throws"
+            );
         } finally {
             if (originalGatewayUrl === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_URL;

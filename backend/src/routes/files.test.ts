@@ -222,38 +222,53 @@ describe("files routes", () => {
 
     it("covers file helper edge cases", async () => {
         const { __testing } = await import("./files.js");
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
 
-        assert.equal(__testing.isBinaryFile("abc"), false);
-        assert.equal(__testing.isBinaryFile("abc\0def"), true);
-        assert.equal(__testing.isImageFile("photo.WEBP"), true);
-        assert.equal(__testing.isImageFile("archive.txt"), false);
-        assert.equal(__testing.getImageMimeType("icon.ico"), "image/x-icon");
-        assert.equal(
-            __testing.getImageMimeType("unknown.bin"),
-            "application/octet-stream"
-        );
-        assert.equal(__testing.shouldHideFile(".secret"), true);
-        assert.equal(__testing.shouldHideFile(".env.example"), false);
-        assert.equal(__testing.compareNames("alpha", "beta"), -1);
-        assert.equal(__testing.compareNames("beta", "alpha"), 1);
-        assert.equal(__testing.compareNames("alpha", "alpha"), 0);
-        assert.equal(
-            __testing.getDefaultWorkspaceRoot(),
-            path.join(os.homedir(), ".openclaw", "workspace")
-        );
-        assert.equal(__testing.listDirectory("../../outside"), null);
-        assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
-        await mkdir(path.join(workspaceRoot, "sort"));
-        await mkdir(path.join(workspaceRoot, "sort", "zeta"));
-        await mkdir(path.join(workspaceRoot, "sort", "alpha-dir"));
-        await writeFile(path.join(workspaceRoot, "sort", "z-file.txt"), "z");
-        await writeFile(path.join(workspaceRoot, "sort", "alpha.txt"), "a");
-        assert.deepEqual(
-            __testing.listDirectory("sort")?.map((entry) => entry.name),
-            ["alpha-dir", "zeta", "alpha.txt", "z-file.txt"]
-        );
-        const srcEntries = __testing.listDirectory("src");
-        assert.equal(srcEntries?.[0]?.path, "src/app.ts");
+        try {
+            assert.equal(__testing.isBinaryFile("abc"), false);
+            assert.equal(__testing.isBinaryFile("abc\0def"), true);
+            assert.equal(__testing.isImageFile("photo.WEBP"), true);
+            assert.equal(__testing.isImageFile("archive.txt"), false);
+            assert.equal(__testing.getImageMimeType("icon.ico"), "image/x-icon");
+            assert.equal(
+                __testing.getImageMimeType("unknown.bin"),
+                "application/octet-stream"
+            );
+            assert.equal(__testing.shouldHideFile(".secret"), true);
+            assert.equal(__testing.shouldHideFile(".env.example"), false);
+            assert.equal(__testing.compareNames("alpha", "beta"), -1);
+            assert.equal(__testing.compareNames("beta", "alpha"), 1);
+            assert.equal(__testing.compareNames("alpha", "alpha"), 0);
+            delete process.env.OPENCLAW_HOME;
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(os.homedir(), ".openclaw", "workspace")
+            );
+            process.env.OPENCLAW_HOME = "/tmp/openclaw-home";
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join("/tmp/openclaw-home", ".openclaw", "workspace")
+            );
+            assert.equal(__testing.listDirectory("../../outside"), null);
+            assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
+            await mkdir(path.join(workspaceRoot, "sort"));
+            await mkdir(path.join(workspaceRoot, "sort", "zeta"));
+            await mkdir(path.join(workspaceRoot, "sort", "alpha-dir"));
+            await writeFile(path.join(workspaceRoot, "sort", "z-file.txt"), "z");
+            await writeFile(path.join(workspaceRoot, "sort", "alpha.txt"), "a");
+            assert.deepEqual(
+                __testing.listDirectory("sort")?.map((entry) => entry.name),
+                ["alpha-dir", "zeta", "alpha.txt", "z-file.txt"]
+            );
+            const srcEntries = __testing.listDirectory("src");
+            assert.equal(srcEntries?.[0]?.path, "src/app.ts");
+        } finally {
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+        }
     });
 
     it("reads text and image files and rejects invalid paths", async () => {

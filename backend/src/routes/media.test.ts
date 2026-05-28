@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -14,30 +14,47 @@ interface TestServer {
 
 async function startServer(openclawHome: string): Promise<TestServer> {
     const prevOpenclawHome = process.env.OPENCLAW_HOME;
+    const restoreOpenclawHome = () => {
+        if (prevOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = prevOpenclawHome;
+        }
+    };
     process.env.OPENCLAW_HOME = openclawHome;
-    const { default: mediaRoutes } = await import("./media.js");
+    let server: http.Server | undefined;
+    try {
+        const { default: mediaRoutes } = await import("./media.js");
 
-    const app = express();
-    mediaRoutes(app);
-    const server = http.createServer(app);
+        const app = express();
+        mediaRoutes(app);
+        server = http.createServer(app);
 
-    await new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-            server.off("listening", onListening);
-            server.off("error", onError);
-        };
-        const onListening = () => {
-            cleanup();
-            resolve();
-        };
-        const onError = (error: Error) => {
-            cleanup();
-            reject(error);
-        };
-        server.once("listening", onListening);
-        server.once("error", onError);
-        server.listen(0);
-    });
+        await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+                server?.off("listening", onListening);
+                server?.off("error", onError);
+            };
+            const onListening = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = (error: Error) => {
+                cleanup();
+                reject(error);
+            };
+            server?.once("listening", onListening);
+            server?.once("error", onError);
+            server?.listen(0);
+        });
+    } catch (error) {
+        if (server?.listening) {
+            await new Promise((resolve) => server?.close(resolve));
+        }
+        restoreOpenclawHome();
+        throw error;
+    }
+    assert.ok(server);
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -46,11 +63,7 @@ async function startServer(openclawHome: string): Promise<TestServer> {
         close: () =>
             new Promise((resolve) =>
                 server.close(() => {
-                    if (prevOpenclawHome === undefined) {
-                        delete process.env.OPENCLAW_HOME;
-                    } else {
-                        process.env.OPENCLAW_HOME = prevOpenclawHome;
-                    }
+                    restoreOpenclawHome();
                     resolve();
                 })
             ),
@@ -122,6 +135,30 @@ describe("media routes", () => {
             assert.equal(typeof module.default, "function");
             assert.equal(module.__testing.mediaRoot, "/home/ubuntu/.openclaw/media");
         } finally {
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+        }
+    });
+
+    it("restores OPENCLAW_HOME when startup fails", async () => {
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        process.env.OPENCLAW_HOME = "previous-home";
+        const listen = mock.method(
+            http.Server.prototype,
+            "listen",
+            function listen(this: http.Server) {
+                this.emit("error", new Error("listen failed"));
+                return this;
+            }
+        );
+        try {
+            await assert.rejects(startServer(openclawHome), /listen failed/u);
+            assert.equal(process.env.OPENCLAW_HOME, "previous-home");
+        } finally {
+            listen.mock.restore();
             if (originalOpenClawHome === undefined) {
                 delete process.env.OPENCLAW_HOME;
             } else {
