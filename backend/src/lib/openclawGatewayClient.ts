@@ -382,7 +382,13 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             }, this.opts.requestTimeoutMs as number);
 
             this.pending.set(id, { resolve, reject, timeout });
-            this.ws?.send(JSON.stringify(frame));
+            try {
+                this.ws?.send(JSON.stringify(frame));
+            } catch (error) {
+                this.pending.delete(id);
+                clearTimeout(timeout);
+                reject(error);
+            }
         });
     }
 

@@ -197,7 +197,10 @@ export default function configFilesRoutes(
 
                 let fd: number | undefined;
                 try {
-                    fd = fs.openSync(fullPath, "r");
+                    fd = fs.openSync(
+                        fullPath,
+                        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+                    );
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
@@ -208,6 +211,18 @@ export default function configFilesRoutes(
                 }
 
                 try {
+                    const realOpenclawRoot = fs.realpathSync(openclawRoot);
+                    const realOpenedPath = fs.realpathSync(`/proc/self/fd/${fd}`);
+                    if (
+                        realOpenedPath !== realOpenclawRoot &&
+                        !realOpenedPath.startsWith(realOpenclawRoot + path.sep)
+                    ) {
+                        res.status(403).json({
+                            error: "Access denied: path outside allowed root",
+                        });
+                        return;
+                    }
+
                     const stat = fs.fstatSync(fd);
 
                     if (stat.isDirectory()) {

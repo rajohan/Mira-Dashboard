@@ -221,6 +221,10 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
         const everyMs = numberFromRecord(schedule, "everyMs");
         if (everyMs) {
             if (everyMs % 3_600_000 === 0) return `Every ${everyMs / 3_600_000}h`;
+            if (everyMs < 60_000) {
+                const seconds = Math.max(1, Math.round(everyMs / 1000));
+                return `Every ${seconds}s`;
+            }
             const minutes = Math.round(everyMs / 60_000);
             return `Every ${minutes}m`;
         }

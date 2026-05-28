@@ -1415,7 +1415,10 @@ export default function agentsRoutes(app: express.Application): void {
                             ? (parsedMetadata as AgentMetadata)
                             : {};
                 } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    if (
+                        (error as NodeJS.ErrnoException).code !== "ENOENT" &&
+                        !(error instanceof SyntaxError)
+                    ) {
                         throw error;
                     }
                 }

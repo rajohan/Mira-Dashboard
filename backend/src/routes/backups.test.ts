@@ -27,7 +27,6 @@ const args = process.argv.slice(2);
 const command = args.at(-1) || "";
 if (process.env.FAKE_BACKUP_SIGNAL === "1") {
     process.kill(process.pid, "SIGTERM");
-    return;
 }
 process.stdout.write("started backup\n" + command + "\n");
 process.stderr.write("backup warning\n");

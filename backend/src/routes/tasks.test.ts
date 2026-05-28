@@ -163,6 +163,10 @@ describe("tasks routes", () => {
             "Every 2h"
         );
         assert.equal(
+            __testing.formatScheduleSummary({ kind: "every", everyMs: 15_000 }),
+            "Every 15s"
+        );
+        assert.equal(
             __testing.formatScheduleSummary({ kind: "every", everyMs: 0 }),
             "every"
         );

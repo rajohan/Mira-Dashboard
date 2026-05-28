@@ -724,57 +724,62 @@ describe("gateway state and helper utilities", () => {
         const ws = new FakeWebSocket();
         gateway.handleClient(ws as unknown as WebSocket);
 
-        ws.emit(
-            "message",
-            Buffer.from(
-                JSON.stringify({
-                    id: "subscribe-1",
-                    method: "subscribe",
-                    params: { channel: "logs" },
-                    type: "req",
-                })
-            )
-        );
-        ws.emit(
-            "message",
-            Buffer.from(
-                JSON.stringify({
-                    id: "unsubscribe-1",
-                    method: "unsubscribe",
-                    params: { channel: "logs" },
-                    type: "request",
-                })
-            )
-        );
-        ws.emit(
-            "message",
-            Buffer.from(JSON.stringify({ channel: "logs", type: "subscribe" }))
-        );
-        ws.emit(
-            "message",
-            Buffer.from(JSON.stringify({ channel: "logs", type: "unsubscribe" }))
-        );
-        await waitForAsyncHandlers();
+        try {
+            ws.emit(
+                "message",
+                Buffer.from(
+                    JSON.stringify({
+                        id: "subscribe-1",
+                        method: "subscribe",
+                        params: { channel: "logs" },
+                        type: "req",
+                    })
+                )
+            );
+            ws.emit(
+                "message",
+                Buffer.from(
+                    JSON.stringify({
+                        id: "unsubscribe-1",
+                        method: "unsubscribe",
+                        params: { channel: "logs" },
+                        type: "request",
+                    })
+                )
+            );
+            ws.emit(
+                "message",
+                Buffer.from(JSON.stringify({ channel: "logs", type: "subscribe" }))
+            );
+            ws.emit(
+                "message",
+                Buffer.from(JSON.stringify({ channel: "logs", type: "unsubscribe" }))
+            );
+            await waitForAsyncHandlers();
 
-        const responses = ws.sent.map((entry) => JSON.parse(entry) as { id?: string });
-        assert.deepEqual(
-            responses.find((entry) => entry.id === "subscribe-1"),
-            {
-                type: "res",
-                id: "subscribe-1",
-                ok: true,
-            }
-        );
-        assert.deepEqual(
-            responses.find((entry) => entry.id === "unsubscribe-1"),
-            {
-                type: "res",
-                id: "unsubscribe-1",
-                ok: true,
-            }
-        );
-        ws.emit("close");
-        logsTesting.resetLogWatcherForTest();
+            const responses = ws.sent.map(
+                (entry) => JSON.parse(entry) as { id?: string }
+            );
+            assert.deepEqual(
+                responses.find((entry) => entry.id === "subscribe-1"),
+                {
+                    type: "res",
+                    id: "subscribe-1",
+                    ok: true,
+                }
+            );
+            assert.deepEqual(
+                responses.find((entry) => entry.id === "unsubscribe-1"),
+                {
+                    type: "res",
+                    id: "unsubscribe-1",
+                    ok: true,
+                }
+            );
+        } finally {
+            ws.emit("close");
+            logsTesting.resetLogWatcherForTest();
+        }
     });
 
     it("refreshes sessions and broadcasts connected request results", async () => {

@@ -829,14 +829,30 @@ describe("agents routes", () => {
         assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
 
         await writeFile(metadataPath, "{ malformed", "utf8");
-        const malformedMetadata = await requestJson<{ error: string }>(
+        const malformedMetadata = await requestJson<{ currentTask: string }>(
             server,
             `/api/agents/${agentId}/metadata`,
-            { method: "PUT", body: { currentTask: "Should not overwrite" } }
+            { method: "PUT", body: { currentTask: "Repair malformed metadata" } }
         );
-        assert.equal(malformedMetadata.status, 500);
-        assert.match(malformedMetadata.body.error, /JSON5|parse|invalid/u);
-        assert.equal(await readFile(metadataPath, "utf8"), "{ malformed");
+        assert.equal(malformedMetadata.status, 200);
+        assert.equal(malformedMetadata.body.currentTask, "Repair malformed metadata");
+        assert.match(await readFile(metadataPath, "utf8"), /Repair malformed metadata/u);
+
+        await rm(metadataPath, { force: true, recursive: true });
+        await mkdir(metadataPath);
+        const unreadableMetadata = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "Unreadable metadata" } }
+        );
+        assert.equal(unreadableMetadata.status, 500);
+        assert.match(unreadableMetadata.body.error, /directory|EISDIR/u);
+        await rm(metadataPath, { force: true, recursive: true });
+        await writeFile(
+            metadataPath,
+            JSON.stringify({ currentTask: "Repair malformed metadata" }),
+            "utf8"
+        );
 
         const history = await requestJson<{
             tasks: Array<{ agentId: string; task: string; status: string }>;

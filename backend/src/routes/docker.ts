@@ -554,10 +554,10 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
         const stats = statsById.get(row.ID);
 
         const ipAddresses = Object.fromEntries(
-            Object.entries(networks).map(([name, value]) => [
-                name,
-                stringFallback((value as { IPAddress?: string }).IPAddress),
-            ])
+            Object.entries(networks).map(([name, value]) => {
+                const network = objectFallback(value);
+                return [name, stringFallback(network.IPAddress)];
+            })
         );
 
         return {
@@ -620,12 +620,15 @@ async function getContainerDetails(
     const labels = objectFallback(inspect.Config?.Labels) as Record<string, string>;
     const networks = Object.entries(
         objectFallback(inspect.NetworkSettings?.Networks)
-    ).map(([name, value]) => ({
-        name,
-        ipAddress: stringFallback(value.IPAddress),
-        gateway: stringFallback(value.Gateway),
-        macAddress: stringFallback(value.MacAddress),
-    }));
+    ).map(([name, value]) => {
+        const network = objectFallback(value);
+        return {
+            name,
+            ipAddress: stringFallback(network.IPAddress),
+            gateway: stringFallback(network.Gateway),
+            macAddress: stringFallback(network.MacAddress),
+        };
+    });
 
     return {
         ...summary,

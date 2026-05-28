@@ -429,12 +429,16 @@ function readRawTranscriptImageMessages(
 
             const images = content
                 .map((block) => asRecord(block))
-                .filter(
-                    (block): block is Record<string, unknown> =>
-                        block?.type === "image" &&
-                        (typeof block.data === "string" ||
-                            typeof asRecord(block.source)?.data === "string")
-                )
+                .filter((block): block is Record<string, unknown> => {
+                    const source = asRecord(block?.source);
+                    const data =
+                        typeof block?.data === "string"
+                            ? block.data
+                            : typeof source?.data === "string"
+                              ? source.data
+                              : "";
+                    return block?.type === "image" && data.trim().length > 0;
+                })
                 .map((block) => ({
                     type: "image",
                     data:

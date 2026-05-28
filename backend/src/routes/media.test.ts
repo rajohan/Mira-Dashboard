@@ -13,6 +13,7 @@ interface TestServer {
 }
 
 async function startServer(openclawHome: string): Promise<TestServer> {
+    const prevOpenclawHome = process.env.OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = openclawHome;
     const { default: mediaRoutes } = await import("./media.js");
 
@@ -26,7 +27,17 @@ async function startServer(openclawHome: string): Promise<TestServer> {
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise((resolve) =>
+                server.close(() => {
+                    if (prevOpenclawHome === undefined) {
+                        delete process.env.OPENCLAW_HOME;
+                    } else {
+                        process.env.OPENCLAW_HOME = prevOpenclawHome;
+                    }
+                    resolve();
+                })
+            ),
     };
 }
 

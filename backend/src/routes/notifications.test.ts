@@ -338,7 +338,7 @@ describe("notifications routes", () => {
             { method: "POST" }
         );
         assert.equal(noReadLeft.status, 200);
-        assert.equal(noReadLeft.body.deleted >= 0, true);
+        assert.ok(noReadLeft.body.deleted > 0);
 
         const stillNoReadLeft = await requestJson<{ ok: true; deleted: number }>(
             server,

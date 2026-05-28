@@ -189,8 +189,20 @@ describe("files routes", () => {
         );
         assert.equal(__testing.shouldHideFile(".secret"), true);
         assert.equal(__testing.shouldHideFile(".env.example"), false);
+        assert.equal(__testing.compareNames("alpha", "beta"), -1);
+        assert.equal(__testing.compareNames("beta", "alpha"), 1);
+        assert.equal(__testing.compareNames("alpha", "alpha"), 0);
         assert.equal(__testing.listDirectory("../../outside"), null);
         assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
+        await mkdir(path.join(workspaceRoot, "sort"));
+        await mkdir(path.join(workspaceRoot, "sort", "zeta"));
+        await mkdir(path.join(workspaceRoot, "sort", "alpha-dir"));
+        await writeFile(path.join(workspaceRoot, "sort", "z-file.txt"), "z");
+        await writeFile(path.join(workspaceRoot, "sort", "alpha.txt"), "a");
+        assert.deepEqual(
+            __testing.listDirectory("sort")?.map((entry) => entry.name),
+            ["alpha-dir", "zeta", "alpha.txt", "z-file.txt"]
+        );
         const srcEntries = __testing.listDirectory("src");
         assert.equal(srcEntries?.[0]?.path, "src/app.ts");
     });
@@ -467,7 +479,7 @@ describe("files routes", () => {
 
     it("maps unexpected canonicalization failures to 500 responses", async () => {
         const originalRealpathSync = fs.realpathSync;
-        let mode: "root" | "candidate" = "root";
+        let mode: "root" | "opened" = "root";
         fs.realpathSync = ((target: fs.PathLike) => {
             if (mode === "root" && target === workspaceRoot) {
                 const error = new Error("root unavailable") as NodeJS.ErrnoException;
@@ -475,10 +487,13 @@ describe("files routes", () => {
                 throw error;
             }
             if (
-                mode === "candidate" &&
-                target === path.join(workspaceRoot, "src", "app.ts")
+                mode === "opened" &&
+                typeof target === "string" &&
+                target.startsWith("/proc/self/fd/")
             ) {
-                const error = new Error("candidate unavailable") as NodeJS.ErrnoException;
+                const error = new Error(
+                    "opened file unavailable"
+                ) as NodeJS.ErrnoException;
                 error.code = "EACCES";
                 throw error;
             }
@@ -493,13 +508,13 @@ describe("files routes", () => {
             assert.equal(rootFailure.status, 500);
             assert.equal(rootFailure.body.error, "root unavailable");
 
-            mode = "candidate";
-            const candidateFailure = await requestJson<{ error: string }>(
+            mode = "opened";
+            const openedFailure = await requestJson<{ error: string }>(
                 server,
                 "/api/files/src%2Fapp.ts"
             );
-            assert.equal(candidateFailure.status, 500);
-            assert.equal(candidateFailure.body.error, "candidate unavailable");
+            assert.equal(openedFailure.status, 500);
+            assert.equal(openedFailure.body.error, "opened file unavailable");
         } finally {
             fs.realpathSync = originalRealpathSync;
         }

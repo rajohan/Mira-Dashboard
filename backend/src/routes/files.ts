@@ -94,6 +94,12 @@ function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
+function compareNames(a: string, b: string): number {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+
 /** Lists a workspace directory or returns null when the path escapes the workspace. */
 function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
@@ -144,7 +150,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
 
     const typeOrder: Record<FileItem["type"], number> = { directory: 0, file: 1 };
     return items.sort(
-        (a, b) => typeOrder[a.type] - typeOrder[b.type] || a.name.localeCompare(b.name)
+        (a, b) => typeOrder[a.type] - typeOrder[b.type] || compareNames(a.name, b.name)
     );
 }
 
@@ -153,6 +159,7 @@ export const __testing = {
     isImageFile,
     getImageMimeType,
     shouldHideFile,
+    compareNames,
     listDirectory,
 };
 
@@ -218,7 +225,7 @@ export default function filesRoutes(
                 let fullPath: string;
                 try {
                     file = await openReadNoFollowGuarded(guardedPath(candidatePath));
-                    fullPath = fs.realpathSync(candidatePath);
+                    fullPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
                 } catch (error) {
                     if (file) {
                         await file.close();

@@ -338,6 +338,27 @@ describe("config files routes", () => {
         }
     });
 
+    it("rejects files when the opened descriptor resolves outside the root", async () => {
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (typeof target === "string" && target.startsWith("/proc/self/fd/")) {
+                    return path.join(os.tmpdir(), "outside-openclaw.json");
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(response.status, 403);
+            assert.equal(response.body.error, "Access denied: path outside allowed root");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+    });
+
     it("detects binary and truncates large allowed config files", async () => {
         await writeFile(
             path.join(openclawRoot, "hooks", "transforms", "agentmail.ts"),
