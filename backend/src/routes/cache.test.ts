@@ -200,9 +200,13 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         assert.equal(refreshed.key, "quotas.summary");
 
         __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
-        await assert.rejects(() => refreshCacheKey("missing.key"), {
-            message: "Cache key not found after refresh: missing.key",
-        });
+        try {
+            await assert.rejects(() => refreshCacheKey("missing.key"), {
+                message: "Cache key not found after refresh: missing.key",
+            });
+        } finally {
+            __testing.setCacheRefreshCommandForTests("missing.key", undefined);
+        }
 
         const routeRefresh = await fetch(
             `${server.baseUrl}/api/cache/quotas.summary/refresh`,

@@ -8,7 +8,7 @@ import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guard
 /** Represents completion request. */
 interface CompletionRequest {
     partial: string;
-    cwd: string;
+    cwd?: string;
 }
 
 /** Represents cd request. */

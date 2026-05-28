@@ -220,8 +220,8 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
     if (schedule.kind === "every") {
         const everyMs = numberFromRecord(schedule, "everyMs");
         if (everyMs) {
+            if (everyMs % 3_600_000 === 0) return `Every ${everyMs / 3_600_000}h`;
             const minutes = Math.round(everyMs / 60_000);
-            if (minutes >= 60 && minutes % 60 === 0) return `Every ${minutes / 60}h`;
             return `Every ${minutes}m`;
         }
     }

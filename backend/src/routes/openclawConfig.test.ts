@@ -526,12 +526,15 @@ describe("OpenClaw config routes", () => {
 
         try {
             const config = await requestJson<{ error: string }>(server, "/api/config");
+            assert.equal(config.status, 500);
             assert.equal(config.body.error, "gateway failed");
             const skills = await requestJson<{ error: string }>(server, "/api/skills");
+            assert.equal(skills.status, 500);
             assert.equal(skills.body.error, "gateway failed");
             const backup = await requestJson<{ error: string }>(server, "/api/backup", {
                 method: "POST",
             });
+            assert.equal(backup.status, 500);
             assert.equal(backup.body.error, "gateway failed");
             const invalidName = await requestJson<{ error: string }>(
                 server,
@@ -541,6 +544,7 @@ describe("OpenClaw config routes", () => {
                     body: { enabled: true },
                 }
             );
+            assert.equal(invalidName.status, 400);
             assert.equal(invalidName.body.error, "Invalid skill name");
             const invalidEnabled = await requestJson<{ error: string }>(
                 server,
@@ -550,6 +554,7 @@ describe("OpenClaw config routes", () => {
                     body: { enabled: "yes" },
                 }
             );
+            assert.equal(invalidEnabled.status, 400);
             assert.equal(invalidEnabled.body.error, "Invalid enabled value");
             const toggleFailure = await requestJson<{ error: string }>(
                 server,
@@ -559,6 +564,7 @@ describe("OpenClaw config routes", () => {
                     body: { enabled: true },
                 }
             );
+            assert.equal(toggleFailure.status, 500);
             assert.equal(toggleFailure.body.error, "gateway failed");
         } finally {
             gateway.request = originalRequest;

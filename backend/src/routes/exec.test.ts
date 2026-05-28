@@ -574,4 +574,51 @@ describe("exec routes", () => {
             __testing.jobs.delete(jobId);
         }
     });
+
+    it("force kills lingering stopped jobs and ignores missing process groups", async () => {
+        const originalKill = process.kill;
+        const jobId = "running-with-force-kill";
+        const signals: Array<NodeJS.Signals | number | undefined> = [];
+        const fakeProcess = {
+            killed: false,
+            pid: 234_567,
+            kill(): boolean {
+                return true;
+            },
+        };
+        __testing.jobs.set(jobId, {
+            id: jobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: fakeProcess as never,
+        });
+
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            assert.equal(pid, -234_567);
+            signals.push(signal);
+            if (signal === "SIGKILL") {
+                throw new Error("already gone");
+            }
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            const stop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${jobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(stop.status, 200);
+            await delay(3_050);
+            assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+        } finally {
+            process.kill = originalKill;
+            __testing.jobs.delete(jobId);
+        }
+    });
 });

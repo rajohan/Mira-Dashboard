@@ -23,27 +23,51 @@ interface FileItem {
 }
 
 async function startServer(workspaceRoot: string): Promise<TestServer> {
+    const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
     process.env.WORKSPACE_ROOT = workspaceRoot;
-    const { default: filesRoutes } = await import(
-        `./files.js?test=${crypto.randomUUID()}`
-    );
+    let server: http.Server | undefined;
+    try {
+        const { default: filesRoutes } = await import(
+            `./files.js?test=${crypto.randomUUID()}`
+        );
 
-    const app = express();
-    app.use(express.json({ limit: "2mb" }));
-    app.use("/api/files/boom", (_req, _res, next) => {
-        next(new Error("boom"));
-    });
-    filesRoutes(app, express);
-    const server = http.createServer(app);
+        const app = express();
+        app.use(express.json({ limit: "2mb" }));
+        app.use("/api/files/boom", (_req, _res, next) => {
+            next(new Error("boom"));
+        });
+        filesRoutes(app, express);
+        server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve) => server?.listen(0, resolve));
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () =>
+                new Promise((resolve) =>
+                    server?.close(() => {
+                        if (originalWorkspaceRoot === undefined) {
+                            delete process.env.WORKSPACE_ROOT;
+                        } else {
+                            process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+                        }
+                        resolve();
+                    })
+                ),
+        };
+    } catch (error) {
+        if (server?.listening) {
+            await new Promise((resolve) => server?.close(resolve));
+        }
+        if (originalWorkspaceRoot === undefined) {
+            delete process.env.WORKSPACE_ROOT;
+        } else {
+            process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+        }
+        throw error;
+    }
 }
 
 async function requestJson<T>(

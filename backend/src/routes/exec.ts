@@ -374,6 +374,7 @@ function completeExecJob(jobId: string, result: ExecResponse): void {
     current.stdout = result.stdout;
     current.stderr = result.stderr;
     current.endedAt = Date.now();
+    current.process = undefined;
     cleanupJobs();
 }
 
@@ -389,6 +390,7 @@ function failExecJob(jobId: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
     current.endedAt = Date.now();
+    current.process = undefined;
     cleanupJobs();
 }
 
