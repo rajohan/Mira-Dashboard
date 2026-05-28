@@ -538,6 +538,7 @@ describe("exec routes", () => {
             pid: 123_456,
             kill(signal: NodeJS.Signals): boolean {
                 assert.equal(signal, "SIGTERM");
+                fakeProcess.killed = true;
                 fallbackKilled = true;
                 return true;
             },
@@ -582,7 +583,9 @@ describe("exec routes", () => {
         const fakeProcess = {
             killed: false,
             pid: 234_567,
-            kill(): boolean {
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                fakeProcess.killed = true;
                 return true;
             },
         };

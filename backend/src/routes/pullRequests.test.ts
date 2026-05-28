@@ -17,6 +17,19 @@ const originalPath = process.env.PATH;
 const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
 const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
 
+function saveEnv(names: string[]): () => void {
+    const previous = new Map(names.map((name) => [name, process.env[name]]));
+    return () => {
+        for (const [name, value] of previous) {
+            if (value === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = value;
+            }
+        }
+    };
+}
+
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
     await chmod(filePath, 0o755);
@@ -211,9 +224,15 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 if (args[0] === "pr" && ["merge", "close"].includes(args[1])) {
-  if (args[1] === "close" && args.includes("--comment")) {
-    const comment = args[args.indexOf("--comment") + 1];
-    process.stdout.write("comment=" + comment + "\n");
+  if (args[1] === "close") {
+    const idx = args.indexOf("--comment");
+    const comment =
+      idx !== -1 && idx + 1 < args.length && typeof args[idx + 1] === "string" && !args[idx + 1].startsWith("--")
+        ? args[idx + 1]
+        : undefined;
+    if (comment !== undefined) {
+      process.stdout.write("comment=" + comment + "\n");
+    }
   }
   process.stdout.write(args.slice(0, 3).join(" ") + "\n");
   process.exit(0);
@@ -728,6 +747,8 @@ describe("pull request routes", () => {
             process.env.FAKE_GH_JSON_LINES = "timeout";
             const timeoutReadyFile = path.join(tempDir, "gh-timeout-ready");
             const timeoutExitFile = path.join(tempDir, "gh-timeout-exit");
+            const previousReadyFile = process.env.FAKE_GH_READY_FILE;
+            const previousExitFile = process.env.FAKE_GH_EXIT_FILE;
             process.env.FAKE_GH_READY_FILE = timeoutReadyFile;
             process.env.FAKE_GH_EXIT_FILE = timeoutExitFile;
             try {
@@ -738,8 +759,16 @@ describe("pull request routes", () => {
                 await assert.rejects(() => timeoutPromise, /timed out/u);
                 await waitForFile(timeoutExitFile);
             } finally {
-                delete process.env.FAKE_GH_READY_FILE;
-                delete process.env.FAKE_GH_EXIT_FILE;
+                if (previousReadyFile === undefined) {
+                    delete process.env.FAKE_GH_READY_FILE;
+                } else {
+                    process.env.FAKE_GH_READY_FILE = previousReadyFile;
+                }
+                if (previousExitFile === undefined) {
+                    delete process.env.FAKE_GH_EXIT_FILE;
+                } else {
+                    process.env.FAKE_GH_EXIT_FILE = previousExitFile;
+                }
             }
 
             const originalPathForSpawnError = process.env.PATH;
@@ -916,6 +945,7 @@ describe("pull request routes", () => {
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
         });
+        const restoreGitEnv = saveEnv(["FAKE_GIT_WORKTREE_LIST"]);
         process.env.FAKE_GIT_WORKTREE_LIST = "short-branch";
         try {
             const approveAndDeploy = await requestJson<{
@@ -930,7 +960,7 @@ describe("pull request routes", () => {
             assert.equal(approveAndDeploy.body.message, "PR #10 merged; deploy started");
             assert.equal(approveAndDeploy.body.deployment.status, "restart-scheduled");
         } finally {
-            delete process.env.FAKE_GIT_WORKTREE_LIST;
+            restoreGitEnv();
         }
     });
 
@@ -962,6 +992,12 @@ describe("pull request routes", () => {
             // Suppress expected route errors for forced production-checkout failures.
         };
 
+        const restoreGitEnv = saveEnv([
+            "FAKE_GIT_WORKTREE_LIST",
+            "FAKE_GIT_DIRTY_WORKTREE",
+            "FAKE_GIT_REMOVE_FAIL",
+            "FAKE_GIT_DIRTY_PRODUCTION",
+        ]);
         try {
             process.env.FAKE_GIT_WORKTREE_LIST = "empty";
             const noWorktree = await requestJson<{
@@ -1026,10 +1062,7 @@ describe("pull request routes", () => {
                 "Production checkout has local changes; refusing deploy/merge"
             );
         } finally {
-            delete process.env.FAKE_GIT_WORKTREE_LIST;
-            delete process.env.FAKE_GIT_DIRTY_WORKTREE;
-            delete process.env.FAKE_GIT_REMOVE_FAIL;
-            delete process.env.FAKE_GIT_DIRTY_PRODUCTION;
+            restoreGitEnv();
             console.error = originalConsoleError;
         }
     });
@@ -1040,6 +1073,12 @@ describe("pull request routes", () => {
             // Suppress expected route errors for forced deploy failures.
         };
 
+        const restoreGitEnv = saveEnv([
+            "FAKE_GIT_NO_UPSTREAM",
+            "FAKE_GIT_EMPTY_UPSTREAM",
+            "FAKE_GIT_ROOT",
+            "FAKE_GIT_BRANCH",
+        ]);
         try {
             process.env.FAKE_GIT_NO_UPSTREAM = "1";
             const checkout = await requestJson<{
@@ -1081,10 +1120,7 @@ describe("pull request routes", () => {
                 /Production checkout must be clean main before deploy/
             );
         } finally {
-            delete process.env.FAKE_GIT_NO_UPSTREAM;
-            delete process.env.FAKE_GIT_EMPTY_UPSTREAM;
-            delete process.env.FAKE_GIT_ROOT;
-            delete process.env.FAKE_GIT_BRANCH;
+            restoreGitEnv();
             console.error = originalConsoleError;
         }
     });

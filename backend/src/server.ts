@@ -8,7 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { getAuthUserFromRequest, getPersistedGatewayToken, requireAuth } from "./auth.js";
+import { getAuthUserFromRequest, requireAuth } from "./auth.js";
 import gateway from "./gateway.js";
 import agentsRoutes from "./routes/agents.js";
 import authRoutes from "./routes/auth.js";
@@ -35,8 +35,6 @@ import sttRoutes from "./routes/stt.js";
 import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
 import ttsRoutes from "./routes/tts.js";
-import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
-import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 dotenv.config();
 
@@ -224,24 +222,3 @@ export function handleWebSocketConnection(
 }
 
 wss.on("connection", handleWebSocketConnection);
-
-// =====================
-// Start Server
-// =====================
-/** Starts Gateway and notification monitors after the HTTP server is listening. */
-export function handleServerListening(): void {
-    const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
-    if (token) {
-        gateway.init(token);
-    } else {
-        console.warn(
-            "[Backend] No gateway token configured yet; waiting for bootstrap registration"
-        );
-    }
-
-    startQuotaNotificationMonitor();
-    startOpenClawNotificationMonitor();
-}
-
-const PORT = resolveListenPort();
-server.listen(PORT, handleServerListening);

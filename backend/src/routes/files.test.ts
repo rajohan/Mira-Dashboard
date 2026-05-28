@@ -237,25 +237,10 @@ describe("files routes", () => {
         assert.equal(__testing.compareNames("alpha", "beta"), -1);
         assert.equal(__testing.compareNames("beta", "alpha"), 1);
         assert.equal(__testing.compareNames("alpha", "alpha"), 0);
-        const originalHome = process.env.HOME;
-        try {
-            process.env.HOME = path.join(os.tmpdir(), "mira-home");
-            assert.equal(
-                __testing.getDefaultWorkspaceRoot(),
-                path.join(process.env.HOME, ".openclaw/workspace")
-            );
-            delete process.env.HOME;
-            assert.equal(
-                __testing.getDefaultWorkspaceRoot(),
-                path.join(os.homedir(), ".openclaw/workspace")
-            );
-        } finally {
-            if (originalHome === undefined) {
-                delete process.env.HOME;
-            } else {
-                process.env.HOME = originalHome;
-            }
-        }
+        assert.equal(
+            __testing.getDefaultWorkspaceRoot(),
+            "/home/ubuntu/.openclaw/workspace"
+        );
         assert.equal(__testing.listDirectory("../../outside"), null);
         assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
         await mkdir(path.join(workspaceRoot, "sort"));

@@ -251,48 +251,63 @@ describe("sessions routes", () => {
     });
 
     it("returns gateway errors for session list, stats, actions, and deletes", async () => {
-        gateway.getSessions = () => {
-            throw new Error("sessions unavailable");
-        };
+        const originalGetSessions = gateway.getSessions;
+        const originalAbortSessionRun = gateway.abortSessionRun;
+        const originalDeleteSession = gateway.deleteSession;
+        try {
+            gateway.getSessions = () => {
+                throw new Error("sessions unavailable");
+            };
 
-        const list = await requestJson<{ error: string }>(server, "/api/sessions/list");
-        const stats = await requestJson<{ error: string }>(server, "/api/sessions/stats");
+            const list = await requestJson<{ error: string }>(
+                server,
+                "/api/sessions/list"
+            );
+            const stats = await requestJson<{ error: string }>(
+                server,
+                "/api/sessions/stats"
+            );
 
-        assert.equal(list.status, 500);
-        assert.equal(list.body.error, "sessions unavailable");
-        assert.equal(stats.status, 500);
-        assert.equal(stats.body.error, "sessions unavailable");
+            assert.equal(list.status, 500);
+            assert.equal(list.body.error, "sessions unavailable");
+            assert.equal(stats.status, 500);
+            assert.equal(stats.body.error, "sessions unavailable");
 
-        gateway.getSessions = () => [...sessions];
-        gateway.abortSessionRun = async () => {
-            throw new Error("abort failed");
-        };
-        gateway.deleteSession = async () => {
-            throw new Error("delete failed");
-        };
+            gateway.getSessions = () => [...sessions];
+            gateway.abortSessionRun = async () => {
+                throw new Error("abort failed");
+            };
+            gateway.deleteSession = async () => {
+                throw new Error("delete failed");
+            };
 
-        const action = await requestJson<{ error: string }>(
-            server,
-            "/api/sessions/agent%3Amain%3Amain/action",
-            { method: "POST", body: { action: "stop" } }
-        );
-        const deleteResponse = await requestJson<{ error: string }>(
-            server,
-            "/api/sessions/agent%3Amain%3Amain",
-            { method: "DELETE" }
-        );
+            const action = await requestJson<{ error: string }>(
+                server,
+                "/api/sessions/agent%3Amain%3Amain/action",
+                { method: "POST", body: { action: "stop" } }
+            );
+            const deleteResponse = await requestJson<{ error: string }>(
+                server,
+                "/api/sessions/agent%3Amain%3Amain",
+                { method: "DELETE" }
+            );
 
-        assert.equal(action.status, 500);
-        assert.equal(action.body.error, "abort failed");
-        assert.equal(deleteResponse.status, 500);
-        assert.equal(deleteResponse.body.error, "delete failed");
+            assert.equal(action.status, 500);
+            assert.equal(action.body.error, "abort failed");
+            assert.equal(deleteResponse.status, 500);
+            assert.equal(deleteResponse.body.error, "delete failed");
 
-        gateway.abortSessionRun = async (key: string) => {
-            aborted.push(key);
-        };
-        gateway.deleteSession = async (key: string) => {
-            deleted.push(key);
-            return { archived: true };
-        };
+            gateway.abortSessionRun = async (key: string) => {
+                aborted.push(key);
+            };
+            gateway.deleteSession = async (key: string) => {
+                deleted.push(key);
+                return { archived: true };
+            };
+        } finally {
+            gateway.getSessions = originalGetSessions;
+            gateway.abortSessionRun = originalAbortSessionRun;
+            gateway.deleteSession = originalDeleteSession;
+        }
     });
 });

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { WebSocket } from "ws";
 
@@ -26,7 +28,6 @@ db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
 
 const {
     apiAuthMiddleware,
-    handleServerListening,
     handleWebSocketConnection,
     parseTrustProxy,
     resolveBackendCommit,
@@ -34,6 +35,12 @@ const {
     server,
     sessionsHandler,
 } = await import("./server.js");
+const {
+    handleServerListening,
+    isDirectEntrypoint,
+    shouldStartOnImport,
+    startBackendServer,
+} = await import("./serverStart.js");
 
 function getBaseUrl(): string {
     const address = server.address();
@@ -67,6 +74,7 @@ describe("server bootstrap", () => {
             };
             server.once("listening", onListening);
             server.once("error", onError);
+            server.listen(0);
         });
     });
 
@@ -431,24 +439,96 @@ describe("server bootstrap", () => {
             request as unknown as http.IncomingMessage
         );
         assert.deepEqual(closes.at(-1), { code: 4401, reason: "Unauthorized" });
+    });
 
+    it("starts runtime services from the entrypoint helpers", async () => {
         const originalInit = gateway.init;
+        const originalListen = server.listen;
+        const originalToken = process.env.OPENCLAW_TOKEN;
+        const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+        const originalConsoleWarn = console.warn;
         let initializedToken: string | undefined;
+        let listenedPort: number | undefined;
+        const warnings: unknown[][] = [];
         gateway.init = (token: string) => {
             initializedToken = token;
         };
-        const originalToken = process.env.OPENCLAW_TOKEN;
+        console.warn = (...args: unknown[]) => {
+            warnings.push(args);
+        };
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
+            delete process.env.OPENCLAW_TOKEN;
+            initializedToken = undefined;
+            handleServerListening();
+            assert.equal(initializedToken, undefined);
+            assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
+
+            server.listen = ((port: number, listener?: () => void) => {
+                listenedPort = port;
+                listener?.();
+                return server;
+            }) as typeof server.listen;
+
+            startBackendServer(41_001);
+            assert.equal(listenedPort, 41_001);
+            assert.equal(
+                isDirectEntrypoint("/tmp/serverStart.js", "file:///tmp/serverStart.js"),
+                true
+            );
+            assert.equal(
+                isDirectEntrypoint("/tmp/other.js", "file:///tmp/serverStart.js"),
+                false
+            );
+            assert.equal(
+                isDirectEntrypoint(undefined, "file:///tmp/serverStart.js"),
+                false
+            );
+            assert.equal(shouldStartOnImport(), false);
+            assert.equal(shouldStartOnImport(undefined, true), true);
+            assert.equal(shouldStartOnImport("0", false), false);
+            assert.equal(shouldStartOnImport("1", false), true);
+
+            process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
+            assert.equal(shouldStartOnImport(), true);
+            listenedPort = undefined;
+            await import(`./serverStart.js?entry=${Date.now()}`);
+            assert.equal(listenedPort, 0);
         } finally {
             if (originalToken === undefined) {
                 delete process.env.OPENCLAW_TOKEN;
             } else {
                 process.env.OPENCLAW_TOKEN = originalToken;
             }
+            if (originalStartOnImport === undefined) {
+                delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+            } else {
+                process.env.MIRA_DASHBOARD_START_ON_IMPORT = originalStartOnImport;
+            }
             gateway.init = originalInit;
+            server.listen = originalListen;
+            console.warn = originalConsoleWarn;
+        }
+    });
+
+    it("runs the startup module as a direct entrypoint", async () => {
+        const child = spawn(process.execPath, ["--import", "tsx", "src/serverStart.ts"], {
+            cwd: process.cwd(),
+            env: {
+                ...process.env,
+                OPENCLAW_TOKEN: "test-token",
+                PORT: "0",
+            },
+            stdio: "ignore",
+        });
+        try {
+            await delay(300);
+            assert.equal(child.exitCode, null);
+        } finally {
+            child.kill("SIGTERM");
+            await new Promise((resolve) => child.once("exit", resolve));
         }
     });
 });

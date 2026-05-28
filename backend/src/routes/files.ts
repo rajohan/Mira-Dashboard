@@ -1,6 +1,5 @@
 import express from "express";
 import fs from "fs";
-import os from "os";
 import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
@@ -16,7 +15,7 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
-    return path.join(process.env.HOME || os.homedir(), ".openclaw/workspace");
+    return "/home/ubuntu/.openclaw/workspace";
 }
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());

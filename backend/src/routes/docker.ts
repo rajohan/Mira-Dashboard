@@ -1117,6 +1117,23 @@ function failDockerExecJob(jobId: string, error: unknown): void {
     cleanupDockerExecJobs();
 }
 
+function resolveManualUpdateServiceId(
+    routeServiceIdParam: string,
+    payload: DockerManualUpdateRequest
+): number | null {
+    if (routeServiceIdParam && !/^\d+$/u.test(routeServiceIdParam)) {
+        return null;
+    }
+
+    const routeServiceId = routeServiceIdParam ? Number(routeServiceIdParam) : Number.NaN;
+    const serviceId =
+        Number.isFinite(routeServiceId) && routeServiceId > 0
+            ? routeServiceId
+            : Number(payload.serviceId || 0);
+
+    return Number.isFinite(serviceId) && serviceId > 0 ? serviceId : null;
+}
+
 export const __testing = {
     asyncRoute,
     buildPostgresUri,
@@ -1147,6 +1164,7 @@ export const __testing = {
     parsePorts,
     parseDockerSizeToBytes,
     getContainerInspectMap,
+    resolveManualUpdateServiceId,
 };
 
 /** Registers docker API routes. */
@@ -1200,15 +1218,9 @@ export default function dockerRoutes(app: express.Application): void {
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerManualUpdateRequest;
             const routeServiceIdParam = stringFallback(req.params.serviceId);
-            const routeServiceId = /^\d+$/u.test(routeServiceIdParam)
-                ? Number(routeServiceIdParam)
-                : Number.NaN;
-            const serviceId =
-                Number.isFinite(routeServiceId) && routeServiceId > 0
-                    ? routeServiceId
-                    : Number(payload.serviceId || 0);
+            const serviceId = resolveManualUpdateServiceId(routeServiceIdParam, payload);
 
-            if (!Number.isFinite(serviceId) || serviceId <= 0) {
+            if (serviceId === null) {
                 res.status(400).json({ error: "Invalid service id" });
                 return;
             }

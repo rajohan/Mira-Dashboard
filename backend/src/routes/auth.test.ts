@@ -9,6 +9,8 @@ import { db } from "../db.js";
 import { __testing as gatewayTesting } from "../gateway.js";
 import authRoutes from "./auth.js";
 
+const bootstrapGatewayToken = `bootstrap-token-${Date.now()}`;
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -70,13 +72,14 @@ function cleanupBootstrapRows(username: string): void {
     cleanupUser("bootstrap-dupe");
     cleanupUser("bootstrap-fail");
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
-        "token"
+        bootstrapGatewayToken
     );
 }
 
 describe("auth first-user bootstrap routes", () => {
     const username = `bootstrap-route-${Date.now()}`;
     const password = "correct horse battery staple";
+    const gatewayToken = bootstrapGatewayToken;
     let server: TestServer;
 
     before(async () => {
@@ -110,7 +113,7 @@ describe("auth first-user bootstrap routes", () => {
             "/api/auth/register-first-user",
             {
                 method: "POST",
-                body: { username: "no", password, gatewayToken: "token" },
+                body: { username: "no", password, gatewayToken },
             }
         );
         assert.equal(invalidUsername.status, 400);
@@ -121,7 +124,7 @@ describe("auth first-user bootstrap routes", () => {
             "/api/auth/register-first-user",
             {
                 method: "POST",
-                body: { username, password: "short", gatewayToken: "token" },
+                body: { username, password: "short", gatewayToken },
             }
         );
         assert.equal(invalidPassword.status, 400);
@@ -157,7 +160,7 @@ describe("auth first-user bootstrap routes", () => {
             body: {
                 username: ` ${username.toUpperCase()} `,
                 password,
-                gatewayToken: "token",
+                gatewayToken,
             },
         });
         assert.equal(registered.status, 201);
@@ -187,7 +190,7 @@ describe("auth first-user bootstrap routes", () => {
                 "/api/auth/register-first-user",
                 {
                     method: "POST",
-                    body: { username: "bootstrap-dupe", password, gatewayToken: "token" },
+                    body: { username: "bootstrap-dupe", password, gatewayToken },
                 }
             );
             assert.equal(duplicate.status, 409);
@@ -198,7 +201,7 @@ describe("auth first-user bootstrap routes", () => {
                 "/api/auth/register-first-user",
                 {
                     method: "POST",
-                    body: { username: "bootstrap-fail", password, gatewayToken: "token" },
+                    body: { username: "bootstrap-fail", password, gatewayToken },
                 }
             );
             assert.equal(failed.status, 500);
@@ -275,7 +278,11 @@ describe("auth routes", () => {
             "/api/auth/register-first-user",
             {
                 method: "POST",
-                body: { username: "new-user", password, gatewayToken: "token" },
+                body: {
+                    username: "new-user",
+                    password,
+                    gatewayToken: bootstrapGatewayToken,
+                },
             }
         );
 

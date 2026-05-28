@@ -323,7 +323,23 @@ async function startServer(updaterCwd: string): Promise<TestServer> {
     dockerRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("error", onError);
+            server.off("listening", onListening);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -497,6 +513,13 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.parseDockerSizeToBytes("1.5 MB"), 1_572_864);
         assert.equal(__testing.parseDockerSizeToBytes("1XB"), 0);
         assert.equal(__testing.trimOutput("x".repeat(120_000)).length, 100_000);
+        assert.equal(__testing.resolveManualUpdateServiceId("12", { serviceId: 3 }), 12);
+        assert.equal(__testing.resolveManualUpdateServiceId("", { serviceId: 3 }), 3);
+        assert.equal(
+            __testing.resolveManualUpdateServiceId("bad", { serviceId: 3 }),
+            null
+        );
+        assert.equal(__testing.resolveManualUpdateServiceId("", {}), null);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
         __testing.setUpdaterNodeBinForTests("node");
         assert.equal(
