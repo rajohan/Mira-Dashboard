@@ -56,7 +56,18 @@ describe("server bootstrap", () => {
             return;
         }
 
-        await new Promise<void>((resolve) => server.once("listening", resolve));
+        await new Promise<void>((resolve, reject) => {
+            const onListening = () => {
+                server.off("error", onError);
+                resolve();
+            };
+            const onError = (error: Error) => {
+                server.off("listening", onListening);
+                reject(error);
+            };
+            server.once("listening", onListening);
+            server.once("error", onError);
+        });
     });
 
     after(async () => {
@@ -131,6 +142,37 @@ describe("server bootstrap", () => {
             }),
         });
         assert.equal(executedSql.length, 1);
+
+        executedSql.length = 0;
+        let initialLockedPrepareCalls = 0;
+        ensureTaskAutomationColumn({
+            exec: (sql) => executedSql.push(sql),
+            prepare: () => ({
+                all: () => {
+                    initialLockedPrepareCalls += 1;
+                    if (initialLockedPrepareCalls === 1) {
+                        throw new Error("database is locked");
+                    }
+                    return [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(initialLockedPrepareCalls, 1);
+        assert.equal(executedSql.length, 1);
+
+        const initialPrepareError = new Error("schema unavailable");
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {},
+                    prepare: () => ({
+                        all: () => {
+                            throw initialPrepareError;
+                        },
+                    }),
+                }),
+            initialPrepareError
+        );
 
         executedSql.length = 0;
         ensureTaskAutomationColumn({

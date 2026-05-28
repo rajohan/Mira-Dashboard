@@ -36,8 +36,11 @@ function isTransientSqliteLock(error: unknown): boolean {
         return false;
     }
     const code = "code" in error ? String(error.code).toUpperCase() : "";
-    const message = error.message.toUpperCase();
-    return /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message}`);
+    const message = error.message;
+    return (
+        /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message.toUpperCase()}`) ||
+        /database is locked/iu.test(message)
+    );
 }
 
 function sleepSync(milliseconds: number): void {
@@ -150,8 +153,14 @@ CREATE TABLE IF NOT EXISTS app_config (
 
 /** Ensures older task databases have the automation column. */
 export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
-    if (taskAutomationColumnExists(targetDb)) {
-        return;
+    try {
+        if (taskAutomationColumnExists(targetDb)) {
+            return;
+        }
+    } catch (error) {
+        if (!isTransientSqliteLock(error)) {
+            throw error;
+        }
     }
 
     let lastError: unknown;

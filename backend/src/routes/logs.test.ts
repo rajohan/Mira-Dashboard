@@ -165,8 +165,10 @@ describe("logs routes", () => {
         assert.equal(invalidTail.status, 200);
         assert.equal(invalidTailBody.content, "first\n\nsecond\nthird\n");
 
-        const today = new RealDate().toISOString().split("T")[0];
-        const todayFile = `openclaw-${today}.log`;
+        const mockedToday = new RealDate("2099-12-31T12:00:00.000Z")
+            .toISOString()
+            .split("T")[0];
+        const todayFile = `openclaw-${mockedToday}.log`;
         await rm(path.join(logsDir, todayFile), { force: true });
 
         try {

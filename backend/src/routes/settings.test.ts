@@ -196,7 +196,7 @@ describe("settings routes", () => {
         const invalidRefreshInterval = await requestJson<{ error: string }>(
             server,
             "/api/settings",
-            { method: "PUT", body: { refreshInterval: Number.NaN } }
+            { method: "PUT", body: { refreshInterval: null } }
         );
         assert.equal(invalidRefreshInterval.status, 400);
         assert.equal(

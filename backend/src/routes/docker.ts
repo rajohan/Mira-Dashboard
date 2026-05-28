@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
@@ -26,6 +27,10 @@ const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const N8N_DATABASE = "n8n";
+
+function updaterScriptPath(fileName: string): string {
+    return path.join(updaterCwd, "scripts", fileName);
+}
 
 /** Represents one docker updater service row. */
 interface DockerUpdaterServiceRow {
@@ -803,7 +808,7 @@ async function getDockerUpdaterServiceById(serviceId: number) {
 /** Performs run manual updater for service. */
 async function runManualUpdaterForService(serviceId: number) {
     const manual = await runUpdaterCommand("manual-update", [
-        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        updaterScriptPath("docker-auto-update.mjs"),
         "--mode",
         "manual",
         "--service-id",
@@ -828,7 +833,7 @@ async function runManualUpdaterForService(serviceId: number) {
     }
 
     const notify = await runUpdaterCommand("notify", [
-        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+        updaterScriptPath("docker-notify-updates.mjs"),
     ]);
     steps.push(notify);
     if (!notify.ok) {
@@ -841,7 +846,7 @@ async function runManualUpdaterForService(serviceId: number) {
     }
 
     const discord = await runUpdaterCommand("discord", [
-        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+        updaterScriptPath("docker-send-discord-newversion.mjs"),
     ]);
     steps.push(discord);
 
@@ -894,27 +899,27 @@ async function runUpdaterCommand(
 /** Performs run docker updater now. */
 async function runDockerUpdaterNow() {
     const register = await runUpdaterCommand("register", [
-        "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
+        updaterScriptPath("docker-register-services.mjs"),
     ]);
     if (!register.ok) return [register];
 
     const poll = await runUpdaterCommand("poll", [
-        "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs",
+        updaterScriptPath("docker-registry-poll.mjs"),
     ]);
     if (!poll.ok) return [register, poll];
 
     const autoUpdate = await runUpdaterCommand("auto-update", [
-        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        updaterScriptPath("docker-auto-update.mjs"),
     ]);
     if (!autoUpdate.ok) return [register, poll, autoUpdate];
 
     const notify = await runUpdaterCommand("notify", [
-        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+        updaterScriptPath("docker-notify-updates.mjs"),
     ]);
     if (!notify.ok) return [register, poll, autoUpdate, notify];
 
     const discord = await runUpdaterCommand("discord", [
-        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+        updaterScriptPath("docker-send-discord-newversion.mjs"),
     ]);
 
     return [register, poll, autoUpdate, notify, discord];

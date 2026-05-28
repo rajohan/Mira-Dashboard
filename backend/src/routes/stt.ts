@@ -15,18 +15,19 @@ function audioExtension(contentType?: string): string {
     if (!contentType) {
         return ".webm";
     }
+    const normalizedContentType = contentType.toLowerCase();
 
-    if (contentType.includes("mp4") || contentType.includes("m4a")) {
+    if (normalizedContentType.includes("mp4") || normalizedContentType.includes("m4a")) {
         return ".m4a";
     }
-    if (contentType.includes("mpeg") || contentType.includes("mp3")) {
+    if (normalizedContentType.includes("mpeg") || normalizedContentType.includes("mp3")) {
         return ".mp3";
     }
-    if (contentType.includes("ogg")) {
+    if (normalizedContentType.includes("ogg")) {
         return ".ogg";
     }
 
-    if (contentType.includes("wav")) {
+    if (normalizedContentType.includes("wav")) {
         return ".wav";
     }
     return ".webm";

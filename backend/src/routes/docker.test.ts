@@ -269,14 +269,15 @@ process.exit(1);
         nodePath,
         String.raw`#!${process.execPath}
 const script = process.argv[2] || "";
+const scriptName = script.split(/[\\/]/u).at(-1);
 const stepByScript = {
-  "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs": "register",
-  "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs": "poll",
-  "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs": process.argv.includes("--mode") ? "manual-update" : "auto-update",
-  "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs": "notify",
-  "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs": "discord"
+  "docker-register-services.mjs": "register",
+  "docker-registry-poll.mjs": "poll",
+  "docker-auto-update.mjs": process.argv.includes("--mode") ? "manual-update" : "auto-update",
+  "docker-notify-updates.mjs": "notify",
+  "docker-send-discord-newversion.mjs": "discord"
 };
-const step = stepByScript[script] || "unknown";
+const step = stepByScript[scriptName] || "unknown";
 if (process.env.MIRA_FAKE_UPDATER_FAIL_STEP === step) {
   if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
     process.stdout.write("not-json\n");
