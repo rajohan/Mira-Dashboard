@@ -49,8 +49,8 @@ describe("cacheStore utilities", () => {
             process.env.DATABASE_HOST = "db";
             process.env.DATABASE_PORT = "6543";
             assert.equal(
-                __testing.buildPostgresUri("cache"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/cache"
+                __testing.buildPostgresUri("cache/name?#"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/cache%2Fname%3F%23"
             );
         } finally {
             if (original.username === undefined) delete process.env.DATABASE_USERNAME;

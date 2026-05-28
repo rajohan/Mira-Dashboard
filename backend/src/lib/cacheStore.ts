@@ -68,9 +68,10 @@ function buildPostgresUri(database = "n8n") {
     const password = process.env.DATABASE_PASSWORD || "postgres";
     const encodedUsername = encodeURIComponent(username);
     const encodedPassword = encodeURIComponent(password);
+    const encodedDatabase = encodeURIComponent(database);
     const host = process.env.DATABASE_HOST || "postgres";
     const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${database}`;
+    return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${encodedDatabase}`;
 }
 
 export const __testing = {
