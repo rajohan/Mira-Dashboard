@@ -1190,6 +1190,14 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(invalid.status, 400);
         assert.equal(invalid.body.error, "Invalid service id");
 
+        const partialNumericRoute = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/updater/services/12oops/update",
+            { method: "POST", body: {} }
+        );
+        assert.equal(partialNumericRoute.status, 400);
+        assert.equal(partialNumericRoute.body.error, "Invalid service id");
+
         const missing = await requestJson<{ error: string }>(
             server,
             "/api/docker/updater/services/999/update",

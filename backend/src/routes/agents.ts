@@ -167,7 +167,7 @@ interface AgentTaskHistoryItem {
 /** Normalizes Gateway session data needed to map live sessions back to agents. */
 interface GatewaySessionSummary {
     key: string;
-    model: string;
+    model?: string;
     status?: string | null;
     updatedAt?: number | null;
     startedAt?: string | number | null;
@@ -254,7 +254,7 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                 )
                 .map((session) => ({
                     key: session.key as string,
-                    model: session.model || "Unknown",
+                    model: session.model,
                     status: session.status,
                     updatedAt: session.updatedAt,
                     startedAt: session.startedAt,

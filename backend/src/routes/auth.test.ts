@@ -65,10 +65,13 @@ function cleanupUser(username: string): void {
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
 }
 
-function cleanupAllAuthRows(): void {
-    db.prepare("DELETE FROM auth_sessions").run();
-    db.prepare("DELETE FROM users").run();
-    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+function cleanupBootstrapRows(username: string): void {
+    cleanupUser(username);
+    cleanupUser("bootstrap-dupe");
+    cleanupUser("bootstrap-fail");
+    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
+        "token"
+    );
 }
 
 describe("auth first-user bootstrap routes", () => {
@@ -77,15 +80,14 @@ describe("auth first-user bootstrap routes", () => {
     let server: TestServer;
 
     before(async () => {
-        cleanupAllAuthRows();
+        cleanupBootstrapRows(username);
         server = await startServer();
     });
 
     after(async () => {
         gatewayTesting.resetGatewayStateForTest();
         await server.close();
-        cleanupUser(username);
-        db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+        cleanupBootstrapRows(username);
     });
 
     it("validates and completes first-user registration", async () => {
@@ -168,7 +170,7 @@ describe("auth first-user bootstrap routes", () => {
     });
 
     it("maps first-user creation failures", async () => {
-        cleanupAllAuthRows();
+        cleanupBootstrapRows(username);
         const duplicateServer = await startServer({
             createUser: () => {
                 throw new Error("SQLITE_CONSTRAINT_UNIQUE");
@@ -204,6 +206,7 @@ describe("auth first-user bootstrap routes", () => {
         } finally {
             await duplicateServer.close();
             await failingServer.close();
+            cleanupBootstrapRows(username);
         }
     });
 });

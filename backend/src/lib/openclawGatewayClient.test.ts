@@ -658,6 +658,21 @@ describe("OpenClaw gateway client websocket protocol", () => {
         client.stop();
     });
 
+    it("rejects asynchronous send failures", async () => {
+        const { client, internals } = createProtocolClient();
+        internals.ws = {
+            readyState: WebSocket.OPEN,
+            send: (_data: string, callback?: (error?: Error) => void) => {
+                callback?.(new Error("async send failed"));
+            },
+            close: () => {},
+        };
+
+        await assert.rejects(client.request("send.failure"), /async send failed/u);
+        assert.equal(internals.pending.size, 0);
+        client.stop();
+    });
+
     it("reports missing connect challenge nonces", () => {
         const { errors, internals } = createProtocolClient();
         internals.ws = { readyState: WebSocket.CLOSED, send: () => {}, close: () => {} };

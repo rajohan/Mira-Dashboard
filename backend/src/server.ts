@@ -44,6 +44,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const app = express();
+const GLOBAL_JSON_LIMIT = "2097152b";
 
 /** Parses Express trust-proxy config from environment strings. */
 export function parseTrustProxy(value?: string): boolean | number | string {
@@ -64,7 +65,7 @@ export function parseTrustProxy(value?: string): boolean | number | string {
 }
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
-app.use(express.json());
+app.use(express.json({ limit: GLOBAL_JSON_LIMIT }));
 export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 

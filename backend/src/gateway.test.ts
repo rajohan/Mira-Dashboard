@@ -98,6 +98,7 @@ async function waitForAsyncHandlers(): Promise<void> {
 }
 
 const openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
+const previousOpenclawHome = process.env.OPENCLAW_HOME;
 process.env.OPENCLAW_HOME = openclawHome;
 
 const gatewayModule = await import("./gateway.js");
@@ -115,6 +116,11 @@ describe("gateway state and helper utilities", () => {
 
     after(async () => {
         __testing.resetGatewayStateForTest();
+        if (previousOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = previousOpenclawHome;
+        }
         await rm(openclawHome, { force: true, recursive: true });
     });
 

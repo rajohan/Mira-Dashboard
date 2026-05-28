@@ -135,7 +135,8 @@ function buildPostgresUri(database = "postgres") {
     const password = encodeURIComponent(process.env.DATABASE_PASSWORD ?? "postgres");
     const host = stringWithDefault(process.env.DATABASE_HOST, "postgres");
     const port = stringWithDefault(process.env.DATABASE_PORT, "5432");
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const db = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
 
 /** Builds a PgBouncer admin connection URI from environment defaults. */
@@ -144,7 +145,8 @@ function buildPgBouncerUri(database = "pgbouncer") {
     const password = encodeURIComponent(process.env.DATABASE_PASSWORD ?? "postgres");
     const host = stringWithDefault(process.env.PGBOUNCER_HOST, "pgbouncer");
     const port = stringWithDefault(process.env.PGBOUNCER_PORT, "5432");
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const db = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
 
 /** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */

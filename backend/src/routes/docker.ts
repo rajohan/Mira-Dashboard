@@ -1199,13 +1199,14 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerManualUpdateRequest;
-            const routeServiceId = Number.parseInt(
-                stringFallback(req.params.serviceId),
-                10
-            );
-            const serviceId = Number.isFinite(routeServiceId)
-                ? routeServiceId
-                : Number(payload.serviceId || 0);
+            const routeServiceIdParam = stringFallback(req.params.serviceId);
+            const routeServiceId = /^\d+$/u.test(routeServiceIdParam)
+                ? Number(routeServiceIdParam)
+                : Number.NaN;
+            const serviceId =
+                Number.isFinite(routeServiceId) && routeServiceId > 0
+                    ? routeServiceId
+                    : Number(payload.serviceId || 0);
 
             if (!Number.isFinite(serviceId) || serviceId <= 0) {
                 res.status(400).json({ error: "Invalid service id" });

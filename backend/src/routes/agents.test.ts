@@ -3014,7 +3014,7 @@ describe("agents routes", () => {
             assert.deepEqual(await __testing.getGatewaySessionsForAgents(), [
                 {
                     key: "agent:x:main",
-                    model: "Unknown",
+                    model: undefined,
                     status: undefined,
                     updatedAt: undefined,
                     startedAt: undefined,
