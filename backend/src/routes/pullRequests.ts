@@ -27,6 +27,13 @@ const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 
+function getResolvedRoots() {
+    return {
+        dashboardRoot: DASHBOARD_ROOT,
+        dashboardWorktreeRoot: DASHBOARD_WORKTREE_ROOT,
+    };
+}
+
 /** Represents command result. */
 interface CommandResult {
     stdout: string;
@@ -859,4 +866,5 @@ export const __testing = {
     validateMiraPr,
     shellQuote,
     trimOutput,
+    getResolvedRoots,
 };

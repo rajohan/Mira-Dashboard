@@ -326,6 +326,20 @@ describe("OpenClaw config routes", () => {
             );
 
             await withSkillEnvironment(packageRoot, homeDir, () => {
+                const originalPackageRootEnv = process.env.OPENCLAW_PACKAGE_ROOT;
+                try {
+                    process.env.OPENCLAW_PACKAGE_ROOT = packageRoot;
+                    __testing.setOpenClawPackageRootForTest(undefined);
+                    assert.equal(__testing.getOpenClawPackageRootForTest(), packageRoot);
+                } finally {
+                    if (originalPackageRootEnv === undefined) {
+                        delete process.env.OPENCLAW_PACKAGE_ROOT;
+                    } else {
+                        process.env.OPENCLAW_PACKAGE_ROOT = originalPackageRootEnv;
+                    }
+                    __testing.setOpenClawPackageRootForTest(packageRoot);
+                }
+
                 assert.deepEqual(
                     __testing
                         .collectExtraSkillDirectories()

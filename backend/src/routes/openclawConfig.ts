@@ -55,10 +55,14 @@ interface SkillInfo {
 
 const execFileAsync = promisify(execFile);
 
-let openClawPackageRoot = path.resolve(
-    process.env.OPENCLAW_PACKAGE_ROOT ||
-        path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
-);
+function getDefaultOpenClawPackageRoot(): string {
+    return path.resolve(
+        process.env.OPENCLAW_PACKAGE_ROOT ||
+            path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
+    );
+}
+
+let openClawPackageRoot = getDefaultOpenClawPackageRoot();
 
 let openClawBin =
     process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw");
@@ -294,7 +298,8 @@ export const __testing = {
             path.join(os.homedir(), ".npm-global/bin/openclaw");
     },
     getOpenClawPackageRootForTest: () => openClawPackageRoot,
-    setOpenClawPackageRootForTest: (packageRoot: string) => {
-        openClawPackageRoot = packageRoot;
+    setOpenClawPackageRootForTest: (packageRoot: string | undefined) => {
+        openClawPackageRoot =
+            packageRoot === undefined ? getDefaultOpenClawPackageRoot() : packageRoot;
     },
 };

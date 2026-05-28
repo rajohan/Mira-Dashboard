@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
@@ -14,10 +15,11 @@ import {
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const WORKSPACE_ROOT = nonEmptyEnvFallback(
-    "WORKSPACE_ROOT",
-    "/home/ubuntu/.openclaw/workspace"
-);
+function getDefaultWorkspaceRoot(): string {
+    return path.join(process.env.HOME || os.homedir(), ".openclaw/workspace");
+}
+
+const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 
 /** Represents file item. */
@@ -151,12 +153,14 @@ function listDirectory(dirPath: string): FileItem[] | null {
 }
 
 export const __testing = {
+    compareNames,
+    decodeRouteFilePath,
+    getDefaultWorkspaceRoot,
+    getImageMimeType,
     isBinaryFile,
     isImageFile,
-    getImageMimeType,
-    shouldHideFile,
-    compareNames,
     listDirectory,
+    shouldHideFile,
 };
 
 /** Registers files API routes. */

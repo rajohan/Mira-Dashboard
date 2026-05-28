@@ -39,7 +39,19 @@ async function startServer(workspaceRoot: string): Promise<TestServer> {
         filesRoutes(app, express);
         server = http.createServer(app);
 
-        await new Promise<void>((resolve) => server?.listen(0, resolve));
+        await new Promise<void>((resolve, reject) => {
+            const onListening = () => {
+                server?.off("error", onError);
+                resolve();
+            };
+            const onError = (error: Error) => {
+                server?.off("listening", onListening);
+                reject(error);
+            };
+            server?.once("listening", onListening);
+            server?.once("error", onError);
+            server?.listen(0);
+        });
         const address = server.address();
         assert.ok(address && typeof address === "object");
 
@@ -165,7 +177,7 @@ describe("files routes", () => {
         let blankServer: TestServer | undefined;
         try {
             process.env.WORKSPACE_ROOT = "";
-            const { default: filesRoutes } = await import(
+            const { __testing, default: filesRoutes } = await import(
                 `./files.js?blank=${crypto.randomUUID()}`
             );
             const app = express();
@@ -197,7 +209,7 @@ describe("files routes", () => {
                 "/api/files"
             );
             assert.equal(response.status, 200);
-            assert.equal(response.body.root, "/home/ubuntu/.openclaw/workspace");
+            assert.equal(response.body.root, __testing.getDefaultWorkspaceRoot());
         } finally {
             await blankServer?.close();
             if (originalWorkspaceRoot === undefined) {
@@ -225,6 +237,25 @@ describe("files routes", () => {
         assert.equal(__testing.compareNames("alpha", "beta"), -1);
         assert.equal(__testing.compareNames("beta", "alpha"), 1);
         assert.equal(__testing.compareNames("alpha", "alpha"), 0);
+        const originalHome = process.env.HOME;
+        try {
+            process.env.HOME = path.join(os.tmpdir(), "mira-home");
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(process.env.HOME, ".openclaw/workspace")
+            );
+            delete process.env.HOME;
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(os.homedir(), ".openclaw/workspace")
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+        }
         assert.equal(__testing.listDirectory("../../outside"), null);
         assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
         await mkdir(path.join(workspaceRoot, "sort"));

@@ -9,6 +9,7 @@ import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
 const N8N_DATABASE = "n8n";
+const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
 const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
@@ -46,7 +47,7 @@ function buildPostgresUri(database = N8N_DATABASE) {
 async function readLogRotationStatus() {
     const sql = `SELECT COALESCE(data->'lastRun', 'null'::jsonb)::text FROM cache_entries WHERE key = '${LOG_ROTATION_STATE_KEY}'`;
     const { stdout } = await execFileAsync(
-        "docker",
+        dockerBin,
         ["exec", "postgres", "psql", buildPostgresUri(), "-t", "-A", "-c", sql],
         {
             env: process.env,

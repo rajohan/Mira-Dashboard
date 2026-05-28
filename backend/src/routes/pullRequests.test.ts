@@ -777,6 +777,10 @@ describe("pull request routes", () => {
                 `./pullRequests.js?roots=${Date.now()}`
             );
             assert.equal(typeof moduleWithDefaultRoots.default, "function");
+            assert.deepEqual(moduleWithDefaultRoots.__testing.getResolvedRoots(), {
+                dashboardRoot: "/home/ubuntu/projects/mira-dashboard",
+                dashboardWorktreeRoot: "/home/ubuntu/projects/mira-dashboard-worktrees",
+            });
 
             delete process.env.MIRA_GITHUB_TOKEN;
             delete process.env.GH_TOKEN;

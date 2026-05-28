@@ -97,6 +97,9 @@ jobs:
               run: npm run test:coverage
               working-directory: backend
 
+            - name: Prefix backend LCOV paths
+              run: perl -0pi -e 's/^SF:src\\//SF:backend\\/src\\//mg' backend/coverage/lcov.info
+
             - name: Upload backend coverage artifact
               uses: actions/upload-artifact@v7
               if: always()

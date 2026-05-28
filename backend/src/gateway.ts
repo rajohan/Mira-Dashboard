@@ -824,7 +824,7 @@ function handleClient(ws: WebSocket): void {
             } catch (error) {
                 console.error(
                     "[Gateway] Client message error:",
-                    (error as Error).message
+                    errorMessage(error, String(error))
                 );
             }
         })();
