@@ -168,15 +168,15 @@ function buildCommandEnv(): NodeJS.ProcessEnv {
         process.env.GH_TOKEN ||
         ""
     ).trim();
-    return {
-        ...process.env,
-        ...(githubToken
-            ? {
-                  GH_TOKEN: githubToken,
-                  GITHUB_TOKEN: githubToken,
-              }
-            : {}),
-    };
+    const env = { ...process.env };
+    if (githubToken) {
+        env.GH_TOKEN = githubToken;
+        env.GITHUB_TOKEN = githubToken;
+    } else {
+        delete env.GH_TOKEN;
+        delete env.GITHUB_TOKEN;
+    }
+    return env;
 }
 
 /** Performs run command. */

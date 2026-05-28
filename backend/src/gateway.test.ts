@@ -396,6 +396,22 @@ describe("gateway state and helper utilities", () => {
                         ],
                     },
                 }),
+                JSON.stringify({
+                    timestamp: 1_700_000_000_002,
+                    message: {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image",
+                                data: "   ",
+                                source: {
+                                    data: "raw-source-fallback",
+                                    media_type: "image/gif",
+                                },
+                            },
+                        ],
+                    },
+                }),
                 "",
             ].join("\n"),
             "utf8"
@@ -433,7 +449,7 @@ describe("gateway state and helper utilities", () => {
             "agent:main:main",
             "session-1"
         );
-        assert.equal(rawMessages.length, 3);
+        assert.equal(rawMessages.length, 4);
         assert.equal(rawMessages[0]?.role, "unknown");
         assert.deepEqual(rawMessages[0]?.images[0], {
             type: "image",
@@ -445,6 +461,13 @@ describe("gateway state and helper utilities", () => {
                 (message) =>
                     message.images[0]?.data === "raw-default-mime" &&
                     message.images[0]?.mimeType === "image/jpeg"
+            )
+        );
+        assert.ok(
+            rawMessages.some(
+                (message) =>
+                    message.images[0]?.data === "raw-source-fallback" &&
+                    message.images[0]?.mimeType === "image/gif"
             )
         );
         const readFileSync = mock.method(fs, "readFileSync", () => {
