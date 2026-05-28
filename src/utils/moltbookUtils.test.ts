@@ -15,4 +15,8 @@ describe("moltbook utils", () => {
     it("formats relative time", () => {
         expect(formatTime(new Date().toISOString())).toEqual(expect.any(String));
     });
+
+    it("falls back for invalid timestamps", () => {
+        expect(formatTime("not-a-date")).toBe("Unknown");
+    });
 });
