@@ -39,6 +39,23 @@ async function requestJson<T>(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
     });
+    const contentType = response.headers.get("content-type") || "";
+
+    return {
+        status: response.status,
+        body: contentType.includes("application/json")
+            ? ((await response.json()) as T)
+            : ((await response.text()) as T),
+    };
+}
+
+async function requestWithoutJsonBody<T>(
+    server: TestServer,
+    pathName: string
+): Promise<{ status: number; body: T }> {
+    const response = await fetch(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+    });
 
     return {
         status: response.status,
@@ -209,13 +226,19 @@ describe("terminal routes", () => {
         assert.equal(emptyCwd.status, 400);
         assert.equal(emptyCwd.body.error, "Missing or invalid cwd");
 
-        const missingBody = await requestJson<{ error: string }>(
+        const missingBody = await requestWithoutJsonBody<{ error: string }>(
+            server,
+            "/api/terminal/complete"
+        );
+        assert.equal(missingBody.status, 400);
+        assert.equal(missingBody.body.error, "Missing or invalid body");
+
+        const primitiveBody = await requestJson<{ error: string }>(
             server,
             "/api/terminal/complete",
             null
         );
-        assert.equal(missingBody.status, 400);
-        assert.equal(missingBody.body.error, "Missing or invalid body");
+        assert.equal(primitiveBody.status, 400);
 
         const nullByte = await requestJson<{ error: string }>(
             server,

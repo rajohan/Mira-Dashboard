@@ -767,6 +767,23 @@ describe("gateway state and helper utilities", () => {
         assert.deepEqual(gateway.getSessions(), []);
     });
 
+    it("treats malformed session list payloads as empty", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.list", { sessions: { key: "agent:main:main" } });
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        await __testing.refreshSessions(client as never);
+
+        assert.deepEqual(gateway.getSessions(), []);
+    });
+
     it("handles log subscription request aliases", async () => {
         const ws = new FakeWebSocket();
         gateway.handleClient(ws as unknown as WebSocket);

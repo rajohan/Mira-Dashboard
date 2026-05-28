@@ -256,10 +256,13 @@ async function runGhJsonLines<T>(
         let settled = false;
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
-        const timeout = setTimeout(() => {
-            child.kill("SIGTERM");
+        const armForceKillTimer = () => {
             forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
             forceKillTimer.unref();
+        };
+        const timeout = setTimeout(() => {
+            child.kill("SIGTERM");
+            armForceKillTimer();
             preserveForceKillTimer = true;
             settle(() => reject(new Error("GitHub CLI command timed out")), {
                 keepForceKillTimer: true,
@@ -300,7 +303,10 @@ async function runGhJsonLines<T>(
             stdoutBuffer = lines.pop() || "";
             if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
-                settle(() => reject(new Error("GitHub CLI JSON line was too large")));
+                armForceKillTimer();
+                settle(() => reject(new Error("GitHub CLI JSON line was too large")), {
+                    keepForceKillTimer: true,
+                });
                 return;
             }
 
@@ -310,7 +316,10 @@ async function runGhJsonLines<T>(
                 }
             } catch (error) {
                 child.kill("SIGTERM");
-                settle(() => reject(toGhJsonParseError(error)));
+                armForceKillTimer();
+                settle(() => reject(toGhJsonParseError(error)), {
+                    keepForceKillTimer: true,
+                });
             }
         });
 

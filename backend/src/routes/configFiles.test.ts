@@ -37,7 +37,9 @@ async function startServer(homeDir?: string): Promise<TestServer> {
     };
 
     try {
-        const { default: configFilesRoutes } = await import("./configFiles.js");
+        const { default: configFilesRoutes } = await import(
+            `./configFiles.js?test=${Date.now()}-${Math.random()}`
+        );
         const app = express();
         app.use(express.json({ limit: "3mb" }));
         configFilesRoutes(app, express);

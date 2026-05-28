@@ -376,14 +376,17 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     }
 
     const openClawRoot = Path.resolve(OPENCLAW_HOME);
-    const agentsSessionsRoot = Path.resolve(openClawRoot, "agents", agentId, "sessions");
+    const agentDir = Path.resolve(openClawRoot, "agents", agentId);
+    const agentsSessionsRoot = Path.resolve(agentDir, "sessions");
     const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
     let realOpenClawRoot: string;
+    let realAgentDir: string;
     let realAgentsSessionsRoot: string;
     let realTranscriptPath: string;
     try {
         realOpenClawRoot = fs.realpathSync(openClawRoot);
-        realAgentsSessionsRoot = fs.realpathSync(agentsSessionsRoot);
+        realAgentDir = fs.realpathSync(agentDir);
+        realAgentsSessionsRoot = fs.realpathSync(Path.resolve(realAgentDir, "sessions"));
         realTranscriptPath = fs.realpathSync(transcriptPath);
     } catch {
         return null;
@@ -580,7 +583,8 @@ async function refreshSessions(
     if (!isGatewayConnected || !isCurrentGatewayClient(expectedClient)) {
         return;
     }
-    sessionList = (payload.sessions || []).map(transformSession);
+    const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    sessionList = sessions.map(transformSession);
     broadcast({ type: "sessions", sessions: sessionList });
 }
 

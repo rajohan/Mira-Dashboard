@@ -135,7 +135,7 @@ describe("media routes", () => {
             assert.equal(typeof module.default, "function");
             assert.equal(
                 module.__testing.mediaRoot,
-                path.join(os.homedir(), ".openclaw", "media")
+                path.join("/home/ubuntu/.openclaw", "media")
             );
         } finally {
             if (originalOpenClawHome === undefined) {
