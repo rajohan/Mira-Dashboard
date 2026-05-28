@@ -217,7 +217,22 @@ export default function configFilesRoutes(
 
                 try {
                     const realOpenclawRoot = fs.realpathSync(openclawRoot);
-                    const realOpenedPath = fs.realpathSync(`/proc/self/fd/${fd}`);
+                    let realOpenedPath = fullPath;
+                    if (process.platform === "linux") {
+                        realOpenedPath = fs.realpathSync(`/proc/self/fd/${fd}`);
+                    } else {
+                        const openedStat = fs.fstatSync(fd);
+                        const targetStat = fs.statSync(fullPath);
+                        if (
+                            openedStat.dev !== targetStat.dev ||
+                            openedStat.ino !== targetStat.ino
+                        ) {
+                            res.status(403).json({
+                                error: "Access denied: path outside allowed root",
+                            });
+                            return;
+                        }
+                    }
                     if (
                         realOpenedPath !== realOpenclawRoot &&
                         !realOpenedPath.startsWith(realOpenclawRoot + path.sep)

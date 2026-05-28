@@ -515,6 +515,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.trimOutput("x".repeat(120_000)).length, 100_000);
         assert.equal(__testing.resolveManualUpdateServiceId("12", { serviceId: 3 }), 12);
         assert.equal(__testing.resolveManualUpdateServiceId("", { serviceId: 3 }), 3);
+        assert.equal(__testing.resolveManualUpdateServiceId("0", { serviceId: 3 }), null);
         assert.equal(
             __testing.resolveManualUpdateServiceId("bad", { serviceId: 3 }),
             null

@@ -1123,16 +1123,17 @@ function resolveManualUpdateServiceId(
     routeServiceIdParam: string,
     payload: DockerManualUpdateRequest
 ): number | null {
-    if (routeServiceIdParam && !/^\d+$/u.test(routeServiceIdParam)) {
-        return null;
+    if (routeServiceIdParam) {
+        if (!/^\d+$/u.test(routeServiceIdParam)) {
+            return null;
+        }
+        const routeServiceId = Number(routeServiceIdParam);
+        return Number.isFinite(routeServiceId) && routeServiceId > 0
+            ? routeServiceId
+            : null;
     }
 
-    const routeServiceId = routeServiceIdParam ? Number(routeServiceIdParam) : Number.NaN;
-    const serviceId =
-        Number.isFinite(routeServiceId) && routeServiceId > 0
-            ? routeServiceId
-            : Number(payload.serviceId || 0);
-
+    const serviceId = Number(payload.serviceId || 0);
     return Number.isFinite(serviceId) && serviceId > 0 ? serviceId : null;
 }
 

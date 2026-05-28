@@ -229,7 +229,7 @@ describe("quota notifications", () => {
             try {
                 startQuotaNotificationMonitor(1);
                 startQuotaNotificationMonitor(60_000);
-                assert.deepEqual(scheduled, [15 * 60 * 1000, 60_000]);
+                assert.deepEqual(scheduled, [15 * 60 * 1000]);
                 await new Promise((resolve) => setTimeout(resolve, 100));
             } finally {
                 stopQuotaNotificationMonitor();

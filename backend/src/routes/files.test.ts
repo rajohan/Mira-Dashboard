@@ -239,7 +239,7 @@ describe("files routes", () => {
         assert.equal(__testing.compareNames("alpha", "alpha"), 0);
         assert.equal(
             __testing.getDefaultWorkspaceRoot(),
-            "/home/ubuntu/.openclaw/workspace"
+            path.join(os.homedir(), ".openclaw", "workspace")
         );
         assert.equal(__testing.listDirectory("../../outside"), null);
         assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
@@ -420,6 +420,45 @@ describe("files routes", () => {
 
         const nonUriError = await fetch(`${server.baseUrl}/api/files/boom`);
         assert.equal(nonUriError.status, 500);
+    });
+
+    it("uses stat identity checks for opened files on non-Linux platforms", async () => {
+        const originalPlatform = process.platform;
+        const originalStatSync = fs.statSync;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+
+            const response = await requestJson<{ content: string }>(
+                server,
+                "/api/files/src%2Fapp.ts"
+            );
+            assert.equal(response.status, 200);
+            assert.equal(response.body.content, "export const ok = true;\n");
+
+            fs.statSync = ((target: fs.PathLike) => {
+                const stat = originalStatSync(target);
+                if (target === path.join(workspaceRoot, "src", "app.ts")) {
+                    return { ...stat, ino: stat.ino + 1 } as fs.Stats;
+                }
+                return stat;
+            }) as typeof fs.statSync;
+
+            const mismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/files/src%2Fapp.ts"
+            );
+            assert.equal(mismatch.status, 403);
+            assert.equal(mismatch.body.error, "Access denied: path outside workspace");
+        } finally {
+            fs.statSync = originalStatSync;
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: originalPlatform,
+            });
+        }
     });
 
     it("writes files, creates parents, and backs up overwritten content", async () => {

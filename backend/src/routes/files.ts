@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
@@ -15,7 +16,7 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
-    return "/home/ubuntu/.openclaw/workspace";
+    return path.join(os.homedir(), ".openclaw", "workspace");
 }
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
@@ -220,7 +221,23 @@ export default function filesRoutes(
                 let fullPath: string;
                 try {
                     file = await openReadNoFollowGuarded(guardedPath(candidatePath));
-                    fullPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
+                    if (process.platform === "linux") {
+                        fullPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
+                    } else {
+                        const openedStat = await file.stat();
+                        const targetStat = fs.statSync(candidatePath);
+                        if (
+                            openedStat.dev !== targetStat.dev ||
+                            openedStat.ino !== targetStat.ino
+                        ) {
+                            res.status(403).json({
+                                error: "Access denied: path outside workspace",
+                            });
+                            await file.close();
+                            return;
+                        }
+                        fullPath = candidatePath;
+                    }
                 } catch (error) {
                     if (file) {
                         await file.close();

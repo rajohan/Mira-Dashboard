@@ -486,11 +486,15 @@ describe("gateway state and helper utilities", () => {
             messages: [],
         });
         assert.equal(__testing.getTranscriptPath("agent:main:unknown"), null);
+        assert.equal(
+            __testing.getTranscriptPath("channel:discord:main", "session-1"),
+            null
+        );
         const dottedAgentDir = path.join(openclawHome, "agents", "my.agent", "sessions");
         await mkdir(dottedAgentDir, { recursive: true });
         await writeFile(path.join(dottedAgentDir, "session-1.jsonl"), "", "utf8");
         assert.match(
-            __testing.getTranscriptPath(":", "session-1") || "",
+            __testing.getTranscriptPath("agent:", "session-1") || "",
             /agents\/main\/sessions\/session-1\.jsonl$/u
         );
         assert.match(

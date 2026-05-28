@@ -241,6 +241,10 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 
 /** Performs start quota notification monitor. */
 export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
+    if (quotaMonitorIntervals.size > 0) {
+        return;
+    }
+
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000
             ? intervalMs

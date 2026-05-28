@@ -326,6 +326,45 @@ describe("config files routes", () => {
         }
     });
 
+    it("uses stat identity checks for opened config files on non-Linux platforms", async () => {
+        const originalPlatform = process.platform;
+        const originalStatSync = fs.statSync;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+
+            const response = await requestJson<{ content: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(response.status, 200);
+            assert.equal(response.body.content, '{"model":"codex"}\n');
+
+            fs.statSync = ((target: fs.PathLike) => {
+                const stat = originalStatSync(target);
+                if (target === path.join(openclawRoot, "openclaw.json")) {
+                    return { ...stat, ino: stat.ino + 1 } as fs.Stats;
+                }
+                return stat;
+            }) as typeof fs.statSync;
+
+            const mismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(mismatch.status, 403);
+            assert.equal(mismatch.body.error, "Access denied: path outside allowed root");
+        } finally {
+            fs.statSync = originalStatSync;
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: originalPlatform,
+            });
+        }
+    });
+
     it("returns 400 for malformed encoded config paths", async () => {
         const read = await requestJson<{ error: string }>(
             server,

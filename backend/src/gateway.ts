@@ -351,6 +351,11 @@ function resolvePathInsideRoot(root: string, candidate: string): string | null {
 
 /** Returns transcript path. */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
+    const parts = sessionKey.split(":");
+    if (parts[0] !== "agent") {
+        return null;
+    }
+
     if (!sessionId) {
         const session = sessionList.find((entry) => entry.key === sessionKey);
         sessionId = session?.id;
@@ -359,7 +364,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         return null;
     }
 
-    const agentId = sessionKey.split(":")[1] || "main";
+    const agentId = parts[1] || "main";
     const safeAgentPathSegment = /^[A-Za-z0-9._-]+$/u;
     const safeSessionPathSegment = /^[A-Za-z0-9:._-]+$/u;
     if (!safeAgentPathSegment.test(agentId) || !safeSessionPathSegment.test(sessionId)) {
