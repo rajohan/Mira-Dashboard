@@ -85,7 +85,14 @@ describe("settings routes", () => {
             __testing.resolveSettingsDir("/tmp/settings-home"),
             path.join("/tmp/settings-home", ".openclaw")
         );
-        assert.equal(__testing.resolveSettingsDir(""), path.resolve(".openclaw"));
+        assert.equal(
+            __testing.resolveSettingsDir(""),
+            path.join(os.homedir(), ".openclaw")
+        );
+        assert.equal(
+            __testing.resolveSettingsDir("   "),
+            path.join(os.homedir(), ".openclaw")
+        );
         assert.equal(
             __testing.resolveSettingsDir(),
             path.join(os.homedir(), ".openclaw")

@@ -620,7 +620,7 @@ function init(token: string): void {
         void refreshSessions(thisGatewayClient).catch((error) => {
             console.error(
                 "[Gateway] Failed to refresh sessions:",
-                (error as Error).message
+                errorMessage(error, String(error))
             );
         });
     }
@@ -638,7 +638,7 @@ function init(token: string): void {
             void refreshSessions(thisGatewayClient).catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
-                    (error as Error).message
+                    errorMessage(error, String(error))
                 );
             });
         }

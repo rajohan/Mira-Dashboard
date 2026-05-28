@@ -149,13 +149,15 @@ describe("moltbook routes", () => {
         ] as const;
 
         for (const [failure, route, expectedError] of cases) {
-            process.env.MIRA_TEST_MOLTBOOK_FAIL = failure;
-            const response = await fetch(`${server.baseUrl}${route}`);
-            const body = (await response.json()) as { error: string };
-            assert.equal(response.status, 503);
-            assert.match(body.error, new RegExp(expectedError, "u"));
+            try {
+                process.env.MIRA_TEST_MOLTBOOK_FAIL = failure;
+                const response = await fetch(`${server.baseUrl}${route}`);
+                const body = (await response.json()) as { error: string };
+                assert.equal(response.status, 503);
+                assert.match(body.error, new RegExp(expectedError, "u"));
+            } finally {
+                delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
+            }
         }
-
-        delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
     });
 });
