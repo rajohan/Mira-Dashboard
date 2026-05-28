@@ -158,7 +158,13 @@ function setCacheRefreshCwdForTests(cwd: string | undefined): void {
     cacheRefreshCwd = cwd ?? N8N_ROOT;
 }
 
+function resetCacheRefreshForTests(): void {
+    cacheRefreshCommandOverrides.clear();
+    cacheRefreshCwd = N8N_ROOT;
+}
+
 export const __testing = {
+    resetCacheRefreshForTests,
     setCacheRefreshCommandForTests,
     setCacheRefreshCwdForTests,
 };

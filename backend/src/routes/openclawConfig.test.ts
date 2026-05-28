@@ -632,6 +632,8 @@ throw new Error("restart failed");
             await rm(tempDir, { recursive: true, force: true });
         }
         try {
+            __testing.setOpenClawBinForTest("");
+            assert.equal(__testing.getOpenClawBinForTest(), "");
             __testing.setOpenClawBinForTest(undefined);
             assert.equal(
                 __testing.getOpenClawBinForTest(),

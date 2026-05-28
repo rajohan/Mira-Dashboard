@@ -131,8 +131,12 @@ async function runDockerExec(container: string, command: string) {
 
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
-    const username = encodeURIComponent(process.env.DATABASE_USERNAME ?? "postgres");
-    const password = encodeURIComponent(process.env.DATABASE_PASSWORD ?? "postgres");
+    const username = encodeURIComponent(
+        stringWithDefault(process.env.DATABASE_USERNAME, "postgres")
+    );
+    const password = encodeURIComponent(
+        stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
+    );
     const host = stringWithDefault(process.env.DATABASE_HOST, "postgres");
     const port = stringWithDefault(process.env.DATABASE_PORT, "5432");
     const db = encodeURIComponent(database);
@@ -141,8 +145,12 @@ function buildPostgresUri(database = "postgres") {
 
 /** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
-    const username = encodeURIComponent(process.env.DATABASE_USERNAME ?? "postgres");
-    const password = encodeURIComponent(process.env.DATABASE_PASSWORD ?? "postgres");
+    const username = encodeURIComponent(
+        stringWithDefault(process.env.DATABASE_USERNAME, "postgres")
+    );
+    const password = encodeURIComponent(
+        stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
+    );
     const host = stringWithDefault(process.env.PGBOUNCER_HOST, "pgbouncer");
     const port = stringWithDefault(process.env.PGBOUNCER_PORT, "5432");
     const db = encodeURIComponent(database);

@@ -254,7 +254,7 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                 )
                 .map((session) => ({
                     key: session.key as string,
-                    model: session.model,
+                    model: session.model?.trim() || undefined,
                     status: session.status,
                     updatedAt: session.updatedAt,
                     startedAt: session.startedAt,

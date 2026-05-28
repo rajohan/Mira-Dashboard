@@ -220,6 +220,12 @@ function parseGhJsonLine<T>(line: string, rows: T[]): void {
     rows.push(JSON.parse(line) as T);
 }
 
+function toGhJsonParseError(error: unknown): Error {
+    return error instanceof Error
+        ? error
+        : new Error(errorMessage(error, "Failed to parse GitHub CLI output"));
+}
+
 function clearForceKillTimerIfAllowed(
     forceKillTimer: NodeJS.Timeout | null,
     options: { keepForceKillTimer?: boolean },
@@ -304,15 +310,7 @@ async function runGhJsonLines<T>(
                 }
             } catch (error) {
                 child.kill("SIGTERM");
-                settle(() =>
-                    reject(
-                        error instanceof Error
-                            ? error
-                            : new Error(
-                                  errorMessage(error, "Failed to parse GitHub CLI output")
-                              )
-                    )
-                );
+                settle(() => reject(toGhJsonParseError(error)));
             }
         });
 
@@ -858,14 +856,15 @@ export default function pullRequestsRoutes(app: express.Application): void {
 
 export const __testing = {
     buildCommandEnv,
+    clearForceKillTimerIfAllowed,
+    parseGhJsonLine,
+    parseRepoParts,
+    isPathInsideRoot,
+    parseGitWorktrees,
     runCommand,
     runGhJson,
-    parseGhJsonLine,
-    clearForceKillTimerIfAllowed,
-    parseRepoParts,
     runGhJsonLines,
-    parseGitWorktrees,
-    isPathInsideRoot,
+    toGhJsonParseError,
     validatePrNumber,
     validateMiraPr,
     shellQuote,

@@ -23,6 +23,9 @@ export function handleServerListening(): void {
 
 /** Binds the HTTP server and starts runtime-only background services. */
 export function startBackendServer(port = resolveListenPort()): void {
+    if (server.listening || server.address() !== null) {
+        return;
+    }
     server.listen(port, handleServerListening);
 }
 

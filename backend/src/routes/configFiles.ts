@@ -63,7 +63,9 @@ function isBinaryFile(content: string): boolean {
 function resolveOpenclawRoot(): string | null {
     const envHome = process.env.HOME?.trim();
     const homeDir =
-        envHome && envHome !== path.parse(envHome).root ? envHome : os.homedir().trim();
+        envHome && path.isAbsolute(envHome) && envHome !== path.parse(envHome).root
+            ? envHome
+            : os.homedir().trim();
     if (!homeDir || homeDir === path.parse(homeDir).root) {
         return null;
     }
@@ -376,3 +378,7 @@ export default function configFilesRoutes(
         )
     );
 }
+
+export const __testing = {
+    resolveOpenclawRoot,
+};

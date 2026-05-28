@@ -730,19 +730,24 @@ describe("pull request routes", () => {
                 SyntaxError
             );
 
-            const originalJsonParse = JSON.parse;
-            JSON.parse = () => {
-                throw "non-error parse failure";
-            };
-            try {
-                process.env.FAKE_GH_JSON_LINES = "partial";
-                await assert.rejects(
-                    () => __testing.runGhJsonLines(["api", "graphql"]),
-                    /Failed to parse GitHub CLI output/u
-                );
-            } finally {
-                JSON.parse = originalJsonParse;
-            }
+            assert.throws(
+                () =>
+                    __testing.parseGhJsonLine(
+                        {
+                            trim: () => "partial",
+                            length: 7,
+                            toString: () => {
+                                throw "non-error parse failure";
+                            },
+                        } as unknown as string,
+                        []
+                    ),
+                (error) => error === "non-error parse failure"
+            );
+            assert.match(
+                __testing.toGhJsonParseError("non-error parse failure").message,
+                /Failed to parse GitHub CLI output/u
+            );
 
             process.env.FAKE_GH_JSON_LINES = "timeout";
             const timeoutReadyFile = path.join(tempDir, "gh-timeout-ready");

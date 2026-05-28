@@ -293,9 +293,10 @@ export const __testing = {
     getOpenClawBinForTest: () => openClawBin,
     setOpenClawBinForTest: (binPath: string | undefined) => {
         openClawBin =
-            binPath ||
-            process.env.OPENCLAW_BIN ||
-            path.join(os.homedir(), ".npm-global/bin/openclaw");
+            binPath === undefined
+                ? process.env.OPENCLAW_BIN ||
+                  path.join(os.homedir(), ".npm-global/bin/openclaw")
+                : binPath;
     },
     getOpenClawPackageRootForTest: () => openClawPackageRoot,
     setOpenClawPackageRootForTest: (packageRoot: string | undefined) => {

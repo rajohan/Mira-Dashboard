@@ -172,6 +172,7 @@ describe("logs routes", () => {
         await rm(path.join(logsDir, todayFile), { force: true });
 
         try {
+            const frozenNow = new RealDate("2099-12-31T12:00:00.000Z").getTime();
             globalThis.Date = class extends RealDate {
                 constructor(...args: unknown[]) {
                     if (args.length === 0) {
@@ -179,6 +180,10 @@ describe("logs routes", () => {
                         return;
                     }
                     super(...(args as [string | number | Date]));
+                }
+
+                static now() {
+                    return frozenNow;
                 }
             } as DateConstructor;
 

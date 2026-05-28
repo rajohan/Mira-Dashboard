@@ -160,6 +160,18 @@ describe("terminal routes", () => {
             [`${tempDir}/nested/install.sh`, `${tempDir}/nested/inside.txt`]
         );
 
+        const trimmedCwdCompletion = await requestJson<{
+            completions: Array<{ completion: string }>;
+        }>(server, "/api/terminal/complete", {
+            partial: "nested/i",
+            cwd: ` ${tempDir} `,
+        });
+        assert.equal(trimmedCwdCompletion.status, 200);
+        assert.deepEqual(
+            trimmedCwdCompletion.body.completions.map((item) => item.completion),
+            ["nested/install.sh", "nested/inside.txt"]
+        );
+
         const missingDir = await requestJson<{
             completions: unknown[];
             commonPrefix: string;

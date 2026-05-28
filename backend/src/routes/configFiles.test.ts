@@ -229,6 +229,22 @@ describe("config files routes", () => {
     });
 
     it("returns an empty list when the OpenClaw root does not exist", async () => {
+        const { __testing } = await import("./configFiles.js");
+        const originalHome = process.env.HOME;
+        try {
+            process.env.HOME = "relative-home";
+            assert.equal(
+                __testing.resolveOpenclawRoot(),
+                path.join(os.homedir(), ".openclaw")
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+        }
+
         const emptyHomeDir = await mkdtemp(path.join(os.tmpdir(), "mira-empty-home-"));
         const emptyServer = await startServer(emptyHomeDir);
         try {

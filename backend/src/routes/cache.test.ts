@@ -99,8 +99,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
     after(async () => {
         await server.close();
-        __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
         __testing.setCacheRefreshCwdForTests(undefined);
+        __testing.resetCacheRefreshForTests();
         setCacheStoreDockerBinForTests(undefined);
         await rm(tempDir, { recursive: true, force: true });
     });

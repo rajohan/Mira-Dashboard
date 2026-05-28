@@ -171,11 +171,12 @@ export default function terminalRoutes(app: express.Application): void {
                 res.status(400).json({ error: "Missing or invalid partial" });
                 return;
             }
-            if (cwd !== undefined && (typeof cwd !== "string" || cwd.trim() === "")) {
+            const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
+            if (cwd !== undefined && !trimmedCwd) {
                 res.status(400).json({ error: "Missing or invalid cwd" });
                 return;
             }
-            const resolvedCwd = typeof cwd === "string" ? cwd : HOME_DIR;
+            const resolvedCwd = trimmedCwd || HOME_DIR;
             const result = await getCompletions(partial, resolvedCwd);
             res.json(result);
         }

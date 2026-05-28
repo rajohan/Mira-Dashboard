@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
@@ -65,12 +65,16 @@ function cleanupNotifications(source: string): void {
 }
 
 describe("notifications routes", () => {
-    const source = `backend-notifications-${Date.now()}`;
+    let source: string;
     let server: TestServer;
 
     before(async () => {
-        cleanupNotifications(source);
         server = await startServer();
+    });
+
+    beforeEach(() => {
+        source = `backend-notifications-${Date.now()}-${Math.random()}`;
+        cleanupNotifications(source);
     });
 
     after(async () => {

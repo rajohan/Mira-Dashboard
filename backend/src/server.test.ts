@@ -498,6 +498,11 @@ describe("server bootstrap", () => {
     it("starts runtime services from the entrypoint helpers", async () => {
         const originalInit = gateway.init;
         const originalListen = server.listen;
+        const originalAddress = server.address;
+        const originalListeningDescriptor = Object.getOwnPropertyDescriptor(
+            server,
+            "listening"
+        );
         const originalToken = process.env.OPENCLAW_TOKEN;
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
@@ -525,9 +530,26 @@ describe("server bootstrap", () => {
                 listener?.();
                 return server;
             }) as typeof server.listen;
+            server.address = (() => null) as typeof server.address;
+            Object.defineProperty(server, "listening", {
+                configurable: true,
+                value: false,
+            });
 
             startBackendServer(41_001);
             assert.equal(listenedPort, 41_001);
+            try {
+                server.address = (() => ({
+                    address: "127.0.0.1",
+                    family: "IPv4",
+                    port: 41_001,
+                })) as typeof server.address;
+                listenedPort = undefined;
+                startBackendServer(41_002);
+                assert.equal(listenedPort, undefined);
+            } finally {
+                server.address = originalAddress;
+            }
             assert.equal(
                 isDirectEntrypoint("/tmp/serverStart.js", "file:///tmp/serverStart.js"),
                 true
@@ -548,6 +570,7 @@ describe("server bootstrap", () => {
             process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
             assert.equal(shouldStartOnImport(), true);
             listenedPort = undefined;
+            server.address = (() => null) as typeof server.address;
             await import(`./serverStart.js?entry=${Date.now()}`);
             assert.equal(listenedPort, 0);
         } finally {
@@ -563,6 +586,12 @@ describe("server bootstrap", () => {
             }
             gateway.init = originalInit;
             server.listen = originalListen;
+            server.address = originalAddress;
+            if (originalListeningDescriptor) {
+                Object.defineProperty(server, "listening", originalListeningDescriptor);
+            } else {
+                delete (server as { listening?: boolean }).listening;
+            }
             console.warn = originalConsoleWarn;
         }
     });
@@ -588,8 +617,9 @@ describe("server bootstrap", () => {
             await delay(300);
             assert.equal(child.exitCode, null);
         } finally {
+            const exitPromise = new Promise((resolve) => child.once("exit", resolve));
             child.kill("SIGTERM");
-            await new Promise((resolve) => child.once("exit", resolve));
+            await exitPromise;
         }
     });
 });

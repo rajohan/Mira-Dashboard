@@ -18,10 +18,9 @@ interface Settings {
 }
 
 /** Resolves dashboard settings directory from a home directory value. */
-function resolveSettingsDir(home = process.env.HOME || os.homedir()): string {
-    const trimmedHome = home.trim();
-    const finalHome = trimmedHome || os.homedir().trim();
-    return path.resolve(path.join(finalHome, ".openclaw"));
+function resolveSettingsDir(home = process.env.HOME): string {
+    const normalizedHome = (home && home.trim()) || os.homedir();
+    return path.resolve(path.join(normalizedHome, ".openclaw"));
 }
 
 const SETTINGS_DIR = resolveSettingsDir();

@@ -3009,7 +3009,7 @@ describe("agents routes", () => {
                 },
             ];
             gateway.request = async () => ({
-                sessions: [{ key: "" }, { key: "agent:x:main" }],
+                sessions: [{ key: "" }, { key: "agent:x:main", model: "   " }],
             });
             assert.deepEqual(await __testing.getGatewaySessionsForAgents(), [
                 {
