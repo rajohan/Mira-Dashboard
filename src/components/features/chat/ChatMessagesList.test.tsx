@@ -324,12 +324,14 @@ describe("ChatMessagesList", () => {
             })
         );
 
-        await user.click(screen.getAllByRole("button", { name: "Chat attachment" })[0]!);
+        await user.click(
+            screen.getByRole("button", { name: "Open chat image 1 preview" })
+        );
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "image", title: "Chat image" })
         );
 
-        await user.click(screen.getByRole("button", { name: "inline.png" }));
+        await user.click(screen.getByRole("button", { name: "Open inline.png preview" }));
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "image", title: "inline.png" })
         );
