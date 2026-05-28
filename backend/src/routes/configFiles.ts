@@ -61,7 +61,9 @@ function isBinaryFile(content: string): boolean {
 
 /** Resolves the OpenClaw root without falling back to a root-level path. */
 function resolveOpenclawRoot(): string | null {
-    const homeDir = process.env.HOME || os.homedir();
+    const envHome = process.env.HOME?.trim();
+    const homeDir =
+        envHome && envHome !== path.parse(envHome).root ? envHome : os.homedir().trim();
     if (!homeDir || homeDir === path.parse(homeDir).root) {
         return null;
     }

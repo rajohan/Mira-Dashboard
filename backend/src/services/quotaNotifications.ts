@@ -12,6 +12,7 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
+const quotaMonitorIntervals = new Set<NodeJS.Timeout>();
 
 /** Formats the Synthetic.new weekly remaining quota. */
 function formatSyntheticWeeklyRemaining(
@@ -246,9 +247,19 @@ export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS):
             : DEFAULT_INTERVAL_MS;
 
     void runQuotaNotificationCheck();
-    setInterval(() => {
+    const monitor = setInterval(() => {
         void runQuotaNotificationCheck();
-    }, safeInterval).unref();
+    }, safeInterval);
+    quotaMonitorIntervals.add(monitor);
+    monitor.unref();
+}
+
+/** Stops quota notification monitors. */
+export function stopQuotaNotificationMonitor(): void {
+    for (const monitor of quotaMonitorIntervals) {
+        clearInterval(monitor);
+    }
+    quotaMonitorIntervals.clear();
 }
 
 export const __testing = {

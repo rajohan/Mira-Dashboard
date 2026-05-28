@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import express from "express";
@@ -569,7 +569,6 @@ describe("exec routes", () => {
 
             assert.equal(stop.status, 200);
             assert.equal(fallbackKilled, true);
-            fakeProcess.killed = true;
         } finally {
             process.kill = originalKill;
             __testing.jobs.delete(jobId);
@@ -610,6 +609,7 @@ describe("exec routes", () => {
         }) as typeof process.kill;
 
         try {
+            mock.timers.enable({ apis: ["setTimeout"] });
             const stop = await requestJson<{ success: true; message: string }>(
                 server,
                 `/api/exec/${jobId}/stop`,
@@ -617,9 +617,10 @@ describe("exec routes", () => {
             );
 
             assert.equal(stop.status, 200);
-            await delay(3_050);
+            mock.timers.tick(3_050);
             assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
         } finally {
+            mock.timers.reset();
             process.kill = originalKill;
             __testing.jobs.delete(jobId);
         }

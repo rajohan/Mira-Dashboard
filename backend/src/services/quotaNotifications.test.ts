@@ -57,13 +57,17 @@ describe("quota notifications", () => {
     let tempDir: string;
     let runQuotaNotificationCheck: () => Promise<void>;
     let startQuotaNotificationMonitor: (intervalMs?: number) => void;
+    let stopQuotaNotificationMonitor: () => void;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-quota-notifications-"));
         await installFakeDocker(tempDir);
-        ({ runQuotaNotificationCheck, startQuotaNotificationMonitor } =
-            await import("./quotaNotifications.js"));
+        ({
+            runQuotaNotificationCheck,
+            startQuotaNotificationMonitor,
+            stopQuotaNotificationMonitor,
+        } = await import("./quotaNotifications.js"));
         ({ __testing: quotaTesting } = await import("./quotaNotifications.js"));
     });
 
@@ -228,6 +232,7 @@ describe("quota notifications", () => {
                 assert.deepEqual(scheduled, [15 * 60 * 1000, 60_000]);
                 await new Promise((resolve) => setTimeout(resolve, 100));
             } finally {
+                stopQuotaNotificationMonitor();
                 globalThis.setInterval = originalSetInterval;
             }
         } finally {

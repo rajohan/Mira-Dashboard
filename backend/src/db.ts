@@ -195,8 +195,12 @@ export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
         }
     }
 
-    if (taskAutomationColumnExists(targetDb)) {
-        return;
+    try {
+        if (taskAutomationColumnExists(targetDb)) {
+            return;
+        }
+    } catch {
+        // Preserve the migration error that triggered the retry loop.
     }
 
     throw lastError;

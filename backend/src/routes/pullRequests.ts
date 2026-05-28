@@ -163,7 +163,11 @@ function parseRepoParts(repo: string): { owner: string; name: string } {
 
 /** Builds command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
-    const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN || "";
+    const githubToken = (
+        process.env.MIRA_GITHUB_TOKEN ||
+        process.env.GH_TOKEN ||
+        ""
+    ).trim();
     return {
         ...process.env,
         ...(githubToken

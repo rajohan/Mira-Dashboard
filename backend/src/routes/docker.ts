@@ -1101,6 +1101,7 @@ function completeDockerExecJob(jobId: string, result: DockerExecResult): void {
     current.stdout = result.stdout;
     current.stderr = result.stderr;
     current.endedAt = Date.now();
+    current.process = undefined;
     cleanupDockerExecJobs();
 }
 
@@ -1114,6 +1115,7 @@ function failDockerExecJob(jobId: string, error: unknown): void {
     current.code = 1;
     current.stderr = trimOutput(`${current.stderr}\n${errMsg}`.trim());
     current.endedAt = Date.now();
+    current.process = undefined;
     cleanupDockerExecJobs();
 }
 

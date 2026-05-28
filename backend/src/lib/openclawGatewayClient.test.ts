@@ -494,9 +494,19 @@ describe("OpenClaw gateway client websocket protocol", () => {
         }
 
         const refusedServer = net.createServer();
-        await new Promise<void>((resolve) =>
-            refusedServer.listen(0, "127.0.0.1", resolve)
-        );
+        await new Promise<void>((resolve, reject) => {
+            const onError = (error: Error) => {
+                refusedServer.off("listening", onListening);
+                reject(error);
+            };
+            const onListening = () => {
+                refusedServer.off("error", onError);
+                resolve();
+            };
+            refusedServer.once("error", onError);
+            refusedServer.once("listening", onListening);
+            refusedServer.listen(0, "127.0.0.1");
+        });
         const refusedAddress = refusedServer.address();
         assert.ok(refusedAddress && typeof refusedAddress === "object");
         await new Promise<void>((resolve, reject) =>

@@ -262,9 +262,12 @@ function getTokenMetrics(): TokenMetrics {
         sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
 
         // Agent data
-        if (session.displayLabel || session.label) {
+        const displayLabel = stringFallback(session.displayLabel).trim();
+        const fallbackLabel = stringFallback(session.label).trim();
+        const agentLabel = displayLabel || fallbackLabel;
+        if (agentLabel) {
             byAgent.push({
-                label: stringFallback(session.displayLabel || session.label),
+                label: stringFallback(agentLabel),
                 model: model,
                 tokens: tokens,
                 type: stringFallback(session.type) || "Unknown",

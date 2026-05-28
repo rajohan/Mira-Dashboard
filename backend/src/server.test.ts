@@ -12,35 +12,23 @@ import { WebSocket } from "ws";
 import { db, ensureTaskAutomationColumn } from "./db.js";
 import gateway from "./gateway.js";
 
-const originalPort = process.env.PORT;
-const originalTrustProxy = process.env.TRUST_PROXY;
-const originalOpenClawHome = process.env.OPENCLAW_HOME;
-const originalGatewayToken = db
-    .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
-    .get() as { value: string } | undefined;
+let originalPort: string | undefined;
+let originalTrustProxy: string | undefined;
+let originalOpenClawHome: string | undefined;
+let originalGatewayToken: { value: string } | undefined;
+let openclawHome: string | undefined;
 
-process.env.PORT = "0";
-process.env.TRUST_PROXY = "2";
-const openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-openclaw-"));
-await mkdir(path.join(openclawHome, "media"));
-process.env.OPENCLAW_HOME = openclawHome;
-db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
-
-const {
-    apiAuthMiddleware,
-    handleWebSocketConnection,
-    parseTrustProxy,
-    resolveBackendCommit,
-    resolveListenPort,
-    server,
-    sessionsHandler,
-} = await import("./server.js");
-const {
-    handleServerListening,
-    isDirectEntrypoint,
-    shouldStartOnImport,
-    startBackendServer,
-} = await import("./serverStart.js");
+let apiAuthMiddleware: (typeof import("./server.js"))["apiAuthMiddleware"];
+let handleWebSocketConnection: (typeof import("./server.js"))["handleWebSocketConnection"];
+let parseTrustProxy: (typeof import("./server.js"))["parseTrustProxy"];
+let resolveBackendCommit: (typeof import("./server.js"))["resolveBackendCommit"];
+let resolveListenPort: (typeof import("./server.js"))["resolveListenPort"];
+let server: (typeof import("./server.js"))["server"];
+let sessionsHandler: (typeof import("./server.js"))["sessionsHandler"];
+let handleServerListening: (typeof import("./serverStart.js"))["handleServerListening"];
+let isDirectEntrypoint: (typeof import("./serverStart.js"))["isDirectEntrypoint"];
+let shouldStartOnImport: (typeof import("./serverStart.js"))["shouldStartOnImport"];
+let startBackendServer: (typeof import("./serverStart.js"))["startBackendServer"];
 
 function getBaseUrl(): string {
     const address = server.address();
@@ -57,8 +45,73 @@ async function requestJson<T>(pathName: string): Promise<{ status: number; body:
     };
 }
 
+async function restoreBootstrapState(): Promise<void> {
+    if (openclawHome) {
+        await rm(openclawHome, { recursive: true, force: true });
+        openclawHome = undefined;
+    }
+
+    if (originalPort === undefined) {
+        delete process.env.PORT;
+    } else {
+        process.env.PORT = originalPort;
+    }
+    if (originalTrustProxy === undefined) {
+        delete process.env.TRUST_PROXY;
+    } else {
+        process.env.TRUST_PROXY = originalTrustProxy;
+    }
+    if (originalOpenClawHome === undefined) {
+        delete process.env.OPENCLAW_HOME;
+    } else {
+        process.env.OPENCLAW_HOME = originalOpenClawHome;
+    }
+
+    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+    if (originalGatewayToken) {
+        db.prepare(
+            "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
+        ).run(originalGatewayToken.value, new Date().toISOString());
+    }
+}
+
 describe("server bootstrap", () => {
     before(async () => {
+        originalPort = process.env.PORT;
+        originalTrustProxy = process.env.TRUST_PROXY;
+        originalOpenClawHome = process.env.OPENCLAW_HOME;
+        originalGatewayToken = db
+            .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+            .get() as { value: string } | undefined;
+
+        try {
+            process.env.PORT = "0";
+            process.env.TRUST_PROXY = "2";
+            openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-openclaw-"));
+            await mkdir(path.join(openclawHome, "media"));
+            process.env.OPENCLAW_HOME = openclawHome;
+            db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+            ({
+                apiAuthMiddleware,
+                handleWebSocketConnection,
+                parseTrustProxy,
+                resolveBackendCommit,
+                resolveListenPort,
+                server,
+                sessionsHandler,
+            } = await import("./server.js"));
+            ({
+                handleServerListening,
+                isDirectEntrypoint,
+                shouldStartOnImport,
+                startBackendServer,
+            } = await import("./serverStart.js"));
+        } catch (error) {
+            await restoreBootstrapState();
+            throw error;
+        }
+
         if (server.listening) {
             return;
         }
@@ -80,7 +133,7 @@ describe("server bootstrap", () => {
 
     after(async () => {
         try {
-            if (server.listening) {
+            if (server?.listening) {
                 await new Promise<void>((resolve, reject) => {
                     server.close((error) => {
                         if (error) {
@@ -93,28 +146,7 @@ describe("server bootstrap", () => {
                 });
             }
         } finally {
-            await rm(openclawHome, { recursive: true, force: true });
-            if (originalPort === undefined) {
-                delete process.env.PORT;
-            } else {
-                process.env.PORT = originalPort;
-            }
-            if (originalTrustProxy === undefined) {
-                delete process.env.TRUST_PROXY;
-            } else {
-                process.env.TRUST_PROXY = originalTrustProxy;
-            }
-            if (originalOpenClawHome === undefined) {
-                delete process.env.OPENCLAW_HOME;
-            } else {
-                process.env.OPENCLAW_HOME = originalOpenClawHome;
-            }
-            db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
-            if (originalGatewayToken) {
-                db.prepare(
-                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
-                ).run(originalGatewayToken.value, new Date().toISOString());
-            }
+            await restoreBootstrapState();
         }
     });
 
@@ -309,6 +341,27 @@ describe("server bootstrap", () => {
                 }),
             /SQLITE_BUSY/u
         );
+
+        let finalCheckCalls = 0;
+        assert.throws(
+            () =>
+                ensureTaskAutomationColumn({
+                    exec: () => {
+                        throw new Error("SQLITE_BUSY");
+                    },
+                    prepare: () => ({
+                        all: () => {
+                            finalCheckCalls += 1;
+                            if (finalCheckCalls === 6) {
+                                throw new Error("final check unavailable");
+                            }
+                            return [{ name: "id" }];
+                        },
+                    }),
+                }),
+            /SQLITE_BUSY/u
+        );
+        assert.equal(finalCheckCalls, 6);
 
         let resolvedAfterRetries = 0;
         let resolvedAfterRetryChecks = 0;

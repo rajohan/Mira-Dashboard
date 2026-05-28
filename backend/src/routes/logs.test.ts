@@ -406,7 +406,9 @@ describe("logs routes", () => {
         try {
             await __testing.pollLogFileForTest();
             assert.equal(
-                ws.sent.some((entry) => entry.includes("log_append")),
+                ws.sent
+                    .map((entry) => JSON.parse(entry) as { type?: string })
+                    .some((entry) => entry.type === "log"),
                 false
             );
         } finally {
