@@ -217,7 +217,7 @@ export default function configFilesRoutes(
 
                 try {
                     const realOpenclawRoot = fs.realpathSync(openclawRoot);
-                    let realOpenedPath = fullPath;
+                    let realOpenedPath: string;
                     if (process.platform === "linux") {
                         realOpenedPath = fs.realpathSync(`/proc/self/fd/${fd}`);
                     } else {
