@@ -331,16 +331,9 @@ export default function configFilesRoutes(
                     return;
                 }
 
-                const fullPath = safePathWithinRoot(filePath, openclawRoot);
-                if (!fullPath) {
-                    res.status(403).json({
-                        error: "Access denied: path outside allowed root",
-                    });
-                    return;
-                }
-
+                const fullPathCandidate = path.resolve(openclawRoot, filePath);
                 const safeFullPath = prepareSafeWriteTargetWithinRoot(
-                    fullPath,
+                    fullPathCandidate,
                     openclawRoot
                 );
                 if (!safeFullPath) {

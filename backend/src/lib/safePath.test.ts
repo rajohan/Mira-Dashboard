@@ -48,6 +48,38 @@ describe("safe path helpers", () => {
         }
     });
 
+    it("rejects existing symlink write targets", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const outsideDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-safe-path-outside-")
+        );
+        const originalLstatSync = fs.lstatSync;
+        try {
+            const root = path.join(baseDir, "workspace");
+            await mkdir(root, { recursive: true });
+            const target = path.join(root, "note.txt");
+            await writeFile(path.join(outsideDir, "note.txt"), "outside", "utf8");
+            await symlink(path.join(outsideDir, "note.txt"), target);
+
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.lstatSync = ((lstatTarget: fs.PathLike) => {
+                if (String(lstatTarget) === target) {
+                    const error = new Error("permission denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(lstatTarget);
+            }) as typeof fs.lstatSync;
+
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+        } finally {
+            fs.lstatSync = originalLstatSync;
+            await rm(baseDir, { recursive: true, force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+    });
+
     it("validates read paths and rejects invalid filenames", async () => {
         const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
         try {

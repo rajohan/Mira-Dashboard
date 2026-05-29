@@ -259,6 +259,11 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join(os.homedir(), ".openclaw", "workspace")
             );
+            process.env.OPENCLAW_HOME = "   ";
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(os.homedir(), ".openclaw", "workspace")
+            );
             process.env.OPENCLAW_HOME = "/tmp/openclaw-home";
             assert.equal(
                 __testing.getDefaultWorkspaceRoot(),

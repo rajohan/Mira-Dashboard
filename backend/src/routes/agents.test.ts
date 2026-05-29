@@ -1039,7 +1039,6 @@ describe("agents routes", () => {
                     type: "MAIN",
                     agentType: "alias-agent",
                     hookName: "",
-                    model: "cached-model",
                     tokenCount: 0,
                     maxTokens: 200000,
                     createdAt: null,
@@ -1048,7 +1047,25 @@ describe("agents routes", () => {
                     displayLabel: "",
                     channel: "unknown",
                     status: "running",
-                    updatedAt: Date.parse("2026-05-16T15:00:00.000Z"),
+                    model: "   ",
+                    updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
+                },
+                {
+                    id: "blank-key",
+                    key: "",
+                    type: "MAIN",
+                    agentType: "alias-agent",
+                    hookName: "",
+                    model: "ignored",
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "running",
+                    updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
                 },
             ];
             gateway.request = async () => {
@@ -1065,8 +1082,8 @@ describe("agents routes", () => {
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "thinking");
             assert.equal(response.body.sessionKey, "agent:alias-agent:main");
-            assert.equal(response.body.model, "cached-model");
-            assert.equal(response.body.lastActivity, "2026-05-16T15:00:00.000Z");
+            assert.equal(response.body.model, "gpt-5.5");
+            assert.equal(response.body.lastActivity, "2026-05-16T16:00:00.000Z");
         } finally {
             gateway.getSessions = previousGatewaySessions;
             gateway.request = previousGatewayRequest;

@@ -216,19 +216,22 @@ function resolveConfiguredModelName(
 
 /** Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure. */
 async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
-    const cached = gateway.getSessions().map((session) => ({
-        key: session.key,
-        model: session.model,
-        status: session.status,
-        updatedAt: session.updatedAt,
-        startedAt: session.startedAt,
-        endedAt: session.endedAt,
-        runId: session.runId,
-        activeRunId: session.activeRunId,
-        currentRunId: session.currentRunId,
-        isRunning: session.isRunning,
-        running: session.running,
-    }));
+    const cached = gateway
+        .getSessions()
+        .filter((session) => typeof session.key === "string" && session.key.length > 0)
+        .map((session) => ({
+            key: session.key,
+            model: session.model?.trim() || undefined,
+            status: session.status,
+            updatedAt: session.updatedAt,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            runId: session.runId,
+            activeRunId: session.activeRunId,
+            currentRunId: session.currentRunId,
+            isRunning: session.isRunning,
+            running: session.running,
+        }));
 
     try {
         const result = (await gateway.request("sessions.list", {})) as {

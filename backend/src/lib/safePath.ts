@@ -98,6 +98,17 @@ export function prepareSafeWriteTargetWithinRoot(
             return null;
         }
 
+        try {
+            if (fs.lstatSync(resolvedTarget).isSymbolicLink()) {
+                return null;
+            }
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "ENOTDIR") {
+                throw error;
+            }
+        }
+
         const targetParent = path.dirname(resolvedTarget);
         const missingSegments: string[] = [];
         let existingAncestor = targetParent;
