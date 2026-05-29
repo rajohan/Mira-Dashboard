@@ -390,6 +390,9 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
             return null;
         }
         realAgentsSessionsRoot = fs.realpathSync(Path.resolve(realAgentDir, "sessions"));
+        if (!realAgentsSessionsRoot.startsWith(`${realAgentDir}${Path.sep}`)) {
+            return null;
+        }
         realTranscriptPath = fs.realpathSync(transcriptPath);
     } catch {
         return null;

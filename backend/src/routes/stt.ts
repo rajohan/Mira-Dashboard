@@ -63,7 +63,7 @@ function transcriptTextFromElevenLabs(result?: unknown): string {
 /** Performs transcribe with eleven labs. */
 async function transcribeWithElevenLabs(
     audioBuffer: Buffer,
-    contentType: string | undefined
+    contentType: string | string[] | undefined
 ): Promise<string> {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
@@ -73,7 +73,8 @@ async function transcribeWithElevenLabs(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ELEVENLABS_TIMEOUT_MS);
     const formData = new FormData();
-    const safeContentType = contentType?.trim() || undefined;
+    const rawContentType = Array.isArray(contentType) ? contentType[0] : contentType;
+    const safeContentType = rawContentType?.trim() || undefined;
     const fileName = `recording${audioExtension(safeContentType)}`;
     const audioBytes = Uint8Array.from(audioBuffer);
     const audioBlob = new Blob([audioBytes], {

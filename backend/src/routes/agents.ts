@@ -1,6 +1,7 @@
 import express from "express";
 import FS from "fs";
 import JSON5 from "json5";
+import os from "os";
 import Path from "path";
 
 import { db } from "../db.js";
@@ -15,7 +16,13 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
-const OPENCLAW_ROOT = (process.env.HOME || "") + "/.openclaw";
+
+const HOME_DIR = os.homedir();
+if (!HOME_DIR || !Path.isAbsolute(HOME_DIR)) {
+    throw new Error("Server misconfigured: home directory is not configured");
+}
+
+const OPENCLAW_ROOT = Path.join(HOME_DIR, ".openclaw");
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
 /** Matches agent ids that are safe to use as path segments. */

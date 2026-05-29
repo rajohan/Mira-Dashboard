@@ -546,6 +546,20 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:linked-agent:main", "session-1"),
             null
         );
+        const linkedSessionsAgentDir = path.join(
+            openclawHome,
+            "agents",
+            "linked-sessions"
+        );
+        await mkdir(linkedSessionsAgentDir, { recursive: true });
+        await symlink(
+            path.join(openclawHome, "agents", "main", "sessions"),
+            path.join(linkedSessionsAgentDir, "sessions")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:linked-sessions:main", "session-1"),
+            null
+        );
         assert.equal(
             __testing.isPathInsideRoot("/tmp/openclaw", "/tmp/elsewhere/file"),
             false

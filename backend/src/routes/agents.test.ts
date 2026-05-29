@@ -2349,8 +2349,15 @@ describe("agents routes", () => {
         const savedHome = process.env.HOME;
         try {
             process.env.HOME = "";
-            const emptyHomeModule = await import(`./agents.js?empty-home=${Date.now()}`);
-            assert.equal(emptyHomeModule.__testing.getSafeAgentSessionsDir("main"), null);
+            await assert.rejects(
+                import(`./agents.js?empty-home=${Date.now()}`),
+                /home directory is not configured/u
+            );
+            process.env.HOME = "relative-home";
+            await assert.rejects(
+                import(`./agents.js?relative-home=${Date.now()}`),
+                /home directory is not configured/u
+            );
         } finally {
             process.env.HOME = savedHome;
         }

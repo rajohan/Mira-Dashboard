@@ -211,6 +211,13 @@ describe("STT routes", () => {
             await __testing.transcribeWithElevenLabs(Buffer.from([1]), "   "),
             "recording.webm:application/octet-stream"
         );
+        assert.equal(
+            await __testing.transcribeWithElevenLabs(Buffer.from([1]), [
+                " audio/wav ",
+                "audio/ogg",
+            ]),
+            "recording.wav:audio/wav"
+        );
 
         globalThis.fetch = async () => Response.json({});
         const missingWords = await transcribe(server, Buffer.from([1]));
