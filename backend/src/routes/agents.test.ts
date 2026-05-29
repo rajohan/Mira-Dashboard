@@ -3112,13 +3112,50 @@ describe("agents routes", () => {
                     status: "idle",
                     updatedAt: 0,
                 },
+                {
+                    id: "non-string-model",
+                    key: "agent:cached-worker:main",
+                    type: "MAIN",
+                    agentType: "cached",
+                    hookName: "",
+                    model: 42 as unknown as string,
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "idle",
+                    updatedAt: 1,
+                },
             ];
             gateway.request = async () => ({
-                sessions: [{ key: "" }, { key: "agent:x:main", model: "   " }],
+                sessions: [
+                    { key: "" },
+                    { key: "agent:x:main", model: "   " },
+                    {
+                        key: "agent:y:main",
+                        model: { primary: "codex" } as unknown as string,
+                    },
+                ],
             });
             assert.deepEqual(await __testing.getGatewaySessionsForAgents(), [
                 {
                     key: "agent:x:main",
+                    model: undefined,
+                    status: undefined,
+                    updatedAt: undefined,
+                    startedAt: undefined,
+                    endedAt: undefined,
+                    runId: undefined,
+                    activeRunId: undefined,
+                    currentRunId: undefined,
+                    isRunning: undefined,
+                    running: undefined,
+                },
+                {
+                    key: "agent:y:main",
                     model: undefined,
                     status: undefined,
                     updatedAt: undefined,
@@ -3139,6 +3176,12 @@ describe("agents routes", () => {
             gateway.request = async () => ({ sessions: [{ key: "" }] });
             const emptyFilteredSessions = await __testing.getGatewaySessionsForAgents();
             assert.deepEqual(emptyFilteredSessions, []);
+
+            gateway.request = async () => {
+                throw new Error("gateway unavailable");
+            };
+            const cachedSessions = await __testing.getGatewaySessionsForAgents();
+            assert.equal(cachedSessions[1]?.model, undefined);
         } finally {
             gateway.getSessions = previousGatewaySessions;
             gateway.request = previousGatewayRequest;

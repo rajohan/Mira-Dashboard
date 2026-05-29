@@ -25,7 +25,7 @@ const data = mode === "invalid" ? "not-json" : JSON.stringify({ version: { curre
 const nullable = mode === "nullable";
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "system.host\t" + data + "\tsystem\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t2026-05-11T00:00:00.000Z\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
+  "system.host\t" + data + "\tsystem\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
   "",
 ].join("\n"));
 `,
@@ -87,6 +87,7 @@ describe("system cache helpers", () => {
         const cached = await fetchCachedSystemHost();
 
         assert.equal(cached.updatedAt, null);
+        assert.equal("lastAttemptAt" in cached, false);
         assert.equal(cached.expiresAt, null);
         assert.equal(cached.errorCode, null);
         assert.equal(cached.errorMessage, null);

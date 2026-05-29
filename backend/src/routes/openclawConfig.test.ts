@@ -229,6 +229,27 @@ describe("OpenClaw config routes", () => {
                 note: "Updated from Mira Dashboard settings",
             },
         });
+
+        calls.length = 0;
+        const trimmedToggle = await requestJson<{ ok: true }>(
+            server,
+            "/api/skills/%20custom-skill%20",
+            {
+                method: "POST",
+                body: { enabled: false },
+            }
+        );
+        assert.equal(trimmedToggle.status, 200);
+        assert.deepEqual(calls.at(-1), {
+            method: "config.patch",
+            params: {
+                raw: JSON.stringify({
+                    skills: { entries: { "custom-skill": { enabled: false } } },
+                }),
+                baseHash: "hash-123",
+                note: "Updated from Mira Dashboard settings",
+            },
+        });
     });
 
     it("creates config backups from current snapshots", async () => {
@@ -663,6 +684,19 @@ throw new Error("restart failed");
 
             assert.equal(__testing.getOpenClawPackageRootForTest(), envPackageRoot);
             assert.equal(__testing.getOpenClawBinForTest(), envBin);
+
+            process.env.OPENCLAW_PACKAGE_ROOT = "   ";
+            process.env.OPENCLAW_BIN = "   ";
+            assert.equal(
+                __testing.getOpenClawPackageRootForTest(),
+                path.resolve(
+                    path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
+                )
+            );
+            assert.equal(
+                __testing.getOpenClawBinForTest(),
+                path.join(os.homedir(), ".npm-global/bin/openclaw")
+            );
         } finally {
             if (originalPackageRootEnv === undefined) {
                 delete process.env.OPENCLAW_PACKAGE_ROOT;

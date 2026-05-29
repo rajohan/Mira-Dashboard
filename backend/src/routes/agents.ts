@@ -236,7 +236,10 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
         .filter((session) => typeof session.key === "string" && session.key.length > 0)
         .map((session) => ({
             key: session.key,
-            model: session.model?.trim() || undefined,
+            model:
+                typeof session.model === "string"
+                    ? session.model.trim() || undefined
+                    : undefined,
             status: session.status,
             updatedAt: session.updatedAt,
             startedAt: session.startedAt,
@@ -272,7 +275,10 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
                 )
                 .map((session) => ({
                     key: session.key as string,
-                    model: session.model?.trim() || undefined,
+                    model:
+                        typeof session.model === "string"
+                            ? session.model.trim() || undefined
+                            : undefined,
                     status: session.status,
                     updatedAt: session.updatedAt,
                     startedAt: session.startedAt,

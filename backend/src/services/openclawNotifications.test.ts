@@ -201,10 +201,10 @@ describe("OpenClaw update notifications", () => {
             startOpenClawNotificationMonitor(1);
             assert.equal(scheduledInterval, 60 * 60 * 1000);
             assert.equal(callbackRuns, 1);
-            stopOpenClawNotificationMonitorForTest();
-            stopOpenClawNotificationMonitorForTest();
             await new Promise((resolve) => setTimeout(resolve, 100));
         } finally {
+            stopOpenClawNotificationMonitorForTest();
+            stopOpenClawNotificationMonitorForTest();
             globalThis.setInterval = originalSetInterval;
         }
     });

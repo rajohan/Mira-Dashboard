@@ -120,44 +120,59 @@ describe("TTS routes", () => {
     });
 
     it("forwards ElevenLabs error responses", async () => {
+        const testOriginalFetch = globalThis.fetch;
         process.env.ELEVENLABS_API_KEY = "test-key";
-        globalThis.fetch = async () => new Response("quota exceeded", { status: 429 });
+        try {
+            globalThis.fetch = async () =>
+                new Response("quota exceeded", { status: 429 });
 
-        const response = await postJson<{ error: string }>(server, { text: "hello" });
+            const response = await postJson<{ error: string }>(server, { text: "hello" });
 
-        assert.equal(response.status, 429);
-        assert.equal(response.body.error, "quota exceeded");
+            assert.equal(response.status, 429);
+            assert.equal(response.body.error, "quota exceeded");
 
-        globalThis.fetch = async () =>
-            ({
-                ok: false,
-                status: 502,
-                text: async () => {
-                    throw new Error("body unavailable");
-                },
-            }) as unknown as Response;
-        const fallback = await postJson<{ error: string }>(server, { text: "hello" });
-        assert.equal(fallback.status, 502);
-        assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
+            globalThis.fetch = async () =>
+                ({
+                    ok: false,
+                    status: 502,
+                    text: async () => {
+                        throw new Error("body unavailable");
+                    },
+                }) as unknown as Response;
+            const fallback = await postJson<{ error: string }>(server, {
+                text: "hello",
+            });
+            assert.equal(fallback.status, 502);
+            assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
+        } finally {
+            globalThis.fetch = testOriginalFetch;
+        }
     });
 
     it("surfaces speech generation exceptions", async () => {
+        const testOriginalFetch = globalThis.fetch;
         process.env.ELEVENLABS_API_KEY = "test-key";
-        globalThis.fetch = async () => {
-            throw new Error("network down");
-        };
+        try {
+            globalThis.fetch = async () => {
+                throw new Error("network down");
+            };
 
-        const response = await postJson<{ error: string }>(server, { text: "hello" });
+            const response = await postJson<{ error: string }>(server, { text: "hello" });
 
-        assert.equal(response.status, 500);
-        assert.equal(response.body.error, "network down");
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "network down");
 
-        globalThis.fetch = async () => {
-            throw "";
-        };
+            globalThis.fetch = async () => {
+                throw "";
+            };
 
-        const fallback = await postJson<{ error: string }>(server, { text: "hello" });
-        assert.equal(fallback.status, 500);
-        assert.equal(fallback.body.error, "Failed to generate speech");
+            const fallback = await postJson<{ error: string }>(server, {
+                text: "hello",
+            });
+            assert.equal(fallback.status, 500);
+            assert.equal(fallback.body.error, "Failed to generate speech");
+        } finally {
+            globalThis.fetch = testOriginalFetch;
+        }
     });
 });

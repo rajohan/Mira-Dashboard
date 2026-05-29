@@ -57,7 +57,7 @@ const execFileAsync = promisify(execFile);
 
 function getDefaultOpenClawPackageRoot(): string {
     return path.resolve(
-        process.env.OPENCLAW_PACKAGE_ROOT ||
+        process.env.OPENCLAW_PACKAGE_ROOT?.trim() ||
             path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
     );
 }
@@ -75,7 +75,8 @@ function getOpenClawBin(): string {
         return openClawBinForTest;
     }
     return (
-        process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw")
+        process.env.OPENCLAW_BIN?.trim() ||
+        path.join(os.homedir(), ".npm-global/bin/openclaw")
     );
 }
 
@@ -274,7 +275,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
 
     app.post("/api/skills/:name", express.json(), (async (req, res) => {
         try {
-            const name = stringFallback(req.params.name);
+            const name = stringFallback(req.params.name).trim();
             const enabled = (req.body as { enabled?: unknown }).enabled;
             if (!isValidSkillName(name)) {
                 res.status(400).json({ error: "Invalid skill name" });

@@ -558,6 +558,10 @@ describe("docker routes", { concurrency: false }, () => {
                 __testing.buildPostgresUri("custom"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom"
             );
+            assert.equal(
+                __testing.buildPostgresUri("custom db/#1"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom%20db%2F%231"
+            );
             process.env.DATABASE_USERNAME = "";
             process.env.DATABASE_PASSWORD = "";
             process.env.DATABASE_HOST = "";

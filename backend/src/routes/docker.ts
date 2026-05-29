@@ -323,7 +323,7 @@ function buildPostgresUri(database = N8N_DATABASE) {
     );
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    return `postgresql://${username}:${password}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
 /** Performs query n8n. */
