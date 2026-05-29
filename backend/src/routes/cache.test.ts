@@ -211,24 +211,28 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         const refreshCommand = ["/bin/sh", "-c", "exit 0"];
 
         __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
-        const refreshed = await refreshCacheKey("quotas.summary");
-        assert.equal(refreshed.key, "quotas.summary");
-
-        __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
         try {
-            await assert.rejects(() => refreshCacheKey("missing.key"), {
-                message: "Cache key not found after refresh: missing.key",
-            });
-        } finally {
-            __testing.setCacheRefreshCommandForTests("missing.key", undefined);
-        }
+            const refreshed = await refreshCacheKey("quotas.summary");
+            assert.equal(refreshed.key, "quotas.summary");
 
-        const routeRefresh = await fetch(
-            `${server.baseUrl}/api/cache/quotas.summary/refresh`,
-            { method: "POST" }
-        );
-        assert.equal(routeRefresh.status, 200);
-        assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
+            __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
+            try {
+                await assert.rejects(() => refreshCacheKey("missing.key"), {
+                    message: "Cache key not found after refresh: missing.key",
+                });
+            } finally {
+                __testing.setCacheRefreshCommandForTests("missing.key", undefined);
+            }
+
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/quotas.summary/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(routeRefresh.status, 200);
+            assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
+        } finally {
+            __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
+        }
     });
 
     it("does not pass literal undefined database credentials to refresh commands", async () => {

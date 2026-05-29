@@ -51,7 +51,7 @@ jobs:
 
             - name: Upload frontend coverage to Codecov
               uses: codecov/codecov-action@v6
-              if: ${{ secrets.CODECOV_TOKEN != '' }}
+              if: ${{ env.CODECOV_TOKEN != '' }}
               env:
                   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
               with:
@@ -109,7 +109,7 @@ jobs:
 
             - name: Upload backend coverage to Codecov
               uses: codecov/codecov-action@v6
-              if: ${{ secrets.CODECOV_TOKEN != '' }}
+              if: ${{ env.CODECOV_TOKEN != '' }}
               env:
                   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
               with:

@@ -3,10 +3,7 @@ import { pathToFileURL } from "node:url";
 import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
 import { resolveListenPort, server } from "./server.js";
-import {
-    startOpenClawNotificationMonitor,
-    stopOpenClawNotificationMonitor,
-} from "./services/openclawNotifications.js";
+import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import {
     startQuotaNotificationMonitor,
     stopQuotaNotificationMonitor,
@@ -18,7 +15,6 @@ let isStarting = false;
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let quotaMonitorStarted = false;
-    let openClawMonitorStarted = false;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -32,13 +28,9 @@ export function handleServerListening(): void {
 
         startQuotaNotificationMonitor();
         quotaMonitorStarted = true;
-        openClawMonitorStarted = true;
         startOpenClawNotificationMonitor();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        if (openClawMonitorStarted) {
-            stopOpenClawNotificationMonitor();
-        }
         if (quotaMonitorStarted) {
             stopQuotaNotificationMonitor();
         }

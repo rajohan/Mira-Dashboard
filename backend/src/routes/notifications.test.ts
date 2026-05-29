@@ -67,6 +67,7 @@ function cleanupNotifications(source: string): void {
 describe("notifications routes", () => {
     let source: string;
     let server: TestServer;
+    let notificationIdToCleanup: number | null = null;
 
     before(async () => {
         server = await startServer();
@@ -77,6 +78,12 @@ describe("notifications routes", () => {
     });
 
     afterEach(() => {
+        if (notificationIdToCleanup !== null) {
+            db.prepare("DELETE FROM notifications WHERE id = ?").run(
+                notificationIdToCleanup
+            );
+            notificationIdToCleanup = null;
+        }
         cleanupNotifications(source);
     });
 
@@ -193,6 +200,7 @@ describe("notifications routes", () => {
             }
         );
         assert.equal(whitespaceFields.status, 200);
+        notificationIdToCleanup = whitespaceFields.body.id;
 
         const upsert = await requestJson<{ ok: true; id: number | null }>(
             server,

@@ -38,8 +38,14 @@ function mimeTypeFromPath(filePath: string): string {
 }
 
 /** Resolves and caches the canonical media root after it exists. */
-function getRealMediaRoot(): string {
-    cachedRealMediaRoot ??= fs.realpathSync(MEDIA_ROOT);
+function getRealMediaRoot(): string | null {
+    if (cachedRealMediaRoot) {
+        return cachedRealMediaRoot;
+    }
+    if (!fs.existsSync(MEDIA_ROOT)) {
+        return null;
+    }
+    cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
     return cachedRealMediaRoot;
 }
 
@@ -61,6 +67,10 @@ export default function mediaRoutes(app: express.Application): void {
 
         const realPath = fs.realpathSync(fullPath);
         const realMediaRoot = getRealMediaRoot();
+        if (!realMediaRoot) {
+            response.status(404).json({ error: "Media not found" });
+            return;
+        }
         if (!realPath.startsWith(`${realMediaRoot}${path.sep}`)) {
             response.status(403).json({ error: "Access denied" });
             return;

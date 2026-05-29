@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -14,6 +15,29 @@ interface TestServer {
 
 async function startServer(openclawHome: string): Promise<TestServer> {
     const prevOpenclawHome = process.env.OPENCLAW_HOME;
+    process.env.OPENCLAW_HOME = openclawHome;
+    try {
+        const { default: mediaRoutes } = await import("./media.js");
+        return await startServerWithMediaRoutes(
+            openclawHome,
+            mediaRoutes,
+            prevOpenclawHome
+        );
+    } catch (error) {
+        if (prevOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = prevOpenclawHome;
+        }
+        throw error;
+    }
+}
+
+async function startServerWithMediaRoutes(
+    openclawHome: string,
+    mediaRoutes: (app: express.Application) => void,
+    prevOpenclawHome = process.env.OPENCLAW_HOME
+): Promise<TestServer> {
     const restoreOpenclawHome = () => {
         if (prevOpenclawHome === undefined) {
             delete process.env.OPENCLAW_HOME;
@@ -24,8 +48,6 @@ async function startServer(openclawHome: string): Promise<TestServer> {
     process.env.OPENCLAW_HOME = openclawHome;
     let server: http.Server | undefined;
     try {
-        const { default: mediaRoutes } = await import("./media.js");
-
         const app = express();
         mediaRoutes(app);
         server = http.createServer(app);
@@ -143,6 +165,41 @@ describe("media routes", () => {
             } else {
                 process.env.OPENCLAW_HOME = originalOpenClawHome;
             }
+        }
+    });
+
+    it("returns not found when the media root disappears before canonicalization", async () => {
+        const missingHome = path.join(tempRoot, "missing-openclaw");
+        const missingMediaRoot = path.join(missingHome, "media");
+        await mkdir(missingMediaRoot, { recursive: true });
+        const disappearingFile = path.join(missingMediaRoot, "disappears.txt");
+        await writeFile(disappearingFile, "gone");
+
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        process.env.OPENCLAW_HOME = missingHome;
+        const module = await import(`./media.js?missing-root=${Date.now()}`);
+        const missingServer = await startServerWithMediaRoutes(
+            missingHome,
+            module.default,
+            previousOpenclawHome
+        );
+        const existsSync = mock.method(
+            fs,
+            "existsSync",
+            (filePath: fs.PathLike) => filePath === disappearingFile
+        );
+
+        try {
+            const response = await fetch(
+                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(
+                    disappearingFile
+                )}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            existsSync.mock.restore();
+            await missingServer.close();
         }
     });
 
