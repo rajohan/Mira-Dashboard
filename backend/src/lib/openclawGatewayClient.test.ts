@@ -217,7 +217,22 @@ async function startGatewayServer(
 ): Promise<{ url: string; close: () => Promise<void> }> {
     const server = new WebSocketServer({ port: 0 });
     server.on("connection", onConnection);
-    await new Promise<void>((resolve) => server.once("listening", resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("error", onError);
+            server.off("listening", onListening);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 

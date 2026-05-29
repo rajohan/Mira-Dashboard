@@ -66,6 +66,7 @@ async function requestWithoutJsonBody<T>(
 describe("terminal routes", () => {
     let server: TestServer;
     let tempDir: string;
+    let appDirName: string;
 
     before(async () => {
         server = await startServer();
@@ -75,7 +76,7 @@ describe("terminal routes", () => {
         await writeFile(path.join(tempDir, ".hidden"), "hidden");
         await writeFile(path.join(tempDir, "run-me"), "#!/bin/sh\n");
         await chmod(path.join(tempDir, "run-me"), 0o755);
-        await mkdtemp(path.join(tempDir, "app-"));
+        appDirName = `${path.basename(await mkdtemp(path.join(tempDir, "app-")))}/`;
         await mkdir(path.join(tempDir, "nested"));
         await writeFile(path.join(tempDir, "nested", "inside.txt"), "inside");
         await writeFile(path.join(tempDir, "nested", "install.sh"), "#!/bin/sh\n");
@@ -112,8 +113,9 @@ describe("terminal routes", () => {
         assert.equal(completionResponse.status, 200);
         assert.deepEqual(
             completionResponse.body.completions.map((item) => item.display),
-            [completionResponse.body.completions[0]!.display, "alpha.txt", "alpine.txt"]
+            [appDirName, "alpha.txt", "alpine.txt"]
         );
+        assert.equal(completionResponse.body.completions[0]?.display, appDirName);
         assert.equal(completionResponse.body.completions[0]?.type, "directory");
         assert.equal(completionResponse.body.commonPrefix, "");
 

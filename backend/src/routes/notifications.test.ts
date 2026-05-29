@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
@@ -74,12 +74,14 @@ describe("notifications routes", () => {
 
     beforeEach(() => {
         source = `backend-notifications-${Date.now()}-${Math.random()}`;
+    });
+
+    afterEach(() => {
         cleanupNotifications(source);
     });
 
     after(async () => {
         await server.close();
-        cleanupNotifications(source);
     });
 
     it("validates required fields and notification type", async () => {

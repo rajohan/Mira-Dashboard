@@ -8,17 +8,23 @@ import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js"
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
-    const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
-    if (token) {
-        gateway.init(token);
-    } else {
-        console.warn(
-            "[Backend] No gateway token configured yet; waiting for bootstrap registration"
-        );
-    }
+    try {
+        const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
+        if (token) {
+            gateway.init(token);
+        } else {
+            console.warn(
+                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
+            );
+        }
 
-    startQuotaNotificationMonitor();
-    startOpenClawNotificationMonitor();
+        startQuotaNotificationMonitor();
+        startOpenClawNotificationMonitor();
+    } catch (error) {
+        console.error("[Backend] Failed to start background services:", error);
+        server.close();
+        throw error;
+    }
 }
 
 /** Binds the HTTP server and starts runtime-only background services. */

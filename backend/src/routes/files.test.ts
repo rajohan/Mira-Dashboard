@@ -138,6 +138,9 @@ describe("files routes", () => {
 
     it("lists workspace files while hiding private dotfiles", async () => {
         await symlink("broken-loop", path.join(workspaceRoot, "broken-loop"));
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-files-outside-"));
+        const escapeLink = path.join(workspaceRoot, "escape-dir");
+        await symlink(outsideDir, escapeLink);
         try {
             const response = await requestJson<{ files: FileItem[]; root: string }>(
                 server,
@@ -153,6 +156,7 @@ describe("files routes", () => {
                     ".env.example",
                     "binary.dat",
                     "broken-loop",
+                    "escape-dir",
                     "large.png",
                     "large.txt",
                     "tiny.png",
@@ -167,8 +171,19 @@ describe("files routes", () => {
                 response.body.files.some((file) => file.name === ".hidden"),
                 false
             );
+            const escapedDirectory = await requestJson<{ error: string }>(
+                server,
+                "/api/files?path=escape-dir"
+            );
+            assert.equal(escapedDirectory.status, 403);
+            assert.equal(
+                escapedDirectory.body.error,
+                "Access denied: path outside workspace"
+            );
         } finally {
             await rm(path.join(workspaceRoot, "broken-loop"), { force: true });
+            await rm(escapeLink, { force: true });
+            await rm(outsideDir, { recursive: true, force: true });
         }
     });
 
@@ -251,6 +266,30 @@ describe("files routes", () => {
             );
             assert.equal(__testing.listDirectory("../../outside"), null);
             assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
+            const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
+            const outsideDir = await mkdtemp(
+                path.join(os.tmpdir(), "mira-files-outside-")
+            );
+            const escapeLink = path.join(workspaceRoot, "helper-escape-dir");
+            await symlink(outsideDir, escapeLink);
+            try {
+                process.env.WORKSPACE_ROOT = workspaceRoot;
+                const freshModule = await import(
+                    `./files.js?escape=${crypto.randomUUID()}`
+                );
+                assert.equal(
+                    freshModule.__testing.listDirectory("helper-escape-dir"),
+                    null
+                );
+            } finally {
+                if (originalWorkspaceRoot === undefined) {
+                    delete process.env.WORKSPACE_ROOT;
+                } else {
+                    process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+                }
+                await rm(escapeLink, { force: true });
+                await rm(outsideDir, { recursive: true, force: true });
+            }
             await mkdir(path.join(workspaceRoot, "sort"));
             await mkdir(path.join(workspaceRoot, "sort", "zeta"));
             await mkdir(path.join(workspaceRoot, "sort", "alpha-dir"));

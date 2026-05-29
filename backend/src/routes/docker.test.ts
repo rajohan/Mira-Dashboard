@@ -20,6 +20,17 @@ const originalUpdaterNodeBin = process.env.MIRA_UPDATER_NODE_BIN;
 const originalUpdaterCwd = process.env.MIRA_UPDATER_CWD;
 let fakeUpdaterNodeBin: string;
 
+function createMockChildProcess(
+    overrides: Pick<ChildProcess, "killed" | "kill"> & Partial<ChildProcess>
+): ChildProcess {
+    const child = {
+        ...overrides,
+    } as ChildProcess;
+    child.off = () => child;
+    child.once = () => child;
+    return child;
+}
+
 async function stopChildProcess(child: ChildProcess): Promise<void> {
     if (child.exitCode !== null || child.signalCode !== null) {
         return;
@@ -523,10 +534,14 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.resolveManualUpdateServiceId("", {}), null);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
         __testing.setUpdaterNodeBinForTests("node");
-        assert.equal(
-            __testing.buildPostgresUri(),
-            "postgresql://postgres:postgres@postgres:5432/n8n"
-        );
+        try {
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://postgres:postgres@postgres:5432/n8n"
+            );
+        } finally {
+            __testing.setUpdaterNodeBinForTests(originalUpdaterNodeBin);
+        }
 
         const originalEnv = {
             DATABASE_USERNAME: process.env.DATABASE_USERNAME,
@@ -628,13 +643,14 @@ describe("docker routes", { concurrency: false }, () => {
                 endedAt: null,
                 process:
                     index === 0
-                        ? ({
+                        ? createMockChildProcess({
                               killed: false,
-                              kill(signal: string) {
+                              kill(signal?: NodeJS.Signals | number) {
                                   assert.equal(signal, "SIGTERM");
                                   cleanupKilled = true;
+                                  return true;
                               },
-                          } as never)
+                          })
                         : undefined,
             });
         }
@@ -673,14 +689,15 @@ describe("docker routes", { concurrency: false }, () => {
             stderr: "",
             startedAt: Date.now(),
             endedAt: null,
-            process: {
+            process: createMockChildProcess({
                 pid: 9_999_999,
                 killed: false,
-                kill(signal: string) {
+                kill(signal?: NodeJS.Signals | number) {
                     assert.equal(signal, "SIGTERM");
                     fallbackKilled = true;
+                    return true;
                 },
-            } as never,
+            }),
         });
         const fallback = await requestJson<{ success: boolean }>(
             server,

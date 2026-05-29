@@ -257,6 +257,9 @@ async function runGhJsonLines<T>(
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
         const armForceKillTimer = () => {
+            if (forceKillTimer) {
+                return;
+            }
             forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
             forceKillTimer.unref();
         };

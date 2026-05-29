@@ -499,6 +499,7 @@ describe("server bootstrap", () => {
         const originalInit = gateway.init;
         const originalListen = server.listen;
         const originalAddress = server.address;
+        const originalClose = server.close;
         const originalListeningDescriptor = Object.getOwnPropertyDescriptor(
             server,
             "listening"
@@ -506,19 +507,39 @@ describe("server bootstrap", () => {
         const originalToken = process.env.OPENCLAW_TOKEN;
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
+        const originalConsoleError = console.error;
         let initializedToken: string | undefined;
         let listenedPort: number | undefined;
+        let closeCalled = false;
         const warnings: unknown[][] = [];
+        const errors: unknown[][] = [];
         gateway.init = (token: string) => {
             initializedToken = token;
         };
         console.warn = (...args: unknown[]) => {
             warnings.push(args);
         };
+        console.error = (...args: unknown[]) => {
+            errors.push(args);
+        };
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
+            gateway.init = () => {
+                throw new Error("gateway failed");
+            };
+            server.close = (() => {
+                closeCalled = true;
+                return server;
+            }) as typeof server.close;
+            assert.throws(() => handleServerListening(), /gateway failed/u);
+            assert.equal(closeCalled, true);
+            assert.match(String(errors.at(-1)?.[0]), /Failed to start background/u);
+            server.close = originalClose;
+            gateway.init = (token: string) => {
+                initializedToken = token;
+            };
             delete process.env.OPENCLAW_TOKEN;
             initializedToken = undefined;
             handleServerListening();
@@ -587,12 +608,14 @@ describe("server bootstrap", () => {
             gateway.init = originalInit;
             server.listen = originalListen;
             server.address = originalAddress;
+            server.close = originalClose;
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);
             } else {
                 delete (server as { listening?: boolean }).listening;
             }
             console.warn = originalConsoleWarn;
+            console.error = originalConsoleError;
         }
     });
 
@@ -617,7 +640,10 @@ describe("server bootstrap", () => {
             await delay(300);
             assert.equal(child.exitCode, null);
         } finally {
-            const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+            const exitPromise =
+                child.exitCode !== null || child.killed
+                    ? Promise.resolve()
+                    : new Promise((resolve) => child.once("exit", resolve));
             child.kill("SIGTERM");
             await exitPromise;
         }

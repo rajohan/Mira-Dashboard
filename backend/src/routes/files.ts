@@ -104,14 +104,17 @@ function compareNames(a: string, b: string): number {
 /** Lists a workspace directory or returns null when the path escapes the workspace. */
 function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
-    const fullPath = safePathWithinRoot(dirPath || ".", WORKSPACE_ROOT);
-
-    if (!fullPath) {
-        return null;
-    }
 
     try {
-        const entries = readdirGuarded(guardedPath(fullPath), { withFileTypes: true });
+        const workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+        const fullPath = safePathWithinRoot(dirPath || ".", workspaceRoot);
+
+        if (!fullPath) {
+            return null;
+        }
+        const entries = readdirGuarded(guardedPath(fullPath), {
+            withFileTypes: true,
+        });
         for (const entry of entries) {
             if (shouldHideFile(entry.name)) continue;
             const itemPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
@@ -239,7 +242,7 @@ export default function filesRoutes(
                             await file.close();
                             return;
                         }
-                        fullPath = candidatePath;
+                        fullPath = await fs.promises.realpath(candidatePath);
                     }
                 } catch (error) {
                     if (file) {
