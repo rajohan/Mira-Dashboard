@@ -155,8 +155,6 @@ describe("files routes", () => {
                     "src",
                     ".env.example",
                     "binary.dat",
-                    "broken-loop",
-                    "escape-dir",
                     "large.png",
                     "large.txt",
                     "tiny.png",
@@ -164,8 +162,12 @@ describe("files routes", () => {
             );
             assert.equal(response.body.files[0]?.type, "directory");
             assert.equal(
-                response.body.files.find((file) => file.name === "broken-loop")?.error,
-                true
+                response.body.files.some((file) => file.name === "broken-loop"),
+                false
+            );
+            assert.equal(
+                response.body.files.some((file) => file.name === "escape-dir"),
+                false
             );
             assert.equal(
                 response.body.files.some((file) => file.name === ".hidden"),
@@ -587,6 +589,14 @@ describe("files routes", () => {
         );
         assert.equal(missingContent.status, 400);
         assert.equal(missingContent.body.error, "Content required");
+
+        const missingBody = await requestJson<{ error: string }>(
+            server,
+            "/api/files/generated%2Fempty.txt",
+            { method: "PUT" }
+        );
+        assert.equal(missingBody.status, 400);
+        assert.equal(missingBody.body.error, "Content required");
 
         const oversizedContent = await requestJson<{ error: string }>(
             server,

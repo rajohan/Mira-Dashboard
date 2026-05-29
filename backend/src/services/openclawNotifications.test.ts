@@ -180,10 +180,12 @@ describe("OpenClaw update notifications", () => {
         await runOpenClawNotificationCheck();
         await first;
         assert.equal(openClawNotifications().length, 1);
+        const stateBeforeMalformedCache = getState();
 
         process.env.FAKE_OPENCLAW_MISSING_VERSION = "true";
         await runOpenClawNotificationCheck();
         assert.equal(openClawNotifications().length, 1);
+        assert.deepEqual(getState(), stateBeforeMalformedCache);
     });
 
     it("starts the monitor with a safe interval fallback", async () => {

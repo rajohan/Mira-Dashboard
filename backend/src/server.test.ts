@@ -597,6 +597,28 @@ describe("server bootstrap", () => {
 
             startBackendServer(41_001);
             assert.equal(listenedPort, 41_001);
+            server.emit("listening");
+            let pendingStartListenCalls = 0;
+            server.listen = ((port: number) => {
+                listenedPort = port;
+                pendingStartListenCalls += 1;
+                return server;
+            }) as typeof server.listen;
+            listenedPort = undefined;
+            startBackendServer(41_003);
+            startBackendServer(41_004);
+            assert.equal(pendingStartListenCalls, 1);
+            assert.equal(listenedPort, 41_003);
+            (server.listeners("error").at(-1) as (() => void) | undefined)?.();
+            startBackendServer(41_004);
+            assert.equal(pendingStartListenCalls, 2);
+            assert.equal(listenedPort, 41_004);
+            server.emit("listening");
+            server.listen = ((port: number, listener?: () => void) => {
+                listenedPort = port;
+                listener?.();
+                return server;
+            }) as typeof server.listen;
             try {
                 server.address = (() => ({
                     address: "127.0.0.1",

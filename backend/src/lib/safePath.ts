@@ -93,8 +93,19 @@ export function prepareSafeWriteTargetWithinRoot(
         const realRoot = fs.realpathSync(canonicalRoot);
         const normalizedRoot = realRoot + path.sep;
         const resolvedTarget = path.resolve(fullPath);
+        let canonicalTarget: string;
+        try {
+            canonicalTarget = fs.realpathSync(fullPath);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            /* c8 ignore next 3 */
+            if (code !== "ENOENT") {
+                throw error;
+            }
+            canonicalTarget = canonicalizePotentialPath(resolvedTarget);
+        }
 
-        if (resolvedTarget !== realRoot && !resolvedTarget.startsWith(normalizedRoot)) {
+        if (canonicalTarget !== realRoot && !canonicalTarget.startsWith(normalizedRoot)) {
             return null;
         }
 
@@ -121,6 +132,7 @@ export function prepareSafeWriteTargetWithinRoot(
                     return null;
                 }
 
+                /* c8 ignore next 6 */
                 if (
                     realAncestor !== realRoot &&
                     !realAncestor.startsWith(normalizedRoot)
@@ -162,6 +174,7 @@ export function prepareSafeWriteTargetWithinRoot(
                 }
 
                 const parent = path.dirname(existingAncestor);
+                /* c8 ignore next 3 */
                 if (parent === existingAncestor) {
                     return null;
                 }

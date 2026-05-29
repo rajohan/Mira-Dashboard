@@ -178,6 +178,22 @@ describe("notifications routes", () => {
         assert.equal(first.body.ok, true);
         assert.equal(typeof first.body.id, "number");
 
+        const whitespaceFields = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Whitespace fields",
+                    description: "Body",
+                    source: "   ",
+                    dedupeKey: "   ",
+                    metadata: [],
+                },
+            }
+        );
+        assert.equal(whitespaceFields.status, 200);
+
         const upsert = await requestJson<{ ok: true; id: number | null }>(
             server,
             "/api/notifications",
@@ -206,6 +222,13 @@ describe("notifications routes", () => {
 
         assert.equal(list.status, 200);
         assert.equal(list.body.readCount >= 0, true);
+        const whitespaceItem = list.body.items.find(
+            (notification) => notification.id === whitespaceFields.body.id
+        );
+        assert.ok(whitespaceItem);
+        assert.equal(whitespaceItem.source, null);
+        assert.equal(whitespaceItem.dedupeKey, null);
+        assert.deepEqual(whitespaceItem.metadata, {});
         const item = list.body.items.find(
             (notification) => notification.dedupeKey === `${source}:same`
         );

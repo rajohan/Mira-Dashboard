@@ -1,7 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
-import { nullableString, objectFallback } from "../lib/values.js";
+import { nullableString, objectFallback, stringFallback } from "../lib/values.js";
 import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 
 /** Defines notification type. */
@@ -97,10 +97,12 @@ export default function notificationsRoutes(app: express.Application): void {
         const title = (req.body?.title || "").toString().trim();
         const description = (req.body?.description || "").toString().trim();
         const type = (req.body?.type || "info").toString() as NotificationType;
-        const source = nullableString(req.body?.source);
-        const dedupeKey = nullableString(req.body?.dedupeKey);
+        const source = nullableString(stringFallback(req.body?.source).trim());
+        const dedupeKey = nullableString(stringFallback(req.body?.dedupeKey).trim());
         const metadata =
-            req.body?.metadata && typeof req.body.metadata === "object"
+            req.body?.metadata &&
+            typeof req.body.metadata === "object" &&
+            !Array.isArray(req.body.metadata)
                 ? objectFallback(req.body.metadata)
                 : {};
         const occurredAt = req.body?.occurredAt
@@ -172,7 +174,9 @@ export default function notificationsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/notifications/clear-read", express.json(), ((req, res) => {
-        const source = nullableString(req.body?.source ?? req.query.source);
+        const source = nullableString(
+            stringFallback(req.body?.source ?? req.query.source).trim()
+        );
         const result = source
             ? db
                   .prepare("DELETE FROM notifications WHERE is_read = 1 AND source = ?")

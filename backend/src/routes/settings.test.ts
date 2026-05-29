@@ -153,6 +153,7 @@ describe("settings routes", () => {
     });
 
     it("merges, persists, and reloads settings", async () => {
+        const alternateHome = await mkdtemp(path.join(os.tmpdir(), "mira-settings-alt-"));
         const updated = await requestJson<{
             theme: string;
             sidebarCollapsed: boolean;
@@ -182,6 +183,42 @@ describe("settings routes", () => {
 
         assert.equal(reloaded.body.theme, "system");
         assert.equal(reloaded.body.sidebarCollapsed, true);
+
+        const originalHome = process.env.HOME;
+        try {
+            process.env.HOME = alternateHome;
+            const alternate = await requestJson<{
+                theme: string;
+                sidebarCollapsed: boolean;
+            }>(server, "/api/settings");
+            assert.equal(alternate.body.theme, "dark");
+
+            const alternateUpdate = await requestJson<{ theme: string }>(
+                server,
+                "/api/settings",
+                {
+                    method: "PUT",
+                    body: { theme: "light" },
+                }
+            );
+            assert.equal(alternateUpdate.status, 200);
+            assert.equal(
+                JSON.parse(
+                    await readFile(
+                        path.join(alternateHome, ".openclaw", "dashboard-settings.json"),
+                        "utf8"
+                    )
+                ).theme,
+                "light"
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+            await rm(alternateHome, { recursive: true, force: true });
+        }
     });
 
     it("validates settings updates before writing them", async () => {

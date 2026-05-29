@@ -63,6 +63,13 @@ describe("safe path helpers", () => {
 
             assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
 
+            const insideTarget = path.join(root, "inside-link.txt");
+            await writeFile(path.join(root, "inside-real.txt"), "inside", "utf8");
+            await symlink(path.join(root, "inside-real.txt"), insideTarget);
+            assert.equal(prepareSafeWriteTargetWithinRoot(insideTarget, root), null);
+
+            await rm(target, { force: true });
+            await writeFile(target, "regular", "utf8");
             fs.lstatSync = ((lstatTarget: fs.PathLike) => {
                 if (String(lstatTarget) === target) {
                     const error = new Error("permission denied") as NodeJS.ErrnoException;
@@ -113,10 +120,23 @@ describe("safe path helpers", () => {
     it("rejects write targets when existing or raced parents are not directories", async () => {
         const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
         const originalMkdirSync = fs.mkdirSync;
+        const originalRealpathSync = fs.realpathSync;
         try {
             const root = path.join(baseDir, "workspace");
             await mkdir(root, { recursive: true });
             await writeFile(path.join(root, "file-parent"), "not a directory", "utf8");
+
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath.endsWith(path.join("file-parent", "note.txt"))) {
+                    const error = new Error("missing target") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
 
             assert.equal(
                 prepareSafeWriteTargetWithinRoot(
@@ -126,6 +146,7 @@ describe("safe path helpers", () => {
                 null
             );
 
+            fs.realpathSync = originalRealpathSync;
             fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
@@ -146,6 +167,7 @@ describe("safe path helpers", () => {
             );
         } finally {
             fs.mkdirSync = originalMkdirSync;
+            fs.realpathSync = originalRealpathSync;
             await rm(baseDir, { recursive: true, force: true });
         }
     });
@@ -323,6 +345,7 @@ describe("safe path helpers", () => {
         );
         const originalRealpathSync = fs.realpathSync;
         const originalMkdirSync = fs.mkdirSync;
+        const originalStatSync = fs.statSync;
         try {
             fs.realpathSync = (() => {
                 const error = new Error("missing") as NodeJS.ErrnoException;
@@ -360,6 +383,29 @@ describe("safe path helpers", () => {
             );
 
             fs.mkdirSync = originalMkdirSync;
+            fs.realpathSync = originalRealpathSync;
+            fs.statSync = ((target: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath.endsWith(path.join("workspace", "stat-raced"))) {
+                    return {
+                        ...originalStatSync(root),
+                        isDirectory: () => false,
+                    };
+                }
+                return originalStatSync(target);
+            }) as typeof fs.statSync;
+
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(root, "stat-raced", "note.txt"),
+                    root
+                ),
+                null
+            );
+
+            fs.statSync = originalStatSync;
             fs.realpathSync = ((target: fs.PathLike) => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
@@ -380,6 +426,7 @@ describe("safe path helpers", () => {
         } finally {
             fs.realpathSync = originalRealpathSync;
             fs.mkdirSync = originalMkdirSync;
+            fs.statSync = originalStatSync;
             await rm(baseDir, { recursive: true, force: true });
             await rm(outsideDir, { recursive: true, force: true });
         }

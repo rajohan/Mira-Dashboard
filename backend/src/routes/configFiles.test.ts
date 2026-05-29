@@ -546,6 +546,14 @@ describe("config files routes", () => {
         assert.equal(missingContent.status, 400);
         assert.equal(missingContent.body.error, "Content required");
 
+        const missingBody = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/openclaw.json",
+            { method: "PUT" }
+        );
+        assert.equal(missingBody.status, 400);
+        assert.equal(missingBody.body.error, "Content required");
+
         const openclawPath = path.join(openclawRoot, "openclaw.json");
         const openclawBeforeInvalid = await readFile(openclawPath, "utf8");
 

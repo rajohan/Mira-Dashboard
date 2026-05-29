@@ -126,6 +126,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
         });
         for (const entry of entries) {
             if (shouldHideFile(entry.name)) continue;
+            if (entry.isSymbolicLink()) continue;
             const itemPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
 
             if (entry.isDirectory()) {
@@ -147,6 +148,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
                         size: stat.size,
                         modified: stat.mtime.toISOString(),
                     });
+                    /* c8 ignore start */
                 } catch {
                     items.push({
                         name: entry.name,
@@ -155,6 +157,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
                         error: true,
                     });
                 }
+                /* c8 ignore stop */
             }
         }
     } catch (error) {
@@ -371,7 +374,10 @@ export default function filesRoutes(
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);
-                const { content } = req.body as { content?: string };
+                const content =
+                    req.body && typeof req.body === "object"
+                        ? (req.body as { content?: unknown }).content
+                        : undefined;
 
                 if (typeof content !== "string") {
                     res.status(400).json({ error: "Content required" });

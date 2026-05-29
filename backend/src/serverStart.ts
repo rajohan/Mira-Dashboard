@@ -12,6 +12,8 @@ import {
     stopQuotaNotificationMonitor,
 } from "./services/quotaNotifications.js";
 
+let isStarting = false;
+
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
@@ -50,9 +52,16 @@ export function handleServerListening(): void {
 
 /** Binds the HTTP server and starts runtime-only background services. */
 export function startBackendServer(port = resolveListenPort()): void {
-    if (server.listening || server.address() !== null) {
+    if (server.listening || server.address() !== null || isStarting) {
         return;
     }
+    isStarting = true;
+    server.once("listening", () => {
+        isStarting = false;
+    });
+    server.once("error", () => {
+        isStarting = false;
+    });
     server.listen(port, handleServerListening);
 }
 

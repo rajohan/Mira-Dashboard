@@ -23,8 +23,9 @@ function resolveSettingsDir(home = process.env.HOME): string {
     return path.resolve(path.join(normalizedHome, ".openclaw"));
 }
 
-const SETTINGS_DIR = resolveSettingsDir();
-const SETTINGS_FILE = path.join(SETTINGS_DIR, "dashboard-settings.json");
+function resolveSettingsFile(): string {
+    return path.join(resolveSettingsDir(), "dashboard-settings.json");
+}
 
 const DEFAULT_SETTINGS: Settings = {
     theme: "dark",
@@ -36,7 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
 /** Performs load settings. */
 function loadSettings(): Settings {
     try {
-        const content = fs.readFileSync(SETTINGS_FILE, "utf8");
+        const content = fs.readFileSync(resolveSettingsFile(), "utf8");
         return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
     } catch {
         // File doesn't exist or is unreadable; return defaults
@@ -97,9 +98,10 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
 
 /** Performs save settings. */
 async function saveSettings(settings: Settings): Promise<void> {
-    mkdirGuarded(guardedPath(SETTINGS_DIR), { recursive: true });
+    const settingsDir = resolveSettingsDir();
+    mkdirGuarded(guardedPath(settingsDir), { recursive: true });
     await writeTextNoFollowGuarded(
-        guardedPath(SETTINGS_FILE),
+        guardedPath(path.join(settingsDir, "dashboard-settings.json")),
         JSON.stringify(settings, null, 2)
     );
 }
@@ -144,4 +146,5 @@ export default function settingsRoutes(
 
 export const __testing = {
     resolveSettingsDir,
+    resolveSettingsFile,
 };

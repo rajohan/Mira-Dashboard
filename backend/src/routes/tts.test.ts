@@ -120,7 +120,6 @@ describe("TTS routes", () => {
     });
 
     it("forwards ElevenLabs error responses", async () => {
-        const testOriginalFetch = globalThis.fetch;
         process.env.ELEVENLABS_API_KEY = "test-key";
         try {
             globalThis.fetch = async () =>
@@ -145,12 +144,11 @@ describe("TTS routes", () => {
             assert.equal(fallback.status, 502);
             assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
         } finally {
-            globalThis.fetch = testOriginalFetch;
+            globalThis.fetch = originalFetch;
         }
     });
 
     it("surfaces speech generation exceptions", async () => {
-        const testOriginalFetch = globalThis.fetch;
         process.env.ELEVENLABS_API_KEY = "test-key";
         try {
             globalThis.fetch = async () => {
@@ -172,7 +170,7 @@ describe("TTS routes", () => {
             assert.equal(fallback.status, 500);
             assert.equal(fallback.body.error, "Failed to generate speech");
         } finally {
-            globalThis.fetch = testOriginalFetch;
+            globalThis.fetch = originalFetch;
         }
     });
 });

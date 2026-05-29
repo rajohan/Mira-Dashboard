@@ -300,7 +300,11 @@ export default function configFilesRoutes(
         asyncRoute(
             async (req, res) => {
                 const filePath = req.params[0];
-                const { content } = req.body as { content?: string };
+                if (!req.body || typeof req.body !== "object") {
+                    res.status(400).json({ error: "Content required" });
+                    return;
+                }
+                const { content } = req.body as { content?: unknown };
 
                 if (content === undefined) {
                     res.status(400).json({ error: "Content required" });
