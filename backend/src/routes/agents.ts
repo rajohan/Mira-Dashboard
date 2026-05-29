@@ -18,11 +18,8 @@ import {
 import { safePathWithinRoot } from "../lib/safePath.js";
 
 const HOME_DIR = os.homedir();
-if (!HOME_DIR || !Path.isAbsolute(HOME_DIR)) {
-    throw new Error("Server misconfigured: home directory is not configured");
-}
-
-const OPENCLAW_ROOT = Path.join(HOME_DIR, ".openclaw");
+const HAS_CONFIGURED_HOME_DIR = HOME_DIR !== "" && Path.isAbsolute(HOME_DIR);
+const OPENCLAW_ROOT = Path.join(HOME_DIR || Path.sep, ".openclaw");
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
 /** Matches agent ids that are safe to use as path segments. */
@@ -47,7 +44,7 @@ function getRouteParam(value: string | string[] | undefined): string {
 
 /** Returns the canonical sessions directory for a validated agent id. */
 function getSafeAgentSessionsDir(agentId: string): string | null {
-    if (!isValidAgentId(agentId)) {
+    if (!HAS_CONFIGURED_HOME_DIR || !isValidAgentId(agentId)) {
         return null;
     }
 
@@ -58,9 +55,18 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
 
     try {
         const realAgentsDir = FS.realpathSync(AGENTS_DIR);
-        const expectedSessionsDir = Path.join(realAgentsDir, agentId, "sessions");
+        const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
+        const canonicalExpectedSessionsDir = Path.join(
+            realAgentsDir,
+            agentId,
+            "sessions"
+        );
+        const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
         const realSessionsDir = FS.realpathSync(sessionsDir);
-        return realSessionsDir === expectedSessionsDir ? sessionsDir : null;
+        return realSessionsDir === realExpectedSessionsDir &&
+            realExpectedSessionsDir === canonicalExpectedSessionsDir
+            ? sessionsDir
+            : null;
     } catch {
         return null;
     }
@@ -1391,6 +1397,12 @@ export default function agentsRoutes(app: express.Application): void {
                     res.status(400).json({ error: "Provide currentTask" });
                     return;
                 }
+                if (!HAS_CONFIGURED_HOME_DIR) {
+                    res.status(500).json({
+                        error: "Agent home directory is not configured",
+                    });
+                    return;
+                }
 
                 FS.mkdirSync(AGENTS_DIR, { recursive: true });
                 const metadataPath = safePathWithinRoot(
@@ -1407,10 +1419,17 @@ export default function agentsRoutes(app: express.Application): void {
                 mkdirGuarded(guardedPath(metadataDir), { recursive: true });
 
                 const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+                const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
+                const canonicalExpectedSessionsDir = Path.join(
+                    realAgentsDir,
+                    agentId,
+                    "sessions"
+                );
+                const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
                 const realMetadataDir = FS.realpathSync(metadataDir);
                 if (
-                    realMetadataDir !== realAgentsDir &&
-                    !realMetadataDir.startsWith(realAgentsDir + Path.sep)
+                    realMetadataDir !== realExpectedSessionsDir ||
+                    realExpectedSessionsDir !== canonicalExpectedSessionsDir
                 ) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
@@ -1471,7 +1490,7 @@ export default function agentsRoutes(app: express.Application): void {
                 metadata.updatedAt = ts;
 
                 const latestMetadataDir = FS.realpathSync(metadataDir);
-                if (latestMetadataDir !== realMetadataDir) {
+                if (latestMetadataDir !== realExpectedSessionsDir) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }

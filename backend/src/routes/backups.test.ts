@@ -46,13 +46,19 @@ async function startServer(tempDir: string): Promise<TestServer> {
     backupRoutes(app, express);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, resolve);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise((resolve, reject) =>
+                server.close((error) => (error ? reject(error) : resolve()))
+            ),
     };
 }
 
@@ -67,13 +73,19 @@ async function startServerWithDoppler(
     backupRoutes(app, express);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, resolve);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise((resolve, reject) =>
+                server.close((error) => (error ? reject(error) : resolve()))
+            ),
     };
 }
 

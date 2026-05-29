@@ -325,7 +325,7 @@ function toFrontendTaskUpdate(update: DbTaskUpdate) {
 /** Serializes task event payloads without dropping primitive values. */
 function serializeTaskEventPayload(payload: unknown): string {
     return JSON.stringify(
-        typeof payload === "object" || payload === null
+        typeof payload === "object"
             ? objectFallback(payload as object | null | undefined)
             : payload
     );

@@ -2367,18 +2367,40 @@ describe("agents routes", () => {
         const { __testing } = await import("./agents.js");
 
         const savedHome = process.env.HOME;
+        let blankHomeServer: http.Server | null = null;
         try {
             process.env.HOME = "";
-            await assert.rejects(
-                import(`./agents.js?empty-home=${Date.now()}`),
-                /home directory is not configured/u
+            const { default: blankHomeAgentsRoutes } = await import(
+                `./agents.js?empty-home=${Date.now()}`
             );
+            const blankHomeApp = express();
+            blankHomeApp.use(express.json());
+            blankHomeAgentsRoutes(blankHomeApp);
+            blankHomeServer = http.createServer(blankHomeApp);
+            await new Promise<void>((resolve, reject) => {
+                blankHomeServer?.once("error", reject);
+                blankHomeServer?.listen(0, resolve);
+            });
+            const blankHomeAddress = blankHomeServer.address();
+            assert.ok(blankHomeAddress && typeof blankHomeAddress === "object");
+            const blankHomeResponse = await fetch(
+                `http://127.0.0.1:${blankHomeAddress.port}/api/agents/blank-home/metadata`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ currentTask: "blocked" }),
+                }
+            );
+            assert.equal(blankHomeResponse.status, 500);
+
             process.env.HOME = "relative-home";
-            await assert.rejects(
-                import(`./agents.js?relative-home=${Date.now()}`),
-                /home directory is not configured/u
-            );
+            await import(`./agents.js?relative-home=${Date.now()}`);
         } finally {
+            if (blankHomeServer) {
+                await new Promise<void>((resolve, reject) =>
+                    blankHomeServer?.close((error) => (error ? reject(error) : resolve()))
+                );
+            }
             process.env.HOME = savedHome;
         }
 
@@ -3031,7 +3053,7 @@ describe("agents routes", () => {
                 const value = originalRealpathSync(target).toString();
                 if (
                     value.endsWith(`${path.sep}swap-agent${path.sep}sessions`) &&
-                    ++metadataDirCalls === 2
+                    ++metadataDirCalls === 3
                 ) {
                     return path.join(homeDir, ".openclaw", "agents");
                 }
