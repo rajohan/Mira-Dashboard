@@ -162,8 +162,13 @@ export default function notificationsRoutes(app: express.Application): void {
         res.json({ ok: true });
     }) as RequestHandler);
 
-    app.post("/api/notifications/clear-read", ((_, res) => {
-        const result = db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
+    app.post("/api/notifications/clear-read", express.json(), ((req, res) => {
+        const source = nullableString(req.body?.source ?? req.query.source);
+        const result = source
+            ? db
+                  .prepare("DELETE FROM notifications WHERE is_read = 1 AND source = ?")
+                  .run(source)
+            : db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
         res.json({ ok: true, deleted: result.changes });
     }) as RequestHandler);
 

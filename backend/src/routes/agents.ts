@@ -1197,9 +1197,13 @@ async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> 
                 status.sessionKey = matchingSession.key;
             }
             applyGatewaySessionStatus(status, matchingSession);
-            status.model =
-                matchingSession?.model && matchingSession.model !== configuredModel
+            const sessionModel =
+                matchingSession?.model && matchingSession.model !== "Unknown"
                     ? matchingSession.model
+                    : undefined;
+            status.model =
+                sessionModel && sessionModel !== configuredModel
+                    ? sessionModel
                     : configuredModel;
             return status;
         })
@@ -1230,10 +1234,12 @@ async function buildSingleAgentStatus(
         status.sessionKey = matchingSession.key;
     }
     applyGatewaySessionStatus(status, matchingSession);
-    status.model =
-        matchingSession?.model && matchingSession.model !== configuredModel
+    const sessionModel =
+        matchingSession?.model && matchingSession.model !== "Unknown"
             ? matchingSession.model
-            : configuredModel;
+            : undefined;
+    status.model =
+        sessionModel && sessionModel !== configuredModel ? sessionModel : configuredModel;
 
     return status;
 }

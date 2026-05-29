@@ -342,15 +342,15 @@ describe("notifications routes", () => {
         const noReadLeft = await requestJson<{ ok: true; deleted: number }>(
             server,
             "/api/notifications/clear-read",
-            { method: "POST" }
+            { method: "POST", body: { source } }
         );
         assert.equal(noReadLeft.status, 200);
-        assert.ok(noReadLeft.body.deleted > 0);
+        assert.equal(noReadLeft.body.deleted, ownItems.length);
 
         const stillNoReadLeft = await requestJson<{ ok: true; deleted: number }>(
             server,
             "/api/notifications/clear-read",
-            { method: "POST" }
+            { method: "POST", body: { source } }
         );
         assert.equal(stillNoReadLeft.status, 200);
         assert.equal(stillNoReadLeft.body.deleted, 0);

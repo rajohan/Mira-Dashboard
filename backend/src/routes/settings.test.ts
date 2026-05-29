@@ -45,14 +45,25 @@ async function startServer(
 
         return {
             baseUrl: `http://127.0.0.1:${address.port}`,
-            close: () => new Promise((resolve) => server.close(() => resolve())),
+            close: () =>
+                new Promise((resolve) =>
+                    server.close(() => {
+                        if (originalHome === undefined) {
+                            delete process.env.HOME;
+                        } else {
+                            process.env.HOME = originalHome;
+                        }
+                        resolve();
+                    })
+                ),
         };
-    } finally {
+    } catch (error) {
         if (originalHome === undefined) {
             delete process.env.HOME;
         } else {
             process.env.HOME = originalHome;
         }
+        throw error;
     }
 }
 

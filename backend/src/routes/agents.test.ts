@@ -744,6 +744,24 @@ describe("agents routes", () => {
             );
             assert.equal(single?.model, "live-model");
             assert.equal(await __testing.buildSingleAgentStatus("missing", config), null);
+
+            gateway.request = async () => ({
+                sessions: [
+                    {
+                        key: "agent:session-key-agent:main",
+                        model: "Unknown",
+                        status: "running",
+                        updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
+                    },
+                ],
+            });
+            const [unknownStatus] = await __testing.buildAgentStatuses(config);
+            assert.equal(unknownStatus.model, "configured-model");
+            const unknownSingle = await __testing.buildSingleAgentStatus(
+                "session-key-agent",
+                config
+            );
+            assert.equal(unknownSingle?.model, "configured-model");
         } finally {
             gateway.request = previousGatewayRequest;
         }

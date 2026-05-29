@@ -180,6 +180,45 @@ describe("ops routes", () => {
         }
     });
 
+    it("encodes PostgreSQL URI credentials and database names", async () => {
+        const { __testing } = await import("./ops.js");
+        const originalUsername = process.env.DATABASE_USERNAME;
+        const originalPassword = process.env.DATABASE_PASSWORD;
+        const originalHost = process.env.DATABASE_HOST;
+        const originalPort = process.env.DATABASE_PORT;
+        try {
+            process.env.DATABASE_USERNAME = "postgres user";
+            process.env.DATABASE_PASSWORD = "p@ss/word";
+            process.env.DATABASE_HOST = "db.example";
+            process.env.DATABASE_PORT = "6543";
+            assert.equal(
+                __testing.buildPostgresUri("n8n/prod db"),
+                "postgresql://postgres%20user:p%40ss%2Fword@db.example:6543/n8n%2Fprod%20db"
+            );
+        } finally {
+            if (originalUsername === undefined) {
+                delete process.env.DATABASE_USERNAME;
+            } else {
+                process.env.DATABASE_USERNAME = originalUsername;
+            }
+            if (originalPassword === undefined) {
+                delete process.env.DATABASE_PASSWORD;
+            } else {
+                process.env.DATABASE_PASSWORD = originalPassword;
+            }
+            if (originalHost === undefined) {
+                delete process.env.DATABASE_HOST;
+            } else {
+                process.env.DATABASE_HOST = originalHost;
+            }
+            if (originalPort === undefined) {
+                delete process.env.DATABASE_PORT;
+            } else {
+                process.env.DATABASE_PORT = originalPort;
+            }
+        }
+    });
+
     it("runs dry-run log rotation with node", async () => {
         const response = await requestJson<{
             success: boolean;

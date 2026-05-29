@@ -62,10 +62,22 @@ function getDefaultOpenClawPackageRoot(): string {
     );
 }
 
-let openClawPackageRoot = getDefaultOpenClawPackageRoot();
+let openClawPackageRootForTest: string | undefined;
 
-let openClawBin =
-    process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw");
+function getOpenClawPackageRoot(): string {
+    return openClawPackageRootForTest ?? getDefaultOpenClawPackageRoot();
+}
+
+let openClawBinForTest: string | undefined;
+
+function getOpenClawBin(): string {
+    if (openClawBinForTest !== undefined) {
+        return openClawBinForTest;
+    }
+    return (
+        process.env.OPENCLAW_BIN || path.join(os.homedir(), ".npm-global/bin/openclaw")
+    );
+}
 
 /** Reads the first available skill description from SKILL.md. */
 function readSkillDescription(skillPath: string): string | undefined {
@@ -101,7 +113,7 @@ function collectSkillDirectories(root: string): string[] {
 
 /** Finds bundled extension skill directories under the OpenClaw package root. */
 function collectExtraSkillDirectories(): string[] {
-    const extensionsRoot = path.join(openClawPackageRoot, "dist/extensions");
+    const extensionsRoot = path.join(getOpenClawPackageRoot(), "dist/extensions");
     try {
         return fs
             .readdirSync(extensionsRoot, { withFileTypes: true })
@@ -160,7 +172,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     }
 
     for (const skillPath of collectSkillDirectories(
-        path.join(openClawPackageRoot, "skills")
+        path.join(getOpenClawPackageRoot(), "skills")
     )) {
         addSkill(skillPath, "builtin");
     }
@@ -249,7 +261,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
 
     app.post("/api/restart", (async (_req, res) => {
         try {
-            await execFileAsync(openClawBin, ["gateway", "restart"], {
+            await execFileAsync(getOpenClawBin(), ["gateway", "restart"], {
                 timeout: 30_000,
             });
             res.json({ ok: true });
@@ -290,17 +302,12 @@ export const __testing = {
     getSkills,
     isValidSkillName,
     readSkillDescription,
-    getOpenClawBinForTest: () => openClawBin,
+    getOpenClawBinForTest: getOpenClawBin,
     setOpenClawBinForTest: (binPath: string | undefined) => {
-        openClawBin =
-            binPath === undefined
-                ? process.env.OPENCLAW_BIN ||
-                  path.join(os.homedir(), ".npm-global/bin/openclaw")
-                : binPath;
+        openClawBinForTest = binPath;
     },
-    getOpenClawPackageRootForTest: () => openClawPackageRoot,
+    getOpenClawPackageRootForTest: getOpenClawPackageRoot,
     setOpenClawPackageRootForTest: (packageRoot: string | undefined) => {
-        openClawPackageRoot =
-            packageRoot === undefined ? getDefaultOpenClawPackageRoot() : packageRoot;
+        openClawPackageRootForTest = packageRoot;
     },
 };

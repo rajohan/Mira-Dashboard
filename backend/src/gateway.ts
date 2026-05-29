@@ -386,6 +386,9 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     try {
         realOpenClawRoot = fs.realpathSync(openClawRoot);
         realAgentDir = fs.realpathSync(agentDir);
+        if (realAgentDir !== Path.resolve(realOpenClawRoot, "agents", agentId)) {
+            return null;
+        }
         realAgentsSessionsRoot = fs.realpathSync(Path.resolve(realAgentDir, "sessions"));
         realTranscriptPath = fs.realpathSync(transcriptPath);
     } catch {

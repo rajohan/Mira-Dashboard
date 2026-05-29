@@ -41,13 +41,18 @@ async function withSkillEnvironment(
     callback: () => Promise<void> | void
 ): Promise<void> {
     const originalHome = process.env.HOME;
-    const originalPackageRoot = __testing.getOpenClawPackageRootForTest();
+    const originalPackageRootEnv = process.env.OPENCLAW_PACKAGE_ROOT;
     try {
         process.env.HOME = homeDir;
         __testing.setOpenClawPackageRootForTest(packageRoot);
         await callback();
     } finally {
-        __testing.setOpenClawPackageRootForTest(originalPackageRoot);
+        __testing.setOpenClawPackageRootForTest(undefined);
+        if (originalPackageRootEnv === undefined) {
+            delete process.env.OPENCLAW_PACKAGE_ROOT;
+        } else {
+            process.env.OPENCLAW_PACKAGE_ROOT = originalPackageRootEnv;
+        }
         if (originalHome === undefined) {
             delete process.env.HOME;
         } else {
@@ -588,7 +593,6 @@ describe("OpenClaw config routes", () => {
 
     it("runs restart through an injected OpenClaw binary", async () => {
         const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-bin-"));
-        const originalOpenClawBin = __testing.getOpenClawBinForTest();
         try {
             const binPath = path.join(tempDir, "openclaw");
             await writeFile(
@@ -628,7 +632,7 @@ throw new Error("restart failed");
             assert.equal(failedRestart.status, 500);
             assert.match(failedRestart.body.error, /Command failed/u);
         } finally {
-            __testing.setOpenClawBinForTest(originalOpenClawBin);
+            __testing.setOpenClawBinForTest(undefined);
             await rm(tempDir, { recursive: true, force: true });
         }
         try {
@@ -641,7 +645,38 @@ throw new Error("restart failed");
                     path.join(os.homedir(), ".npm-global/bin/openclaw")
             );
         } finally {
-            __testing.setOpenClawBinForTest(originalOpenClawBin);
+            __testing.setOpenClawBinForTest(undefined);
+        }
+    });
+
+    it("reads OpenClaw environment defaults lazily", async () => {
+        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-env-"));
+        const originalPackageRootEnv = process.env.OPENCLAW_PACKAGE_ROOT;
+        const originalBinEnv = process.env.OPENCLAW_BIN;
+        try {
+            const envPackageRoot = path.join(tempDir, "env-package-root");
+            const envBin = path.join(tempDir, "openclaw-env");
+            process.env.OPENCLAW_PACKAGE_ROOT = envPackageRoot;
+            process.env.OPENCLAW_BIN = envBin;
+            __testing.setOpenClawPackageRootForTest(undefined);
+            __testing.setOpenClawBinForTest(undefined);
+
+            assert.equal(__testing.getOpenClawPackageRootForTest(), envPackageRoot);
+            assert.equal(__testing.getOpenClawBinForTest(), envBin);
+        } finally {
+            if (originalPackageRootEnv === undefined) {
+                delete process.env.OPENCLAW_PACKAGE_ROOT;
+            } else {
+                process.env.OPENCLAW_PACKAGE_ROOT = originalPackageRootEnv;
+            }
+            if (originalBinEnv === undefined) {
+                delete process.env.OPENCLAW_BIN;
+            } else {
+                process.env.OPENCLAW_BIN = originalBinEnv;
+            }
+            __testing.setOpenClawPackageRootForTest(undefined);
+            __testing.setOpenClawBinForTest(undefined);
+            await rm(tempDir, { recursive: true, force: true });
         }
     });
 });

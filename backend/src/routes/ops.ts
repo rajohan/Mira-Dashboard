@@ -40,7 +40,7 @@ function buildPostgresUri(database = N8N_DATABASE) {
     const password = nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres");
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
-    return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+    return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
 /** Performs read log rotation status. */
@@ -127,3 +127,7 @@ export default function opsRoutes(app: express.Application): void {
         })
     );
 }
+
+export const __testing = {
+    buildPostgresUri,
+};

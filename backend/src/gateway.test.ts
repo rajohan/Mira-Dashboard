@@ -538,6 +538,14 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:main:main", "linked-session"),
             null
         );
+        await symlink(
+            path.join(openclawHome, "agents", "main"),
+            path.join(openclawHome, "agents", "linked-agent")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:linked-agent:main", "session-1"),
+            null
+        );
         assert.equal(
             __testing.isPathInsideRoot("/tmp/openclaw", "/tmp/elsewhere/file"),
             false
