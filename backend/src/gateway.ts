@@ -964,7 +964,6 @@ function shutdown(): void {
     gatewayClient = null;
     isGatewayConnected = false;
     currentToken = null;
-    pendingRequests.clear();
     broadcast({ type: "disconnected", gatewayConnected: false });
 }
 

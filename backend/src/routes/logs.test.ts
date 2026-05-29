@@ -356,50 +356,56 @@ describe("logs routes", () => {
         );
 
         const ws = new FakeWebSocket();
-        subscribeToLogs(ws as never);
+        try {
+            subscribeToLogs(ws as never);
 
-        assert.equal(__testing.subscriberCount(), 1);
-        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
-            type: "log_file",
-            file: todayFile,
-        });
-        assert.deepEqual(
-            ws.sent.slice(1, -1).map((message) => JSON.parse(message)),
-            [
-                { type: "log", line: "ignored blank" },
-                { type: "log", line: "latest one" },
-                { type: "log", line: "latest two" },
-            ]
-        );
-        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
-            type: "log_history_complete",
-            count: 3,
-        });
-
-        unsubscribeFromLogs(ws as never);
-        assert.equal(__testing.subscriberCount(), 0);
-        __testing.resetLogWatcherForTest();
-        await rm(path.join(logsDir, todayFile), { force: true });
+            assert.equal(__testing.subscriberCount(), 1);
+            assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+                type: "log_file",
+                file: todayFile,
+            });
+            assert.deepEqual(
+                ws.sent.slice(1, -1).map((message) => JSON.parse(message)),
+                [
+                    { type: "log", line: "ignored blank" },
+                    { type: "log", line: "latest one" },
+                    { type: "log", line: "latest two" },
+                ]
+            );
+            assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+                type: "log_history_complete",
+                count: 3,
+            });
+        } finally {
+            unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
+            await rm(path.join(logsDir, todayFile), { force: true });
+        }
     });
 
     it("sends empty log history when today's log is missing", async () => {
         const today = new Date().toISOString().split("T")[0];
         const todayFile = `openclaw-${today}.log`;
-        await rm(path.join(logsDir, todayFile), { force: true });
+        const todayPath = path.join(logsDir, todayFile);
+        await rm(todayPath, { force: true });
 
         const ws = new FakeWebSocket();
-        subscribeToLogs(ws as never);
+        try {
+            subscribeToLogs(ws as never);
 
-        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
-            type: "log_file",
-            file: todayFile,
-        });
-        assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
-            type: "log_history_complete",
-            count: 0,
-        });
-
-        __testing.resetLogWatcherForTest();
+            assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+                type: "log_file",
+                file: todayFile,
+            });
+            assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
+                type: "log_history_complete",
+                count: 0,
+            });
+        } finally {
+            unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
+            await rm(todayPath, { force: true });
+        }
     });
 
     it("ignores missing log files during direct polling", async () => {
@@ -418,6 +424,8 @@ describe("logs routes", () => {
             );
         } finally {
             unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
+            await rm(path.join(logsDir, todayFile), { force: true });
         }
     });
 
@@ -435,16 +443,20 @@ describe("logs routes", () => {
             }) as typeof fs.readFileSync;
 
             const ws = new FakeWebSocket();
-            subscribeToLogs(ws as never);
+            try {
+                subscribeToLogs(ws as never);
 
-            assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
-                type: "log_file",
-                file: todayFile,
-            });
-            assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
-                type: "log_history_complete",
-                count: 0,
-            });
+                assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+                    type: "log_file",
+                    file: todayFile,
+                });
+                assert.deepEqual(JSON.parse(ws.sent[1] || "{}"), {
+                    type: "log_history_complete",
+                    count: 0,
+                });
+            } finally {
+                unsubscribeFromLogs(ws as never);
+            }
         } finally {
             fs.readFileSync = originalReadFileSync;
             __testing.resetLogWatcherForTest();
@@ -459,39 +471,41 @@ describe("logs routes", () => {
         await writeFile(todayPath, "initial\n", "utf8");
 
         const ws = new FakeWebSocket();
-        subscribeToLogs(ws as never);
-        ws.sent.length = 0;
+        try {
+            subscribeToLogs(ws as never);
+            ws.sent.length = 0;
 
-        await __testing.pollLogFileForTest();
-        assert.equal(ws.sent.length, 0);
+            await __testing.pollLogFileForTest();
+            assert.equal(ws.sent.length, 0);
 
-        await writeFile(todayPath, "initial\nnext one\n\nnext two\n", "utf8");
-        await __testing.pollLogFileForTest();
+            await writeFile(todayPath, "initial\nnext one\n\nnext two\n", "utf8");
+            await __testing.pollLogFileForTest();
 
-        assert.deepEqual(
-            ws.sent.map((message) => JSON.parse(message)),
-            [
-                { type: "log", line: "next one" },
-                { type: "log", line: "next two" },
-            ]
-        );
+            assert.deepEqual(
+                ws.sent.map((message) => JSON.parse(message)),
+                [
+                    { type: "log", line: "next one" },
+                    { type: "log", line: "next two" },
+                ]
+            );
 
-        ws.sent.length = 0;
-        await writeFile(todayPath, "truncated\n", "utf8");
-        await __testing.pollLogFileForTest();
-        assert.deepEqual(
-            ws.sent.map((message) => JSON.parse(message)),
-            [{ type: "log", line: "truncated" }]
-        );
+            ws.sent.length = 0;
+            await writeFile(todayPath, "truncated\n", "utf8");
+            await __testing.pollLogFileForTest();
+            assert.deepEqual(
+                ws.sent.map((message) => JSON.parse(message)),
+                [{ type: "log", line: "truncated" }]
+            );
 
-        ws.failSend = true;
-        await writeFile(todayPath, "truncated\nignored send error\n", "utf8");
-        await __testing.pollLogFileForTest();
-        assert.equal(__testing.subscriberCount(), 1);
-
-        unsubscribeFromLogs(ws as never);
-        __testing.resetLogWatcherForTest();
-        await rm(todayPath, { force: true });
+            ws.failSend = true;
+            await writeFile(todayPath, "truncated\nignored send error\n", "utf8");
+            await __testing.pollLogFileForTest();
+            assert.equal(__testing.subscriberCount(), 1);
+        } finally {
+            unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
+            await rm(todayPath, { force: true });
+        }
     });
 
     it("serializes watcher ticks and logs polling errors", async () => {

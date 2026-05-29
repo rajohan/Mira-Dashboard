@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
+import { errorMessage } from "../lib/errors.js";
 import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 
 const LOGS_DIR = "/tmp/openclaw";
@@ -83,7 +84,7 @@ function runLogWatcherTick(): void {
     logPollInFlight = true;
     void pollLogFile()
         .catch((error: unknown) => {
-            console.error("[LogWatcher] Error:", (error as Error).message);
+            console.error("[LogWatcher] Error:", errorMessage(error, String(error)));
         })
         .finally(() => {
             logPollInFlight = false;

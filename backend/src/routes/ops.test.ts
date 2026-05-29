@@ -151,8 +151,11 @@ describe("ops routes", () => {
             process.env.DATABASE_HOST = "";
             process.env.DATABASE_PORT = "";
             const { __testing } = await import("./ops.js");
-            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "");
-            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD, "");
+            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "postgres");
+            assert.equal(
+                __testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD,
+                "postgres"
+            );
             const defaultCredentials = await requestJson<{
                 success: boolean;
                 lastRun: { completedAt: string; ok: boolean };
@@ -202,7 +205,7 @@ describe("ops routes", () => {
             process.env.DATABASE_PASSWORD = "";
             assert.equal(
                 __testing.buildPostgresUri("n8n"),
-                "postgresql://:@db.example:6543/n8n"
+                "postgresql://postgres:postgres@db.example:6543/n8n"
             );
         } finally {
             if (originalUsername === undefined) {

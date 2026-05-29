@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
@@ -29,15 +29,15 @@ function buildN8nScriptEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", "postgres"),
-        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", "postgres"),
+        DB_POSTGRESDB_USER: nonEmptyEnvFallback("DATABASE_USERNAME", "postgres"),
+        DB_POSTGRESDB_PASSWORD: nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres"),
     };
 }
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = envFallback("DATABASE_USERNAME", "postgres");
-    const password = envFallback("DATABASE_PASSWORD", "postgres");
+    const username = nonEmptyEnvFallback("DATABASE_USERNAME", "postgres");
+    const password = nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres");
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
     return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
