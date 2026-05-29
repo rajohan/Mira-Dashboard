@@ -2372,9 +2372,9 @@ describe("agents routes", () => {
         try {
             process.env.HOME = "";
             os.homedir = (() => "") as typeof os.homedir;
-            const { default: blankHomeAgentsRoutes } = await import(
-                `./agents.js?empty-home=${Date.now()}`
-            );
+            const { default: blankHomeAgentsRoutes, __testing: blankHomeTesting } =
+                await import(`./agents.js?empty-home=${Date.now()}`);
+            assert.equal(blankHomeTesting.parseAgentsConfig(), null);
             const blankHomeApp = express();
             blankHomeApp.use(express.json());
             blankHomeAgentsRoutes(blankHomeApp);

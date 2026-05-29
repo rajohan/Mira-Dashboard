@@ -157,6 +157,10 @@ describe("server bootstrap", () => {
         assert.equal(parseTrustProxy("true"), true);
         assert.equal(parseTrustProxy("FALSE"), false);
         assert.equal(parseTrustProxy("2"), 2);
+        assert.equal(parseTrustProxy("0010"), 10);
+        assert.equal(parseTrustProxy("+2"), "+2");
+        assert.equal(parseTrustProxy("0x10"), "0x10");
+        assert.equal(parseTrustProxy("1e2"), "1e2");
         assert.equal(parseTrustProxy("public-proxy"), "public-proxy");
         assert.equal(parseTrustProxy(" loopback "), "loopback");
         assert.equal(resolveListenPort("1234"), 1234);

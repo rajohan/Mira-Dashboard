@@ -261,6 +261,36 @@ describe("gateway state and helper utilities", () => {
         }
     });
 
+    it("rejects invalid OpenClaw root configuration at import time", async () => {
+        const originalDashboardHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const originalOpenclawHome = process.env.OPENCLAW_HOME;
+        try {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "relative-home";
+            await assert.rejects(
+                import(`./gateway.js?invalid-dashboard-home=${Date.now()}`),
+                /MIRA_DASHBOARD_OPENCLAW_HOME must be an absolute non-root path/
+            );
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome || "/tmp";
+            process.env.OPENCLAW_HOME = path.parse(process.cwd()).root;
+            await assert.rejects(
+                import(`./gateway.js?invalid-openclaw-home=${Date.now()}`),
+                /OPENCLAW_HOME must be an absolute non-root path/
+            );
+        } finally {
+            if (originalDashboardHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardHome;
+            }
+            if (originalOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenclawHome;
+            }
+        }
+    });
+
     it("transforms Gateway sessions into dashboard session summaries", () => {
         const main = __testing.transformSession({
             channel: "webchat",

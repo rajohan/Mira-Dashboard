@@ -387,7 +387,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 
 /** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
 function parseAgentsConfig(): AgentsConfig | null {
-    const configRoot = ["\0", OPENCLAW_ROOT][Number(HAS_CONFIGURED_HOME_DIR)];
+    const configRoot = HAS_CONFIGURED_HOME_DIR ? OPENCLAW_ROOT : "\0";
     const configPath = Path.join(configRoot, "openclaw.json");
 
     try {

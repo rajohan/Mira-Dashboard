@@ -233,13 +233,15 @@ describe("config files routes", () => {
     it("returns an empty list when the OpenClaw root does not exist", async () => {
         const { __testing } = await import("./configFiles.js");
         const originalHome = process.env.HOME;
+        const originalHomedir = os.homedir;
         try {
             process.env.HOME = "relative-home";
-            assert.equal(
-                __testing.resolveOpenclawRoot(),
-                path.join(os.homedir(), ".openclaw")
-            );
+            assert.equal(__testing.resolveOpenclawRoot(), null);
+            delete process.env.HOME;
+            os.homedir = (() => "relative-home") as typeof os.homedir;
+            assert.equal(__testing.resolveOpenclawRoot(), null);
         } finally {
+            os.homedir = originalHomedir;
             if (originalHome === undefined) {
                 delete process.env.HOME;
             } else {

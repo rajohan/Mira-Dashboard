@@ -15,13 +15,23 @@ import {
 } from "./lib/openclawGatewayClient.js";
 import { nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
 
-const DASHBOARD_OPENCLAW_HOME = nonEmptyEnvFallback(
-    "MIRA_DASHBOARD_OPENCLAW_HOME",
-    Path.join(process.cwd(), "data", "openclaw-client")
+function validateOpenClawRoot(rootPath: string, envName: string): string {
+    if (!Path.isAbsolute(rootPath) || rootPath === Path.parse(rootPath).root) {
+        throw new Error(`${envName} must be an absolute non-root path`);
+    }
+    return rootPath;
+}
+
+const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
+    nonEmptyEnvFallback(
+        "MIRA_DASHBOARD_OPENCLAW_HOME",
+        Path.join(process.cwd(), "data", "openclaw-client")
+    ),
+    "MIRA_DASHBOARD_OPENCLAW_HOME"
 );
-const OPENCLAW_HOME = nonEmptyEnvFallback(
-    "OPENCLAW_HOME",
-    Path.join(os.homedir(), ".openclaw")
+const OPENCLAW_HOME = validateOpenClawRoot(
+    nonEmptyEnvFallback("OPENCLAW_HOME", Path.join(os.homedir(), ".openclaw")),
+    "OPENCLAW_HOME"
 );
 
 /** Performs load or create dashboard device IDentity. */
@@ -954,6 +964,7 @@ export const __testing = {
     enrichRuntimeEventPayload,
     hydrateOmittedChatHistoryImages,
     loadOrCreateDashboardDeviceIdentity,
+    validateOpenClawRoot,
     readRawTranscriptImageMessages,
     getTranscriptPath,
     isPathInsideRoot,

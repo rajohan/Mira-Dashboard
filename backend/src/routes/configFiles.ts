@@ -66,7 +66,7 @@ function resolveOpenclawRoot(): string | null {
         envHome && path.isAbsolute(envHome) && envHome !== path.parse(envHome).root
             ? envHome
             : os.homedir().trim();
-    if (!homeDir || homeDir === path.parse(homeDir).root) {
+    if (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root) {
         return null;
     }
     return path.join(homeDir, ".openclaw");

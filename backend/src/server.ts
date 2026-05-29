@@ -54,9 +54,8 @@ export function parseTrustProxy(value?: string): boolean | number | string {
     if (normalized === "true") return true;
     if (normalized === "false") return false;
 
-    const numeric = Number(normalized);
-    if (Number.isInteger(numeric) && numeric >= 0) {
-        return numeric;
+    if (/^\d+$/u.test(normalized)) {
+        return Number.parseInt(normalized, 10);
     }
 
     return normalized;
