@@ -59,7 +59,8 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
     try {
         const realAgentsDir = FS.realpathSync(AGENTS_DIR);
         const expectedSessionsDir = Path.join(realAgentsDir, agentId, "sessions");
-        return sessionsDir === expectedSessionsDir ? sessionsDir : null;
+        const realSessionsDir = FS.realpathSync(sessionsDir);
+        return realSessionsDir === expectedSessionsDir ? sessionsDir : null;
     } catch {
         return null;
     }

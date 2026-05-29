@@ -154,8 +154,9 @@ function trimOutput(value: string): string {
 
 /** Splits an owner/name GitHub repository identifier. */
 function parseRepoParts(repo: string): { owner: string; name: string } {
-    const [owner, name] = repo.split("/");
-    if (!owner || !name) {
+    const parts = repo.split("/");
+    const [owner, name] = parts;
+    if (parts.length !== 2 || !owner || !name) {
         throw new Error("Dashboard repository must be configured as owner/name");
     }
     return { owner, name };

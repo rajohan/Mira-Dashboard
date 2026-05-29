@@ -104,16 +104,19 @@ async function waitForAsyncHandlers(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
-const openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
 const previousOpenclawHome = process.env.OPENCLAW_HOME;
-process.env.OPENCLAW_HOME = openclawHome;
-
-const gatewayModule = await import("./gateway.js");
-const gateway = gatewayModule.default;
-const { __testing } = gatewayModule;
+let openclawHome: string | undefined;
+let gatewayModule: Awaited<typeof import("./gateway.js")> | undefined;
+let gateway: Awaited<typeof import("./gateway.js")>["default"];
+let __testing: Awaited<typeof import("./gateway.js")>["__testing"];
 
 describe("gateway state and helper utilities", () => {
-    before(() => {
+    before(async () => {
+        openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
+        process.env.OPENCLAW_HOME = openclawHome;
+        gatewayModule = await import("./gateway.js");
+        gateway = gatewayModule.default;
+        __testing = gatewayModule.__testing;
         __testing.resetGatewayStateForTest();
     });
 
@@ -122,13 +125,17 @@ describe("gateway state and helper utilities", () => {
     });
 
     after(async () => {
-        __testing.resetGatewayStateForTest();
+        __testing?.resetGatewayStateForTest();
+        gatewayModule = undefined;
         if (previousOpenclawHome === undefined) {
             delete process.env.OPENCLAW_HOME;
         } else {
             process.env.OPENCLAW_HOME = previousOpenclawHome;
         }
-        await rm(openclawHome, { force: true, recursive: true });
+        if (openclawHome) {
+            await rm(openclawHome, { force: true, recursive: true });
+            openclawHome = undefined;
+        }
     });
 
     it("initializes the Gateway client lifecycle and avoids duplicate starts", async () => {
@@ -347,7 +354,9 @@ describe("gateway state and helper utilities", () => {
     });
 
     it("hydrates omitted chat-history images from raw transcripts", async () => {
-        const transcriptDir = path.join(openclawHome, "agents", "main", "sessions");
+        assert.ok(openclawHome);
+        const home = openclawHome;
+        const transcriptDir = path.join(home, "agents", "main", "sessions");
         await mkdir(transcriptDir, { recursive: true });
         await writeFile(
             path.join(transcriptDir, "session-1.jsonl"),
@@ -506,7 +515,7 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("channel:discord:main", "session-1"),
             null
         );
-        const dottedAgentDir = path.join(openclawHome, "agents", "my.agent", "sessions");
+        const dottedAgentDir = path.join(home, "agents", "my.agent", "sessions");
         await mkdir(dottedAgentDir, { recursive: true });
         await writeFile(path.join(dottedAgentDir, "session-1.jsonl"), "", "utf8");
         assert.equal(__testing.getTranscriptPath("agent:", "session-1"), null);
@@ -528,7 +537,7 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:main:main", "agent:main:main") || "",
             /agents\/main\/sessions\/agent:main:main\.jsonl$/u
         );
-        const outsideTranscript = path.join(openclawHome, "outside.jsonl");
+        const outsideTranscript = path.join(home, "outside.jsonl");
         await writeFile(outsideTranscript, "", "utf8");
         await symlink(
             outsideTranscript,
@@ -539,21 +548,17 @@ describe("gateway state and helper utilities", () => {
             null
         );
         await symlink(
-            path.join(openclawHome, "agents", "main"),
-            path.join(openclawHome, "agents", "linked-agent")
+            path.join(home, "agents", "main"),
+            path.join(home, "agents", "linked-agent")
         );
         assert.equal(
             __testing.getTranscriptPath("agent:linked-agent:main", "session-1"),
             null
         );
-        const linkedSessionsAgentDir = path.join(
-            openclawHome,
-            "agents",
-            "linked-sessions"
-        );
+        const linkedSessionsAgentDir = path.join(home, "agents", "linked-sessions");
         await mkdir(linkedSessionsAgentDir, { recursive: true });
         await symlink(
-            path.join(openclawHome, "agents", "main", "sessions"),
+            path.join(home, "agents", "main", "sessions"),
             path.join(linkedSessionsAgentDir, "sessions")
         );
         assert.equal(

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -122,6 +122,38 @@ describe("notifications routes", () => {
         );
         assert.equal(defaultType.status, 200);
         assert.equal(typeof defaultType.body.id, "number");
+    });
+
+    it("reports insert failures without pruning notifications", async () => {
+        const originalPrepare = db.prepare.bind(db);
+        const consoleError = mock.method(console, "error", () => {});
+        const prepare = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO notifications")) {
+                return { get: () => null } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return originalPrepare(sql);
+        });
+
+        try {
+            const response = await requestJson<{ ok: false; error: string }>(
+                server,
+                "/api/notifications",
+                {
+                    method: "POST",
+                    body: { title: "Broken insert", description: "body", source },
+                }
+            );
+
+            assert.equal(response.status, 500);
+            assert.deepEqual(response.body, {
+                ok: false,
+                error: "Failed to create notification",
+            });
+            assert.equal(consoleError.mock.callCount(), 1);
+        } finally {
+            prepare.mock.restore();
+            consoleError.mock.restore();
+        }
     });
 
     it("creates, upserts, lists, reads, clears, and deletes notifications", async () => {

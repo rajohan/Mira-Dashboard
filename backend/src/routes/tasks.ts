@@ -322,6 +322,15 @@ function toFrontendTaskUpdate(update: DbTaskUpdate) {
     };
 }
 
+/** Serializes task event payloads without dropping primitive values. */
+function serializeTaskEventPayload(payload: unknown): string {
+    return JSON.stringify(
+        typeof payload === "object" || payload === null
+            ? objectFallback(payload as object | null | undefined)
+            : payload
+    );
+}
+
 /** Performs record event. */
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
     db.prepare(
@@ -330,7 +339,7 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
     ).run(
         taskId,
         eventType,
-        JSON.stringify(objectFallback(payload as object | null | undefined)),
+        serializeTaskEventPayload(payload),
         new Date().toISOString()
     );
 }
@@ -344,6 +353,7 @@ export const __testing = {
     normalizeCronJobs,
     normalizeStatus,
     parseRecordJson,
+    serializeTaskEventPayload,
     toFrontendTask,
 };
 

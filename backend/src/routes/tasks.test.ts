@@ -130,6 +130,11 @@ describe("tasks routes", () => {
         assert.deepEqual(__testing.parseRecordJson("{bad"), {});
         assert.deepEqual(__testing.parseRecordJson("[]"), {});
         assert.deepEqual(__testing.parseRecordJson("null"), {});
+        assert.equal(__testing.serializeTaskEventPayload("started"), '"started"');
+        assert.equal(__testing.serializeTaskEventPayload(3), "3");
+        assert.equal(__testing.serializeTaskEventPayload(false), "false");
+        assert.equal(__testing.serializeTaskEventPayload({ ok: true }), '{"ok":true}');
+        assert.equal(__testing.serializeTaskEventPayload(null), "{}");
         assert.equal(__testing.normalizeAutomationInput(null), "{}");
         assert.equal(__testing.normalizeAutomationInput([]), "{}");
         assert.equal(__testing.normalizeAutomationInput({ cronJobId: "   " }), "{}");

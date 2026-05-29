@@ -150,9 +150,18 @@ export default function notificationsRoutes(app: express.Application): void {
             now,
             occurredAt
         );
+        const id = (row as { id?: unknown } | null | undefined)?.id;
+        if (typeof id !== "number") {
+            console.error("[Notifications] Failed to create notification:", row);
+            res.status(500).json({
+                ok: false,
+                error: "Failed to create notification",
+            });
+            return;
+        }
 
         pruneReadNotifications();
-        res.json({ ok: true, id: (row as { id: number }).id });
+        res.json({ ok: true, id });
     }) as RequestHandler);
 
     app.post("/api/notifications/mark-all-read", ((_, res) => {

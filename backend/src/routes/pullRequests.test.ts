@@ -565,9 +565,8 @@ describe("pull request routes", () => {
             owner: "owner",
             name: "repo",
         });
-        assert.deepEqual(__testing.parseRepoParts("owner/repo/extra"), {
-            owner: "owner",
-            name: "repo",
+        assert.throws(() => __testing.parseRepoParts("owner/repo/extra"), {
+            message: "Dashboard repository must be configured as owner/name",
         });
         assert.throws(() => __testing.parseRepoParts("missing-slash"), {
             message: "Dashboard repository must be configured as owner/name",

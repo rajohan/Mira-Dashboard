@@ -487,6 +487,26 @@ describe("agents routes", () => {
             await rm(escapedActivityAgentDir, { force: true });
         }
 
+        const escapedSessionsAgentDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "escaped-sessions-agent"
+        );
+        await mkdir(escapedSessionsAgentDir, { recursive: true });
+        await symlink(
+            externalSessionsRoot,
+            path.join(escapedSessionsAgentDir, "sessions")
+        );
+        try {
+            assert.equal(
+                __testing.getSafeAgentSessionsDir("escaped-sessions-agent"),
+                null
+            );
+        } finally {
+            await rm(escapedSessionsAgentDir, { recursive: true, force: true });
+        }
+
         const staleSessionsDir = path.join(
             homeDir,
             ".openclaw",

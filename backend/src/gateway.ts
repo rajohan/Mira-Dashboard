@@ -605,24 +605,29 @@ function init(token: string): void {
     broadcast({ type: "disconnected", gatewayConnected: false });
     currentToken = token;
     previousGatewayClient?.stop();
-    /** Returns whether this callback belongs to the active Gateway client. */
-    function isCurrentInitGatewayClient(): boolean {
-        return isCurrentGatewayClient(thisGatewayClient);
+    let thisGatewayClient: OpenClawGatewayClientInstance | null = null;
+    /** Returns the active Gateway client when this callback belongs to it. */
+    function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | null {
+        return thisGatewayClient && isCurrentGatewayClient(thisGatewayClient)
+            ? thisGatewayClient
+            : null;
     }
     /** Handles successful Gateway hello negotiation and subscribes to live events. */
     function handleGatewayHelloOk(): void {
-        if (!isCurrentInitGatewayClient()) {
+        const activeClient = getCurrentInitGatewayClient();
+        if (!activeClient) {
             return;
         }
         isGatewayConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
         async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
-            if (!isCurrentInitGatewayClient() || !isGatewayConnected) {
+            const currentClient = getCurrentInitGatewayClient();
+            if (!currentClient || !isGatewayConnected) {
                 return;
             }
             try {
-                await thisGatewayClient.request("sessions.subscribe", {});
+                await currentClient.request("sessions.subscribe", {});
             } catch (error) {
                 if (shouldRetrySessionIndexSubscription(attempt)) {
                     const delayMs = 500 * 2 ** attempt;
@@ -640,7 +645,7 @@ function init(token: string): void {
             }
         }
         void subscribeToSessionIndexEvents();
-        void refreshSessions(thisGatewayClient).catch((error) => {
+        void refreshSessions(activeClient).catch((error) => {
             console.error(
                 "[Gateway] Failed to refresh sessions:",
                 errorMessage(error, String(error))
@@ -649,7 +654,8 @@ function init(token: string): void {
     }
     /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
     function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
-        if (!isCurrentInitGatewayClient()) {
+        const activeClient = getCurrentInitGatewayClient();
+        if (!activeClient) {
             return;
         }
         broadcast({
@@ -658,7 +664,7 @@ function init(token: string): void {
             payload: enrichRuntimeEventPayload(evt.event, evt.payload),
         });
         if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
-            void refreshSessions(thisGatewayClient).catch((error) => {
+            void refreshSessions(activeClient).catch((error) => {
                 console.error(
                     "[Gateway] Failed to refresh sessions:",
                     errorMessage(error, String(error))
@@ -668,20 +674,20 @@ function init(token: string): void {
     }
     /** Logs Gateway connection failures. */
     function handleGatewayConnectError(err: Error): void {
-        if (!isCurrentInitGatewayClient()) {
+        if (!getCurrentInitGatewayClient()) {
             return;
         }
         console.error("[Gateway] Connect failed:", err.message);
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
-        if (!isCurrentInitGatewayClient()) {
+        if (!getCurrentInitGatewayClient()) {
             return;
         }
         isGatewayConnected = false;
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
-    const thisGatewayClient = new GatewayClientCtor({
+    thisGatewayClient = new GatewayClientCtor({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
         role: "operator",

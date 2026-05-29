@@ -13,13 +13,31 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function startServer(): Promise<TestServer> {
+async function startServer(
+    createServer: typeof http.createServer = http.createServer
+): Promise<TestServer> {
     const app = express();
     app.use(express.json());
     execRoutes(app, express);
-    const server = http.createServer(app);
+    const server = createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        function cleanup(): void {
+            server.off("listening", handleListening);
+            server.off("error", handleError);
+        }
+        function handleListening(): void {
+            cleanup();
+            resolve();
+        }
+        function handleError(error: Error): void {
+            cleanup();
+            reject(error);
+        }
+        server.once("listening", handleListening);
+        server.once("error", handleError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -89,6 +107,38 @@ describe("exec routes", () => {
     after(async () => {
         await server.close();
         __testing.jobs.clear();
+    });
+
+    it("rejects server startup listen errors", async () => {
+        const listeners = new Map<string, (error?: Error) => void>();
+        const fakeServer = {
+            once(event: string, listener: (error?: Error) => void) {
+                listeners.set(event, listener);
+                return fakeServer;
+            },
+            off(event: string) {
+                listeners.delete(event);
+                return fakeServer;
+            },
+            listen() {
+                queueMicrotask(() =>
+                    listeners.get("error")?.(new Error("listen failed"))
+                );
+                return fakeServer;
+            },
+            address: () => null,
+            close(callback?: (error?: Error) => void) {
+                callback?.();
+                return fakeServer;
+            },
+            listenerCount(event: string) {
+                return listeners.has(event) ? 1 : 0;
+            },
+        } as unknown as http.Server;
+
+        await assert.rejects(() => startServer(() => fakeServer), /listen failed/u);
+        assert.equal(fakeServer.listenerCount("listening"), 0);
+        assert.equal(fakeServer.listenerCount("error"), 0);
     });
 
     it("covers exec helper and cleanup edge cases", () => {
