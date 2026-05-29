@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { Task } from "../types/task";
-import { COLUMN_CONFIG, getColumnId, getPriority, taskMatchesSearch } from "./taskUtils";
+import {
+    COLUMN_CONFIG,
+    getColumnId,
+    getPriority,
+    getTaskUpdatedAtMs,
+    taskMatchesSearch,
+} from "./taskUtils";
 
 /** Builds a task fixture with focused overrides for utility tests. */
 function task(overrides: Partial<Task> = {}): Task {
@@ -76,6 +82,13 @@ describe("task utils", () => {
         expect(taskMatchesSearch(searchableTask, "#8")).toBe(true);
         expect(taskMatchesSearch(searchableTask, "8")).toBe(true);
         expect(taskMatchesSearch(searchableTask, "missing")).toBe(false);
+    });
+
+    it("returns a stable fallback timestamp for malformed updatedAt values", () => {
+        expect(getTaskUpdatedAtMs(task({ updatedAt: "2026-05-10T09:30:00.000Z" }))).toBe(
+            Date.parse("2026-05-10T09:30:00.000Z")
+        );
+        expect(getTaskUpdatedAtMs(task({ updatedAt: "not-a-date" }))).toBe(0);
     });
 
     it("keeps column filters aligned with task column mapping", () => {

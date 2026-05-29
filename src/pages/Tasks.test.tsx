@@ -498,6 +498,33 @@ describe("Tasks page", () => {
         ).toEqual(["Done four", "Done two"]);
     });
 
+    it("sorts malformed updated timestamps after valid timestamps", () => {
+        mockTaskHooks({
+            data: [
+                task({
+                    labels: [{ name: "todo" }, { name: "priority-medium" }],
+                    number: 9,
+                    title: "Malformed updated timestamp",
+                    updatedAt: "not-a-date",
+                }),
+                task({
+                    labels: [{ name: "todo" }, { name: "priority-medium" }],
+                    number: 4,
+                    title: "Valid updated timestamp",
+                    updatedAt: "2026-05-11T02:00:00.000Z",
+                }),
+            ],
+        });
+
+        render(<Tasks />);
+
+        expect(
+            within(screen.getByTestId("column-todo"))
+                .getAllByRole("button")
+                .map((button) => button.textContent)
+        ).toEqual(["Valid updated timestamp", "Malformed updated timestamp"]);
+    });
+
     it("closes the new-task modal without creating a task", async () => {
         const user = userEvent.setup();
 

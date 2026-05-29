@@ -37,7 +37,7 @@ import {
     useUpdateTaskUpdate,
 } from "../hooks";
 import type { ColumnId, Task, TaskAutomation } from "../types/task";
-import { getPriority, taskMatchesSearch } from "../utils/taskUtils";
+import { getPriority, getTaskUpdatedAtMs, taskMatchesSearch } from "../utils/taskUtils";
 
 const ASSIGNMENT_FILTERS = [
     { value: "all", label: "All" },
@@ -90,8 +90,7 @@ export function Tasks() {
         tasksByColumn[col.id] = filteredTasks
             .filter((task) => col.filter(task))
             .sort((a, b) => {
-                const updatedDiff =
-                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                const updatedDiff = getTaskUpdatedAtMs(b) - getTaskUpdatedAtMs(a);
 
                 if (col.id === "done") {
                     return updatedDiff || b.number - a.number;
