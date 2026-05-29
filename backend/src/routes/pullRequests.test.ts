@@ -801,6 +801,7 @@ describe("pull request routes", () => {
         const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
         const originalDashboardWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         const originalMiraToken = process.env.MIRA_GITHUB_TOKEN;
+        const originalMiraBackupToken = process.env.MIRA_GITHUB_TOKEN_BACKUP;
         const originalGhToken = process.env.GH_TOKEN;
         const originalGithubToken = process.env.GITHUB_TOKEN;
         try {
@@ -834,8 +835,12 @@ describe("pull request routes", () => {
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "stale-token");
 
             process.env.MIRA_GITHUB_TOKEN = "mira-token";
-            assert.equal(__testing.buildCommandEnv().GH_TOKEN, "mira-token");
-            assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, "mira-token");
+            process.env.MIRA_GITHUB_TOKEN_BACKUP = "backup-token";
+            const miraEnv = __testing.buildCommandEnv();
+            assert.equal(miraEnv.GH_TOKEN, "mira-token");
+            assert.equal(miraEnv.GITHUB_TOKEN, "mira-token");
+            assert.equal(miraEnv.MIRA_GITHUB_TOKEN, undefined);
+            assert.equal(miraEnv.MIRA_GITHUB_TOKEN_BACKUP, undefined);
 
             const pullRequest = await __testing.runGhJson(["pr", "view", "10"]);
             assert.equal(pullRequest.number, 10);
@@ -874,6 +879,11 @@ describe("pull request routes", () => {
                 delete process.env.MIRA_GITHUB_TOKEN;
             } else {
                 process.env.MIRA_GITHUB_TOKEN = originalMiraToken;
+            }
+            if (originalMiraBackupToken === undefined) {
+                delete process.env.MIRA_GITHUB_TOKEN_BACKUP;
+            } else {
+                process.env.MIRA_GITHUB_TOKEN_BACKUP = originalMiraBackupToken;
             }
             if (originalGhToken === undefined) {
                 delete process.env.GH_TOKEN;

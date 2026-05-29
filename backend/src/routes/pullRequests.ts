@@ -170,6 +170,11 @@ function buildCommandEnv(): NodeJS.ProcessEnv {
         process.env.GITHUB_TOKEN?.trim() ||
         "";
     const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+        if (key === "MIRA_GITHUB_TOKEN" || key.startsWith("MIRA_GITHUB_TOKEN_")) {
+            delete env[key];
+        }
+    }
     if (githubToken) {
         env.GH_TOKEN = githubToken;
         env.GITHUB_TOKEN = githubToken;

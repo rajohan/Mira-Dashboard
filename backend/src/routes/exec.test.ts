@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import { after, before, describe, it, mock } from "node:test";
@@ -97,6 +98,26 @@ async function waitForJob(
     throw new Error(`Timed out waiting for exec job ${jobId}`);
 }
 
+async function terminateChildProcess(child: ChildProcess): Promise<void> {
+    if (child.killed || child.exitCode !== null || child.signalCode !== null) {
+        return;
+    }
+
+    const waitForExit = new Promise<void>((resolve) => {
+        child.once("exit", () => resolve());
+        child.once("close", () => resolve());
+    });
+    const timeout = new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 250);
+    });
+
+    child.kill("SIGTERM");
+    if ((await Promise.race([waitForExit, timeout])) === "timeout") {
+        child.kill("SIGKILL");
+        await waitForExit;
+    }
+}
+
 describe("exec routes", () => {
     let server: TestServer;
 
@@ -105,8 +126,13 @@ describe("exec routes", () => {
     });
 
     after(async () => {
-        await server.close();
+        for (const job of __testing.jobs.values()) {
+            if (job.process) {
+                await terminateChildProcess(job.process);
+            }
+        }
         __testing.jobs.clear();
+        await server.close();
     });
 
     it("rejects server startup listen errors", async () => {

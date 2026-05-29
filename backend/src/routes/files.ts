@@ -112,7 +112,16 @@ function listDirectory(dirPath: string): FileItem[] | null {
         if (!fullPath) {
             return null;
         }
-        const entries = readdirGuarded(guardedPath(fullPath), {
+        const resolvedFullPath = safePathWithinRoot(
+            fs.realpathSync(fullPath),
+            workspaceRoot
+        );
+        /* c8 ignore next 3 */
+        if (!resolvedFullPath) {
+            return null;
+        }
+
+        const entries = readdirGuarded(guardedPath(resolvedFullPath), {
             withFileTypes: true,
         });
         for (const entry of entries) {
@@ -129,7 +138,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
                 // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
                 try {
                     const stat = statGuarded(
-                        guardedPath(path.join(fullPath, entry.name))
+                        guardedPath(path.join(resolvedFullPath, entry.name))
                     );
                     items.push({
                         name: entry.name,
@@ -358,7 +367,7 @@ export default function filesRoutes(
     // Write file
     app.put(
         /^\/api\/files\/(.*)$/,
-        express.json(),
+        express.json({ limit: MAX_FILE_SIZE }),
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);
@@ -366,6 +375,10 @@ export default function filesRoutes(
 
                 if (typeof content !== "string") {
                     res.status(400).json({ error: "Content required" });
+                    return;
+                }
+                if (Buffer.byteLength(content, "utf8") > MAX_FILE_SIZE) {
+                    res.status(413).json({ error: "File is too large to write" });
                     return;
                 }
 

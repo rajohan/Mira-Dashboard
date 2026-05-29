@@ -335,12 +335,29 @@ describe("metrics routes", () => {
                     displayLabel: "",
                     channel: "webchat",
                 },
+                {
+                    id: "blank-model-id",
+                    key: "agent:blank:main",
+                    type: "   ",
+                    agentType: "blank",
+                    hookName: "",
+                    kind: "direct",
+                    model: "   ",
+                    tokenCount: 0,
+                    maxTokens: 200_000,
+                    createdAt: null,
+                    updatedAt: Date.now(),
+                    displayName: "",
+                    label: "  Blank model  ",
+                    displayLabel: "   ",
+                    channel: "webchat",
+                },
             ];
 
             assert.deepEqual(__testing.getTokenMetrics(), {
                 total: 0,
                 byModel: { "provider/": 0, unknown: 0 },
-                sessionsByModel: { "provider/": 1, unknown: 1 },
+                sessionsByModel: { "provider/": 1, unknown: 2 },
                 byAgent: [
                     {
                         label: "Fallback label",
@@ -351,6 +368,12 @@ describe("metrics routes", () => {
                     {
                         label: "Trailing model",
                         model: "provider/",
+                        tokens: 0,
+                        type: "Unknown",
+                    },
+                    {
+                        label: "Blank model",
+                        model: "unknown",
                         tokens: 0,
                         type: "Unknown",
                     },

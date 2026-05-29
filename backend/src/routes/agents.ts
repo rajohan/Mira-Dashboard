@@ -18,8 +18,9 @@ import {
 import { safePathWithinRoot } from "../lib/safePath.js";
 
 const HOME_DIR = os.homedir();
-const HAS_CONFIGURED_HOME_DIR = HOME_DIR !== "" && Path.isAbsolute(HOME_DIR);
-const OPENCLAW_ROOT = Path.join(HOME_DIR || Path.sep, ".openclaw");
+const HAS_CONFIGURED_HOME_DIR =
+    HOME_DIR.length > 0 && Path.resolve(HOME_DIR) === HOME_DIR;
+const OPENCLAW_ROOT = Path.join(HOME_DIR, ".openclaw");
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 
 /** Matches agent ids that are safe to use as path segments. */
@@ -74,7 +75,7 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
 
 /** Returns activity log roots for an agent, including Codex-native rollout logs. */
 function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
-    if (!isValidAgentId(agentId)) {
+    if (!HAS_CONFIGURED_HOME_DIR || !isValidAgentId(agentId)) {
         return [];
     }
 
@@ -386,7 +387,8 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 
 /** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
 function parseAgentsConfig(): AgentsConfig | null {
-    const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
+    const configRoot = ["\0", OPENCLAW_ROOT][Number(HAS_CONFIGURED_HOME_DIR)];
+    const configPath = Path.join(configRoot, "openclaw.json");
 
     try {
         if (!FS.existsSync(configPath)) {
@@ -1303,6 +1305,12 @@ export default function agentsRoutes(app: express.Application): void {
         "/api/agents/config",
         asyncRoute(
             async (_req, res) => {
+                if (!HAS_CONFIGURED_HOME_DIR) {
+                    res.status(500).json({
+                        error: "Agent home directory is not configured",
+                    });
+                    return;
+                }
                 const config = parseAgentsConfig();
                 if (!config) {
                     res.status(404).json({ error: "Agent configuration not found" });
@@ -1320,6 +1328,12 @@ export default function agentsRoutes(app: express.Application): void {
         "/api/agents/status",
         asyncRoute(
             async (_req, res) => {
+                if (!HAS_CONFIGURED_HOME_DIR) {
+                    res.status(500).json({
+                        error: "Agent home directory is not configured",
+                    });
+                    return;
+                }
                 closeStaleActiveTasks();
                 const config = parseAgentsConfig();
                 if (!config) {
@@ -1341,6 +1355,12 @@ export default function agentsRoutes(app: express.Application): void {
                 const agentId = getRouteParam(req.params.id);
                 if (!isValidAgentId(agentId)) {
                     res.status(400).json({ error: "Invalid agent ID" });
+                    return;
+                }
+                if (!HAS_CONFIGURED_HOME_DIR) {
+                    res.status(500).json({
+                        error: "Agent home directory is not configured",
+                    });
                     return;
                 }
 

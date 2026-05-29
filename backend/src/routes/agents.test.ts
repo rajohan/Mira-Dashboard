@@ -2367,9 +2367,11 @@ describe("agents routes", () => {
         const { __testing } = await import("./agents.js");
 
         const savedHome = process.env.HOME;
+        const originalHomedir = os.homedir;
         let blankHomeServer: http.Server | null = null;
         try {
             process.env.HOME = "";
+            os.homedir = (() => "") as typeof os.homedir;
             const { default: blankHomeAgentsRoutes } = await import(
                 `./agents.js?empty-home=${Date.now()}`
             );
@@ -2392,15 +2394,34 @@ describe("agents routes", () => {
                 }
             );
             assert.equal(blankHomeResponse.status, 500);
+            for (const pathName of [
+                "/api/agents/config",
+                "/api/agents/status",
+                "/api/agents/blank-home/status",
+            ]) {
+                const response = await fetch(
+                    `http://127.0.0.1:${blankHomeAddress.port}${pathName}`
+                );
+                assert.equal(response.status, 500);
+                assert.deepEqual(await response.json(), {
+                    error: "Agent home directory is not configured",
+                });
+            }
 
             process.env.HOME = "relative-home";
+            os.homedir = (() => "relative-home") as typeof os.homedir;
             await import(`./agents.js?relative-home=${Date.now()}`);
+
+            delete process.env.HOME;
+            os.homedir = (() => originalHomedir()) as typeof os.homedir;
+            await import(`./agents.js?homedir-home=${Date.now()}`);
         } finally {
             if (blankHomeServer) {
                 await new Promise<void>((resolve, reject) =>
                     blankHomeServer?.close((error) => (error ? reject(error) : resolve()))
                 );
             }
+            os.homedir = originalHomedir;
             process.env.HOME = savedHome;
         }
 

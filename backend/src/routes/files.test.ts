@@ -236,6 +236,8 @@ describe("files routes", () => {
     });
 
     it("covers file helper edge cases", async () => {
+        const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
+        process.env.WORKSPACE_ROOT = workspaceRoot;
         const { __testing } = await import("./files.js");
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
 
@@ -271,7 +273,6 @@ describe("files routes", () => {
             );
             assert.equal(__testing.listDirectory("../../outside"), null);
             assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
-            const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
             const outsideDir = await mkdtemp(
                 path.join(os.tmpdir(), "mira-files-outside-")
             );
@@ -311,6 +312,11 @@ describe("files routes", () => {
                 delete process.env.OPENCLAW_HOME;
             } else {
                 process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            if (originalWorkspaceRoot === undefined) {
+                delete process.env.WORKSPACE_ROOT;
+            } else {
+                process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
             }
         }
     });
@@ -582,6 +588,14 @@ describe("files routes", () => {
         assert.equal(missingContent.status, 400);
         assert.equal(missingContent.body.error, "Content required");
 
+        const oversizedContent = await requestJson<{ error: string }>(
+            server,
+            "/api/files/generated%2Flarge-write.txt",
+            { method: "PUT", body: { content: "x".repeat(1024 * 1024 + 1) } }
+        );
+        assert.equal(oversizedContent.status, 413);
+        assert.equal(oversizedContent.body.error, "File is too large to write");
+
         const deniedWrite = await requestJson<{ error: string }>(
             server,
             "/api/files/..%2Foutside.txt",
@@ -626,7 +640,8 @@ describe("files routes", () => {
 
     it("maps unexpected canonicalization failures to 500 responses", async () => {
         const originalRealpathSync = fs.realpathSync;
-        let mode: "root" | "opened" = "root";
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-files-outside-"));
+        let mode: "root" | "opened" | "escaped-directory" = "root";
         fs.realpathSync = ((target: fs.PathLike) => {
             if (mode === "root" && target === workspaceRoot) {
                 const error = new Error("root unavailable") as NodeJS.ErrnoException;
@@ -643,6 +658,12 @@ describe("files routes", () => {
                 ) as NodeJS.ErrnoException;
                 error.code = "EACCES";
                 throw error;
+            }
+            if (
+                mode === "escaped-directory" &&
+                target === path.join(workspaceRoot, "src")
+            ) {
+                return outsideDir;
             }
             return originalRealpathSync(target);
         }) as typeof fs.realpathSync;
@@ -662,8 +683,20 @@ describe("files routes", () => {
             );
             assert.equal(openedFailure.status, 500);
             assert.equal(openedFailure.body.error, "opened file unavailable");
+
+            mode = "escaped-directory";
+            const escapedDirectory = await requestJson<{ error: string }>(
+                server,
+                "/api/files?path=src"
+            );
+            assert.equal(escapedDirectory.status, 403);
+            assert.equal(
+                escapedDirectory.body.error,
+                "Access denied: path outside workspace"
+            );
         } finally {
             fs.realpathSync = originalRealpathSync;
+            await rm(outsideDir, { recursive: true, force: true });
         }
     });
 

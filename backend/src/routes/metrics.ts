@@ -248,7 +248,7 @@ function getTokenMetrics(): TokenMetrics {
         [];
 
     for (const session of sessions) {
-        const model = stringFallback(session.model) || "unknown";
+        const model = stringFallback(session.model).trim() || "unknown";
         const tokens = session.tokenCount || 0;
 
         totalTokens += tokens;
@@ -264,13 +264,14 @@ function getTokenMetrics(): TokenMetrics {
         // Agent data
         const displayLabel = stringFallback(session.displayLabel).trim();
         const fallbackLabel = stringFallback(session.label).trim();
+        const sessionType = stringFallback(session.type).trim() || "Unknown";
         const agentLabel = displayLabel || fallbackLabel;
         if (agentLabel) {
             byAgent.push({
                 label: agentLabel,
                 model: model,
                 tokens: tokens,
-                type: stringFallback(session.type) || "Unknown",
+                type: sessionType,
             });
         }
     }

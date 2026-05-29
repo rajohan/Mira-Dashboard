@@ -10,7 +10,7 @@ import {
     parseJsonField,
 } from "../lib/cacheStore.js";
 import { errorMessage } from "../lib/errors.js";
-import { envFallback, stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
@@ -205,8 +205,8 @@ export async function refreshCacheKey(key: string) {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
-        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
+        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME,
+        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD,
     };
 
     const [file, ...args] = command;

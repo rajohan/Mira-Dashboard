@@ -56,10 +56,16 @@ async function requestWithoutJsonBody<T>(
     const response = await fetch(`${server.baseUrl}${pathName}`, {
         method: "POST",
     });
+    const contentType = response.headers.get("content-type") || "";
+    const text = contentType.includes("application/json")
+        ? undefined
+        : await response.text();
 
     return {
         status: response.status,
-        body: (await response.json()) as T,
+        body: contentType.includes("application/json")
+            ? ((await response.json()) as T)
+            : ((text || {}) as T),
     };
 }
 
