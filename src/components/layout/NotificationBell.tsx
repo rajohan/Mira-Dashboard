@@ -8,6 +8,7 @@ import {
     useMarkNotificationRead,
     useNotifications,
 } from "../../hooks";
+import type { NotificationItem } from "../../hooks/useNotifications";
 import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";
@@ -15,6 +16,25 @@ import { Dropdown } from "../ui/Dropdown";
 
 /** Defines notification filter. */
 type NotificationFilter = "all" | "unread" | "warning";
+
+/** Returns a sortable timestamp for notifications with graceful fallbacks. */
+function getNotificationTimestamp(notification: NotificationItem): number {
+    const occurredAt = Date.parse(notification.occurredAt);
+
+    if (!Number.isNaN(occurredAt)) {
+        return occurredAt;
+    }
+
+    const createdAt = Date.parse(notification.createdAt);
+    return Number.isNaN(createdAt) ? 0 : createdAt;
+}
+
+/** Formats notification time without surfacing invalid Date text. */
+function formatNotificationTime(notification: NotificationItem): string {
+    const timestamp = getNotificationTimestamp(notification);
+
+    return timestamp > 0 ? formatDate(timestamp) : "Unknown time";
+}
 
 /** Renders the notification bell UI. */
 export function NotificationBell() {
@@ -34,7 +54,7 @@ export function NotificationBell() {
             : `Open notifications, ${unreadCount} unread`;
 
     const sortedItems = [...items].sort(
-        (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+        (a, b) => getNotificationTimestamp(b) - getNotificationTimestamp(a)
     );
 
     const filteredItems = sortedItems.filter((notification) => {
@@ -140,9 +160,7 @@ export function NotificationBell() {
                                             )}
                                         </div>
                                         <span className="text-primary-500 text-xs">
-                                            {formatDate(
-                                                new Date(notification.occurredAt)
-                                            )}
+                                            {formatNotificationTime(notification)}
                                         </span>
                                     </div>
                                     <div className="text-primary-100 text-sm">

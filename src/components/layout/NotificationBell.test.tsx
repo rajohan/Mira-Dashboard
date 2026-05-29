@@ -232,4 +232,59 @@ describe("NotificationBell", () => {
 
         expect(screen.getByText("Clear read").closest("button")).toBeEnabled();
     });
+
+    it("falls back to created time when notification occurred time is invalid", async () => {
+        const user = userEvent.setup();
+        hooks.useNotifications.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        createdAt: "2026-05-10T12:00:00.000Z",
+                        dedupeKey: null,
+                        description: "Malformed event time",
+                        id: 3,
+                        isRead: false,
+                        metadata: {},
+                        occurredAt: "not-a-date",
+                        source: null,
+                        title: "Recovered timestamp",
+                        type: "warning",
+                        updatedAt: "2026-05-10T12:00:00.000Z",
+                    },
+                    {
+                        createdAt: "2026-05-10T08:00:00.000Z",
+                        dedupeKey: null,
+                        description: "Older valid event",
+                        id: 4,
+                        isRead: false,
+                        metadata: {},
+                        occurredAt: "2026-05-10T08:00:00.000Z",
+                        source: null,
+                        title: "Older notification",
+                        type: "info",
+                        updatedAt: "2026-05-10T08:00:00.000Z",
+                    },
+                ],
+                readCount: 0,
+                unreadCount: 2,
+            },
+        });
+
+        render(<NotificationBell />);
+
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open notifications, 2 unread",
+            })
+        );
+
+        expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
+        expect(screen.queryByText("not-a-date")).not.toBeInTheDocument();
+        expect(screen.getAllByText(/10\.05\.2026/u).length).toBeGreaterThan(0);
+
+        const titles = screen
+            .getAllByText(/Recovered timestamp|Older notification/u)
+            .map((element) => element.textContent);
+        expect(titles).toEqual(["Recovered timestamp", "Older notification"]);
+    });
 });
