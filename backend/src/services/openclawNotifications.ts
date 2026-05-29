@@ -123,13 +123,16 @@ export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_M
     }, safeInterval).unref();
 }
 
+/** Stops OpenClaw notification monitor. */
+export function stopOpenClawNotificationMonitor(): void {
+    if (!monitorTimer) {
+        return;
+    }
+    clearInterval(monitorTimer);
+    monitorTimer = undefined;
+}
+
 export const __testing = {
     getState,
-    stopOpenClawNotificationMonitorForTest: () => {
-        if (!monitorTimer) {
-            return;
-        }
-        clearInterval(monitorTimer);
-        monitorTimer = undefined;
-    },
+    stopOpenClawNotificationMonitorForTest: stopOpenClawNotificationMonitor,
 };

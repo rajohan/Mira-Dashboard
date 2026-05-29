@@ -276,7 +276,8 @@ export default function openClawConfigRoutes(app: express.Application): void {
     app.post("/api/skills/:name", express.json(), (async (req, res) => {
         try {
             const name = stringFallback(req.params.name).trim();
-            const enabled = (req.body as { enabled?: unknown }).enabled;
+            const body = req.body as { enabled?: unknown } | null;
+            const enabled = body && typeof body === "object" ? body.enabled : undefined;
             if (!isValidSkillName(name)) {
                 res.status(400).json({ error: "Invalid skill name" });
                 return;

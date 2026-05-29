@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -345,7 +346,7 @@ async function startServer(tempDir: string): Promise<TestServer> {
     let server: http.Server | undefined;
     try {
         const { default: pullRequestsRoutes } = await import(
-            `./pullRequests.js?test=${Date.now()}`
+            `./pullRequests.js?test=${randomUUID()}`
         );
         const app = express();
         app.use(express.json());
@@ -559,7 +560,7 @@ describe("pull request routes", () => {
     });
 
     it("covers pull request route helper edge cases", async () => {
-        const { __testing } = await import(`./pullRequests.js?helpers=${Date.now()}`);
+        const { __testing } = await import(`./pullRequests.js?helpers=${randomUUID()}`);
 
         assert.deepEqual(__testing.parseRepoParts("owner/repo"), {
             owner: "owner",
@@ -672,7 +673,9 @@ describe("pull request routes", () => {
     });
 
     it("covers GitHub JSON-lines parser edge cases", async () => {
-        const { __testing } = await import(`./pullRequests.js?json-lines=${Date.now()}`);
+        const { __testing } = await import(
+            `./pullRequests.js?json-lines=${randomUUID()}`
+        );
         const originalScenario = process.env.FAKE_GH_JSON_LINES;
         try {
             process.env.FAKE_GH_JSON_LINES = "partial";
@@ -797,7 +800,7 @@ describe("pull request routes", () => {
     });
 
     it("covers command environment and JSON command helper edge cases", async () => {
-        const { __testing } = await import(`./pullRequests.js?command=${Date.now()}`);
+        const { __testing } = await import(`./pullRequests.js?command=${randomUUID()}`);
         const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
         const originalDashboardWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         const originalMiraToken = process.env.MIRA_GITHUB_TOKEN;
@@ -808,7 +811,7 @@ describe("pull request routes", () => {
             process.env.MIRA_DASHBOARD_ROOT = "";
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = "";
             const moduleWithDefaultRoots = await import(
-                `./pullRequests.js?roots=${Date.now()}`
+                `./pullRequests.js?roots=${randomUUID()}`
             );
             assert.equal(typeof moduleWithDefaultRoots.default, "function");
             assert.deepEqual(moduleWithDefaultRoots.__testing.getResolvedRoots(), {

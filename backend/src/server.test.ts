@@ -12,6 +12,8 @@ import { WebSocket } from "ws";
 
 import { db, ensureTaskAutomationColumn } from "./db.js";
 import gateway from "./gateway.js";
+import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
+import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 let originalPort: string | undefined;
 let originalTrustProxy: string | undefined;
@@ -512,9 +514,12 @@ describe("server bootstrap", () => {
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
         const originalConsoleError = console.error;
+        const originalSetInterval = globalThis.setInterval;
+        const originalShutdown = gateway.shutdown;
         let initializedToken: string | undefined;
         let listenedPort: number | undefined;
         let closeCalled = false;
+        let shutdownCalled = false;
         const warnings: unknown[][] = [];
         const errors: unknown[][] = [];
         gateway.init = (token: string) => {
@@ -530,6 +535,8 @@ describe("server bootstrap", () => {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -540,6 +547,33 @@ describe("server bootstrap", () => {
             assert.throws(() => handleServerListening(), /gateway failed/u);
             assert.equal(closeCalled, true);
             assert.match(String(errors.at(-1)?.[0]), /Failed to start background/u);
+            server.close = originalClose;
+            closeCalled = false;
+            gateway.init = (token: string) => {
+                initializedToken = token;
+            };
+            gateway.shutdown = () => {
+                shutdownCalled = true;
+            };
+            let intervalCalls = 0;
+            globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+                intervalCalls += 1;
+                if (intervalCalls === 2) {
+                    throw new Error("monitor failed");
+                }
+                return originalSetInterval(...args);
+            }) as typeof setInterval;
+            server.close = (() => {
+                closeCalled = true;
+                return server;
+            }) as typeof server.close;
+            assert.throws(() => handleServerListening(), /monitor failed/u);
+            assert.equal(closeCalled, true);
+            assert.equal(shutdownCalled, true);
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
+            globalThis.setInterval = originalSetInterval;
+            gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {
                 initializedToken = token;
@@ -613,6 +647,10 @@ describe("server bootstrap", () => {
             server.listen = originalListen;
             server.address = originalAddress;
             server.close = originalClose;
+            globalThis.setInterval = originalSetInterval;
+            gateway.shutdown = originalShutdown;
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);
             } else {

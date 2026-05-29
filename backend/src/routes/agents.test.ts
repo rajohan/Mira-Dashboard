@@ -808,6 +808,14 @@ describe("agents routes", () => {
         assert.equal(nonString.status, 400);
         assert.equal(nonString.body.error, "Provide currentTask");
 
+        const nullBody = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT" }
+        );
+        assert.equal(nullBody.status, 400);
+        assert.equal(nullBody.body.error, "Provide currentTask");
+
         const firstTask = await requestJson<{ currentTask: string; updatedAt: string }>(
             server,
             `/api/agents/${agentId}/metadata`,

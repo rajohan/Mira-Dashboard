@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -229,5 +229,42 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         );
         assert.equal(routeRefresh.status, 200);
         assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
+    });
+
+    it("does not pass literal undefined database credentials to refresh commands", async () => {
+        const originalDatabaseUsername = process.env.DATABASE_USERNAME;
+        const originalDatabasePassword = process.env.DATABASE_PASSWORD;
+        const envPath = path.join(tempDir, "refresh-env.json");
+        const refreshCommand = [
+            process.execPath,
+            "-e",
+            `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ user: process.env.DB_POSTGRESDB_USER, password: process.env.DB_POSTGRESDB_PASSWORD }))`,
+        ];
+
+        try {
+            delete process.env.DATABASE_USERNAME;
+            delete process.env.DATABASE_PASSWORD;
+            __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
+
+            await refreshCacheKey("quotas.summary");
+
+            const payload = JSON.parse(await readFile(envPath, "utf8")) as {
+                user?: string;
+                password?: string;
+            };
+            assert.deepEqual(payload, { user: "", password: "" });
+        } finally {
+            if (originalDatabaseUsername === undefined) {
+                delete process.env.DATABASE_USERNAME;
+            } else {
+                process.env.DATABASE_USERNAME = originalDatabaseUsername;
+            }
+            if (originalDatabasePassword === undefined) {
+                delete process.env.DATABASE_PASSWORD;
+            } else {
+                process.env.DATABASE_PASSWORD = originalDatabasePassword;
+            }
+            __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
+        }
     });
 });

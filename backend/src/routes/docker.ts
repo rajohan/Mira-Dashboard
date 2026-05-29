@@ -1452,8 +1452,13 @@ export default function dockerRoutes(app: express.Application): void {
             res.status(400).json({ error: "Process not available" });
             return;
         }
+        const { pid } = job.process;
         try {
-            process.kill(-job.process.pid!, "SIGTERM");
+            if (typeof pid === "number" && !Number.isNaN(pid)) {
+                process.kill(-pid, "SIGTERM");
+            } else {
+                job.process.kill("SIGTERM");
+            }
         } catch {
             job.process.kill("SIGTERM");
         }

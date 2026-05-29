@@ -634,150 +634,184 @@ describe("docker routes", { concurrency: false }, () => {
         const { __testing } = await import("./docker.js");
 
         __testing.dockerExecJobs.clear();
-        let cleanupKilled = false;
-        for (let index = 0; index < 102; index += 1) {
-            __testing.dockerExecJobs.set(`job-${index}`, {
-                id: `job-${index}`,
+        try {
+            let cleanupKilled = false;
+            for (let index = 0; index < 102; index += 1) {
+                __testing.dockerExecJobs.set(`job-${index}`, {
+                    id: `job-${index}`,
+                    containerId: "app",
+                    status: "running",
+                    code: null,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: index,
+                    endedAt: null,
+                    process:
+                        index === 0
+                            ? createMockChildProcess({
+                                  killed: false,
+                                  kill(signal?: NodeJS.Signals | number) {
+                                      assert.equal(signal, "SIGTERM");
+                                      cleanupKilled = true;
+                                      return true;
+                                  },
+                              })
+                            : undefined,
+                });
+            }
+
+            __testing.cleanupDockerExecJobs();
+            assert.equal(__testing.dockerExecJobs.size, 100);
+            assert.equal(__testing.dockerExecJobs.has("job-0"), false);
+            assert.equal(__testing.dockerExecJobs.has("job-1"), false);
+            assert.equal(cleanupKilled, true);
+
+            __testing.dockerExecJobs.set("no-process", {
+                id: "no-process",
                 containerId: "app",
                 status: "running",
                 code: null,
                 stdout: "",
                 stderr: "",
-                startedAt: index,
+                startedAt: Date.now(),
                 endedAt: null,
-                process:
-                    index === 0
-                        ? createMockChildProcess({
-                              killed: false,
-                              kill(signal?: NodeJS.Signals | number) {
-                                  assert.equal(signal, "SIGTERM");
-                                  cleanupKilled = true;
-                                  return true;
-                              },
-                          })
-                        : undefined,
             });
+            const unavailable = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/exec/no-process/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(unavailable.status, 400);
+            assert.equal(unavailable.body.error, "Process not available");
+
+            let fallbackKilled = false;
+            __testing.dockerExecJobs.set("fallback-kill", {
+                id: "fallback-kill",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    pid: 9_999_999,
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
+                        fallbackKilled = true;
+                        return true;
+                    },
+                }),
+            });
+            const fallback = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/exec/fallback-kill/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(fallback.status, 200);
+            assert.equal(fallback.body.success, true);
+            assert.equal(fallbackKilled, true);
+
+            let missingPidKilled = false;
+            __testing.dockerExecJobs.set("missing-pid", {
+                id: "missing-pid",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
+                        missingPidKilled = true;
+                        return true;
+                    },
+                }),
+            });
+            const missingPid = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/exec/missing-pid/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(missingPid.status, 200);
+            assert.equal(missingPidKilled, true);
+
+            __testing.updateDockerExecJobOutput("missing-output", "stdout", "stderr");
+            __testing.completeDockerExecJob("missing-complete", {
+                code: 0,
+                stdout: "stdout",
+                stderr: "stderr",
+            });
+            __testing.failDockerExecJob("missing-fail", new Error("failed"));
+
+            __testing.dockerExecJobs.set("state-helper", {
+                id: "state-helper",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+            });
+            __testing.updateDockerExecJobOutput("state-helper", "partial", "warning");
+            assert.equal(__testing.dockerExecJobs.get("state-helper")?.stdout, "partial");
+            __testing.completeDockerExecJob("state-helper", {
+                code: 0,
+                stdout: "done",
+                stderr: "",
+            });
+            assert.equal(__testing.dockerExecJobs.get("state-helper")?.status, "done");
+            assert.equal(__testing.dockerExecJobs.get("state-helper")?.stdout, "done");
+
+            __testing.dockerExecJobs.set("state-fail", {
+                id: "state-fail",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "before",
+                startedAt: Date.now(),
+                endedAt: null,
+            });
+            __testing.failDockerExecJob("state-fail", new Error("after"));
+            assert.equal(__testing.dockerExecJobs.get("state-fail")?.code, 1);
+            assert.match(
+                __testing.dockerExecJobs.get("state-fail")?.stderr || "",
+                /after/u
+            );
+
+            __testing.dockerExecJobs.set("primitive-fail", {
+                id: "primitive-fail",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+            });
+            __testing.failDockerExecJob("primitive-fail", "plain failure");
+            assert.match(
+                __testing.dockerExecJobs.get("primitive-fail")?.stderr || "",
+                /plain failure/u
+            );
+
+            __testing.dockerExecJobs.clear();
+            const directRun = await __testing.runDockerExecCommand(
+                "app",
+                "echo hi",
+                "missing-job"
+            );
+            assert.equal(directRun.code, 0);
+            assert.equal(directRun.stdout, "exec stdout\n");
+        } finally {
+            __testing.dockerExecJobs.clear();
         }
-
-        __testing.cleanupDockerExecJobs();
-        assert.equal(__testing.dockerExecJobs.size, 100);
-        assert.equal(__testing.dockerExecJobs.has("job-0"), false);
-        assert.equal(__testing.dockerExecJobs.has("job-1"), false);
-        assert.equal(cleanupKilled, true);
-
-        __testing.dockerExecJobs.set("no-process", {
-            id: "no-process",
-            containerId: "app",
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "",
-            startedAt: Date.now(),
-            endedAt: null,
-        });
-        const unavailable = await requestJson<{ error: string }>(
-            server,
-            "/api/docker/exec/no-process/stop",
-            { method: "POST", body: {} }
-        );
-        assert.equal(unavailable.status, 400);
-        assert.equal(unavailable.body.error, "Process not available");
-
-        let fallbackKilled = false;
-        __testing.dockerExecJobs.set("fallback-kill", {
-            id: "fallback-kill",
-            containerId: "app",
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "",
-            startedAt: Date.now(),
-            endedAt: null,
-            process: createMockChildProcess({
-                pid: 9_999_999,
-                killed: false,
-                kill(signal?: NodeJS.Signals | number) {
-                    assert.equal(signal, "SIGTERM");
-                    fallbackKilled = true;
-                    return true;
-                },
-            }),
-        });
-        const fallback = await requestJson<{ success: boolean }>(
-            server,
-            "/api/docker/exec/fallback-kill/stop",
-            { method: "POST", body: {} }
-        );
-        assert.equal(fallback.status, 200);
-        assert.equal(fallback.body.success, true);
-        assert.equal(fallbackKilled, true);
-
-        __testing.updateDockerExecJobOutput("missing-output", "stdout", "stderr");
-        __testing.completeDockerExecJob("missing-complete", {
-            code: 0,
-            stdout: "stdout",
-            stderr: "stderr",
-        });
-        __testing.failDockerExecJob("missing-fail", new Error("failed"));
-
-        __testing.dockerExecJobs.set("state-helper", {
-            id: "state-helper",
-            containerId: "app",
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "",
-            startedAt: Date.now(),
-            endedAt: null,
-        });
-        __testing.updateDockerExecJobOutput("state-helper", "partial", "warning");
-        assert.equal(__testing.dockerExecJobs.get("state-helper")?.stdout, "partial");
-        __testing.completeDockerExecJob("state-helper", {
-            code: 0,
-            stdout: "done",
-            stderr: "",
-        });
-        assert.equal(__testing.dockerExecJobs.get("state-helper")?.status, "done");
-        assert.equal(__testing.dockerExecJobs.get("state-helper")?.stdout, "done");
-
-        __testing.dockerExecJobs.set("state-fail", {
-            id: "state-fail",
-            containerId: "app",
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "before",
-            startedAt: Date.now(),
-            endedAt: null,
-        });
-        __testing.failDockerExecJob("state-fail", new Error("after"));
-        assert.equal(__testing.dockerExecJobs.get("state-fail")?.code, 1);
-        assert.match(__testing.dockerExecJobs.get("state-fail")?.stderr || "", /after/u);
-
-        __testing.dockerExecJobs.set("primitive-fail", {
-            id: "primitive-fail",
-            containerId: "app",
-            status: "running",
-            code: null,
-            stdout: "",
-            stderr: "",
-            startedAt: Date.now(),
-            endedAt: null,
-        });
-        __testing.failDockerExecJob("primitive-fail", "plain failure");
-        assert.match(
-            __testing.dockerExecJobs.get("primitive-fail")?.stderr || "",
-            /plain failure/u
-        );
-
-        __testing.dockerExecJobs.clear();
-        const directRun = await __testing.runDockerExecCommand(
-            "app",
-            "echo hi",
-            "missing-job"
-        );
-        assert.equal(directRun.code, 0);
-        assert.equal(directRun.stdout, "exec stdout\n");
     });
 
     it("covers docker fallback branches for inspect, image sizes, events cleanup, and exec spawn errors", async () => {

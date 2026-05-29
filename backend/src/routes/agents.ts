@@ -1417,7 +1417,9 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
 
-                const { currentTask } = req.body as { currentTask?: unknown };
+                const body = req.body as { currentTask?: unknown } | null;
+                const currentTask =
+                    body && typeof body === "object" ? body.currentTask : undefined;
 
                 if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
                     res.status(400).json({ error: "Provide currentTask" });

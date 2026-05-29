@@ -237,7 +237,7 @@ describe("notifications routes", () => {
         const clearRead = await requestJson<{ ok: true; deleted: number }>(
             server,
             "/api/notifications/clear-read",
-            { method: "POST" }
+            { method: "POST", body: { source } }
         );
         assert.equal(clearRead.status, 200);
         assert.equal(clearRead.body.deleted >= 1, true);
@@ -386,6 +386,14 @@ describe("notifications routes", () => {
         );
         assert.equal(stillNoReadLeft.status, 200);
         assert.equal(stillNoReadLeft.body.deleted, 0);
+
+        const globalClearRead = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST" }
+        );
+        assert.equal(globalClearRead.status, 200);
+        assert.equal(globalClearRead.body.deleted >= 0, true);
 
         const deleteNeverExisted = await requestJson<{ ok: true; deleted: number }>(
             server,

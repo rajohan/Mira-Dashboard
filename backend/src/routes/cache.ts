@@ -205,8 +205,8 @@ export async function refreshCacheKey(key: string) {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME,
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD,
+        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
+        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
     };
 
     const [file, ...args] = command;

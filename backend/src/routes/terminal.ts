@@ -169,7 +169,10 @@ export default function terminalRoutes(app: express.Application): void {
             return;
         }
         const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
-        if (cwd !== undefined && !trimmedCwd) {
+        if (
+            cwd !== undefined &&
+            (typeof cwd !== "string" || !trimmedCwd || trimmedCwd.includes("\0"))
+        ) {
             res.status(400).json({ error: "Missing or invalid cwd" });
             return;
         }

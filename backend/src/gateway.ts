@@ -958,6 +958,16 @@ async function request(
     return sendRequestAsync(method, params);
 }
 
+/** Stops the active Gateway client and clears connected state. */
+function shutdown(): void {
+    gatewayClient?.stop();
+    gatewayClient = null;
+    isGatewayConnected = false;
+    currentToken = null;
+    pendingRequests.clear();
+    broadcast({ type: "disconnected", gatewayConnected: false });
+}
+
 /** Defines testing. */
 export const __testing = {
     transformSession,
@@ -998,14 +1008,10 @@ export const __testing = {
     },
     /** Clears mutable gateway state between tests. */
     resetGatewayStateForTest(): void {
-        gatewayClient?.stop();
+        shutdown();
         subscribers.clear();
         sessionList = [];
-        isGatewayConnected = false;
-        pendingRequests.clear();
-        gatewayClient = null;
         GatewayClientCtor = OpenClawGatewayClient;
-        currentToken = null;
         requestId = 1000;
     },
 };
@@ -1021,6 +1027,7 @@ export default {
     abortSessionRun,
     deleteSession,
     request,
+    shutdown,
 };
 
 export type { GatewaySession, Session };

@@ -597,6 +597,15 @@ describe("OpenClaw config routes", () => {
             );
             assert.equal(invalidEnabled.status, 400);
             assert.equal(invalidEnabled.body.error, "Invalid enabled value");
+            const nullBody = await requestJson<{ error: string }>(
+                server,
+                "/api/skills/custom-skill",
+                {
+                    method: "POST",
+                }
+            );
+            assert.equal(nullBody.status, 400);
+            assert.equal(nullBody.body.error, "Invalid enabled value");
             const toggleFailure = await requestJson<{ error: string }>(
                 server,
                 "/api/skills/custom-skill",
