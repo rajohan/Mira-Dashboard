@@ -77,9 +77,19 @@ export function formatUptime(seconds: number): string {
 
 /** Formats bytes as a human-readable binary size. */
 export function formatSize(bytes: number): string {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    if (!Number.isFinite(bytes) || bytes < 0) return "Unknown";
+
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+
+    if (unitIndex === 0) return size + " B";
+    return size.toFixed(1) + " " + units[unitIndex];
 }
 
 /** Formats a numeric load value to two decimal places. */
