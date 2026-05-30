@@ -3,18 +3,23 @@ import { pathToFileURL } from "node:url";
 import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
 import { resolveListenPort, server } from "./server.js";
-import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
+import {
+    startOpenClawNotificationMonitor,
+    stopOpenClawNotificationMonitor,
+} from "./services/openclawNotifications.js";
 import {
     startQuotaNotificationMonitor,
     stopQuotaNotificationMonitor,
 } from "./services/quotaNotifications.js";
 
 let isStarting = false;
+let afterBackgroundServicesStartedForTest: (() => void) | undefined;
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let quotaMonitorStarted = false;
+    let openClawMonitorStarted = false;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -29,8 +34,13 @@ export function handleServerListening(): void {
         startQuotaNotificationMonitor();
         quotaMonitorStarted = true;
         startOpenClawNotificationMonitor();
+        openClawMonitorStarted = true;
+        afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
+        if (openClawMonitorStarted) {
+            stopOpenClawNotificationMonitor();
+        }
         if (quotaMonitorStarted) {
             stopQuotaNotificationMonitor();
         }
@@ -74,3 +84,9 @@ export function shouldStartOnImport(
 if (shouldStartOnImport()) {
     startBackendServer();
 }
+
+export const __testing = {
+    setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
+        afterBackgroundServicesStartedForTest = callback;
+    },
+};

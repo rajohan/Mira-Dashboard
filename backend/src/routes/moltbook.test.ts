@@ -82,10 +82,18 @@ describe("moltbook routes", () => {
     });
 
     after(async () => {
-        await server.close();
-        process.env.PATH = originalPath;
+        if (server) {
+            await server.close();
+        }
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
-        await rm(tempDir, { recursive: true, force: true });
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("returns cached Moltbook home metadata", async () => {

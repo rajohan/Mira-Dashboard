@@ -30,6 +30,7 @@ let server: (typeof import("./server.js"))["server"];
 let sessionsHandler: (typeof import("./server.js"))["sessionsHandler"];
 let handleServerListening: (typeof import("./serverStart.js"))["handleServerListening"];
 let isDirectEntrypoint: (typeof import("./serverStart.js"))["isDirectEntrypoint"];
+let serverStartTesting: (typeof import("./serverStart.js"))["__testing"];
 let shouldStartOnImport: (typeof import("./serverStart.js"))["shouldStartOnImport"];
 let startBackendServer: (typeof import("./serverStart.js"))["startBackendServer"];
 
@@ -106,6 +107,7 @@ describe("server bootstrap", () => {
             } = await import("./server.js"));
             ({
                 handleServerListening,
+                __testing: serverStartTesting,
                 isDirectEntrypoint,
                 shouldStartOnImport,
                 startBackendServer,
@@ -573,6 +575,17 @@ describe("server bootstrap", () => {
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
             globalThis.setInterval = originalSetInterval;
+            closeCalled = false;
+            shutdownCalled = false;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                throw new Error("post monitor failed");
+            });
+            assert.throws(() => handleServerListening(), /post monitor failed/u);
+            assert.equal(closeCalled, true);
+            assert.equal(shutdownCalled, true);
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
             gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {
@@ -671,6 +684,7 @@ describe("server bootstrap", () => {
             server.close = originalClose;
             globalThis.setInterval = originalSetInterval;
             gateway.shutdown = originalShutdown;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
             if (originalListeningDescriptor) {

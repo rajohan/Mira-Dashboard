@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 
 import express from "express";
 
@@ -48,6 +48,10 @@ describe("STT routes", () => {
 
     before(async () => {
         server = await startServer();
+    });
+
+    afterEach(() => {
+        globalThis.fetch = originalFetch;
     });
 
     after(async () => {

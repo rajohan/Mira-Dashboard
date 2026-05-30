@@ -101,11 +101,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     after(async () => {
-        await server.close();
+        if (server) {
+            await server.close();
+        }
         __testing.setCacheRefreshCwdForTests(undefined);
         __testing.resetCacheRefreshForTests();
         setCacheStoreDockerBinForTests(undefined);
-        await rm(tempDir, { recursive: true, force: true });
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("keeps scalar cache payloads when they are not JSON", () => {

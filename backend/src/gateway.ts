@@ -22,6 +22,13 @@ function validateOpenClawRoot(rootPath: string, envName: string): string {
     return rootPath;
 }
 
+function defaultOpenClawHome(): string {
+    const homeDir = os.homedir();
+    return homeDir
+        ? Path.join(homeDir, ".openclaw")
+        : Path.join(process.cwd(), "data", "openclaw");
+}
+
 const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
     nonEmptyEnvFallback(
         "MIRA_DASHBOARD_OPENCLAW_HOME",
@@ -30,7 +37,7 @@ const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
     "MIRA_DASHBOARD_OPENCLAW_HOME"
 );
 const OPENCLAW_HOME = validateOpenClawRoot(
-    nonEmptyEnvFallback("OPENCLAW_HOME", Path.join(os.homedir(), ".openclaw")),
+    nonEmptyEnvFallback("OPENCLAW_HOME", defaultOpenClawHome()),
     "OPENCLAW_HOME"
 );
 
@@ -985,6 +992,9 @@ export const __testing = {
     sessionHasRunIdentifier,
     refreshSessions,
     forwardRequest,
+    pendingRequestCountForTest(): number {
+        return pendingRequests.size;
+    },
     /** Replaces the in-memory session list for focused gateway tests. */
     setSessionListForTest(sessions: Session[]): void {
         sessionList = sessions;
@@ -1009,6 +1019,7 @@ export const __testing = {
     resetGatewayStateForTest(): void {
         shutdown();
         subscribers.clear();
+        pendingRequests.clear();
         sessionList = [];
         GatewayClientCtor = OpenClawGatewayClient;
         requestId = 1000;

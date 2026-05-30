@@ -105,6 +105,7 @@ async function waitForAsyncHandlers(): Promise<void> {
 }
 
 const previousOpenclawHome = process.env.OPENCLAW_HOME;
+const previousHome = process.env.HOME;
 let openclawHome: string | undefined;
 let gatewayModule: Awaited<typeof import("./gateway.js")> | undefined;
 let gateway: Awaited<typeof import("./gateway.js")>["default"];
@@ -131,6 +132,11 @@ describe("gateway state and helper utilities", () => {
             delete process.env.OPENCLAW_HOME;
         } else {
             process.env.OPENCLAW_HOME = previousOpenclawHome;
+        }
+        if (previousHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = previousHome;
         }
         if (openclawHome) {
             await rm(openclawHome, { force: true, recursive: true });
@@ -264,6 +270,7 @@ describe("gateway state and helper utilities", () => {
     it("rejects invalid OpenClaw root configuration at import time", async () => {
         const originalDashboardHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         const originalOpenclawHome = process.env.OPENCLAW_HOME;
+        const originalHome = process.env.HOME;
         try {
             process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "relative-home";
             await assert.rejects(
@@ -277,6 +284,14 @@ describe("gateway state and helper utilities", () => {
                 import(`./gateway.js?invalid-openclaw-home=${Date.now()}`),
                 /OPENCLAW_HOME must be an absolute non-root path/
             );
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome || "/tmp";
+            delete process.env.OPENCLAW_HOME;
+            process.env.HOME = "";
+            await assert.doesNotReject(
+                import(`./gateway.js?blank-home=${Date.now()}`),
+                "blank HOME should fall back to a safe absolute data path"
+            );
         } finally {
             if (originalDashboardHome === undefined) {
                 delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
@@ -288,7 +303,30 @@ describe("gateway state and helper utilities", () => {
             } else {
                 process.env.OPENCLAW_HOME = originalOpenclawHome;
             }
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
         }
+    });
+
+    it("clears pending requests when resetting test state", async () => {
+        __testing.setGatewayConnectedForTest(true);
+        __testing.setGatewayClientForTest({
+            request: () => new Promise(() => {}),
+            start: () => {},
+            stop: () => {},
+        });
+        const clientWs = {
+            readyState: WebSocket.OPEN,
+            send: () => {},
+        } as unknown as WebSocket;
+
+        void __testing.forwardRequest("chat.send", {}, clientWs, "request-1");
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
+        __testing.resetGatewayStateForTest();
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
     });
 
     it("transforms Gateway sessions into dashboard session summaries", () => {
