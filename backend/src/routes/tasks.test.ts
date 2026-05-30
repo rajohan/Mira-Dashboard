@@ -422,8 +422,8 @@ describe("tasks routes", () => {
         });
         assert.equal(defaultCreated.status, 201);
         assert.deepEqual(
-            defaultCreated.body.labels.map((label) => label.name),
-            ["todo", "priority-medium"]
+            defaultCreated.body.labels.map((label) => label.name).sort(),
+            ["todo", "priority-medium"].sort()
         );
     });
 

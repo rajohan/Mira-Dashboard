@@ -69,7 +69,14 @@ export function startBackendServer(port = resolveListenPort()): void {
     };
     server.once("listening", onListening);
     server.once("error", onError);
-    server.listen(port, handleServerListening);
+    try {
+        server.listen(port, handleServerListening);
+    } catch (error) {
+        server.removeListener("listening", onListening);
+        server.removeListener("error", onError);
+        isStarting = false;
+        throw error;
+    }
 }
 
 export function isDirectEntrypoint(

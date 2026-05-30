@@ -274,7 +274,9 @@ describe("files routes", () => {
                 path.join("/tmp/openclaw-home", "workspace")
             );
             assert.equal(__testing.listDirectory("../../outside"), null);
-            assert.deepEqual(__testing.listDirectory("src/app.ts"), []);
+            assert.throws(() => __testing.listDirectory("src/app.ts"), {
+                code: "ENOTDIR",
+            });
             const outsideDir = await mkdtemp(
                 path.join(os.tmpdir(), "mira-files-outside-")
             );

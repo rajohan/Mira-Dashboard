@@ -769,7 +769,7 @@ describe("agents routes", () => {
                 sessions: [
                     {
                         key: "agent:session-key-agent:main",
-                        model: "Unknown",
+                        model: "unknown",
                         status: "running",
                         updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
                     },

@@ -24,7 +24,7 @@ function getDefaultWorkspaceRoot(): string {
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
-const JSON_PARSER_SIZE_HEADROOM = 1024;
+const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE;
 
 /** Represents file item. */
 interface FileItem {
@@ -138,31 +138,21 @@ function listDirectory(dirPath: string): FileItem[] | null {
                 });
             } else {
                 // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
-                try {
-                    const stat = statGuarded(
-                        guardedPath(path.join(resolvedFullPath, entry.name))
-                    );
-                    items.push({
-                        name: entry.name,
-                        type: "file",
-                        path: itemPath,
-                        size: stat.size,
-                        modified: stat.mtime.toISOString(),
-                    });
-                    /* c8 ignore start */
-                } catch {
-                    items.push({
-                        name: entry.name,
-                        type: "file",
-                        path: itemPath,
-                        error: true,
-                    });
-                }
-                /* c8 ignore stop */
+                const stat = statGuarded(
+                    guardedPath(path.join(resolvedFullPath, entry.name))
+                );
+                items.push({
+                    name: entry.name,
+                    type: "file",
+                    path: itemPath,
+                    size: stat.size,
+                    modified: stat.mtime.toISOString(),
+                });
             }
         }
     } catch (error) {
         console.error("[Files] Error listing directory:", (error as Error).message);
+        throw error;
     }
 
     const typeOrder: Record<FileItem["type"], number> = { directory: 0, file: 1 };

@@ -635,11 +635,21 @@ describe("server bootstrap", () => {
             assert.equal(pendingStartListenCalls, 2);
             assert.equal(listenedPort, 41_004);
             server.emit("listening");
+            server.listen = ((port: number) => {
+                listenedPort = port;
+                throw new Error("sync listen failed");
+            }) as unknown as typeof server.listen;
+            assert.throws(() => startBackendServer(41_005), /sync listen failed/u);
+            assert.equal(listenedPort, 41_005);
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
                 listener?.();
                 return server;
             }) as typeof server.listen;
+            listenedPort = undefined;
+            startBackendServer(41_006);
+            assert.equal(listenedPort, 41_006);
+            server.emit("listening");
             try {
                 server.address = (() => ({
                     address: "127.0.0.1",

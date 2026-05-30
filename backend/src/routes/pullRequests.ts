@@ -220,7 +220,7 @@ function parseGhJsonLine<T>(line: string, rows: T[]): void {
     if (!line.trim()) {
         return;
     }
-    if (line.length > MAX_JSON_LINE_LENGTH) {
+    if (Buffer.byteLength(String(line), "utf8") > MAX_JSON_LINE_LENGTH) {
         throw new Error("GitHub CLI JSON line was too large");
     }
     rows.push(JSON.parse(line) as T);
@@ -310,7 +310,7 @@ async function runGhJsonLines<T>(
 
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
-            if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
+            if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
                 armForceKillTimer();
                 settle(() => reject(new Error("GitHub CLI JSON line was too large")), {
@@ -852,7 +852,15 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/:number/approve",
         express.json(),
         asyncRoute(async (req, res) => {
-            const number = validatePrNumber(req.params.number);
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
             const deploy = req.body?.deploy === true;
             res.json(await approvePullRequest(number, deploy));
         })

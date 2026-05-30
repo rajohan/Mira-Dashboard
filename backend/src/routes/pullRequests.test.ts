@@ -913,7 +913,7 @@ describe("pull request routes", () => {
                 { method: "POST", body: {} }
             );
 
-            assert.equal(response.status, 500);
+            assert.equal(response.status, 400);
             assert.equal(response.body.error, "Invalid pull request number");
         } finally {
             console.error = originalConsoleError;

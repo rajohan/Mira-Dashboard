@@ -328,7 +328,8 @@ describe("OpenClaw config routes", () => {
             assert.deepEqual(
                 __testing
                     .collectSkillDirectories(tempDir)
-                    .map((skillPath) => path.basename(skillPath)),
+                    .map((skillPath) => path.basename(skillPath))
+                    .sort(),
                 ["described-skill", "fallback-skill"]
             );
             assert.deepEqual(
