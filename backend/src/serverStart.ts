@@ -58,12 +58,17 @@ export function startBackendServer(port = resolveListenPort()): void {
         return;
     }
     isStarting = true;
-    server.once("listening", () => {
+    const onListening = () => {
+        server.removeListener("error", onError);
         isStarting = false;
-    });
-    server.once("error", () => {
+    };
+    const onError = (error: Error) => {
+        server.removeListener("listening", onListening);
         isStarting = false;
-    });
+        throw error;
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
     server.listen(port, handleServerListening);
 }
 

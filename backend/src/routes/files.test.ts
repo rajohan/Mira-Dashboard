@@ -239,9 +239,9 @@ describe("files routes", () => {
 
     it("covers file helper edge cases", async () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
-        process.env.WORKSPACE_ROOT = workspaceRoot;
         const { __testing } = await import("./files.js");
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        process.env.WORKSPACE_ROOT = workspaceRoot;
 
         try {
             assert.equal(__testing.isBinaryFile("abc"), false);

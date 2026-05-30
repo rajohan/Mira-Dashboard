@@ -24,6 +24,7 @@ function getDefaultWorkspaceRoot(): string {
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
+const JSON_PARSER_SIZE_HEADROOM = 1024;
 
 /** Represents file item. */
 interface FileItem {
@@ -370,7 +371,7 @@ export default function filesRoutes(
     // Write file
     app.put(
         /^\/api\/files\/(.*)$/,
-        express.json({ limit: MAX_FILE_SIZE }),
+        express.json({ limit: MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM }),
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);

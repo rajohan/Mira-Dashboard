@@ -16,10 +16,11 @@ import {
 import { nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
 
 function validateOpenClawRoot(rootPath: string, envName: string): string {
-    if (!Path.isAbsolute(rootPath) || rootPath === Path.parse(rootPath).root) {
+    const resolved = Path.resolve(rootPath);
+    if (!Path.isAbsolute(rootPath) || resolved === Path.parse(resolved).root) {
         throw new Error(`${envName} must be an absolute non-root path`);
     }
-    return rootPath;
+    return resolved;
 }
 
 function defaultOpenClawHome(): string {

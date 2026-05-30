@@ -622,7 +622,15 @@ describe("server bootstrap", () => {
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 1);
             assert.equal(listenedPort, 41_003);
-            (server.listeners("error").at(-1) as (() => void) | undefined)?.();
+            assert.throws(
+                () =>
+                    (
+                        server.listeners("error").at(-1) as
+                            | ((error: Error) => void)
+                            | undefined
+                    )?.(new Error("listen failed")),
+                /listen failed/u
+            );
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 2);
             assert.equal(listenedPort, 41_004);
@@ -708,6 +716,10 @@ describe("server bootstrap", () => {
                 cwd: process.cwd(),
                 env: {
                     ...process.env,
+                    NODE_V8_COVERAGE: path.join(
+                        os.tmpdir(),
+                        "mira-server-entrypoint-coverage"
+                    ),
                     OPENCLAW_TOKEN: "test-token",
                     PORT: "0",
                 },

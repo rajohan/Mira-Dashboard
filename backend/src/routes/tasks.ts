@@ -219,7 +219,7 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
 
     if (schedule.kind === "every") {
         const everyMs = numberFromRecord(schedule, "everyMs");
-        if (everyMs) {
+        if (everyMs && everyMs > 0) {
             if (everyMs % 3_600_000 === 0) return `Every ${everyMs / 3_600_000}h`;
             if (everyMs < 60_000) {
                 const seconds = Math.max(1, Math.round(everyMs / 1000));

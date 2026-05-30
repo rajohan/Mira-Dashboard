@@ -113,7 +113,13 @@ async function terminateChildProcess(child: ChildProcess): Promise<void> {
 
     child.kill("SIGTERM");
     if ((await Promise.race([waitForExit, timeout])) === "timeout") {
-        child.kill("SIGKILL");
+        try {
+            if (!child.kill("SIGKILL")) {
+                return;
+            }
+        } catch {
+            return;
+        }
         await waitForExit;
     }
 }

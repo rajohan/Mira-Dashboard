@@ -215,24 +215,18 @@ function waitFor<T>(predicate: () => T | undefined, label: string): Promise<T> {
 async function startGatewayServer(
     onConnection: (socket: WebSocket) => void
 ): Promise<{ url: string; close: () => Promise<void> }> {
-    const server = new WebSocketServer({ port: 0 });
-    server.on("connection", onConnection);
-    await new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-            server.off("error", onError);
-            server.off("listening", onListening);
-        };
-        const onListening = () => {
-            cleanup();
-            resolve();
-        };
+    const server = await new Promise<WebSocketServer>((resolve, reject) => {
+        const nextServer = new WebSocketServer({ port: 0 }, () => {
+            nextServer.off("error", onError);
+            resolve(nextServer);
+        });
         const onError = (error: Error) => {
-            cleanup();
+            nextServer.off("error", onError);
             reject(error);
         };
-        server.once("listening", onListening);
-        server.once("error", onError);
+        nextServer.once("error", onError);
     });
+    server.on("connection", onConnection);
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
