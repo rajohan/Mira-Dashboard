@@ -191,9 +191,13 @@ describe("files routes", () => {
 
     it("falls back to the default workspace root when WORKSPACE_ROOT is blank", async () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-files-home-"));
         let blankServer: TestServer | undefined;
         try {
             process.env.WORKSPACE_ROOT = "";
+            process.env.OPENCLAW_HOME = openclawHome;
+            await mkdir(path.join(openclawHome, "workspace"), { recursive: true });
             const { __testing, default: filesRoutes } = await import(
                 `./files.js?blank=${crypto.randomUUID()}`
             );
@@ -234,6 +238,12 @@ describe("files routes", () => {
             } else {
                 process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
             }
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            await rm(openclawHome, { recursive: true, force: true });
         }
     });
 
