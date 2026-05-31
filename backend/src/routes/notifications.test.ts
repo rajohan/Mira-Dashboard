@@ -216,6 +216,7 @@ describe("notifications routes", () => {
             }
         );
         assert.equal(whitespaceFields.status, 200);
+        assert.equal(typeof whitespaceFields.body.id, "number");
         notificationIdToCleanup = whitespaceFields.body.id;
 
         const upsert = await requestJson<{ ok: true; id: number | null }>(

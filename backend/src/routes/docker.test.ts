@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -305,6 +305,12 @@ const stepByScript = {
   "docker-send-discord-newversion.mjs": "discord"
 };
 const step = stepByScript[scriptName] || "unknown";
+if (process.env.MIRA_FAKE_UPDATER_ENV_PATH) {
+  require("node:fs").writeFileSync(process.env.MIRA_FAKE_UPDATER_ENV_PATH, JSON.stringify({
+    user: process.env.DB_POSTGRESDB_USER,
+    password: process.env.DB_POSTGRESDB_PASSWORD
+  }));
+}
 if (process.env.MIRA_FAKE_UPDATER_FAIL_STEP === step) {
   if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
     process.stdout.write("not-json\n");
@@ -1328,6 +1334,40 @@ describe("docker routes", { concurrency: false }, () => {
                 ["register", "poll", "auto-update", "notify", "discord"]
             );
         });
+
+        const originalPostgresUser = process.env.DB_POSTGRESDB_USER;
+        const originalPostgresPassword = process.env.DB_POSTGRESDB_PASSWORD;
+        const originalEnvPath = process.env.MIRA_FAKE_UPDATER_ENV_PATH;
+        const envPath = path.join(tempDir, "updater-env.json");
+        try {
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            process.env.MIRA_FAKE_UPDATER_ENV_PATH = envPath;
+            const run = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(run.status, 200);
+            assert.equal(run.body.success, true);
+            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
+                user: "native-user",
+                password: "native-password",
+            });
+        } finally {
+            if (originalPostgresUser === undefined) delete process.env.DB_POSTGRESDB_USER;
+            else process.env.DB_POSTGRESDB_USER = originalPostgresUser;
+            if (originalPostgresPassword === undefined) {
+                delete process.env.DB_POSTGRESDB_PASSWORD;
+            } else {
+                process.env.DB_POSTGRESDB_PASSWORD = originalPostgresPassword;
+            }
+            if (originalEnvPath === undefined) {
+                delete process.env.MIRA_FAKE_UPDATER_ENV_PATH;
+            } else {
+                process.env.MIRA_FAKE_UPDATER_ENV_PATH = originalEnvPath;
+            }
+        }
 
         await withFakeUpdaterFailStep("poll", async () => {
             const failedRun = await requestJson<{

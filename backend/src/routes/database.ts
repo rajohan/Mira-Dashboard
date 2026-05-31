@@ -135,13 +135,18 @@ function trimmedEnvValue(value: string | undefined): string | undefined {
     return trimmed === "" ? undefined : trimmed;
 }
 
+/** Returns a fallback only when the value is absent, preserving intentional blanks. */
+function envValueOrDefault(value: string | undefined, fallback: string): string {
+    return value === undefined ? fallback : value;
+}
+
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
     const username = encodeURIComponent(
-        stringWithDefault(process.env.DATABASE_USERNAME, "postgres")
+        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
     const password = encodeURIComponent(
-        stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
+        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
     const host = stringWithDefault(
         trimmedEnvValue(process.env.DATABASE_HOST),
@@ -155,10 +160,10 @@ function buildPostgresUri(database = "postgres") {
 /** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
     const username = encodeURIComponent(
-        stringWithDefault(process.env.DATABASE_USERNAME, "postgres")
+        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
     const password = encodeURIComponent(
-        stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
+        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
     const host = stringWithDefault(
         trimmedEnvValue(process.env.PGBOUNCER_HOST),

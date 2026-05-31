@@ -142,11 +142,11 @@ describe("database routes", () => {
             process.env.PGBOUNCER_PORT = "7654";
             assert.equal(
                 __testing.buildPostgresUri("custom/name #1"),
-                "postgresql://user%40name:postgres@db:6543/custom%2Fname%20%231"
+                "postgresql://user%40name:@db:6543/custom%2Fname%20%231"
             );
             assert.equal(
                 __testing.buildPgBouncerUri("pool admin"),
-                "postgresql://user%40name:postgres@pool:7654/pool%20admin"
+                "postgresql://user%40name:@pool:7654/pool%20admin"
             );
 
             process.env.DATABASE_PASSWORD = "p:a/ss#";

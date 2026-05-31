@@ -102,6 +102,31 @@ export function copyGuarded(source: GuardedPath, destination: GuardedPath): void
     fsOps.copyFileSync(guardedPathBuffer(source), guardedPathBuffer(destination));
 }
 
+/** Copies bytes while atomically refusing final-component symlinks on both paths. */
+export async function copyNoFollowGuarded(
+    source: GuardedPath,
+    destination: GuardedPath
+): Promise<void> {
+    const sourceFile = await openReadNoFollowGuarded(source);
+    try {
+        const destinationFile = await Fs.promises.open(
+            guardedPathBuffer(destination),
+            Fs.constants.O_WRONLY |
+                Fs.constants.O_CREAT |
+                Fs.constants.O_TRUNC |
+                Fs.constants.O_NOFOLLOW,
+            0o666
+        );
+        try {
+            await destinationFile.writeFile(await sourceFile.readFile());
+        } finally {
+            await destinationFile.close();
+        }
+    } finally {
+        await sourceFile.close();
+    }
+}
+
 /** Opens a validated path for reading while refusing a final-component symlink. */
 export async function openReadNoFollowGuarded(
     path: GuardedPath

@@ -196,34 +196,41 @@ describe("cron routes", () => {
     });
 
     it("returns gateway errors as route errors", async () => {
+        const originalRequest = gateway.request;
         gateway.request = async (method: string) => {
             throw new Error(`${method} unavailable`);
         };
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/cron/jobs"
+            );
+            const toggle = await requestJson<{ error: string }>(
+                server,
+                "/api/cron/jobs/job-1/toggle",
+                { method: "POST", body: { enabled: true } }
+            );
+            const update = await requestJson<{ error: string }>(
+                server,
+                "/api/cron/jobs/job-1/update",
+                { method: "POST", body: { patch: { enabled: true } } }
+            );
+            const run = await requestJson<{ error: string }>(
+                server,
+                "/api/cron/jobs/job-1/run",
+                { method: "POST" }
+            );
 
-        const response = await requestJson<{ error: string }>(server, "/api/cron/jobs");
-        const toggle = await requestJson<{ error: string }>(
-            server,
-            "/api/cron/jobs/job-1/toggle",
-            { method: "POST", body: { enabled: true } }
-        );
-        const update = await requestJson<{ error: string }>(
-            server,
-            "/api/cron/jobs/job-1/update",
-            { method: "POST", body: { patch: { enabled: true } } }
-        );
-        const run = await requestJson<{ error: string }>(
-            server,
-            "/api/cron/jobs/job-1/run",
-            { method: "POST" }
-        );
-
-        assert.equal(response.status, 500);
-        assert.equal(response.body.error, "cron.list unavailable");
-        assert.equal(toggle.status, 500);
-        assert.equal(toggle.body.error, "cron.update unavailable");
-        assert.equal(update.status, 500);
-        assert.equal(update.body.error, "cron.update unavailable");
-        assert.equal(run.status, 500);
-        assert.equal(run.body.error, "cron.run unavailable");
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "cron.list unavailable");
+            assert.equal(toggle.status, 500);
+            assert.equal(toggle.body.error, "cron.update unavailable");
+            assert.equal(update.status, 500);
+            assert.equal(update.body.error, "cron.update unavailable");
+            assert.equal(run.status, 500);
+            assert.equal(run.body.error, "cron.run unavailable");
+        } finally {
+            gateway.request = originalRequest;
+        }
     });
 });

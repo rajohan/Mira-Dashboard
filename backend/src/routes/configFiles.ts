@@ -5,7 +5,7 @@ import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
 import {
-    copyGuarded,
+    copyNoFollowGuarded,
     guardedPath,
     statGuarded,
     writeTextNoFollowGuarded,
@@ -351,7 +351,14 @@ export default function configFilesRoutes(
                 // Create backup
                 try {
                     const backupPath = safeFullPath + ".bak";
-                    copyGuarded(guardedPath(safeFullPath), guardedPath(backupPath));
+                    const safeBackupPath = prepareSafeWriteTargetWithinRoot(
+                        backupPath,
+                        openclawRoot
+                    );
+                    await copyNoFollowGuarded(
+                        guardedPath(safeFullPath),
+                        guardedPath(safeBackupPath as string)
+                    );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                         throw error;

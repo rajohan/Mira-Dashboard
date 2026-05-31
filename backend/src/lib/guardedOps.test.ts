@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import {
     copyGuarded,
+    copyNoFollowGuarded,
     guardedPath,
     mkdirGuarded,
     openReadNoFollowGuarded,
@@ -56,6 +57,11 @@ describe("guarded filesystem helpers", () => {
             const copied = guardedPath(path.join(baseDir, "nested", "copied.txt"));
             copyGuarded(source, copied);
             assert.equal(await readFile(copied, "utf8"), "'hello'");
+            const noFollowCopy = guardedPath(
+                path.join(baseDir, "nested", "no-follow-copy.txt")
+            );
+            await copyNoFollowGuarded(source, noFollowCopy);
+            assert.equal(await readFile(noFollowCopy, "utf8"), "'hello'");
 
             const opened = await openReadNoFollowGuarded(copied);
             try {
@@ -87,6 +93,12 @@ describe("guarded filesystem helpers", () => {
 
             const originalContent = await readFile(realTarget, "utf8");
             await assert.rejects(() => writeTextNoFollowGuarded(linkTarget, "blocked"));
+            await assert.rejects(() =>
+                copyNoFollowGuarded(guardedPath(realTarget), linkTarget)
+            );
+            await assert.rejects(() =>
+                copyNoFollowGuarded(linkTarget, guardedPath(realTarget))
+            );
             assert.equal(await readFile(realTarget, "utf8"), originalContent);
             const realStat = await stat(realTarget);
             assert.equal(realStat.isFile(), true);

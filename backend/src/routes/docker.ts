@@ -868,8 +868,12 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: nonEmptyEnvFallback("DATABASE_USERNAME", "postgres"),
-        DB_POSTGRESDB_PASSWORD: nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres"),
+        DB_POSTGRESDB_USER:
+            process.env.DB_POSTGRESDB_USER?.trim() ||
+            nonEmptyEnvFallback("DATABASE_USERNAME", "postgres"),
+        DB_POSTGRESDB_PASSWORD:
+            process.env.DB_POSTGRESDB_PASSWORD?.trim() ||
+            nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres"),
     };
 
     try {
