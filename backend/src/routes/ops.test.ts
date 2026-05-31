@@ -119,7 +119,9 @@ describe("ops routes", () => {
             }
             delete process.env.FAKE_LOG_ROTATION_EMPTY;
             delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
-            await rm(tempDir, { recursive: true, force: true });
+            if (tempDir) {
+                await rm(tempDir, { recursive: true, force: true });
+            }
         }
     });
 

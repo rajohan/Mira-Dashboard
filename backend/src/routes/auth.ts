@@ -170,7 +170,11 @@ export default function authRoutes(
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
-            rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+            try {
+                rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+            } catch {
+                // Preserve the original bootstrap failure response.
+            }
             shutdownGateway();
             response.status(500).json({ error: "Failed to complete first-user setup" });
         }

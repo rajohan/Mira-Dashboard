@@ -915,7 +915,7 @@ describe("docker routes", { concurrency: false }, () => {
                 /ENOENT/u
             );
         } finally {
-            __testing.setDockerBinForTests("docker");
+            __testing.setDockerBinForTests(path.join(tempDir, "bin", "docker"));
         }
     });
 

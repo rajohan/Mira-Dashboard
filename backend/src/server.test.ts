@@ -796,7 +796,7 @@ describe("server bootstrap", () => {
             await delay(300);
             assert.equal(child.exitCode, null);
         } finally {
-            let exited = child.exitCode !== null || child.killed;
+            let exited = child.exitCode !== null || child.signalCode !== null;
             if (!exited) {
                 const exitPromise = new Promise((resolve) => child.once("exit", resolve));
                 child.kill("SIGTERM");
@@ -806,12 +806,11 @@ describe("server bootstrap", () => {
                         delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
                     ])) === true;
             }
-            exited ||= child.exitCode !== null || child.killed;
+            exited ||= child.exitCode !== null || child.signalCode !== null;
             if (!exited) {
                 const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-                if (child.kill("SIGKILL")) {
-                    await exitPromise;
-                }
+                child.kill("SIGKILL");
+                await exitPromise;
             }
         }
     });

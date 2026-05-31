@@ -236,21 +236,22 @@ describe("auth first-user bootstrap routes", () => {
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
         ).run("preexisting-token", new Date().toISOString());
-        const sideEffectServer = await startServer({
-            createSession: () => {
-                throw new Error("session unavailable");
-            },
-            rollbackBootstrap: (userId, token, previousToken) => {
-                rolledBack = true;
-                previousGatewayToken = previousToken ?? null;
-                authTesting.rollbackFirstUserBootstrap(userId, token, previousToken);
-            },
-            shutdownGateway: () => {
-                shutdown = true;
-            },
-        });
+        let sideEffectServer: TestServer | undefined;
         let retryServer: TestServer | undefined;
         try {
+            sideEffectServer = await startServer({
+                createSession: () => {
+                    throw new Error("session unavailable");
+                },
+                rollbackBootstrap: (userId, token, previousToken) => {
+                    rolledBack = true;
+                    previousGatewayToken = previousToken ?? null;
+                    authTesting.rollbackFirstUserBootstrap(userId, token, previousToken);
+                },
+                shutdownGateway: () => {
+                    shutdown = true;
+                },
+            });
             const registered = await requestJson<{
                 error: string;
             }>(sideEffectServer, "/api/auth/register-first-user", {
@@ -295,13 +296,50 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(retried.body.authenticated, true);
             assert.equal(retried.body.user.username, "bootstrap-dupe");
         } finally {
-            await sideEffectServer.close();
+            await sideEffectServer?.close();
             await retryServer?.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
             db.prepare(
                 "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
             ).run("preexisting-token");
+        }
+    });
+
+    it("keeps first-user cleanup best-effort when rollback throws", async () => {
+        cleanupBootstrapRows(username);
+        let rollbackCalled = false;
+        let shutdown = false;
+        const throwingRollbackServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+            rollbackBootstrap: () => {
+                rollbackCalled = true;
+                throw new Error("rollback unavailable");
+            },
+            shutdownGateway: () => {
+                shutdown = true;
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                throwingRollbackServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-side-effect", password, gatewayToken },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(rollbackCalled, true);
+            assert.equal(shutdown, true);
+        } finally {
+            await throwingRollbackServer.close();
+            cleanupUser("bootstrap-side-effect");
+            cleanupBootstrapRows(username);
         }
     });
 });
