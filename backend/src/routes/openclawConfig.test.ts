@@ -133,8 +133,13 @@ describe("OpenClaw config routes", () => {
     });
 
     after(async () => {
-        await server.close();
-        gateway.request = originalRequest;
+        try {
+            if (server) {
+                await server.close();
+            }
+        } finally {
+            gateway.request = originalRequest;
+        }
     });
 
     it("returns config snapshots with the OpenClaw hash", async () => {

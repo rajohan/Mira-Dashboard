@@ -81,6 +81,38 @@ function decodeConfigPath(encodedPath: string): string | null {
     }
 }
 
+async function withRootedParentPath<T>(
+    safePath: string,
+    rootPath: string,
+    callback: (rootedPath: string) => Promise<T> | T
+): Promise<T> {
+    /* c8 ignore next 3 -- covered by platform-specific integration behavior on Linux */
+    if (process.platform !== "linux") {
+        return callback(safePath);
+    }
+
+    const parentPath = path.dirname(safePath);
+    const parentFd = fs.openSync(
+        parentPath,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const realRoot = fs.realpathSync(rootPath);
+        const realParent = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
+            const error = new Error(
+                "Parent path validation failed"
+            ) as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        }
+
+        return await callback(`/proc/self/fd/${parentFd}/${path.basename(safePath)}`);
+    } finally {
+        fs.closeSync(parentFd);
+    }
+}
+
 /** Performs list config files. */
 function listConfigFiles(openclawRoot: string): ConfigFile[] {
     const files: ConfigFile[] = [];
@@ -362,9 +394,28 @@ export default function configFilesRoutes(
                         error.code = "EACCES";
                         throw error;
                     }
-                    await copyNoFollowGuarded(
-                        guardedPath(safeFullPath),
-                        guardedPath(safeBackupPath)
+                    await withRootedParentPath(
+                        safeFullPath,
+                        openclawRoot,
+                        async (rootedFullPath) => {
+                            const currentStat = statGuarded(guardedPath(rootedFullPath));
+                            if (currentStat.size > MAX_CONFIG_WRITE_SIZE) {
+                                const error = new Error(
+                                    "Existing config file exceeds backup size limit"
+                                ) as NodeJS.ErrnoException;
+                                error.code = "EFBIG";
+                                throw error;
+                            }
+                            await withRootedParentPath(
+                                safeBackupPath,
+                                openclawRoot,
+                                (rootedBackupPath) =>
+                                    copyNoFollowGuarded(
+                                        guardedPath(rootedFullPath),
+                                        guardedPath(rootedBackupPath)
+                                    )
+                            );
+                        }
                     );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -372,7 +423,9 @@ export default function configFilesRoutes(
                     }
                 }
 
-                await writeTextNoFollowGuarded(guardedPath(safeFullPath), content);
+                await withRootedParentPath(safeFullPath, openclawRoot, (rootedFullPath) =>
+                    writeTextNoFollowGuarded(guardedPath(rootedFullPath), content)
+                );
                 const stat = statGuarded(guardedPath(safeFullPath));
 
                 res.json({

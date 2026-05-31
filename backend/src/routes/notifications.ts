@@ -38,9 +38,11 @@ function listNotifications(limit: number): NotificationRow[] {
 function toResponse(row: NotificationRow) {
     let metadata: Record<string, unknown> = {};
     try {
-        metadata = row.metadata_json
-            ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
-            : {};
+        const parsed = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+        metadata =
+            parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : {};
     } catch {
         // Keep the default empty metadata for malformed historical rows.
     }

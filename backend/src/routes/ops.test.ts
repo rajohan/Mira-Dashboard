@@ -106,16 +106,21 @@ describe("ops routes", () => {
     });
 
     after(async () => {
-        await server.close();
-        process.env.PATH = originalPath;
-        if (originalN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = originalN8nRoot;
+        try {
+            if (server) {
+                await server.close();
+            }
+        } finally {
+            process.env.PATH = originalPath;
+            if (originalN8nRoot === undefined) {
+                delete process.env.MIRA_N8N_ROOT;
+            } else {
+                process.env.MIRA_N8N_ROOT = originalN8nRoot;
+            }
+            delete process.env.FAKE_LOG_ROTATION_EMPTY;
+            delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
+            await rm(tempDir, { recursive: true, force: true });
         }
-        delete process.env.FAKE_LOG_ROTATION_EMPTY;
-        delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
-        await rm(tempDir, { recursive: true, force: true });
     });
 
     it("returns log rotation status from n8n cache state", async () => {

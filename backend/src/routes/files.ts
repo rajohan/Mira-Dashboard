@@ -17,11 +17,20 @@ import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
     const openclawHome = process.env.OPENCLAW_HOME?.trim();
-    return openclawHome &&
+    if (
+        openclawHome &&
         path.isAbsolute(openclawHome) &&
         path.parse(openclawHome).root !== openclawHome
-        ? path.join(openclawHome, "workspace")
-        : path.join(os.homedir(), ".openclaw", "workspace");
+    ) {
+        return path.join(openclawHome, "workspace");
+    }
+
+    const homeDir = os.homedir().trim();
+    if (!homeDir || !path.isAbsolute(homeDir) || path.parse(homeDir).root === homeDir) {
+        throw new Error("Could not resolve a safe workspace root");
+    }
+
+    return path.join(homeDir, ".openclaw", "workspace");
 }
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());

@@ -620,6 +620,31 @@ describe("server bootstrap", () => {
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
+            gateway.shutdown = () => {
+                throw new Error("shutdown cleanup failed");
+            };
+            server.close = (() => {
+                throw new Error("server cleanup failed");
+            }) as typeof server.close;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                throw new Error("post monitor cleanup failed");
+            });
+            assert.throws(() => handleServerListening(), /post monitor cleanup failed/u);
+            assert.equal(
+                errors.some((entry) =>
+                    String(entry[0]).includes("Failed to stop gateway")
+                ),
+                true
+            );
+            assert.equal(
+                errors.some((entry) =>
+                    String(entry[0]).includes("Failed to close server")
+                ),
+                true
+            );
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
             gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {

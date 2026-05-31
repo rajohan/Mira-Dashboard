@@ -701,5 +701,41 @@ describe("config files routes", () => {
         } finally {
             await rm(backup, { force: true });
         }
+
+        await writeFile(target, Buffer.alloc(2 * 1024 * 1024 + 1, "a"));
+        try {
+            const oversizedBackup = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const next = true;\n" } }
+            );
+            assert.equal(oversizedBackup.status, 500);
+            assert.match(oversizedBackup.body.error, /backup size limit/u);
+            const targetContent = await readFile(target, "utf8");
+            assert.equal(targetContent.startsWith("a"), true);
+        } finally {
+            await writeFile(target, "export const previous = true;\n");
+            await rm(backup, { force: true });
+        }
+
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value.startsWith("/proc/self/fd/")) {
+                    return path.join(os.tmpdir(), "mira-config-outside-parent");
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+            const escapedParent = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const next = true;\n" } }
+            );
+            assert.equal(escapedParent.status, 500);
+            assert.match(escapedParent.body.error, /Parent path validation failed/u);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
     });
 });

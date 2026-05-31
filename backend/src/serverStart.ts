@@ -38,16 +38,29 @@ export function handleServerListening(): void {
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
+        const rollback = (fn: () => void, label: string): void => {
+            try {
+                fn();
+            } catch (cleanupError) {
+                console.error(label, cleanupError);
+            }
+        };
         if (openClawMonitorStarted) {
-            stopOpenClawNotificationMonitor();
+            rollback(
+                stopOpenClawNotificationMonitor,
+                "[Backend] Failed to stop OpenClaw notification monitor:"
+            );
         }
         if (quotaMonitorStarted) {
-            stopQuotaNotificationMonitor();
+            rollback(
+                stopQuotaNotificationMonitor,
+                "[Backend] Failed to stop quota notification monitor:"
+            );
         }
         if (gatewayStarted) {
-            gateway.shutdown();
+            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
-        server.close();
+        rollback(() => server.close(), "[Backend] Failed to close server:");
         throw error;
     }
 }

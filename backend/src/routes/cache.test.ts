@@ -275,7 +275,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 user?: string;
                 password?: string;
             };
-            assert.deepEqual(blankPayload, { user: "postgres", password: "postgres" });
+            assert.deepEqual(blankPayload, { user: "", password: "" });
 
             process.env.DB_POSTGRESDB_USER = "native-user";
             process.env.DB_POSTGRESDB_PASSWORD = "native-password";

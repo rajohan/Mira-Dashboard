@@ -67,8 +67,8 @@ async function runDockerExec(container: string, command: string) {
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = "n8n") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
+    const username = process.env.DATABASE_USERNAME ?? "postgres";
+    const password = process.env.DATABASE_PASSWORD ?? "postgres";
     const encodedUsername = encodeURIComponent(username);
     const encodedPassword = encodeURIComponent(password);
     const encodedDatabase = encodeURIComponent(database);

@@ -360,6 +360,23 @@ describe("notifications routes", () => {
             "2026-05-11T02:01:00.000Z",
             "2026-05-11T02:01:00.000Z"
         );
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Array metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:array-metadata`,
+            "[]",
+            "2026-05-11T02:02:00.000Z",
+            "2026-05-11T02:02:00.000Z",
+            "2026-05-11T02:02:00.000Z"
+        );
 
         const list = await requestJson<{
             items: NotificationItem[];
@@ -374,6 +391,12 @@ describe("notifications routes", () => {
         assert.deepEqual(
             list.body.items.find(
                 (notification) => notification.dedupeKey === `${source}:empty-metadata`
+            )?.metadata,
+            {}
+        );
+        assert.deepEqual(
+            list.body.items.find(
+                (notification) => notification.dedupeKey === `${source}:array-metadata`
             )?.metadata,
             {}
         );

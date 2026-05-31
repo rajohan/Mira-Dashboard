@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -313,6 +313,20 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join(os.homedir(), ".openclaw", "workspace")
             );
+            const realHomeDir = os.homedir();
+            const homedir = mock.method(
+                os,
+                "homedir",
+                () => path.parse(realHomeDir).root
+            );
+            try {
+                delete process.env.OPENCLAW_HOME;
+                assert.throws(() => __testing.getDefaultWorkspaceRoot(), {
+                    message: "Could not resolve a safe workspace root",
+                });
+            } finally {
+                homedir.mock.restore();
+            }
             assert.equal(__testing.listDirectory("../../outside"), null);
             assert.throws(() => __testing.listDirectory("src/app.ts"), {
                 code: "ENOTDIR",

@@ -44,6 +44,13 @@ describe("cacheStore utilities", () => {
                 "postgresql://postgres:postgres@postgres:5432/n8n"
             );
 
+            process.env.DATABASE_USERNAME = "";
+            process.env.DATABASE_PASSWORD = "";
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://:@postgres:5432/n8n"
+            );
+
             process.env.DATABASE_USERNAME = "user@name";
             process.env.DATABASE_PASSWORD = "p:a/ss#";
             process.env.DATABASE_HOST = "db";
