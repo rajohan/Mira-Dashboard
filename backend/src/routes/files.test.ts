@@ -37,6 +37,18 @@ async function startServer(workspaceRoot: string): Promise<TestServer> {
             next(new Error("boom"));
         });
         filesRoutes(app, express);
+        app.use(
+            (
+                error: unknown,
+                _req: express.Request,
+                res: express.Response,
+                _next: express.NextFunction
+            ) => {
+                res.status(500).json({
+                    error: error instanceof Error ? error.message : "Route failed",
+                });
+            }
+        );
         server = http.createServer(app);
 
         await new Promise<void>((resolve, reject) => {
@@ -549,7 +561,10 @@ describe("files routes", () => {
         assert.equal(fileAsDirectory.body.error, "Directory not found");
 
         const nonUriError = await fetch(`${server.baseUrl}/api/files/boom`);
+        const nonUriErrorBody = (await nonUriError.json()) as { error: string };
         assert.equal(nonUriError.status, 500);
+        assert.match(nonUriError.headers.get("content-type") ?? "", /application\/json/u);
+        assert.deepEqual(nonUriErrorBody, { error: "boom" });
     });
 
     it("uses stat identity checks for opened files on non-Linux platforms", async () => {

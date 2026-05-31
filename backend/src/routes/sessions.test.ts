@@ -296,14 +296,6 @@ describe("sessions routes", () => {
             assert.equal(action.body.error, "abort failed");
             assert.equal(deleteResponse.status, 500);
             assert.equal(deleteResponse.body.error, "delete failed");
-
-            gateway.abortSessionRun = async (key: string) => {
-                aborted.push(key);
-            };
-            gateway.deleteSession = async (key: string) => {
-                deleted.push(key);
-                return { archived: true };
-            };
         } finally {
             gateway.getSessions = originalGetSessions;
             gateway.abortSessionRun = originalAbortSessionRun;
