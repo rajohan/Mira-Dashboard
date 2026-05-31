@@ -355,9 +355,16 @@ export default function configFilesRoutes(
                         backupPath,
                         openclawRoot
                     );
+                    if (!safeBackupPath) {
+                        const error = new Error(
+                            "Backup path validation failed"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "EACCES";
+                        throw error;
+                    }
                     await copyNoFollowGuarded(
                         guardedPath(safeFullPath),
-                        guardedPath(safeBackupPath as string)
+                        guardedPath(safeBackupPath)
                     );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

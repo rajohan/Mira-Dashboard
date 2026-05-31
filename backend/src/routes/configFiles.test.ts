@@ -683,5 +683,23 @@ describe("config files routes", () => {
         } finally {
             await rm(backup, { recursive: true, force: true });
         }
+
+        await writeFile(target, "export const previous = true;\n");
+        await symlink(path.join(os.tmpdir(), "mira-unsafe-backup.ts"), backup);
+        try {
+            const unsafeBackup = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const next = true;\n" } }
+            );
+            assert.equal(unsafeBackup.status, 500);
+            assert.match(unsafeBackup.body.error, /Backup path validation failed/u);
+            assert.equal(
+                await readFile(target, "utf8"),
+                "export const previous = true;\n"
+            );
+        } finally {
+            await rm(backup, { force: true });
+        }
     });
 });

@@ -145,6 +145,10 @@ describe("notifications routes", () => {
         );
         assert.equal(defaultType.status, 200);
         assert.equal(typeof defaultType.body.id, "number");
+        const createdDefaultType = db
+            .prepare("SELECT type FROM notifications WHERE id = ?")
+            .get(defaultType.body.id) as { type: string } | undefined;
+        assert.equal(createdDefaultType?.type, "info");
     });
 
     it("reports insert failures without pruning notifications", async () => {
