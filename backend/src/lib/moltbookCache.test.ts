@@ -111,6 +111,7 @@ describe("Moltbook cache helpers", () => {
         const home = await cache.fetchCachedMoltbookHome();
 
         assert.equal(home.updatedAt, null);
+        assert.equal(home.lastAttemptAt, null);
         assert.equal(home.expiresAt, null);
         assert.equal(home.errorCode, null);
         assert.equal(home.errorMessage, null);

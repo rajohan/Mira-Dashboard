@@ -117,7 +117,7 @@ describe("STT routes", () => {
         assert.equal(words.status, 200);
         assert.deepEqual(await words.json(), {
             provider: "elevenlabs",
-            text: "hei   der",
+            text: "hei der",
         });
 
         globalThis.fetch = async () => new Response("bad audio", { status: 400 });

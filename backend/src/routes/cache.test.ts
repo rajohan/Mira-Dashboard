@@ -242,6 +242,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     it("does not pass literal undefined database credentials to refresh commands", async () => {
         const originalDatabaseUsername = process.env.DATABASE_USERNAME;
         const originalDatabasePassword = process.env.DATABASE_PASSWORD;
+        const originalPostgresUser = process.env.DB_POSTGRESDB_USER;
+        const originalPostgresPassword = process.env.DB_POSTGRESDB_PASSWORD;
         const envPath = path.join(tempDir, "refresh-env.json");
         const refreshCommand = [
             process.execPath,
@@ -252,6 +254,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             delete process.env.DATABASE_USERNAME;
             delete process.env.DATABASE_PASSWORD;
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
             __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
 
             await refreshCacheKey("quotas.summary");
@@ -261,6 +265,18 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 password?: string;
             };
             assert.deepEqual(payload, { user: "", password: "" });
+
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            await refreshCacheKey("quotas.summary");
+            const inheritedPayload = JSON.parse(await readFile(envPath, "utf8")) as {
+                user?: string;
+                password?: string;
+            };
+            assert.deepEqual(inheritedPayload, {
+                user: "native-user",
+                password: "native-password",
+            });
         } finally {
             if (originalDatabaseUsername === undefined) {
                 delete process.env.DATABASE_USERNAME;
@@ -271,6 +287,16 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 delete process.env.DATABASE_PASSWORD;
             } else {
                 process.env.DATABASE_PASSWORD = originalDatabasePassword;
+            }
+            if (originalPostgresUser === undefined) {
+                delete process.env.DB_POSTGRESDB_USER;
+            } else {
+                process.env.DB_POSTGRESDB_USER = originalPostgresUser;
+            }
+            if (originalPostgresPassword === undefined) {
+                delete process.env.DB_POSTGRESDB_PASSWORD;
+            } else {
+                process.env.DB_POSTGRESDB_PASSWORD = originalPostgresPassword;
             }
             __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
         }

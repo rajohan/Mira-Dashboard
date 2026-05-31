@@ -606,7 +606,10 @@ async function refreshSessions(
         return;
     }
     const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-    sessionList = sessions.map(transformSession);
+    sessionList = sessions
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => entry !== null)
+        .map((entry) => transformSession(entry as GatewaySession));
     broadcast({ type: "sessions", sessions: sessionList });
 }
 
@@ -702,6 +705,7 @@ function init(token: string): void {
             return;
         }
         isGatewayConnected = false;
+        sessionList = [];
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     thisGatewayClient = new GatewayClientCtor({

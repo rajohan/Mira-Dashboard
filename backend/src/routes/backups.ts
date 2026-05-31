@@ -107,8 +107,10 @@ function createBackupEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", ""),
-        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", ""),
+        DB_POSTGRESDB_USER:
+            process.env.DB_POSTGRESDB_USER ?? envFallback("DATABASE_USERNAME", ""),
+        DB_POSTGRESDB_PASSWORD:
+            process.env.DB_POSTGRESDB_PASSWORD ?? envFallback("DATABASE_PASSWORD", ""),
     };
 }
 

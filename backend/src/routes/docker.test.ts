@@ -18,6 +18,22 @@ const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalUpdaterNodeBin = process.env.MIRA_UPDATER_NODE_BIN;
 const originalUpdaterCwd = process.env.MIRA_UPDATER_CWD;
+const fakeEnvKeys = [
+    "MIRA_FAKE_UPDATER_FAIL_STEP",
+    "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
+    "MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP",
+    "MIRA_FAKE_UPDATER_STDERR",
+    "MIRA_FAKE_DOCKER_EMPTY",
+    "MIRA_FAKE_DOCKER_SPARSE",
+    "MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT",
+    "MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE",
+    "MIRA_FAKE_DOCKER_RM_FAIL",
+    "MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH",
+    "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
+] as const;
+const originalFakeEnv = new Map(
+    fakeEnvKeys.map((key) => [key, process.env[key]] as const)
+);
 let fakeUpdaterNodeBin: string;
 
 function createMockChildProcess(
@@ -421,17 +437,14 @@ describe("docker routes", { concurrency: false }, () => {
         );
         __testing.dockerExecJobs.clear();
         process.env.PATH = originalPath;
-        delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
-        delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
-        delete process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP;
-        delete process.env.MIRA_FAKE_UPDATER_STDERR;
-        delete process.env.MIRA_FAKE_DOCKER_EMPTY;
-        delete process.env.MIRA_FAKE_DOCKER_SPARSE;
-        delete process.env.MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT;
-        delete process.env.MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE;
-        delete process.env.MIRA_FAKE_DOCKER_RM_FAIL;
-        delete process.env.MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH;
-        delete process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS;
+        for (const key of fakeEnvKeys) {
+            const originalValue = originalFakeEnv.get(key);
+            if (originalValue === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = originalValue;
+            }
+        }
         if (originalDockerRoot === undefined) {
             delete process.env.MIRA_DOCKER_ROOT;
         } else {

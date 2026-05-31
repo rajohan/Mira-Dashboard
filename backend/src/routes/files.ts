@@ -257,7 +257,9 @@ export default function filesRoutes(
                         fullPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
                     } else {
                         const openedStat = await file.stat();
-                        const targetStat = fs.statSync(candidatePath);
+                        const resolvedCandidatePath =
+                            await fs.promises.realpath(candidatePath);
+                        const targetStat = fs.statSync(resolvedCandidatePath);
                         if (
                             openedStat.dev !== targetStat.dev ||
                             openedStat.ino !== targetStat.ino
@@ -268,7 +270,7 @@ export default function filesRoutes(
                             await file.close();
                             return;
                         }
-                        fullPath = await fs.promises.realpath(candidatePath);
+                        fullPath = resolvedCandidatePath;
                     }
                 } catch (error) {
                     if (file) {

@@ -54,8 +54,9 @@ function transcriptTextFromElevenLabs(result?: unknown): string {
             }
 
             const text = (word as { text?: unknown }).text;
-            return typeof text === "string" ? text : "";
+            return typeof text === "string" ? text.trim() : "";
         })
+        .filter(Boolean)
         .join(" ")
         .trim();
 }

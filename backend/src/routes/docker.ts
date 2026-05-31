@@ -29,7 +29,7 @@ const MAX_JOBS = 100;
 const N8N_DATABASE = "n8n";
 
 function updaterScriptPath(fileName: string): string {
-    return path.join(updaterCwd, "scripts", fileName);
+    return path.resolve(updaterCwd, "scripts", fileName);
 }
 
 /** Represents one docker updater service row. */

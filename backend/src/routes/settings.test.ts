@@ -303,6 +303,23 @@ describe("settings routes", () => {
         }
     });
 
+    it("falls back to defaults when persisted settings values are invalid", async () => {
+        await writeFile(
+            settingsPath,
+            JSON.stringify({ theme: 42, refreshInterval: "oops" }),
+            "utf8"
+        );
+
+        const response = await requestJson<{
+            theme: string;
+            refreshInterval: number;
+        }>(server, "/api/settings");
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.theme, "dark");
+        assert.equal(response.body.refreshInterval, 5000);
+    });
+
     it("reports gateway-status and save failures", async () => {
         const failingHomeDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-settings-failing-")

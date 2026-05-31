@@ -10,12 +10,20 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 
+function resolveConfiguredRoot(envName: string, fallback: string): string {
+    const value = nonEmptyEnvFallback(envName, fallback).trim();
+    if (!path.isAbsolute(value) || value === path.parse(value).root) {
+        throw new Error(`${envName} must be an absolute non-root path`);
+    }
+    return value;
+}
+
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
-const DASHBOARD_ROOT = nonEmptyEnvFallback(
+const DASHBOARD_ROOT = resolveConfiguredRoot(
     "MIRA_DASHBOARD_ROOT",
     "/home/ubuntu/projects/mira-dashboard"
 );
-const DASHBOARD_WORKTREE_ROOT = nonEmptyEnvFallback(
+const DASHBOARD_WORKTREE_ROOT = resolveConfiguredRoot(
     "MIRA_DASHBOARD_WORKTREE_ROOT",
     "/home/ubuntu/projects/mira-dashboard-worktrees"
 );

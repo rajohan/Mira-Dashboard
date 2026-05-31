@@ -44,17 +44,32 @@ describe("error helpers", () => {
         assert.deepEqual(jsonCalls, [{ error: "fallback" }]);
 
         const forwarded: unknown[] = [];
+        const forwardedJsonCalls: unknown[] = [];
+        const forwardedResponse = {
+            headersSent: true,
+            statusCode: 200,
+            status(code: number) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body: unknown) {
+                forwardedJsonCalls.push(body);
+                return this;
+            },
+        };
         const forwardHandler = asyncRoute(async () => {
             throw new Error("after headers");
         }, {});
 
         forwardHandler(
             {} as never,
-            { ...response, headersSent: true } as never,
+            forwardedResponse as never,
             ((error: unknown) => forwarded.push(error)) as never
         );
         await new Promise((resolve) => setImmediate(resolve));
 
         assert.equal((forwarded[0] as Error).message, "after headers");
+        assert.deepEqual(forwardedJsonCalls, []);
+        assert.equal(forwardedResponse.statusCode, 200);
     });
 });

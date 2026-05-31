@@ -68,7 +68,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         env:
-            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+            CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
         steps:
             - name: Checkout
               uses: actions/checkout@v6
@@ -103,7 +103,7 @@ jobs:
               run: perl -0pi -e 's{^SF:src/}{SF:backend/src/}mg' backend/coverage/lcov.info
 
             - name: Upload backend coverage artifact
-              uses: actions/upload-artifact@v7
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
                   name: backend-coverage-lcov
@@ -112,8 +112,8 @@ jobs:
                   retention-days: 14
 
             - name: Upload backend coverage to Codecov
-              uses: codecov/codecov-action@v6
-              if: ${{ env.CODECOV_TOKEN != '' }}
+              uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
+              if: ${{ env.CODECOV_TOKEN_PRESENT == 'true' }}
               env:
                   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
               with:

@@ -176,8 +176,17 @@ describe("media routes", () => {
         await writeFile(disappearingFile, "gone");
 
         const previousOpenclawHome = process.env.OPENCLAW_HOME;
-        process.env.OPENCLAW_HOME = missingHome;
-        const module = await import(`./media.js?missing-root=${Date.now()}`);
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = missingHome;
+            module = await import(`./media.js?missing-root=${Date.now()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+        }
         const missingServer = await startServerWithMediaRoutes(
             missingHome,
             module.default,
@@ -210,8 +219,17 @@ describe("media routes", () => {
         await writeFile(resolvedFilePath, "orphaned");
 
         const previousOpenclawHome = process.env.OPENCLAW_HOME;
-        process.env.OPENCLAW_HOME = missingHome;
-        const module = await import(`./media.js?missing-real-root=${Date.now()}`);
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = missingHome;
+            module = await import(`./media.js?missing-real-root=${Date.now()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+        }
         const missingServer = await startServerWithMediaRoutes(
             missingHome,
             module.default,

@@ -180,8 +180,12 @@ describe("gateway state and helper utilities", () => {
                 payload: { runId: "run-1" },
             });
             latest?.options.onConnectError?.(new Error("connect failed"));
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
             latest?.options.onClose?.(1006, "closed");
             assert.equal(gateway.isConnected(), false);
+            assert.deepEqual(gateway.getSessions(), []);
             await waitForAsyncHandlers();
 
             gateway.init("token-c");
@@ -246,8 +250,10 @@ describe("gateway state and helper utilities", () => {
         }) as typeof setTimeout;
 
         try {
+            assert.ok(openclawHome);
+            const deviceIdentityPath = path.join(openclawHome, "device.json");
             assert.equal(
-                __testing.loadOrCreateDashboardDeviceIdentity("/tmp/device.json", () => {
+                __testing.loadOrCreateDashboardDeviceIdentity(deviceIdentityPath, () => {
                     throw new Error("identity unavailable");
                 }),
                 undefined
@@ -895,6 +901,10 @@ describe("gateway state and helper utilities", () => {
         assert.deepEqual(gateway.getSessions(), []);
 
         client.responses.set("sessions.list", "not an object");
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", { sessions: [null, "bad"] });
         await __testing.refreshSessions(client as never);
         assert.deepEqual(gateway.getSessions(), []);
     });

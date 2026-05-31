@@ -314,6 +314,26 @@ describe("backup routes", () => {
         assert.equal(backupTesting.mapJob(null), null);
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
+        const previousDatabaseUser = process.env.DB_POSTGRESDB_USER;
+        const previousDatabasePassword = process.env.DB_POSTGRESDB_PASSWORD;
+        try {
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            const env = backupTesting.createBackupEnv();
+            assert.equal(env.DB_POSTGRESDB_USER, "native-user");
+            assert.equal(env.DB_POSTGRESDB_PASSWORD, "native-password");
+        } finally {
+            if (previousDatabaseUser === undefined) {
+                delete process.env.DB_POSTGRESDB_USER;
+            } else {
+                process.env.DB_POSTGRESDB_USER = previousDatabaseUser;
+            }
+            if (previousDatabasePassword === undefined) {
+                delete process.env.DB_POSTGRESDB_PASSWORD;
+            } else {
+                process.env.DB_POSTGRESDB_PASSWORD = previousDatabasePassword;
+            }
+        }
         assert.equal(backupTesting.getN8nRoot(), tempDir);
         const previousN8nRoot = process.env.MIRA_N8N_ROOT;
         try {

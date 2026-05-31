@@ -751,10 +751,12 @@ describe("server bootstrap", () => {
                         delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
                     ])) === true;
             }
+            exited ||= child.exitCode !== null || child.killed;
             if (!exited) {
                 const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-                child.kill("SIGKILL");
-                await exitPromise;
+                if (child.kill("SIGKILL")) {
+                    await exitPromise;
+                }
             }
         }
     });

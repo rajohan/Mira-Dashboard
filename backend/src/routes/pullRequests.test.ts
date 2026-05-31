@@ -901,6 +901,30 @@ describe("pull request routes", () => {
         }
     });
 
+    it("rejects unsafe dashboard root configuration at import time", async () => {
+        const restoreEnv = saveEnv([
+            "MIRA_DASHBOARD_ROOT",
+            "MIRA_DASHBOARD_WORKTREE_ROOT",
+        ]);
+        try {
+            process.env.MIRA_DASHBOARD_ROOT = "relative-dashboard";
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
+            await assert.rejects(
+                () => import(`./pullRequests.js?relative-root=${randomUUID()}`),
+                /MIRA_DASHBOARD_ROOT must be an absolute non-root path/u
+            );
+
+            process.env.MIRA_DASHBOARD_ROOT = tempDir;
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.parse(tempDir).root;
+            await assert.rejects(
+                () => import(`./pullRequests.js?root-worktree=${randomUUID()}`),
+                /MIRA_DASHBOARD_WORKTREE_ROOT must be an absolute non-root path/u
+            );
+        } finally {
+            restoreEnv();
+        }
+    });
+
     it("rejects invalid pull request numbers before running external commands", async () => {
         const originalConsoleError = console.error;
         console.error = () => {

@@ -38,7 +38,8 @@ const DEFAULT_SETTINGS: Settings = {
 function loadSettings(): Settings {
     try {
         const content = fs.readFileSync(resolveSettingsFile(), "utf8");
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
+        const persisted = JSON.parse(content) as unknown;
+        return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
     } catch {
         // File doesn't exist or is unreadable; return defaults
     }
