@@ -117,10 +117,7 @@ describe("settings routes", () => {
             __testing.resolveSettingsDir("   "),
             path.join(os.homedir(), ".openclaw")
         );
-        assert.equal(
-            __testing.resolveSettingsDir(),
-            path.join(os.homedir(), ".openclaw")
-        );
+        assert.equal(__testing.resolveSettingsDir(), path.join(homeDir, ".openclaw"));
         const originalHome = process.env.HOME;
         try {
             delete process.env.HOME;
