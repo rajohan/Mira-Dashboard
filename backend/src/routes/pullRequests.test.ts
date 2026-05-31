@@ -915,7 +915,11 @@ describe("pull request routes", () => {
             );
 
             process.env.MIRA_DASHBOARD_ROOT = tempDir;
-            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.parse(tempDir).root;
+            process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(
+                path.parse(tempDir).root,
+                "tmp",
+                ".."
+            );
             await assert.rejects(
                 () => import(`./pullRequests.js?root-worktree=${randomUUID()}`),
                 /MIRA_DASHBOARD_WORKTREE_ROOT must be an absolute non-root path/u

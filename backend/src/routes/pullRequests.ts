@@ -11,8 +11,12 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 const execFileAsync = promisify(execFile);
 
 function resolveConfiguredRoot(envName: string, fallback: string): string {
-    const value = nonEmptyEnvFallback(envName, fallback).trim();
-    if (!path.isAbsolute(value) || value === path.parse(value).root) {
+    const rawValue = nonEmptyEnvFallback(envName, fallback).trim();
+    if (!path.isAbsolute(rawValue)) {
+        throw new Error(`${envName} must be an absolute non-root path`);
+    }
+    const value = path.resolve(rawValue);
+    if (value === path.parse(value).root) {
         throw new Error(`${envName} must be an absolute non-root path`);
     }
     return value;
