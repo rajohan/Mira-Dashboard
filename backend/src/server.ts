@@ -43,6 +43,7 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 const GLOBAL_JSON_LIMIT = "2097152b";
+const globalJsonParser = express.json({ limit: GLOBAL_JSON_LIMIT });
 
 /** Parses Express trust-proxy config from environment strings. */
 export function parseTrustProxy(value?: string): boolean | number | string {
@@ -62,7 +63,14 @@ export function parseTrustProxy(value?: string): boolean | number | string {
 }
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
-app.use(express.json({ limit: GLOBAL_JSON_LIMIT }));
+app.use((request, response, next) => {
+    if (request.method === "PUT" && request.path.startsWith("/api/config-files/")) {
+        next();
+        return;
+    }
+
+    globalJsonParser(request, response, next);
+});
 export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 

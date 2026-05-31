@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -444,6 +444,19 @@ describe("server bootstrap", () => {
             });
             ws.once("error", reject);
         });
+    });
+
+    it("lets config-file writes use the route-specific JSON parser", async () => {
+        assert.ok(openclawHome);
+        await writeFile(path.join(openclawHome, "openclaw.json"), "{}", "utf8");
+
+        const response = await fetch(`${getBaseUrl()}/api/config-files/openclaw.json`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: '{"updated":true}' }),
+        });
+
+        assert.equal(response.status, 200);
     });
 
     it("covers non-loopback auth and startup handler branches", () => {
