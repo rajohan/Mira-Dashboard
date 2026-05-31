@@ -27,6 +27,19 @@ function getVariant(status?: string): "success" | "warning" | "error" | "default
     return "default";
 }
 
+function formatCacheUpdateTime(value?: string | null): string {
+    if (!value) {
+        return "Never";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return "Unknown";
+    }
+
+    return formatDate(date);
+}
+
 /** Renders the cache status card UI. */
 export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
     const { data } = useCacheHeartbeat(30_000);
@@ -79,9 +92,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                     <div>
                                         Last update:{" "}
                                         <span className="text-primary-100">
-                                            {entry?.updatedAt
-                                                ? formatDate(new Date(entry.updatedAt))
-                                                : "Never"}
+                                            {formatCacheUpdateTime(entry?.updatedAt)}
                                         </span>
                                     </div>
                                     {entry?.errorMessage ? (
