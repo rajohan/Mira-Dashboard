@@ -59,9 +59,17 @@ function validatePassword(password: unknown): string | null {
     return password;
 }
 
-function rollbackFirstUserBootstrap(userId: number, gatewayToken: string): void {
+function rollbackFirstUserBootstrap(
+    userId: number,
+    gatewayToken: string,
+    previousGatewayToken: string | null = null
+): void {
     db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    if (previousGatewayToken) {
+        persistGatewayToken(previousGatewayToken);
+        return;
+    }
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
         gatewayToken
     );
@@ -154,6 +162,7 @@ export default function authRoutes(
             return;
         }
 
+        const previousGatewayToken = getPersistedGatewayToken();
         try {
             persistAuthGatewayToken(gatewayToken);
             initGateway(gatewayToken);
@@ -161,7 +170,7 @@ export default function authRoutes(
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
-            rollbackBootstrap(user.id, gatewayToken);
+            rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
             shutdownGateway();
             response.status(500).json({ error: "Failed to complete first-user setup" });
         }

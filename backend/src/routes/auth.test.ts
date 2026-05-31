@@ -232,13 +232,18 @@ describe("auth first-user bootstrap routes", () => {
         cleanupBootstrapRows(username);
         let rolledBack = false;
         let shutdown = false;
+        let previousGatewayToken: string | null = null;
+        db.prepare(
+            "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ).run("preexisting-token", new Date().toISOString());
         const sideEffectServer = await startServer({
             createSession: () => {
                 throw new Error("session unavailable");
             },
-            rollbackBootstrap: (userId, token) => {
+            rollbackBootstrap: (userId, token, previousToken) => {
                 rolledBack = true;
-                authTesting.rollbackFirstUserBootstrap(userId, token);
+                previousGatewayToken = previousToken ?? null;
+                authTesting.rollbackFirstUserBootstrap(userId, token, previousToken);
             },
             shutdownGateway: () => {
                 shutdown = true;
@@ -257,11 +262,25 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.body.error, "Failed to complete first-user setup");
             assert.equal(rolledBack, true);
             assert.equal(shutdown, true);
+            assert.equal(previousGatewayToken, "preexisting-token");
+            assert.equal(
+                db
+                    .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+                    .get()?.value,
+                "preexisting-token"
+            );
             assert.equal(
                 db
                     .prepare("SELECT id FROM users WHERE username = ?")
                     .get("bootstrap-side-effect"),
                 undefined
+            );
+            authTesting.rollbackFirstUserBootstrap(0, gatewayToken);
+            assert.equal(
+                db
+                    .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+                    .get()?.value,
+                "preexisting-token"
             );
 
             retryServer = await startServer();
@@ -280,6 +299,9 @@ describe("auth first-user bootstrap routes", () => {
             await retryServer?.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
+            db.prepare(
+                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+            ).run("preexisting-token");
         }
     });
 });

@@ -111,7 +111,6 @@ export async function copyNoFollowGuarded(
     try {
         const sourceStat = await sourceFile.stat();
         const sourceMode = sourceStat.mode & 0o777;
-        const sourceContent = await sourceFile.readFile();
         const destinationFile = await Fs.promises.open(
             guardedPathBuffer(destination),
             Fs.constants.O_WRONLY | Fs.constants.O_CREAT | Fs.constants.O_NOFOLLOW,
@@ -130,7 +129,22 @@ export async function copyNoFollowGuarded(
 
             await destinationFile.chmod(sourceMode);
             await destinationFile.truncate(0);
-            await destinationFile.writeFile(sourceContent);
+            const buffer = Buffer.allocUnsafe(64 * 1024);
+            let position = 0;
+            while (position < sourceStat.size) {
+                const { bytesRead } = await sourceFile.read(
+                    buffer,
+                    0,
+                    buffer.length,
+                    position
+                );
+                /* c8 ignore next 3 */
+                if (bytesRead === 0) {
+                    break;
+                }
+                await destinationFile.write(buffer, 0, bytesRead);
+                position += bytesRead;
+            }
         } finally {
             await destinationFile.close();
         }
