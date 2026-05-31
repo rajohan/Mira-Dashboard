@@ -176,8 +176,8 @@ export default function authRoutes(
             return;
         }
 
-        const sessionId = createSession(user.id);
-        setSessionCookie(response, sessionId, request);
+        const sessionId = createAuthSession(user.id);
+        setAuthSessionCookie(response, sessionId, request);
         response.json({
             authenticated: true,
             user: { id: user.id, username: user.username },
