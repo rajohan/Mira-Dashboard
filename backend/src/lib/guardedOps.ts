@@ -109,16 +109,28 @@ export async function copyNoFollowGuarded(
 ): Promise<void> {
     const sourceFile = await openReadNoFollowGuarded(source);
     try {
+        const sourceStat = await sourceFile.stat();
+        const sourceMode = sourceStat.mode & 0o777;
+        const sourceContent = await sourceFile.readFile();
         const destinationFile = await Fs.promises.open(
             guardedPathBuffer(destination),
-            Fs.constants.O_WRONLY |
-                Fs.constants.O_CREAT |
-                Fs.constants.O_TRUNC |
-                Fs.constants.O_NOFOLLOW,
-            0o666
+            Fs.constants.O_WRONLY | Fs.constants.O_CREAT | Fs.constants.O_NOFOLLOW,
+            sourceMode
         );
         try {
-            await destinationFile.writeFile(await sourceFile.readFile());
+            const destinationStat = await destinationFile.stat();
+            if (
+                sourceStat.dev === destinationStat.dev &&
+                sourceStat.ino === destinationStat.ino
+            ) {
+                throw Object.assign(new Error("Source and destination must differ"), {
+                    code: "EINVAL",
+                });
+            }
+
+            await destinationFile.chmod(sourceMode);
+            await destinationFile.truncate(0);
+            await destinationFile.writeFile(sourceContent);
         } finally {
             await destinationFile.close();
         }

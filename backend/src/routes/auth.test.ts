@@ -228,39 +228,45 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
-    it("reports success when post-create bootstrap side effects fail", async () => {
+    it("rolls back first-user bootstrap when post-create side effects fail", async () => {
         cleanupBootstrapRows(username);
         const sideEffectServer = await startServer({
             createSession: () => {
                 throw new Error("session unavailable");
             },
         });
+        let retryServer: TestServer | undefined;
         try {
             const registered = await requestJson<{
-                authenticated: boolean;
-                user: { username: string };
-                warning: string;
+                error: string;
             }>(sideEffectServer, "/api/auth/register-first-user", {
                 method: "POST",
                 body: { username: "bootstrap-side-effect", password, gatewayToken },
             });
 
-            assert.equal(registered.status, 201);
-            assert.equal(registered.body.authenticated, false);
-            assert.equal(registered.body.user.username, "bootstrap-side-effect");
-            assert.match(registered.body.warning, /sign in/u);
-
-            const duplicate = await requestJson<{ error: string }>(
-                sideEffectServer,
-                "/api/auth/register-first-user",
-                {
-                    method: "POST",
-                    body: { username: "bootstrap-dupe", password, gatewayToken },
-                }
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(
+                db
+                    .prepare("SELECT id FROM users WHERE username = ?")
+                    .get("bootstrap-side-effect"),
+                undefined
             );
-            assert.equal(duplicate.status, 409);
+
+            retryServer = await startServer();
+            const retried = await requestJson<{
+                authenticated: boolean;
+                user: { username: string };
+            }>(retryServer, "/api/auth/register-first-user", {
+                method: "POST",
+                body: { username: "bootstrap-dupe", password, gatewayToken },
+            });
+            assert.equal(retried.status, 201);
+            assert.equal(retried.body.authenticated, true);
+            assert.equal(retried.body.user.username, "bootstrap-dupe");
         } finally {
             await sideEffectServer.close();
+            await retryServer?.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
         }

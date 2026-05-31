@@ -102,10 +102,10 @@ describe("safe path helpers", () => {
             assert.equal(safePathWithinRoot("../outside.txt", root), null);
             assert.equal(safePathWithinRoot("bad\0name", root), null);
             assert.equal(safePathWithinRoot("nested/note.txt", "/\0bad-root"), null);
-            assert.equal(safePathWithinRoot("tmp", "/"), "/tmp");
+            assert.equal(safePathWithinRoot("tmp", "/"), null);
             assert.equal(
                 prepareSafeWriteTargetWithinRoot("/tmp/mira-safe-root-check.txt", "/"),
-                "/tmp/mira-safe-root-check.txt"
+                null
             );
 
             assert.equal(sanitizeFilename("../note.txt"), "note.txt");

@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    link,
+    mkdtemp,
+    readFile,
+    rm,
+    stat,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -32,6 +41,7 @@ describe("guarded filesystem helpers", () => {
 
             const source = guardedPath(path.join(baseDir, "nested", "source.txt"));
             await writeFile(source, "'hello'", "utf8");
+            await chmod(source, 0o600);
 
             assert.equal(readTextGuarded(source), "'hello'");
             assert.equal(readJson5Guarded(source), "hello");
@@ -62,6 +72,8 @@ describe("guarded filesystem helpers", () => {
             );
             await copyNoFollowGuarded(source, noFollowCopy);
             assert.equal(await readFile(noFollowCopy, "utf8"), "'hello'");
+            const noFollowCopyStat = await stat(noFollowCopy);
+            assert.equal(noFollowCopyStat.mode & 0o777, 0o600);
 
             const opened = await openReadNoFollowGuarded(copied);
             try {
@@ -88,8 +100,10 @@ describe("guarded filesystem helpers", () => {
         try {
             const realTarget = path.join(baseDir, "real.txt");
             const linkTarget = guardedPath(path.join(baseDir, "link.txt"));
+            const hardLinkTarget = guardedPath(path.join(baseDir, "hardlink.txt"));
             await writeFile(realTarget, "real", "utf8");
             await symlink(realTarget, linkTarget);
+            await link(realTarget, hardLinkTarget);
 
             const originalContent = await readFile(realTarget, "utf8");
             await assert.rejects(() => writeTextNoFollowGuarded(linkTarget, "blocked"));
@@ -98,6 +112,10 @@ describe("guarded filesystem helpers", () => {
             );
             await assert.rejects(() =>
                 copyNoFollowGuarded(linkTarget, guardedPath(realTarget))
+            );
+            await assert.rejects(
+                () => copyNoFollowGuarded(guardedPath(realTarget), hardLinkTarget),
+                /Source and destination must differ/u
             );
             assert.equal(await readFile(realTarget, "utf8"), originalContent);
             const realStat = await stat(realTarget);

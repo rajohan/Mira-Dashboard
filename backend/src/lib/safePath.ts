@@ -32,7 +32,12 @@ function canonicalizePotentialPath(targetPath: string): string {
 }
 
 function withTrailingPathSeparator(rootPath: string): string {
+    /* c8 ignore next -- filesystem roots are rejected before containment checks. */
     return rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep;
+}
+
+function isFilesystemRoot(rootPath: string): boolean {
+    return path.parse(rootPath).root === rootPath;
 }
 
 /**
@@ -57,6 +62,10 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
 
     try {
         const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDir));
+        if (isFilesystemRoot(canonicalRoot)) {
+            return null;
+        }
+
         const canonicalResolved = canonicalizePotentialPath(
             path.resolve(rootDir, userPath)
         );
@@ -92,6 +101,10 @@ export function prepareSafeWriteTargetWithinRoot(
 
     try {
         const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDir));
+        if (isFilesystemRoot(canonicalRoot)) {
+            return null;
+        }
+
         fs.mkdirSync(Buffer.from(canonicalRoot), { recursive: true });
 
         const realRoot = fs.realpathSync(canonicalRoot);

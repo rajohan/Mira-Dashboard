@@ -13,6 +13,7 @@ import {
     setSessionCookie,
     verifyPassword,
 } from "../auth.js";
+import { db } from "../db.js";
 import gateway from "../gateway.js";
 
 /** Performs read session ID. */
@@ -58,8 +59,17 @@ function validatePassword(password: unknown): string | null {
     return password;
 }
 
+function rollbackFirstUserBootstrap(userId: number, gatewayToken: string): void {
+    db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
+        gatewayToken
+    );
+}
+
 export const __testing = {
     readSessionId,
+    rollbackFirstUserBootstrap,
     validateUsername,
     validatePassword,
 };
@@ -146,11 +156,8 @@ export default function authRoutes(
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
-            response.status(201).json({
-                authenticated: false,
-                user,
-                warning: "First user created; sign in to finish setup",
-            });
+            rollbackFirstUserBootstrap(user.id, gatewayToken);
+            response.status(500).json({ error: "Failed to complete first-user setup" });
         }
     });
 
