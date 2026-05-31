@@ -135,6 +135,8 @@ describe("tasks routes", () => {
         assert.equal(__testing.serializeTaskEventPayload(false), "false");
         assert.equal(__testing.serializeTaskEventPayload({ ok: true }), '{"ok":true}');
         assert.equal(__testing.serializeTaskEventPayload(null), "{}");
+        const missingPayload: unknown = undefined;
+        assert.equal(__testing.serializeTaskEventPayload(missingPayload), "null");
         assert.equal(__testing.normalizeAutomationInput(null), "{}");
         assert.equal(__testing.normalizeAutomationInput([]), "{}");
         assert.equal(__testing.normalizeAutomationInput({ cronJobId: "   " }), "{}");

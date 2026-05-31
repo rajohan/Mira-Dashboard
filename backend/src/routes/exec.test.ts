@@ -189,6 +189,10 @@ describe("exec routes", () => {
             status: 500,
             error: "internal server error",
         });
+        assert.deepEqual(__testing.execErrorResponse(null), {
+            status: 500,
+            error: "internal server error",
+        });
 
         __testing.jobs.clear();
         for (let index = 0; index < 101; index += 1) {

@@ -1513,7 +1513,25 @@ export default function agentsRoutes(app: express.Application): void {
                 const currentActive = getActiveHistoryTask(agentId);
                 const ts = nowIso();
 
-                // Auto history handling on task changes
+                if (safeTask && safeTask.length > 0) {
+                    metadata.currentTask = safeTask;
+                }
+
+                metadata.updatedAt = ts;
+
+                const latestMetadataDir = FS.realpathSync(metadataDir);
+                if (latestMetadataDir !== realExpectedSessionsDir) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
+
+                // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
+                await writeTextNoFollowGuarded(
+                    guardedPath(Path.join(latestMetadataDir, "metadata.json")),
+                    JSON.stringify(metadata, null, 2)
+                );
+
+                // Auto history handling on task changes after metadata is durably written.
                 if (safeTask && safeTask.length > 0) {
                     if (!currentActive) {
                         db.prepare(
@@ -1536,23 +1554,7 @@ export default function agentsRoutes(app: express.Application): void {
                          VALUES (?, ?, 'active', ?, ?)`
                         ).run(agentId, safeTask, ts, ts);
                     }
-
-                    metadata.currentTask = safeTask;
                 }
-
-                metadata.updatedAt = ts;
-
-                const latestMetadataDir = FS.realpathSync(metadataDir);
-                if (latestMetadataDir !== realExpectedSessionsDir) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-
-                // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
-                await writeTextNoFollowGuarded(
-                    guardedPath(Path.join(latestMetadataDir, "metadata.json")),
-                    JSON.stringify(metadata, null, 2)
-                );
                 res.json(metadata);
             },
             {

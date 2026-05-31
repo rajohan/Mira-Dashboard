@@ -253,7 +253,9 @@ function execErrorResponse(error: unknown): { status: number; error: string } {
         return { status: 400, error: error.message };
     }
 
-    console.error("[Exec] Route error:", (error as Error).message);
+    const message =
+        error instanceof Error ? error.message : String(error || "Unknown error");
+    console.error("[Exec] Route error:", message);
     return { status: 500, error: "internal server error" };
 }
 

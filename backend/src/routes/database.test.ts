@@ -154,6 +154,19 @@ describe("database routes", () => {
                 __testing.buildPostgresUri(),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/postgres"
             );
+
+            process.env.DATABASE_HOST = "   ";
+            process.env.DATABASE_PORT = "  ";
+            process.env.PGBOUNCER_HOST = "   ";
+            process.env.PGBOUNCER_PORT = "  ";
+            assert.equal(
+                __testing.buildPostgresUri(),
+                "postgresql://user%40name:p%3Aa%2Fss%23@postgres:5432/postgres"
+            );
+            assert.equal(
+                __testing.buildPgBouncerUri(),
+                "postgresql://user%40name:p%3Aa%2Fss%23@pgbouncer:5432/pgbouncer"
+            );
         } finally {
             for (const [key, value] of Object.entries(originalEnv)) {
                 if (value === undefined) {

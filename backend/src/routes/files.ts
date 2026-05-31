@@ -17,7 +17,9 @@ import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
     const openclawHome = process.env.OPENCLAW_HOME?.trim();
-    return openclawHome
+    return openclawHome &&
+        path.isAbsolute(openclawHome) &&
+        path.parse(openclawHome).root !== openclawHome
         ? path.join(openclawHome, "workspace")
         : path.join(os.homedir(), ".openclaw", "workspace");
 }

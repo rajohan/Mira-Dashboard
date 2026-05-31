@@ -1,6 +1,8 @@
 import * as ChildProcess from "node:child_process";
 import * as Fs from "node:fs";
 
+import JSON5 from "json5";
+
 export type GuardedPath = string & { readonly __guardedPath: unique symbol };
 
 /** Marks a previously validated path so filesystem helpers only accept reviewed path values. */
@@ -37,8 +39,8 @@ export function mkdirGuarded(path: GuardedPath, options: { recursive: true }): v
 }
 
 /** Reads a JSON5 text file from a validated path. */
-export function readJson5Guarded(path: GuardedPath): string {
-    return fsOps.readFileSync(guardedPathBuffer(path), "utf8");
+export function readJson5Guarded(path: GuardedPath): unknown {
+    return JSON5.parse(fsOps.readFileSync(guardedPathBuffer(path), "utf8"));
 }
 
 /** Lists directory entries from a validated path. */

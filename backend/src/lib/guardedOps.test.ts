@@ -30,9 +30,9 @@ describe("guarded filesystem helpers", () => {
             mkdirGuarded(nested, { recursive: true });
 
             const source = guardedPath(path.join(baseDir, "nested", "source.txt"));
-            await writeFile(source, "hello", "utf8");
+            await writeFile(source, "'hello'", "utf8");
 
-            assert.equal(readTextGuarded(source), "hello");
+            assert.equal(readTextGuarded(source), "'hello'");
             assert.equal(readJson5Guarded(source), "hello");
             const sourceStat = await statGuardedAsync(source);
             assert.equal(statGuarded(source).isFile(), true);
@@ -55,17 +55,17 @@ describe("guarded filesystem helpers", () => {
 
             const copied = guardedPath(path.join(baseDir, "nested", "copied.txt"));
             copyGuarded(source, copied);
-            assert.equal(await readFile(copied, "utf8"), "hello");
+            assert.equal(await readFile(copied, "utf8"), "'hello'");
 
             const opened = await openReadNoFollowGuarded(copied);
             try {
-                assert.equal(readFromOpenFile(opened.fd, 5).toString(), "hello");
-                assert.equal(readFromOpenFile(opened.fd, 20).toString(), "hello");
+                assert.equal(readFromOpenFile(opened.fd, 7).toString(), "'hello'");
+                assert.equal(readFromOpenFile(opened.fd, 20).toString(), "'hello'");
             } finally {
                 await opened.close();
             }
 
-            assert.equal(await readTextNoFollowGuarded(copied), "hello");
+            assert.equal(await readTextNoFollowGuarded(copied), "'hello'");
 
             await writeTextGuarded(copied, "updated");
             assert.equal(await readFile(copied, "utf8"), "updated");

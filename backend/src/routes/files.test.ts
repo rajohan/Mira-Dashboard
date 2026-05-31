@@ -303,6 +303,16 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join("/tmp/openclaw-home", "workspace")
             );
+            process.env.OPENCLAW_HOME = "relative-home";
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(os.homedir(), ".openclaw", "workspace")
+            );
+            process.env.OPENCLAW_HOME = path.parse(os.homedir()).root;
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join(os.homedir(), ".openclaw", "workspace")
+            );
             assert.equal(__testing.listDirectory("../../outside"), null);
             assert.throws(() => __testing.listDirectory("src/app.ts"), {
                 code: "ENOTDIR",

@@ -129,6 +129,12 @@ async function runDockerExec(container: string, command: string) {
     return stdout;
 }
 
+/** Returns trimmed environment overrides while treating whitespace-only values as missing. */
+function trimmedEnvValue(value: string | undefined): string | undefined {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? undefined : trimmed;
+}
+
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
     const username = encodeURIComponent(
@@ -137,8 +143,11 @@ function buildPostgresUri(database = "postgres") {
     const password = encodeURIComponent(
         stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
-    const host = stringWithDefault(process.env.DATABASE_HOST, "postgres");
-    const port = stringWithDefault(process.env.DATABASE_PORT, "5432");
+    const host = stringWithDefault(
+        trimmedEnvValue(process.env.DATABASE_HOST),
+        "postgres"
+    );
+    const port = stringWithDefault(trimmedEnvValue(process.env.DATABASE_PORT), "5432");
     const db = encodeURIComponent(database);
     return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
@@ -151,8 +160,11 @@ function buildPgBouncerUri(database = "pgbouncer") {
     const password = encodeURIComponent(
         stringWithDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
-    const host = stringWithDefault(process.env.PGBOUNCER_HOST, "pgbouncer");
-    const port = stringWithDefault(process.env.PGBOUNCER_PORT, "5432");
+    const host = stringWithDefault(
+        trimmedEnvValue(process.env.PGBOUNCER_HOST),
+        "pgbouncer"
+    );
+    const port = stringWithDefault(trimmedEnvValue(process.env.PGBOUNCER_PORT), "5432");
     const db = encodeURIComponent(database);
     return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }

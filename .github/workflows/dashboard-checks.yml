@@ -100,7 +100,8 @@ jobs:
               working-directory: backend
 
             - name: Prefix backend LCOV paths
-              run: perl -0pi -e 's{^SF:src/}{SF:backend/src/}mg' backend/coverage/lcov.info
+              if: always()
+              run: test ! -f backend/coverage/lcov.info || perl -0pi -e 's{^SF:src/}{SF:backend/src/}mg' backend/coverage/lcov.info
 
             - name: Upload backend coverage artifact
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

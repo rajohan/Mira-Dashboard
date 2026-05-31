@@ -13,6 +13,7 @@ import {
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
+const CONFIG_WRITE_JSON_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
 
 // Allowed config files (whitelist for security)
 const ALLOWED_CONFIG_FILES = [
@@ -296,7 +297,7 @@ export default function configFilesRoutes(
     // Write config file
     app.put(
         /^\/api\/config-files\/(.*)$/,
-        express.json({ limit: `${MAX_CONFIG_WRITE_SIZE}b` }),
+        express.json({ limit: `${CONFIG_WRITE_JSON_LIMIT}b` }),
         asyncRoute(
             async (req, res) => {
                 const filePath = req.params[0];
@@ -313,7 +314,7 @@ export default function configFilesRoutes(
 
                 if (
                     typeof content !== "string" ||
-                    content.length > MAX_CONFIG_WRITE_SIZE
+                    Buffer.byteLength(content, "utf8") > MAX_CONFIG_WRITE_SIZE
                 ) {
                     res.status(400).json({ error: "Invalid content" });
                     return;
