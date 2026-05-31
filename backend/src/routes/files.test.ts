@@ -247,6 +247,26 @@ describe("files routes", () => {
         }
     });
 
+    it("returns not found when the workspace root is missing", async () => {
+        const missingRootParent = await mkdtemp(
+            path.join(os.tmpdir(), "mira-files-missing-root-")
+        );
+        const missingServer = await startServer(
+            path.join(missingRootParent, "workspace")
+        );
+        try {
+            const response = await requestJson<{ error: string }>(
+                missingServer,
+                "/api/files"
+            );
+            assert.equal(response.status, 404);
+            assert.equal(response.body.error, "Directory not found");
+        } finally {
+            await missingServer.close();
+            await rm(missingRootParent, { recursive: true, force: true });
+        }
+    });
+
     it("covers file helper edge cases", async () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
         const { __testing } = await import("./files.js");
@@ -497,6 +517,13 @@ describe("files routes", () => {
         );
         assert.equal(deniedList.status, 403);
 
+        const fileAsDirectory = await requestJson<{ error: string }>(
+            server,
+            "/api/files?path=src%2Fapp.ts"
+        );
+        assert.equal(fileAsDirectory.status, 404);
+        assert.equal(fileAsDirectory.body.error, "Directory not found");
+
         const nonUriError = await fetch(`${server.baseUrl}/api/files/boom`);
         assert.equal(nonUriError.status, 500);
     });
@@ -691,6 +718,13 @@ describe("files routes", () => {
         }) as typeof fs.realpathSync;
 
         try {
+            const listFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/files"
+            );
+            assert.equal(listFailure.status, 500);
+            assert.equal(listFailure.body.error, "root unavailable");
+
             const rootFailure = await requestJson<{ error: string }>(
                 server,
                 "/api/files/src%2Fapp.ts"

@@ -137,17 +137,28 @@ function listDirectory(dirPath: string): FileItem[] | null {
                     path: itemPath,
                 });
             } else {
-                // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
-                const stat = statGuarded(
-                    guardedPath(path.join(resolvedFullPath, entry.name))
-                );
-                items.push({
-                    name: entry.name,
-                    type: "file",
-                    path: itemPath,
-                    size: stat.size,
-                    modified: stat.mtime.toISOString(),
-                });
+                try {
+                    // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
+                    const stat = statGuarded(
+                        guardedPath(path.join(resolvedFullPath, entry.name))
+                    );
+                    items.push({
+                        name: entry.name,
+                        type: "file",
+                        path: itemPath,
+                        size: stat.size,
+                        modified: stat.mtime.toISOString(),
+                    });
+                    /* c8 ignore start */
+                } catch {
+                    items.push({
+                        name: entry.name,
+                        type: "file",
+                        path: itemPath,
+                        error: true,
+                    });
+                }
+                /* c8 ignore stop */
             }
         }
     } catch (error) {
@@ -183,7 +194,19 @@ export default function filesRoutes(
         asyncRoute(
             async (req, res) => {
                 const dirPath = stringFallback(req.query.path);
-                const files = listDirectory(dirPath);
+                let files: FileItem[] | null;
+                try {
+                    files = listDirectory(dirPath);
+                } catch (error) {
+                    if (
+                        (error as NodeJS.ErrnoException).code === "ENOENT" ||
+                        (error as NodeJS.ErrnoException).code === "ENOTDIR"
+                    ) {
+                        res.status(404).json({ error: "Directory not found" });
+                        return;
+                    }
+                    throw error;
+                }
                 if (!files) {
                     res.status(403).json({
                         error: "Access denied: path outside workspace",

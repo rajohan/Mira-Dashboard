@@ -113,6 +113,7 @@ describe("ops routes", () => {
         } else {
             process.env.MIRA_N8N_ROOT = originalN8nRoot;
         }
+        delete process.env.FAKE_LOG_ROTATION_EMPTY;
         delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
         await rm(tempDir, { recursive: true, force: true });
     });

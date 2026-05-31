@@ -66,7 +66,7 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
         const realSessionsDir = FS.realpathSync(sessionsDir);
         return realSessionsDir === realExpectedSessionsDir &&
             realExpectedSessionsDir === canonicalExpectedSessionsDir
-            ? sessionsDir
+            ? realSessionsDir
             : null;
     } catch {
         return null;
@@ -97,8 +97,9 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
 
             try {
                 const expected = Path.join(realAgentsDir, root.relative);
-                return FS.realpathSync(rootDir) === expected
-                    ? [{ dir: rootDir, recursive: root.recursive }]
+                const realRootDir = FS.realpathSync(rootDir);
+                return realRootDir === expected
+                    ? [{ dir: realRootDir, recursive: root.recursive }]
                     : [];
             } catch {
                 return [];

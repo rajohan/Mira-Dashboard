@@ -57,15 +57,13 @@ async function requestWithoutJsonBody<T>(
         method: "POST",
     });
     const contentType = response.headers.get("content-type") || "";
-    const text = contentType.includes("application/json")
-        ? undefined
-        : await response.text();
+    const body = contentType.includes("application/json")
+        ? ((await response.json()) as T)
+        : ((await response.text()) as T);
 
     return {
         status: response.status,
-        body: contentType.includes("application/json")
-            ? ((await response.json()) as T)
-            : ((text || {}) as T),
+        body,
     };
 }
 
