@@ -157,6 +157,7 @@ export default function authRoutes(
             response.status(201).json({ authenticated: true, user });
         } catch {
             rollbackFirstUserBootstrap(user.id, gatewayToken);
+            gateway.shutdown();
             response.status(500).json({ error: "Failed to complete first-user setup" });
         }
     });
