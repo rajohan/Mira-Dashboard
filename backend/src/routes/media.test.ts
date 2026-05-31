@@ -183,10 +183,9 @@ describe("media routes", () => {
             module.default,
             previousOpenclawHome
         );
-        const existsSync = mock.method(
-            fs,
-            "existsSync",
-            (filePath: fs.PathLike) => filePath === disappearingFile
+        const realExistsSync = fs.existsSync.bind(fs);
+        const existsSync = mock.method(fs, "existsSync", (filePath: fs.PathLike) =>
+            filePath === disappearingFile ? false : realExistsSync(filePath)
         );
 
         try {
@@ -199,6 +198,49 @@ describe("media routes", () => {
             assert.deepEqual(await response.json(), { error: "Media not found" });
         } finally {
             existsSync.mock.restore();
+            await missingServer.close();
+        }
+    });
+
+    it("returns not found when the media root disappears after file validation", async () => {
+        const missingHome = path.join(tempRoot, "missing-root-after-file");
+        const missingMediaRoot = path.join(missingHome, "media");
+        const filePath = path.join(missingMediaRoot, "orphaned.txt");
+        const resolvedFilePath = path.join(tempRoot, "resolved-orphaned.txt");
+        await writeFile(resolvedFilePath, "orphaned");
+
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        process.env.OPENCLAW_HOME = missingHome;
+        const module = await import(`./media.js?missing-real-root=${Date.now()}`);
+        const missingServer = await startServerWithMediaRoutes(
+            missingHome,
+            module.default,
+            previousOpenclawHome
+        );
+        const realExistsSync = fs.existsSync.bind(fs);
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const existsSync = mock.method(fs, "existsSync", (candidate: fs.PathLike) => {
+            if (candidate === filePath) {
+                return true;
+            }
+            if (candidate === missingMediaRoot) {
+                return false;
+            }
+            return realExistsSync(candidate);
+        });
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) =>
+            candidate === filePath ? resolvedFilePath : realRealpathSync(candidate)
+        );
+
+        try {
+            const response = await fetch(
+                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(filePath)}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            existsSync.mock.restore();
+            realpathSync.mock.restore();
             await missingServer.close();
         }
     });

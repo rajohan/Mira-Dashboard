@@ -870,7 +870,15 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/:number/reject",
         express.json(),
         asyncRoute(async (req, res) => {
-            const number = validatePrNumber(req.params.number);
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
             const comment =
                 typeof req.body?.comment === "string" && req.body.comment.trim()
                     ? req.body.comment.trim()

@@ -915,6 +915,15 @@ describe("pull request routes", () => {
 
             assert.equal(response.status, 400);
             assert.equal(response.body.error, "Invalid pull request number");
+
+            const reject = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/nope/reject",
+                { method: "POST", body: { comment: "Nope" } }
+            );
+
+            assert.equal(reject.status, 400);
+            assert.equal(reject.body.error, "Invalid pull request number");
         } finally {
             console.error = originalConsoleError;
         }

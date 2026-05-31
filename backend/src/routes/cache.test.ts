@@ -7,7 +7,7 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
-import { cacheStoreTestState } from "../lib/cacheStore.js";
+import { __testing as cacheStoreTesting } from "../lib/cacheStore.js";
 import cacheRoutes from "./cache.js";
 import {
     __testing,
@@ -54,7 +54,7 @@ if (command.includes("WHERE key = 'missing.key'")) {
         "utf8"
     );
     await chmod(dockerPath, 0o755);
-    cacheStoreTestState.dockerBin = dockerPath;
+    cacheStoreTesting.setDockerBinForTests(dockerPath);
     return dockerPath;
 }
 
@@ -106,7 +106,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
         __testing.setCacheRefreshCwdForTests(undefined);
         __testing.resetCacheRefreshForTests();
-        delete cacheStoreTestState.dockerBin;
+        cacheStoreTesting.setDockerBinForTests(undefined);
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }

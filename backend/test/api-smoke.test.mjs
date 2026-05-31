@@ -116,7 +116,9 @@ async function startServer() {
             OPENCLAW_HOME: openClawHome,
             PORT: String(port),
             WORKSPACE_ROOT: workspaceRoot,
-            NODE_V8_COVERAGE: path.join(temporaryRoot, "coverage"),
+            ...(process.env.NODE_V8_COVERAGE
+                ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE }
+                : { NODE_V8_COVERAGE: path.join(temporaryRoot, "coverage") }),
         },
         stdio: ["ignore", "pipe", "pipe"],
     });

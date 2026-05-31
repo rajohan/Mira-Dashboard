@@ -200,9 +200,13 @@ describe("OpenClaw update notifications", () => {
             return timer;
         }) as typeof setInterval;
         try {
+            startOpenClawNotificationMonitor(Number.MAX_SAFE_INTEGER);
+            assert.equal(scheduledInterval, 2_147_483_647);
+            stopOpenClawNotificationMonitorForTest();
+
             startOpenClawNotificationMonitor(1);
             assert.equal(scheduledInterval, 60 * 60 * 1000);
-            assert.equal(callbackRuns, 1);
+            assert.equal(callbackRuns, 2);
             await new Promise((resolve) => setTimeout(resolve, 100));
         } finally {
             stopOpenClawNotificationMonitorForTest();

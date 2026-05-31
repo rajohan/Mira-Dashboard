@@ -43,6 +43,11 @@ function getRouteParam(value: string | string[] | undefined): string {
     return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
+function getRealAgentsDir(): string | null {
+    const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+    return realAgentsDir === AGENTS_DIR ? realAgentsDir : null;
+}
+
 /** Returns the canonical sessions directory for a validated agent id. */
 function getSafeAgentSessionsDir(agentId: string): string | null {
     if (!HAS_CONFIGURED_HOME_DIR || !isValidAgentId(agentId)) {
@@ -55,7 +60,10 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
     }
 
     try {
-        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        const realAgentsDir = getRealAgentsDir();
+        if (!realAgentsDir) {
+            return null;
+        }
         const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
         const canonicalExpectedSessionsDir = Path.join(
             realAgentsDir,
@@ -88,7 +96,10 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
     ];
 
     try {
-        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        const realAgentsDir = getRealAgentsDir();
+        if (!realAgentsDir) {
+            return [];
+        }
         return roots.flatMap((root) => {
             const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR);
             if (!rootDir) {
@@ -1223,7 +1234,10 @@ async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> 
                 status.sessionKey = matchingSession.key;
             }
             applyGatewaySessionStatus(status, matchingSession);
-            const sessionModel = normalizeGatewaySessionModel(matchingSession?.model);
+            const rawSessionModel = normalizeGatewaySessionModel(matchingSession?.model);
+            const sessionModel = rawSessionModel
+                ? toDisplayModelName(rawSessionModel)
+                : undefined;
             status.model =
                 sessionModel && sessionModel !== configuredModel
                     ? sessionModel
@@ -1257,7 +1271,10 @@ async function buildSingleAgentStatus(
         status.sessionKey = matchingSession.key;
     }
     applyGatewaySessionStatus(status, matchingSession);
-    const sessionModel = normalizeGatewaySessionModel(matchingSession?.model);
+    const rawSessionModel = normalizeGatewaySessionModel(matchingSession?.model);
+    const sessionModel = rawSessionModel
+        ? toDisplayModelName(rawSessionModel)
+        : undefined;
     status.model =
         sessionModel && sessionModel !== configuredModel ? sessionModel : configuredModel;
 
@@ -1448,7 +1465,11 @@ export default function agentsRoutes(app: express.Application): void {
                 // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
                 mkdirGuarded(guardedPath(metadataDir), { recursive: true });
 
-                const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+                const realAgentsDir = getRealAgentsDir();
+                if (!realAgentsDir) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
                 const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
                 const canonicalExpectedSessionsDir = Path.join(
                     realAgentsDir,

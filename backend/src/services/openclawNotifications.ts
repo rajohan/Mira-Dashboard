@@ -3,6 +3,7 @@ import { fetchCachedSystemHost } from "../lib/systemCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Represents alert state. */
 interface AlertState {
@@ -109,7 +110,7 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
 export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000
-            ? intervalMs
+            ? Math.min(Math.trunc(intervalMs), MAX_TIMER_MS)
             : DEFAULT_INTERVAL_MS;
 
     if (monitorTimer) {

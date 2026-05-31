@@ -83,6 +83,7 @@ function cleanupBootstrapRows(username: string): void {
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
         bootstrapGatewayToken
     );
+    gatewayTesting.resetGatewayStateForTest();
 }
 
 describe("auth first-user bootstrap routes", () => {

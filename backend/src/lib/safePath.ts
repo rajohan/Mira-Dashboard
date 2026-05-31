@@ -31,6 +31,10 @@ function canonicalizePotentialPath(targetPath: string): string {
     }
 }
 
+function withTrailingPathSeparator(rootPath: string): string {
+    return rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep;
+}
+
 /**
  * Validate that a resolved path stays within an allowed root directory.
  * Prevents path traversal attacks (e.g. "../../etc/passwd").
@@ -56,7 +60,7 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
         const canonicalResolved = canonicalizePotentialPath(
             path.resolve(rootDir, userPath)
         );
-        const normalizedRoot = canonicalRoot + path.sep;
+        const normalizedRoot = withTrailingPathSeparator(canonicalRoot);
 
         if (
             canonicalResolved === canonicalRoot ||
@@ -91,7 +95,7 @@ export function prepareSafeWriteTargetWithinRoot(
         fs.mkdirSync(Buffer.from(canonicalRoot), { recursive: true });
 
         const realRoot = fs.realpathSync(canonicalRoot);
-        const normalizedRoot = realRoot + path.sep;
+        const normalizedRoot = withTrailingPathSeparator(realRoot);
         const resolvedTarget = path.resolve(fullPath);
         let canonicalTarget: string;
         try {

@@ -620,6 +620,7 @@ function init(token: string): void {
     const previousGatewayClient = gatewayClient;
     gatewayClient = null;
     isGatewayConnected = false;
+    sessionList = [];
     broadcast({ type: "disconnected", gatewayConnected: false });
     currentToken = token;
     previousGatewayClient?.stop();
@@ -971,6 +972,7 @@ function shutdown(): void {
     gatewayClient?.stop();
     gatewayClient = null;
     isGatewayConnected = false;
+    sessionList = [];
     currentToken = null;
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

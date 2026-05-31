@@ -20,6 +20,7 @@ let originalTrustProxy: string | undefined;
 let originalOpenClawHome: string | undefined;
 let originalGatewayToken: { value: string } | undefined;
 let openclawHome: string | undefined;
+const ENTRYPOINT_SHUTDOWN_TIMEOUT_MS = 3_000;
 
 let apiAuthMiddleware: (typeof import("./server.js"))["apiAuthMiddleware"];
 let handleWebSocketConnection: (typeof import("./server.js"))["handleWebSocketConnection"];
@@ -740,12 +741,21 @@ describe("server bootstrap", () => {
             await delay(300);
             assert.equal(child.exitCode, null);
         } finally {
-            const exitPromise =
-                child.exitCode !== null || child.killed
-                    ? Promise.resolve()
-                    : new Promise((resolve) => child.once("exit", resolve));
-            child.kill("SIGTERM");
-            await exitPromise;
+            let exited = child.exitCode !== null || child.killed;
+            if (!exited) {
+                const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+                child.kill("SIGTERM");
+                exited =
+                    (await Promise.race([
+                        exitPromise.then(() => true),
+                        delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
+                    ])) === true;
+            }
+            if (!exited) {
+                const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+                child.kill("SIGKILL");
+                await exitPromise;
+            }
         }
     });
 });

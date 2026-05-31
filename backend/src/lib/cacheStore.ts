@@ -3,7 +3,15 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export const cacheStoreTestState: { dockerBin?: string } = {};
+const cacheStoreTestState: { dockerBin?: string } = {};
+
+function setDockerBinForTests(value: string | undefined): void {
+    cacheStoreTestState.dockerBin = value;
+}
+
+function getDockerBinForTests(): string | undefined {
+    return cacheStoreTestState.dockerBin;
+}
 
 /** Represents one cache entry row. */
 export interface CacheEntryRow {
@@ -48,7 +56,7 @@ async function runDockerExec(container: string, command: string) {
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
     };
-    const dockerBin = cacheStoreTestState.dockerBin || "docker";
+    const dockerBin = getDockerBinForTests() || "docker";
     const { stdout } = await execFileAsync(
         dockerBin,
         ["exec", container, "bash", "-lc", command],
@@ -71,6 +79,8 @@ function buildPostgresUri(database = "n8n") {
 
 export const __testing = {
     buildPostgresUri,
+    getDockerBinForTests,
+    setDockerBinForTests,
 };
 
 /** Performs query n8n cache. */

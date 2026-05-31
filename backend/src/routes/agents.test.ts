@@ -174,7 +174,7 @@ describe("agents routes", () => {
         const testAgent = status.body.agents.find((agent) => agent.id === agentId);
         const researcher = status.body.agents.find((agent) => agent.id === "researcher");
         assert.equal(testAgent?.status, "idle");
-        assert.equal(testAgent?.model, "openai-codex/gpt-5.5");
+        assert.equal(testAgent?.model, "gpt-5.5");
         assert.equal(testAgent?.currentTask, null);
         assert.equal(researcher?.model, "hf:moonshotai/Kimi-K2.5");
         assert.equal(typeof status.body.timestamp, "number");
@@ -782,6 +782,24 @@ describe("agents routes", () => {
                 config
             );
             assert.equal(unknownSingle?.model, "configured-model");
+
+            gateway.request = async () => ({
+                sessions: [
+                    {
+                        key: "agent:session-key-agent:main",
+                        model: "openai-codex/gpt-5.5",
+                        status: "running",
+                        updatedAt: Date.parse("2026-05-16T18:00:00.000Z"),
+                    },
+                ],
+            });
+            const [displayStatus] = await __testing.buildAgentStatuses(config);
+            assert.equal(displayStatus.model, "gpt-5.5");
+            const displaySingle = await __testing.buildSingleAgentStatus(
+                "session-key-agent",
+                config
+            );
+            assert.equal(displaySingle?.model, "gpt-5.5");
         } finally {
             gateway.request = previousGatewayRequest;
         }
@@ -922,6 +940,60 @@ describe("agents routes", () => {
             ),
             true
         );
+    });
+
+    it("rejects a symlinked agents root before writing metadata", async () => {
+        const symlinkHome = await mkdtemp(path.join(os.tmpdir(), "mira-agents-link-"));
+        const outsideAgents = await mkdtemp(
+            path.join(os.tmpdir(), "mira-agents-link-target-")
+        );
+        const openclawRoot = path.join(symlinkHome, ".openclaw");
+        let symlinkServer: http.Server | undefined;
+        const previousHome = process.env.HOME;
+        try {
+            await mkdir(openclawRoot, { recursive: true });
+            await symlink(outsideAgents, path.join(openclawRoot, "agents"));
+            process.env.HOME = symlinkHome;
+            const { default: agentsRoutes, __testing } = await import(
+                `./agents.js?symlink-root=${Date.now()}`
+            );
+
+            assert.equal(__testing.getSafeAgentSessionsDir("main"), null);
+            assert.deepEqual(__testing.getSafeAgentActivityRoots("main"), []);
+
+            const app = express();
+            agentsRoutes(app);
+            symlinkServer = http.createServer(app);
+            await new Promise<void>((resolve) => symlinkServer?.listen(0, resolve));
+            const address = symlinkServer.address();
+            assert.ok(address && typeof address === "object");
+
+            const response = await fetch(
+                `http://127.0.0.1:${address.port}/api/agents/main/metadata`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ currentTask: "blocked" }),
+                }
+            );
+            assert.equal(response.status, 400);
+            assert.deepEqual(await response.json(), {
+                error: "Invalid agent metadata path",
+            });
+        } finally {
+            if (symlinkServer) {
+                await new Promise<void>((resolve, reject) =>
+                    symlinkServer?.close((error) => (error ? reject(error) : resolve()))
+                );
+            }
+            if (previousHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = previousHome;
+            }
+            await rm(symlinkHome, { recursive: true, force: true });
+            await rm(outsideAgents, { recursive: true, force: true });
+        }
     });
 
     it("rejects invalid agent ids before touching metadata paths", async () => {

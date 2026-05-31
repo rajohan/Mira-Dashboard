@@ -39,54 +39,86 @@ setTimeout(() => process.exit(0), 10);
 }
 
 async function startServer(tempDir: string): Promise<TestServer> {
+    const savedDopplerBin = process.env.DOPPLER_BIN;
+    const savedN8nRoot = process.env.MIRA_N8N_ROOT;
     process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
     process.env.MIRA_N8N_ROOT = tempDir;
-    const app = express();
-    app.use(express.json());
-    backupRoutes(app, express);
-    const server = http.createServer(app);
+    try {
+        const app = express();
+        app.use(express.json());
+        backupRoutes(app, express);
+        const server = http.createServer(app);
 
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, resolve);
-    });
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, resolve);
+        });
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () =>
-            new Promise((resolve, reject) =>
-                server.close((error) => (error ? reject(error) : resolve()))
-            ),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () =>
+                new Promise((resolve, reject) =>
+                    server.close((error) => (error ? reject(error) : resolve()))
+                ),
+        };
+    } catch (error) {
+        if (savedDopplerBin === undefined) {
+            delete process.env.DOPPLER_BIN;
+        } else {
+            process.env.DOPPLER_BIN = savedDopplerBin;
+        }
+        if (savedN8nRoot === undefined) {
+            delete process.env.MIRA_N8N_ROOT;
+        } else {
+            process.env.MIRA_N8N_ROOT = savedN8nRoot;
+        }
+        throw error;
+    }
 }
 
 async function startServerWithDoppler(
     tempDir: string,
     dopplerBin: string
 ): Promise<TestServer> {
+    const savedDopplerBin = process.env.DOPPLER_BIN;
+    const savedN8nRoot = process.env.MIRA_N8N_ROOT;
     process.env.DOPPLER_BIN = dopplerBin;
     process.env.MIRA_N8N_ROOT = tempDir;
-    const app = express();
-    app.use(express.json());
-    backupRoutes(app, express);
-    const server = http.createServer(app);
+    try {
+        const app = express();
+        app.use(express.json());
+        backupRoutes(app, express);
+        const server = http.createServer(app);
 
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, resolve);
-    });
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, resolve);
+        });
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () =>
-            new Promise((resolve, reject) =>
-                server.close((error) => (error ? reject(error) : resolve()))
-            ),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () =>
+                new Promise((resolve, reject) =>
+                    server.close((error) => (error ? reject(error) : resolve()))
+                ),
+        };
+    } catch (error) {
+        if (savedDopplerBin === undefined) {
+            delete process.env.DOPPLER_BIN;
+        } else {
+            process.env.DOPPLER_BIN = savedDopplerBin;
+        }
+        if (savedN8nRoot === undefined) {
+            delete process.env.MIRA_N8N_ROOT;
+        } else {
+            process.env.MIRA_N8N_ROOT = savedN8nRoot;
+        }
+        throw error;
+    }
 }
 
 async function requestJson<T>(

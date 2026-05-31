@@ -155,8 +155,13 @@ describe("gateway state and helper utilities", () => {
             process.env.OPENCLAW_GATEWAY_URL = "";
             gateway.init("token-a");
             assert.equal(gateway.isConnected(), false);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
             gateway.init("token-a");
             gateway.init("token-b");
+            assert.deepEqual(gateway.getSessions(), []);
+            assert.equal(gateway.getStatus().sessions, 0);
             assert.equal(CapturingGatewayClient.instances.length, 2);
             assert.equal(CapturingGatewayClient.instances[0]?.started, true);
             assert.equal(CapturingGatewayClient.instances[0]?.stopped, true);
@@ -199,6 +204,13 @@ describe("gateway state and helper utilities", () => {
             successful?.options.onConnectError?.(new Error("stale connect failed"));
             successful?.options.onClose?.(1006, "stale");
             assert.equal(gateway.isConnected(), true);
+
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            gateway.shutdown();
+            assert.deepEqual(gateway.getSessions(), []);
+            assert.equal(gateway.getStatus().sessions, 0);
 
             __testing.setGatewayClientConstructorForTest(ThrowingStartGatewayClient);
             assert.throws(() => gateway.init("token-throws"), /start failed/u);
