@@ -1175,4 +1175,27 @@ describe("gateway state and helper utilities", () => {
             payload: { deleted: true },
         });
     });
+
+    it("refreshes sessions after successful requests even when client replies fail", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.delete", { deleted: true });
+        client.responses.set("sessions.list", {
+            sessions: [{ key: "agent:main:main", sessionId: "session-after-send" }],
+        });
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new ThrowingWebSocket();
+        ws.throwOnSend = true;
+        const forwarded = await __testing.forwardRequest(
+            "sessions.delete",
+            { key: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "session-delete-send-failure"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(ws.sent, []);
+        assert.equal(gateway.getSessions()[0]?.id, "session-after-send");
+    });
 });

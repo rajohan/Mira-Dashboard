@@ -763,15 +763,19 @@ async function forwardRequest(
             }
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
-            if (pending?.clientWs.readyState === WebSocket.OPEN) {
-                pending.clientWs.send(
-                    JSON.stringify({
-                        type: "res",
-                        id: pending.clientId,
-                        ok: true,
-                        payload,
-                    })
-                );
+            try {
+                if (pending?.clientWs.readyState === WebSocket.OPEN) {
+                    pending.clientWs.send(
+                        JSON.stringify({
+                            type: "res",
+                            id: pending.clientId,
+                            ok: true,
+                            payload,
+                        })
+                    );
+                }
+            } catch {
+                // Ignore reply write failures; the Gateway call already succeeded.
             }
             if (method.startsWith("sessions.")) {
                 await refreshSessions(activeGateway);
