@@ -222,6 +222,44 @@ describe("auth first-user bootstrap routes", () => {
             cleanupBootstrapRows(username);
         }
     });
+
+    it("reports success when post-create bootstrap side effects fail", async () => {
+        cleanupBootstrapRows(username);
+        const sideEffectServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+        });
+        try {
+            const registered = await requestJson<{
+                authenticated: boolean;
+                user: { username: string };
+                warning: string;
+            }>(sideEffectServer, "/api/auth/register-first-user", {
+                method: "POST",
+                body: { username: "bootstrap-side-effect", password, gatewayToken },
+            });
+
+            assert.equal(registered.status, 201);
+            assert.equal(registered.body.authenticated, false);
+            assert.equal(registered.body.user.username, "bootstrap-side-effect");
+            assert.match(registered.body.warning, /sign in/u);
+
+            const duplicate = await requestJson<{ error: string }>(
+                sideEffectServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-dupe", password, gatewayToken },
+                }
+            );
+            assert.equal(duplicate.status, 409);
+        } finally {
+            await sideEffectServer.close();
+            cleanupUser("bootstrap-side-effect");
+            cleanupBootstrapRows(username);
+        }
+    });
 });
 
 describe("auth routes", () => {

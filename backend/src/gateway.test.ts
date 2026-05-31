@@ -1198,4 +1198,23 @@ describe("gateway state and helper utilities", () => {
         assert.deepEqual(ws.sent, []);
         assert.equal(gateway.getSessions()[0]?.id, "session-after-send");
     });
+
+    it("swallows error reply write failures", async () => {
+        const client = new FakeGatewayClient();
+        client.failures.set("chat.history", new Error("history failed"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new ThrowingWebSocket();
+        ws.throwOnSend = true;
+        const forwarded = await __testing.forwardRequest(
+            "chat.history",
+            {},
+            ws as unknown as WebSocket,
+            "history-send-failure"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(ws.sent, []);
+    });
 });

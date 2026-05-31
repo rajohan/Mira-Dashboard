@@ -67,9 +67,21 @@ export const __testing = {
 /** Registers auth API routes. */
 export default function authRoutes(
     app: express.Application,
-    dependencies: { createUser?: typeof createUser } = {}
+    dependencies: {
+        createSession?: typeof createSession;
+        createUser?: typeof createUser;
+        initGateway?: typeof gateway.init;
+        persistGatewayToken?: typeof persistGatewayToken;
+        setSessionCookie?: typeof setSessionCookie;
+    } = {}
 ): void {
+    const createAuthSession = dependencies.createSession ?? createSession;
     const createAuthUser = dependencies.createUser ?? createUser;
+    const initGateway =
+        dependencies.initGateway ?? ((token: string) => gateway.init(token));
+    const persistAuthGatewayToken =
+        dependencies.persistGatewayToken ?? persistGatewayToken;
+    const setAuthSessionCookie = dependencies.setSessionCookie ?? setSessionCookie;
 
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
@@ -114,13 +126,9 @@ export default function authRoutes(
             return;
         }
         const gatewayToken = rawGatewayToken.trim();
+        let user: ReturnType<typeof createUser>;
         try {
-            const user = createAuthUser(username, password);
-            persistGatewayToken(gatewayToken);
-            gateway.init(gatewayToken);
-            const sessionId = createSession(user.id);
-            setSessionCookie(response, sessionId, request);
-            response.status(201).json({ authenticated: true, user });
+            user = createAuthUser(username, password);
         } catch (error_) {
             const message = error_ instanceof Error ? error_.message : String(error_);
             if (message.includes("UNIQUE")) {
@@ -128,6 +136,21 @@ export default function authRoutes(
                 return;
             }
             response.status(500).json({ error: "Failed to create first user" });
+            return;
+        }
+
+        try {
+            persistAuthGatewayToken(gatewayToken);
+            initGateway(gatewayToken);
+            const sessionId = createAuthSession(user.id);
+            setAuthSessionCookie(response, sessionId, request);
+            response.status(201).json({ authenticated: true, user });
+        } catch {
+            response.status(201).json({
+                authenticated: false,
+                user,
+                warning: "First user created; sign in to finish setup",
+            });
         }
     });
 

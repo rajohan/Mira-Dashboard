@@ -783,15 +783,19 @@ async function forwardRequest(
         } catch (error) {
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
-            if (pending?.clientWs.readyState === WebSocket.OPEN) {
-                pending.clientWs.send(
-                    JSON.stringify({
-                        type: "res",
-                        id: pending.clientId,
-                        ok: false,
-                        error: errorMessage(error, String(error)),
-                    })
-                );
+            try {
+                if (pending?.clientWs.readyState === WebSocket.OPEN) {
+                    pending.clientWs.send(
+                        JSON.stringify({
+                            type: "res",
+                            id: pending.clientId,
+                            ok: false,
+                            error: errorMessage(error, String(error)),
+                        })
+                    );
+                }
+            } catch {
+                // Ignore reply write failures; the client is already gone.
             }
         }
         return true;
