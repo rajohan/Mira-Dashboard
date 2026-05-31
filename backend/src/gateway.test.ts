@@ -889,6 +889,14 @@ describe("gateway state and helper utilities", () => {
         await __testing.refreshSessions(client as never);
 
         assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", null);
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", "not an object");
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
     });
 
     it("handles log subscription request aliases", async () => {

@@ -601,13 +601,11 @@ async function refreshSessions(
         return;
     }
 
-    const payload = (await expectedClient.request("sessions.list", {})) as {
-        sessions?: GatewaySession[];
-    };
+    const payload = asRecord(await expectedClient.request("sessions.list", {}));
     if (!isGatewayConnected || !isCurrentGatewayClient(expectedClient)) {
         return;
     }
-    const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
     sessionList = sessions.map(transformSession);
     broadcast({ type: "sessions", sessions: sessionList });
 }
