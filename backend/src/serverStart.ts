@@ -64,9 +64,11 @@ export function startBackendServer(port = resolveListenPort()): void {
     };
     const onError = (error: Error) => {
         server.removeListener("listening", onListening);
+        server.removeListener("error", onError);
         isStarting = false;
         console.error("[Backend] Failed to start server:", error);
         process.exitCode = 1;
+        server.close();
     };
     server.once("listening", onListening);
     server.once("error", onError);
