@@ -82,7 +82,9 @@ export default function authRoutes(
         createUser?: typeof createUser;
         initGateway?: typeof gateway.init;
         persistGatewayToken?: typeof persistGatewayToken;
+        rollbackBootstrap?: typeof rollbackFirstUserBootstrap;
         setSessionCookie?: typeof setSessionCookie;
+        shutdownGateway?: typeof gateway.shutdown;
     } = {}
 ): void {
     const createAuthSession = dependencies.createSession ?? createSession;
@@ -91,7 +93,10 @@ export default function authRoutes(
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
         dependencies.persistGatewayToken ?? persistGatewayToken;
+    const rollbackBootstrap =
+        dependencies.rollbackBootstrap ?? rollbackFirstUserBootstrap;
     const setAuthSessionCookie = dependencies.setSessionCookie ?? setSessionCookie;
+    const shutdownGateway = dependencies.shutdownGateway ?? (() => gateway.shutdown());
 
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
@@ -156,8 +161,8 @@ export default function authRoutes(
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
-            rollbackFirstUserBootstrap(user.id, gatewayToken);
-            gateway.shutdown();
+            rollbackBootstrap(user.id, gatewayToken);
+            shutdownGateway();
             response.status(500).json({ error: "Failed to complete first-user setup" });
         }
     });

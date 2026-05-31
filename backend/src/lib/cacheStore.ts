@@ -72,8 +72,8 @@ function buildPostgresUri(database = "n8n") {
     const encodedUsername = encodeURIComponent(username);
     const encodedPassword = encodeURIComponent(password);
     const encodedDatabase = encodeURIComponent(database);
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
+    const host = process.env.DATABASE_HOST?.trim() || "postgres";
+    const port = process.env.DATABASE_PORT?.trim() || "5432";
     return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${encodedDatabase}`;
 }
 

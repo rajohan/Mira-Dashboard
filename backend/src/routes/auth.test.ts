@@ -7,7 +7,7 @@ import express from "express";
 import { createUser } from "../auth.js";
 import { db } from "../db.js";
 import { __testing as gatewayTesting } from "../gateway.js";
-import authRoutes from "./auth.js";
+import authRoutes, { __testing as authTesting } from "./auth.js";
 
 const bootstrapGatewayToken = `bootstrap-token-${Date.now()}`;
 
@@ -230,9 +230,18 @@ describe("auth first-user bootstrap routes", () => {
 
     it("rolls back first-user bootstrap when post-create side effects fail", async () => {
         cleanupBootstrapRows(username);
+        let rolledBack = false;
+        let shutdown = false;
         const sideEffectServer = await startServer({
             createSession: () => {
                 throw new Error("session unavailable");
+            },
+            rollbackBootstrap: (userId, token) => {
+                rolledBack = true;
+                authTesting.rollbackFirstUserBootstrap(userId, token);
+            },
+            shutdownGateway: () => {
+                shutdown = true;
             },
         });
         let retryServer: TestServer | undefined;
@@ -246,6 +255,8 @@ describe("auth first-user bootstrap routes", () => {
 
             assert.equal(registered.status, 500);
             assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(rolledBack, true);
+            assert.equal(shutdown, true);
             assert.equal(
                 db
                     .prepare("SELECT id FROM users WHERE username = ?")

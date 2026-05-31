@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -153,7 +154,7 @@ describe("media routes", () => {
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
         try {
             process.env.OPENCLAW_HOME = "";
-            const module = await import(`./media.js?blank=${Date.now()}`);
+            const module = await import(`./media.js?blank=${randomUUID()}`);
             assert.equal(typeof module.default, "function");
             assert.equal(
                 module.__testing.mediaRoot,

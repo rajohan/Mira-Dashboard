@@ -17,9 +17,11 @@ import {
 } from "../lib/guardedOps.js";
 import { safePathWithinRoot } from "../lib/safePath.js";
 
-const HOME_DIR = os.homedir();
+const HOME_DIR = os.homedir().trim();
 const HAS_CONFIGURED_HOME_DIR =
-    HOME_DIR.length > 0 && Path.resolve(HOME_DIR) === HOME_DIR;
+    HOME_DIR.length > 0 &&
+    Path.resolve(HOME_DIR) === HOME_DIR &&
+    Path.parse(HOME_DIR).root !== HOME_DIR;
 const OPENCLAW_ROOT = Path.join(HOME_DIR, ".openclaw");
 const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 

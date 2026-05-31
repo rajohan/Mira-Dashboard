@@ -555,7 +555,7 @@ export default function tasksRoutes(
         const id = Number(req.params.id);
         const { assignee } = req.body as { assignee?: string | null };
         if (!Number.isInteger(id)) {
-            res.status(400).json({ error: "Invalid request" });
+            res.status(400).json({ error: "Invalid id" });
             return;
         }
 

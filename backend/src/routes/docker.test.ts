@@ -18,6 +18,8 @@ const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalUpdaterNodeBin = process.env.MIRA_UPDATER_NODE_BIN;
 const originalUpdaterCwd = process.env.MIRA_UPDATER_CWD;
+const originalDockerBin = process.env.MIRA_DOCKER_BIN;
+const originalDockerComposeWrapper = process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
 const fakeEnvKeys = [
     "MIRA_FAKE_UPDATER_FAIL_STEP",
     "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
@@ -344,6 +346,8 @@ process.stdout.write("compose " + process.argv.slice(2).join(" ") + "\n");
         "utf8"
     );
     await chmod(composePath, 0o755);
+    process.env.MIRA_DOCKER_BIN = dockerPath;
+    process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composePath;
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
 }
 
@@ -432,7 +436,7 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     after(async () => {
-        await server.close();
+        await server?.close();
         const { __testing } = await import("./docker.js");
         await Promise.all(
             [...__testing.dockerExecJobs.values()]
@@ -456,6 +460,16 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_DOCKER_ROOT = originalDockerRoot;
         }
+        if (originalDockerBin === undefined) {
+            delete process.env.MIRA_DOCKER_BIN;
+        } else {
+            process.env.MIRA_DOCKER_BIN = originalDockerBin;
+        }
+        if (originalDockerComposeWrapper === undefined) {
+            delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
+        } else {
+            process.env.MIRA_DOCKER_COMPOSE_WRAPPER = originalDockerComposeWrapper;
+        }
         if (originalUpdaterNodeBin === undefined) {
             delete process.env.MIRA_UPDATER_NODE_BIN;
         } else {
@@ -468,7 +482,9 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.MIRA_UPDATER_CWD = originalUpdaterCwd;
         }
         __testing.setUpdaterCwdForTests(originalUpdaterCwd);
-        await rm(tempDir, { recursive: true, force: true });
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("covers docker parser helper edge cases", async () => {
@@ -1353,6 +1369,20 @@ describe("docker routes", { concurrency: false }, () => {
             assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
                 user: "native-user",
                 password: "native-password",
+            });
+
+            process.env.DB_POSTGRESDB_USER = "";
+            process.env.DB_POSTGRESDB_PASSWORD = "";
+            const blankRun = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(blankRun.status, 200);
+            assert.equal(blankRun.body.success, true);
+            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
+                user: "",
+                password: "",
             });
         } finally {
             if (originalPostgresUser === undefined) delete process.env.DB_POSTGRESDB_USER;

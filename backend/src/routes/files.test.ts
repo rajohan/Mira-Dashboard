@@ -660,6 +660,35 @@ describe("files routes", () => {
             "first"
         );
 
+        const outsideBackupDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-files-backup-outside-")
+        );
+        try {
+            await writeFile(path.join(workspaceRoot, "generated", "linked.txt"), "old");
+            await symlink(
+                path.join(outsideBackupDir, "linked.txt.bak"),
+                path.join(workspaceRoot, "generated", "linked.txt.bak")
+            );
+            const symlinkedBackup = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Flinked.txt",
+                { method: "PUT", body: { content: "new" } }
+            );
+            assert.equal(symlinkedBackup.status, 403);
+            assert.equal(
+                symlinkedBackup.body.error,
+                "Access denied: path outside workspace"
+            );
+        } finally {
+            await rm(path.join(workspaceRoot, "generated", "linked.txt"), {
+                force: true,
+            });
+            await rm(path.join(workspaceRoot, "generated", "linked.txt.bak"), {
+                force: true,
+            });
+            await rm(outsideBackupDir, { recursive: true, force: true });
+        }
+
         const missingContent = await requestJson<{ error: string }>(
             server,
             "/api/files/generated%2Fempty.txt",

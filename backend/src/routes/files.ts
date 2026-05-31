@@ -5,7 +5,7 @@ import path from "path";
 
 import { asyncRoute } from "../lib/errors.js";
 import {
-    copyGuarded,
+    copyNoFollowGuarded,
     guardedPath,
     openReadNoFollowGuarded,
     readdirGuarded,
@@ -437,7 +437,20 @@ export default function filesRoutes(
 
                 try {
                     const backupPath = safeFullPath + ".bak";
-                    copyGuarded(guardedPath(safeFullPath), guardedPath(backupPath));
+                    const safeBackupPath = prepareSafeWriteTargetWithinRoot(
+                        backupPath,
+                        WORKSPACE_ROOT
+                    );
+                    if (!safeBackupPath) {
+                        res.status(403).json({
+                            error: "Access denied: path outside workspace",
+                        });
+                        return;
+                    }
+                    await copyNoFollowGuarded(
+                        guardedPath(safeFullPath),
+                        guardedPath(safeBackupPath)
+                    );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                         throw error;
