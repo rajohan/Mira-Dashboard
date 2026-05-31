@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -447,16 +447,36 @@ describe("server bootstrap", () => {
     });
 
     it("lets config-file writes use the route-specific JSON parser", async () => {
-        assert.ok(openclawHome);
-        await writeFile(path.join(openclawHome, "openclaw.json"), "{}", "utf8");
+        const originalHome = process.env.HOME;
+        const tempHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-home-"));
+        const configRoot = path.join(tempHome, ".openclaw");
+        const configPath = path.join(configRoot, "openclaw.json");
+        const largeContent = "a".repeat(2 * 1024 * 1024);
 
-        const response = await fetch(`${getBaseUrl()}/api/config-files/openclaw.json`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: '{"updated":true}' }),
-        });
+        try {
+            await mkdir(configRoot, { recursive: true });
+            await writeFile(configPath, "{}", "utf8");
+            process.env.HOME = tempHome;
 
-        assert.equal(response.status, 200);
+            const response = await fetch(
+                `${getBaseUrl()}/api/config-files/openclaw.json`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: largeContent }),
+                }
+            );
+
+            assert.equal(response.status, 200);
+            assert.equal(await readFile(configPath, "utf8"), largeContent);
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+            await rm(tempHome, { recursive: true, force: true });
+        }
     });
 
     it("covers non-loopback auth and startup handler branches", () => {
