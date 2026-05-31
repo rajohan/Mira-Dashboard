@@ -623,15 +623,12 @@ describe("server bootstrap", () => {
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 1);
             assert.equal(listenedPort, 41_003);
-            assert.throws(
-                () =>
-                    (
-                        server.listeners("error").at(-1) as
-                            | ((error: Error) => void)
-                            | undefined
-                    )?.(new Error("listen failed")),
-                /listen failed/u
+            const originalExitCode = process.exitCode;
+            (server.listeners("error").at(-1) as ((error: Error) => void) | undefined)?.(
+                new Error("listen failed")
             );
+            assert.equal(process.exitCode, 1);
+            process.exitCode = originalExitCode;
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 2);
             assert.equal(listenedPort, 41_004);

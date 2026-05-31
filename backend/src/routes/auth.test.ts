@@ -184,17 +184,22 @@ describe("auth first-user bootstrap routes", () => {
 
     it("maps first-user creation failures", async () => {
         cleanupBootstrapRows(username);
-        const duplicateServer = await startServer({
-            createUser: () => {
-                throw new Error("SQLITE_CONSTRAINT_UNIQUE");
-            },
-        });
-        const failingServer = await startServer({
-            createUser: () => {
-                throw "boom";
-            },
-        });
+        let duplicateServer: TestServer | undefined;
+        let failingServer: TestServer | undefined;
         try {
+            duplicateServer = await startServer({
+                createUser: () => {
+                    throw new Error("SQLITE_CONSTRAINT_UNIQUE");
+                },
+            });
+            failingServer = await startServer({
+                createUser: () => {
+                    throw "boom";
+                },
+            });
+            assert.ok(duplicateServer);
+            assert.ok(failingServer);
+
             const duplicate = await requestJson<{ error: string }>(
                 duplicateServer,
                 "/api/auth/register-first-user",
@@ -217,8 +222,8 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(failed.status, 500);
             assert.equal(failed.body.error, "Failed to create first user");
         } finally {
-            await duplicateServer.close();
-            await failingServer.close();
+            await duplicateServer?.close();
+            await failingServer?.close();
             cleanupBootstrapRows(username);
         }
     });
