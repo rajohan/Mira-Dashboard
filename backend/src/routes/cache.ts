@@ -17,6 +17,10 @@ const N8N_ROOT = "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
 let cacheRefreshCwd = N8N_ROOT;
 
+interface HttpStatusError extends Error {
+    statusCode?: number;
+}
+
 const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
     "git.workspace": [
         "/usr/local/bin/doppler",
@@ -198,7 +202,11 @@ export async function refreshCacheKey(key: string) {
         ? cacheRefreshCommandOverrides.get(key)
         : CACHE_REFRESH_COMMANDS[key];
     if (!command) {
-        throw new Error(`No refresh command configured for cache key: ${key}`);
+        const error = new Error(
+            `No refresh command configured for cache key: ${key}`
+        ) as HttpStatusError;
+        error.statusCode = 400;
+        throw error;
     }
     const env = {
         ...process.env,
@@ -252,7 +260,7 @@ export default function cacheRoutes(app: express.Application): void {
             const entry = await refreshCacheKey(key);
             res.json({ ok: true, entry });
         } catch (error) {
-            res.status(500).json({
+            res.status((error as HttpStatusError).statusCode || 500).json({
                 error: errorMessage(error, "Cache refresh failed"),
             });
         }

@@ -157,9 +157,17 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     it("rejects refresh requests for unconfigured cache keys before shelling out", async () => {
-        await assert.rejects(() => refreshCacheKey("not.configured"), {
-            message: "No refresh command configured for cache key: not.configured",
-        });
+        await assert.rejects(
+            () => refreshCacheKey("not.configured"),
+            (error: unknown) => {
+                assert.equal(
+                    (error as Error).message,
+                    "No refresh command configured for cache key: not.configured"
+                );
+                assert.equal((error as { statusCode?: number }).statusCode, 400);
+                return true;
+            }
+        );
     });
 
     it("serves heartbeat and cache entries from the cache store", async () => {
@@ -205,7 +213,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 method: "POST",
             }
         );
-        assert.equal(refresh.status, 500);
+        assert.equal(refresh.status, 400);
         assert.deepEqual(await refresh.json(), {
             error: "No refresh command configured for cache key: not.configured",
         });
@@ -234,6 +242,17 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             );
             assert.equal(routeRefresh.status, 200);
             assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
+
+            __testing.setCacheRefreshCommandForTests("quotas.summary", [
+                "/bin/sh",
+                "-c",
+                "exit 2",
+            ]);
+            const failedRouteRefresh = await fetch(
+                `${server.baseUrl}/api/cache/quotas.summary/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(failedRouteRefresh.status, 500);
         } finally {
             __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
         }

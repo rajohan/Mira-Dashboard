@@ -40,7 +40,8 @@ function resolveWorkspaceRoot(): string {
     );
     if (
         !path.isAbsolute(workspaceRoot) ||
-        path.normalize(workspaceRoot) !== workspaceRoot
+        path.normalize(workspaceRoot) !== workspaceRoot ||
+        path.resolve(workspaceRoot) === path.parse(path.resolve(workspaceRoot)).root
     ) {
         throw new Error("WORKSPACE_ROOT must be an absolute normalized path");
     }

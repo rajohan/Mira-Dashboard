@@ -290,6 +290,10 @@ describe("files routes", () => {
             assert.throws(() => __testing.resolveWorkspaceRoot(), {
                 message: "WORKSPACE_ROOT must be an absolute normalized path",
             });
+            process.env.WORKSPACE_ROOT = path.parse(workspaceRoot).root;
+            assert.throws(() => __testing.resolveWorkspaceRoot(), {
+                message: "WORKSPACE_ROOT must be an absolute normalized path",
+            });
             process.env.WORKSPACE_ROOT = workspaceRoot;
             assert.equal(__testing.isBinaryFile("abc"), false);
             assert.equal(__testing.isBinaryFile("abc\0def"), true);
