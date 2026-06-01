@@ -49,14 +49,18 @@ export function formatDockerMemory(value: string | undefined): string {
             TB: 1024 ** 4,
         };
         const unit = match[2].toUpperCase() as keyof typeof factors;
+        const factor = factors[unit];
+        if (!factor) {
+            return null;
+        }
 
-        return amount * factors[unit];
+        return amount * factor;
     };
 
     const usedBytes = parsePart(usedRaw);
     const totalBytes = parsePart(totalRaw);
 
-    if (!usedBytes || !totalBytes) {
+    if (usedBytes === null || totalBytes === null) {
         return value;
     }
 
