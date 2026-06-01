@@ -29,6 +29,7 @@ import {
     statGuarded,
     statGuardedAsync,
     writeTextGuarded,
+    writeTextNoFollowExclusiveGuarded,
     writeTextNoFollowGuarded,
 } from "./guardedOps.js";
 
@@ -94,6 +95,16 @@ describe("guarded filesystem helpers", () => {
             assert.equal(await readFile(copied, "utf8"), "private");
             const privateStat = await stat(copied);
             assert.equal(privateStat.mode & 0o777, 0o600);
+
+            const exclusive = guardedPath(path.join(baseDir, "nested", "exclusive.txt"));
+            await writeTextNoFollowExclusiveGuarded(exclusive, "exclusive", 0o600);
+            assert.equal(await readFile(exclusive, "utf8"), "exclusive");
+            const exclusiveStat = await stat(exclusive);
+            assert.equal(exclusiveStat.mode & 0o777, 0o600);
+            await assert.rejects(
+                () => writeTextNoFollowExclusiveGuarded(exclusive, "blocked"),
+                { code: "EEXIST" }
+            );
         } finally {
             await rm(baseDir, { recursive: true, force: true });
         }

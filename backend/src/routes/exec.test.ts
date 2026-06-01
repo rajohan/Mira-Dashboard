@@ -199,6 +199,13 @@ describe("exec routes", () => {
             status: 500,
             error: "internal server error",
         });
+        const routeErrorLog = mock.method(console, "error", () => {});
+        assert.deepEqual(__testing.execErrorResponse(false), {
+            status: 500,
+            error: "internal server error",
+        });
+        assert.equal(routeErrorLog.mock.calls.at(-1)?.arguments.at(1), "false");
+        routeErrorLog.mock.restore();
 
         __testing.jobs.clear();
         for (let index = 0; index < 101; index += 1) {

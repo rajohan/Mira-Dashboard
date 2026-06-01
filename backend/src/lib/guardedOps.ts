@@ -213,6 +213,30 @@ export async function writeTextNoFollowGuarded(
     }
 }
 
+/** Writes UTF-8 text while refusing symlinks and existing final paths. */
+export async function writeTextNoFollowExclusiveGuarded(
+    path: GuardedPath,
+    content: string,
+    mode?: number
+): Promise<void> {
+    const file = await Fs.promises.open(
+        guardedPathBuffer(path),
+        Fs.constants.O_WRONLY |
+            Fs.constants.O_CREAT |
+            Fs.constants.O_EXCL |
+            Fs.constants.O_NOFOLLOW,
+        mode ?? 0o666
+    );
+    try {
+        if (mode !== undefined) {
+            await file.chmod(mode & 0o777);
+        }
+        await file.writeFile(content, "utf8");
+    } finally {
+        await file.close();
+    }
+}
+
 /** Stats a validated path. */
 export function statGuarded(path: GuardedPath): Fs.Stats {
     return fsOps.statSync(guardedPathBuffer(path));

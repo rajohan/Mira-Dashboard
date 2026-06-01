@@ -999,11 +999,11 @@ async function request(
 function shutdown(): void {
     const previousGatewayClient = gatewayClient;
     gatewayClient = null;
-    previousGatewayClient?.stop();
     isGatewayConnected = false;
     sessionList = [];
     currentToken = null;
     broadcast({ type: "disconnected", gatewayConnected: false });
+    previousGatewayClient?.stop();
 }
 
 /** Defines testing. */

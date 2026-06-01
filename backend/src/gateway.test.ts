@@ -99,6 +99,13 @@ class ThrowingStartGatewayClient extends CapturingGatewayClient {
     }
 }
 
+/** Throws synchronously from stop to exercise shutdown cleanup ordering. */
+class ThrowingStopGatewayClient extends FakeGatewayClient {
+    override stop(): void {
+        throw new Error("stop failed");
+    }
+}
+
 /** Waits one tick so async WebSocket handlers can settle. */
 async function waitForAsyncHandlers(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
@@ -222,6 +229,15 @@ describe("gateway state and helper utilities", () => {
             gateway.shutdown();
             assert.deepEqual(gateway.getSessions(), []);
             assert.equal(gateway.getStatus().sessions, 0);
+
+            __testing.setGatewayClientForTest(new ThrowingStopGatewayClient());
+            __testing.setGatewayConnectedForTest(true);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            assert.throws(() => gateway.shutdown(), /stop failed/u);
+            assert.equal(gateway.isConnected(), false);
+            assert.deepEqual(gateway.getSessions(), []);
 
             __testing.setGatewayClientConstructorForTest(ThrowingStartGatewayClient);
             assert.throws(() => gateway.init("token-throws"), /start failed/u);

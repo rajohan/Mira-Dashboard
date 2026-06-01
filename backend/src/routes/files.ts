@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import express from "express";
 import fs from "fs";
 import os from "os";
@@ -10,7 +12,7 @@ import {
     openReadNoFollowGuarded,
     readdirGuarded,
     statGuarded,
-    writeTextNoFollowGuarded,
+    writeTextNoFollowExclusiveGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
@@ -542,9 +544,9 @@ export default function filesRoutes(
                             }
                         }
 
-                        const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.tmp`;
+                        const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
                         try {
-                            await writeTextNoFollowGuarded(
+                            await writeTextNoFollowExclusiveGuarded(
                                 guardedPath(tempPath),
                                 content,
                                 existingMode ?? undefined
