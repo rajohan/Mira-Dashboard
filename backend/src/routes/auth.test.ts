@@ -353,18 +353,19 @@ describe("auth first-user bootstrap routes", () => {
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
         ).run("shutdown-throws-token", new Date().toISOString());
         let restoreAttempted = false;
-        const throwingShutdownServer = await startServer({
-            createSession: () => {
-                throw new Error("session unavailable");
-            },
-            shutdownGateway: () => {
-                throw new Error("shutdown unavailable");
-            },
-            initGateway: (token) => {
-                restoreAttempted = token === "shutdown-throws-token";
-            },
-        });
+        let throwingShutdownServer: TestServer | null = null;
         try {
+            throwingShutdownServer = await startServer({
+                createSession: () => {
+                    throw new Error("session unavailable");
+                },
+                shutdownGateway: () => {
+                    throw new Error("shutdown unavailable");
+                },
+                initGateway: (token) => {
+                    restoreAttempted = token === "shutdown-throws-token";
+                },
+            });
             const registered = await requestJson<{ error: string }>(
                 throwingShutdownServer,
                 "/api/auth/register-first-user",
@@ -378,7 +379,7 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.body.error, "Failed to complete first-user setup");
             assert.equal(restoreAttempted, true);
         } finally {
-            await throwingShutdownServer.close();
+            await throwingShutdownServer?.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
             db.prepare(
@@ -393,18 +394,19 @@ describe("auth first-user bootstrap routes", () => {
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
         ).run("restore-fails-token", new Date().toISOString());
         let restoreAttempted = false;
-        const restoreServer = await startServer({
-            createSession: () => {
-                throw new Error("session unavailable");
-            },
-            initGateway: (token) => {
-                if (token === "restore-fails-token") {
-                    restoreAttempted = true;
-                    throw new Error("restore unavailable");
-                }
-            },
-        });
+        let restoreServer: TestServer | null = null;
         try {
+            restoreServer = await startServer({
+                createSession: () => {
+                    throw new Error("session unavailable");
+                },
+                initGateway: (token) => {
+                    if (token === "restore-fails-token") {
+                        restoreAttempted = true;
+                        throw new Error("restore unavailable");
+                    }
+                },
+            });
             const registered = await requestJson<{ error: string }>(
                 restoreServer,
                 "/api/auth/register-first-user",
@@ -418,7 +420,7 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.body.error, "Failed to complete first-user setup");
             assert.equal(restoreAttempted, true);
         } finally {
-            await restoreServer.close();
+            await restoreServer?.close();
             cleanupUser("bootstrap-restore");
             cleanupBootstrapRows(username);
             db.prepare(

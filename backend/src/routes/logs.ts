@@ -187,9 +187,12 @@ export default function logsRoutes(app: express.Application): void {
             const files: LogFile[] = fs
                 .readdirSync(logsDir)
                 .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
-                .map((f) => {
-                    const stat = fs.statSync(path.join(logsDir, f));
-                    return { name: f, size: stat.size, modified: stat.mtime };
+                .flatMap((f) => {
+                    const stat = fs.lstatSync(path.join(logsDir, f));
+                    if (!stat.isFile() || stat.isSymbolicLink()) {
+                        return [];
+                    }
+                    return [{ name: f, size: stat.size, modified: stat.mtime }];
                 })
                 .sort((a, b) => b.modified.getTime() - a.modified.getTime());
 

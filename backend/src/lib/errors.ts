@@ -2,7 +2,10 @@ import type { RequestHandler } from "express";
 
 /** Returns a stable message for unknown caught values. */
 export function errorMessage(error: unknown, fallback: string): string {
-    return error instanceof Error ? error.message : fallback;
+    if (!(error instanceof Error)) {
+        return fallback;
+    }
+    return error.message.trim() || fallback;
 }
 
 /** Wraps async Express handlers with consistent JSON error responses. */

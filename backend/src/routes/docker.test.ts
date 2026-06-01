@@ -251,7 +251,9 @@ if (command === "volume prune -f") {
 }
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("sleep")) {
   process.stdout.write("started long exec\n");
+  process.on("SIGTERM", () => process.exit(0));
   setInterval(() => {}, 1000);
+  return;
 }
 else if (args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
   process.stdout.write("exec stdout\n");

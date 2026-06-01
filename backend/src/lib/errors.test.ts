@@ -5,7 +5,12 @@ import { asyncRoute, errorMessage } from "./errors.js";
 
 describe("error helpers", () => {
     it("returns Error messages and stable fallbacks for unknown caught values", () => {
+        const blankError = new Error("placeholder");
+        blankError.message = "";
+
         assert.equal(errorMessage(new Error("boom"), "fallback"), "boom");
+        assert.equal(errorMessage(blankError, "fallback"), "fallback");
+        assert.equal(errorMessage(new Error("   "), "fallback"), "fallback");
         assert.equal(errorMessage("boom", "fallback"), "fallback");
     });
 

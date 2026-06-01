@@ -236,6 +236,23 @@ async function withRootedParentPath<T>(
     }
 }
 
+function sendRootedParentError(
+    res: express.Response,
+    error: NodeJS.ErrnoException
+): boolean {
+    if (error.code !== "EACCES") {
+        return false;
+    }
+    if (error.message === "Parent path validation is not available on this platform") {
+        res.status(501).json({
+            error: "File writes are not supported on this platform",
+        });
+        return true;
+    }
+    res.status(403).json({ error: "Access denied: path outside workspace" });
+    return true;
+}
+
 export const __testing = {
     compareNames,
     decodeRouteFilePath,
@@ -506,58 +523,68 @@ export default function filesRoutes(
                     return;
                 }
 
-                const stat = await withRootedParentPath(
-                    safeFullPath,
-                    WORKSPACE_ROOT,
-                    async (rootedFullPath) => {
-                        let existingMode: number | null = null;
-                        try {
-                            const existingStat = statGuarded(guardedPath(rootedFullPath));
-                            if (existingStat.nlink > 1) {
-                                return null;
+                let stat: fs.Stats | null;
+                try {
+                    stat = await withRootedParentPath(
+                        safeFullPath,
+                        WORKSPACE_ROOT,
+                        async (rootedFullPath) => {
+                            let existingMode: number | null = null;
+                            try {
+                                const existingStat = statGuarded(
+                                    guardedPath(rootedFullPath)
+                                );
+                                if (existingStat.nlink > 1) {
+                                    return null;
+                                }
+                                existingMode = existingStat.mode & 0o777;
+                            } catch (error) {
+                                /* c8 ignore next 3 -- unexpected stat failures use the route's existing 500 fallback */
+                                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                                    throw error;
+                                }
                             }
-                            existingMode = existingStat.mode & 0o777;
-                        } catch (error) {
-                            /* c8 ignore next 3 -- unexpected stat failures use the route's existing 500 fallback */
-                            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                                throw error;
-                            }
-                        }
 
-                        try {
-                            await withRootedParentPath(
-                                safeBackupPath,
-                                WORKSPACE_ROOT,
-                                (rootedBackupPath) =>
-                                    copyNoFollowGuarded(
-                                        guardedPath(rootedFullPath),
-                                        guardedPath(rootedBackupPath)
-                                    )
-                            );
-                        } catch (error) {
-                            const code = (error as NodeJS.ErrnoException).code;
-                            if (code === "EMLINK") {
-                                return null;
+                            try {
+                                await withRootedParentPath(
+                                    safeBackupPath,
+                                    WORKSPACE_ROOT,
+                                    (rootedBackupPath) =>
+                                        copyNoFollowGuarded(
+                                            guardedPath(rootedFullPath),
+                                            guardedPath(rootedBackupPath)
+                                        )
+                                );
+                            } catch (error) {
+                                const code = (error as NodeJS.ErrnoException).code;
+                                if (code === "EMLINK") {
+                                    return null;
+                                }
+                                if (code !== "ENOENT") {
+                                    throw error;
+                                }
                             }
-                            if (code !== "ENOENT") {
-                                throw error;
-                            }
-                        }
 
-                        const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-                        try {
-                            await writeTextNoFollowExclusiveGuarded(
-                                guardedPath(tempPath),
-                                content,
-                                existingMode ?? undefined
-                            );
-                            await fs.promises.rename(tempPath, rootedFullPath);
-                            return statGuarded(guardedPath(rootedFullPath));
-                        } finally {
-                            await fs.promises.rm(tempPath, { force: true });
+                            const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+                            try {
+                                await writeTextNoFollowExclusiveGuarded(
+                                    guardedPath(tempPath),
+                                    content,
+                                    existingMode ?? undefined
+                                );
+                                await fs.promises.rename(tempPath, rootedFullPath);
+                                return statGuarded(guardedPath(rootedFullPath));
+                            } finally {
+                                await fs.promises.rm(tempPath, { force: true });
+                            }
                         }
+                    );
+                } catch (error) {
+                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                        return;
                     }
-                );
+                    throw error;
+                }
                 if (!stat) {
                     res.status(403).json({ error: HARD_LINK_ERROR });
                     return;

@@ -629,10 +629,10 @@ describe("files routes", () => {
                 { method: "PUT", body: { content: "blocked" } }
             );
 
-            assert.equal(response.status, 500);
+            assert.equal(response.status, 501);
             assert.equal(
                 response.body.error,
-                "Parent path validation is not available on this platform"
+                "File writes are not supported on this platform"
             );
         } finally {
             Object.defineProperty(process, "platform", {
@@ -1079,8 +1079,8 @@ describe("files routes", () => {
                 { method: "PUT", body: { content: "nope" } }
             );
 
-            assert.equal(denied.status, 500);
-            assert.equal(denied.body.error, "Parent path validation failed");
+            assert.equal(denied.status, 403);
+            assert.equal(denied.body.error, "Access denied: path outside workspace");
         } finally {
             fs.realpathSync = originalRealpathSync;
             await rm(outsideDir, { recursive: true, force: true });

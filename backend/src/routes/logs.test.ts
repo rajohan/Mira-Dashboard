@@ -86,6 +86,10 @@ describe("logs routes", () => {
     });
 
     it("lists OpenClaw log files and ignores unrelated files", async () => {
+        await symlink(
+            path.join(outsideDir, "secret.log"),
+            path.join(logsDir, "openclaw-secret.log")
+        );
         const response = await fetch(`${server.baseUrl}/api/logs/info`);
         const body = (await response.json()) as {
             logs: Array<{ name: string; size: number; modified: string }>;
@@ -104,6 +108,11 @@ describe("logs routes", () => {
             body.logs.some((log) => log.name === "not-openclaw.txt"),
             false
         );
+        assert.equal(
+            body.logs.some((log) => log.name === "openclaw-secret.log"),
+            false
+        );
+        await rm(path.join(logsDir, "openclaw-secret.log"), { force: true });
     });
 
     it("handles log info filesystem edge cases", async () => {

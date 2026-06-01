@@ -259,10 +259,10 @@ describe("config files routes", () => {
             const unreadableHomeDir = await mkdtemp(
                 path.join(os.tmpdir(), "mira-unreadable-home-")
             );
-            const originalRealpathSync = fs.realpathSync;
+            const originalLstatSync = fs.lstatSync;
             process.env.HOME = unreadableHomeDir;
             try {
-                fs.realpathSync = ((target: fs.PathLike) => {
+                fs.lstatSync = ((target: fs.PathLike) => {
                     if (target === path.join(unreadableHomeDir, ".openclaw")) {
                         const error = new Error(
                             "root unavailable"
@@ -270,11 +270,11 @@ describe("config files routes", () => {
                         error.code = "EACCES";
                         throw error;
                     }
-                    return originalRealpathSync(target);
-                }) as typeof fs.realpathSync;
+                    return originalLstatSync(target);
+                }) as typeof fs.lstatSync;
                 assert.equal(__testing.resolveOpenclawRoot(), null);
             } finally {
-                fs.realpathSync = originalRealpathSync;
+                fs.lstatSync = originalLstatSync;
                 await rm(unreadableHomeDir, { recursive: true, force: true });
             }
         } finally {
@@ -534,7 +534,8 @@ describe("config files routes", () => {
     });
 
     it("writes allowed config files and backs up overwritten content", async () => {
-        await rm(path.join(openclawRoot, "hooks", "transforms", "agentmail.ts"), {
+        await rm(path.join(openclawRoot, "hooks"), {
+            recursive: true,
             force: true,
         });
         const created = await requestJson<{
@@ -697,6 +698,18 @@ describe("config files routes", () => {
             await mkdir(transformsDir, { recursive: true });
             await rm(outsideParent, { recursive: true, force: true });
         }
+
+        const { __testing } = await import("./configFiles.js");
+        await assert.rejects(
+            () =>
+                __testing.ensureParentDirsForWrite(
+                    path.join(openclawRoot, "..", "outside", "openclaw.json"),
+                    openclawRoot
+                ),
+            (error: unknown) =>
+                (error as NodeJS.ErrnoException).code === "EACCES" &&
+                (error as Error).message === "Parent directory validation failed"
+        );
     });
 
     it("reports backup-copy failures when overwriting config files", async () => {

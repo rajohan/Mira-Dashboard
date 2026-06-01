@@ -7,6 +7,7 @@ import { asyncRoute } from "../lib/errors.js";
 import {
     copyNoFollowGuarded,
     guardedPath,
+    mkdirGuarded,
     statGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
@@ -72,7 +73,7 @@ function resolveOpenclawRoot(): string | null {
     }
     const openclawRoot = path.join(homeDir, ".openclaw");
     try {
-        if (fs.realpathSync(openclawRoot) !== openclawRoot) {
+        if (fs.lstatSync(openclawRoot).isSymbolicLink()) {
             return null;
         }
     } catch (error) {
@@ -120,6 +121,33 @@ async function withRootedParentPath<T>(
         return await callback(`/proc/self/fd/${parentFd}/${path.basename(safePath)}`);
     } finally {
         fs.closeSync(parentFd);
+    }
+}
+
+async function ensureParentDirsForWrite(
+    safePath: string,
+    rootPath: string
+): Promise<void> {
+    const targetParent = path.dirname(safePath);
+    const relativeParent = path.relative(rootPath, targetParent);
+    if (!relativeParent) {
+        return;
+    }
+
+    let currentPath = rootPath;
+    for (const segment of relativeParent.split(path.sep)) {
+        currentPath = path.join(currentPath, segment);
+        const safeDirectoryPath = prepareSafeWriteTargetWithinRoot(currentPath, rootPath);
+        if (!safeDirectoryPath) {
+            const error = new Error(
+                "Parent directory validation failed"
+            ) as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        }
+        await withRootedParentPath(safeDirectoryPath, rootPath, (rootedPath) => {
+            mkdirGuarded(guardedPath(rootedPath), { recursive: true });
+        });
     }
 }
 
@@ -390,6 +418,8 @@ export default function configFilesRoutes(
                     return;
                 }
 
+                await ensureParentDirsForWrite(safeFullPath, openclawRoot);
+
                 // Create backup
                 try {
                     const backupPath = safeFullPath + ".bak";
@@ -462,5 +492,6 @@ export default function configFilesRoutes(
 }
 
 export const __testing = {
+    ensureParentDirsForWrite,
     resolveOpenclawRoot,
 };
