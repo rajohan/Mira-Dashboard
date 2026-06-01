@@ -1158,8 +1158,8 @@ export const __testing = {
     cleanupDockerExecJobs,
     runUpdaterCommand,
     runDockerExecCommand,
-    setDockerBinForTests: (nextDockerBin: string) => {
-        dockerBin = nextDockerBin;
+    setDockerBinForTests: (nextDockerBin: string | undefined) => {
+        dockerBin = nextDockerBin || nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
     },
     setUpdaterNodeBinForTests: (nextUpdaterNodeBin: string | undefined) => {
         updaterNodeBin =

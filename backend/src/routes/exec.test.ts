@@ -99,7 +99,7 @@ async function waitForJob(
 }
 
 async function terminateChildProcess(child: ChildProcess): Promise<void> {
-    if (child.killed || child.exitCode !== null || child.signalCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
         return;
     }
 

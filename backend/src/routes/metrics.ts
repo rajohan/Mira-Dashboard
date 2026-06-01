@@ -149,6 +149,7 @@ function getNetworkMetrics(): NetworkMetrics {
 
     const elapsedSeconds = (timestamp - previousNetworkSample.timestamp) / 1000;
     if (elapsedSeconds <= 0) {
+        previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
         return {
             downloadMbps: 0,
             uploadMbps: 0,

@@ -120,7 +120,7 @@ export default function authRoutes(
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
             bootstrapRequired: bootstrapRequired(),
-            hasGatewayToken: Boolean(getPersistedGatewayToken()),
+            hasGatewayToken: Boolean(getPersistedAuthGatewayToken()),
         });
     });
 

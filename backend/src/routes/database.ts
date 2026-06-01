@@ -3,7 +3,6 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { errorMessage } from "../lib/errors.js";
 import { stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
@@ -423,8 +422,9 @@ export default function databaseRoutes(app: express.Application): void {
             const data = await getDatabaseOverview();
             res.json(data);
         } catch (error) {
+            console.error("[databaseRoutes] Failed to load database overview", error);
             res.status(500).json({
-                error: errorMessage(error, String(error)),
+                error: "Failed to load database overview",
             });
         }
     }) as RequestHandler);

@@ -293,6 +293,6 @@ describe("database routes", () => {
         const body = (await response.json()) as { error: string };
 
         assert.equal(response.status, 500);
-        assert.match(body.error, /database unavailable|Command failed/);
+        assert.equal(body.error, "Failed to load database overview");
     });
 });

@@ -624,6 +624,8 @@ async function refreshSessions(
         .filter(
             (entry): entry is Record<string, unknown> =>
                 entry !== null &&
+                (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
+                (entry.key === undefined || typeof entry.key === "string") &&
                 (stringFallback(entry.sessionId).trim() ||
                     stringFallback(entry.key).trim()) !== ""
         )

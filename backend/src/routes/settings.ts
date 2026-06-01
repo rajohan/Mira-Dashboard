@@ -45,6 +45,33 @@ function resolveSettingsFile(): string {
     return path.join(resolveSettingsDir(), "dashboard-settings.json");
 }
 
+async function withPinnedSettingsFile<T>(
+    settingsDir: string,
+    callback: (settingsFile: string) => Promise<T> | T
+): Promise<T> {
+    /* c8 ignore next 3 -- Linux uses /proc/self/fd to pin the parent directory. */
+    if (process.platform !== "linux") {
+        return callback(path.join(settingsDir, "dashboard-settings.json"));
+    }
+
+    const parentFd = fs.openSync(
+        settingsDir,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const realSettingsDir = fs.realpathSync(settingsDir);
+        const realPinnedDir = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        /* c8 ignore next 3 -- requires swapping the settings dir between open and realpath. */
+        if (realPinnedDir !== realSettingsDir) {
+            throw new Error("Invalid settings directory");
+        }
+
+        return await callback(`/proc/self/fd/${parentFd}/dashboard-settings.json`);
+    } finally {
+        fs.closeSync(parentFd);
+    }
+}
+
 const DEFAULT_SETTINGS: Settings = {
     theme: "dark",
     sidebarCollapsed: false,
@@ -55,7 +82,10 @@ const DEFAULT_SETTINGS: Settings = {
 /** Performs load settings. */
 async function loadSettings(): Promise<Settings> {
     try {
-        const content = await readTextNoFollowGuarded(guardedPath(resolveSettingsFile()));
+        const settingsDir = resolveSettingsDir();
+        const content = await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+            readTextNoFollowGuarded(guardedPath(settingsFile))
+        );
         const persisted = JSON.parse(content) as unknown;
         return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
     } catch {
@@ -119,9 +149,11 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
 async function saveSettings(settings: Settings): Promise<void> {
     const settingsDir = resolveSettingsDir();
     mkdirGuarded(guardedPath(settingsDir), { recursive: true });
-    await writeTextNoFollowGuarded(
-        guardedPath(path.join(settingsDir, "dashboard-settings.json")),
-        JSON.stringify(settings, null, 2)
+    await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+        writeTextNoFollowGuarded(
+            guardedPath(settingsFile),
+            JSON.stringify(settings, null, 2)
+        )
     );
 }
 

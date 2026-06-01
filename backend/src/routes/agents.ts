@@ -1553,7 +1553,6 @@ export default function agentsRoutes(app: express.Application): void {
                 }
 
                 const safeTask = currentTask.trim().slice(0, 100);
-                const currentActive = getActiveHistoryTask(agentId);
                 const ts = nowIso();
 
                 if (safeTask && safeTask.length > 0) {
@@ -1576,6 +1575,7 @@ export default function agentsRoutes(app: express.Application): void {
 
                 // Auto history handling on task changes after metadata is durably written.
                 if (safeTask && safeTask.length > 0) {
+                    const currentActive = getActiveHistoryTask(agentId);
                     if (!currentActive) {
                         db.prepare(
                             `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)

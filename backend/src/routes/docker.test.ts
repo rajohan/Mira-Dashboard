@@ -471,6 +471,7 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
+        __testing.setDockerBinForTests(originalDockerBin);
         if (originalDockerComposeWrapper === undefined) {
             delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
         } else {
