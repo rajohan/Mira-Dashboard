@@ -192,7 +192,8 @@ export async function writeTextGuarded(
 /** Writes UTF-8 text while atomically refusing a symlink at the final path. */
 export async function writeTextNoFollowGuarded(
     path: GuardedPath,
-    content: string
+    content: string,
+    mode?: number
 ): Promise<void> {
     const file = await Fs.promises.open(
         guardedPathBuffer(path),
@@ -200,9 +201,12 @@ export async function writeTextNoFollowGuarded(
             Fs.constants.O_CREAT |
             Fs.constants.O_TRUNC |
             Fs.constants.O_NOFOLLOW,
-        0o666
+        mode ?? 0o666
     );
     try {
+        if (mode !== undefined) {
+            await file.chmod(mode & 0o777);
+        }
         await file.writeFile(content, "utf8");
     } finally {
         await file.close();

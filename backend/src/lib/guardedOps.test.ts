@@ -90,6 +90,10 @@ describe("guarded filesystem helpers", () => {
 
             await writeTextNoFollowGuarded(copied, "no-follow");
             assert.equal(await readFile(copied, "utf8"), "no-follow");
+            await writeTextNoFollowGuarded(copied, "private", 0o600);
+            assert.equal(await readFile(copied, "utf8"), "private");
+            const privateStat = await stat(copied);
+            assert.equal(privateStat.mode & 0o777, 0o600);
         } finally {
             await rm(baseDir, { recursive: true, force: true });
         }

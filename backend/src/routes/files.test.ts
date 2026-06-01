@@ -752,8 +752,11 @@ describe("files routes", () => {
                 "/api/files/generated%2Fnote.txt",
                 { method: "PUT", body: { content: "third" } }
             );
-            assert.equal(hardLinkedBackup.status, 500);
-            assert.match(hardLinkedBackup.body.error, /hard-linked/u);
+            assert.equal(hardLinkedBackup.status, 403);
+            assert.equal(
+                hardLinkedBackup.body.error,
+                "Access denied: hard links are not supported"
+            );
             assert.equal(await readFile(linkedBackupSource, "utf8"), "external backup");
         } finally {
             await rm(linkedBackupPath, { force: true });

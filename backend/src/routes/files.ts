@@ -533,7 +533,11 @@ export default function filesRoutes(
                                     )
                             );
                         } catch (error) {
-                            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                            const code = (error as NodeJS.ErrnoException).code;
+                            if (code === "EMLINK") {
+                                return null;
+                            }
+                            if (code !== "ENOENT") {
                                 throw error;
                             }
                         }
@@ -542,11 +546,9 @@ export default function filesRoutes(
                         try {
                             await writeTextNoFollowGuarded(
                                 guardedPath(tempPath),
-                                content
+                                content,
+                                existingMode ?? undefined
                             );
-                            if (existingMode !== null) {
-                                await fs.promises.chmod(tempPath, existingMode);
-                            }
                             await fs.promises.rename(tempPath, rootedFullPath);
                             return statGuarded(guardedPath(rootedFullPath));
                         } finally {
