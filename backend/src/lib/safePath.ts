@@ -127,7 +127,7 @@ export function prepareSafeWriteTargetWithinRoot(
         }
 
         try {
-            if (fs.lstatSync(resolvedTarget).isSymbolicLink()) {
+            if (fs.lstatSync(Buffer.from(resolvedTarget)).isSymbolicLink()) {
                 return null;
             }
         } catch (error) {
