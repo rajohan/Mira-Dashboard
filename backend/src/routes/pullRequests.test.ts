@@ -787,7 +787,11 @@ describe("pull request routes", () => {
                     /ENOENT/u
                 );
             } finally {
-                process.env.PATH = originalPathForSpawnError;
+                if (originalPathForSpawnError === undefined) {
+                    delete process.env.PATH;
+                } else {
+                    process.env.PATH = originalPathForSpawnError;
+                }
             }
             delete process.env.FAKE_GH_JSON_LINES;
         } finally {

@@ -111,7 +111,11 @@ describe("ops routes", () => {
                 await server.close();
             }
         } finally {
-            process.env.PATH = originalPath;
+            if (originalPath === undefined) {
+                delete process.env.PATH;
+            } else {
+                process.env.PATH = originalPath;
+            }
             if (originalN8nRoot === undefined) {
                 delete process.env.MIRA_N8N_ROOT;
             } else {

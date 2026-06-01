@@ -589,7 +589,11 @@ describe("docker routes", { concurrency: false }, () => {
             DATABASE_PASSWORD: process.env.DATABASE_PASSWORD,
             DATABASE_HOST: process.env.DATABASE_HOST,
             DATABASE_PORT: process.env.DATABASE_PORT,
+            DB_POSTGRESDB_USER: process.env.DB_POSTGRESDB_USER,
+            DB_POSTGRESDB_PASSWORD: process.env.DB_POSTGRESDB_PASSWORD,
         };
+        delete process.env.DB_POSTGRESDB_USER;
+        delete process.env.DB_POSTGRESDB_PASSWORD;
         process.env.DATABASE_USERNAME = "user@name";
         process.env.DATABASE_PASSWORD = "p:a/ss#";
         process.env.DATABASE_HOST = "db";
@@ -603,6 +607,20 @@ describe("docker routes", { concurrency: false }, () => {
                 __testing.buildPostgresUri("custom db/#1"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom%20db%2F%231"
             );
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            assert.equal(
+                __testing.buildPostgresUri("custom"),
+                "postgresql://native-user:native-password@db:6543/custom"
+            );
+            process.env.DB_POSTGRESDB_USER = "";
+            process.env.DB_POSTGRESDB_PASSWORD = "";
+            assert.equal(
+                __testing.buildPostgresUri("custom"),
+                "postgresql://:@db:6543/custom"
+            );
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
             process.env.DATABASE_USERNAME = "";
             process.env.DATABASE_PASSWORD = "";
             process.env.DATABASE_HOST = "";

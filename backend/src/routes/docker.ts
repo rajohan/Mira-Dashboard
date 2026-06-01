@@ -316,10 +316,14 @@ function parseJsonField<T>(value: string | undefined): T | null {
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = encodeURIComponent(
-        nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+        process.env.DB_POSTGRESDB_USER === undefined
+            ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+            : process.env.DB_POSTGRESDB_USER
     );
     const password = encodeURIComponent(
-        nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+        process.env.DB_POSTGRESDB_PASSWORD === undefined
+            ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+            : process.env.DB_POSTGRESDB_PASSWORD
     );
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
