@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -315,6 +315,18 @@ describe("settings routes", () => {
         assert.equal(response.status, 200);
         assert.equal(response.body.theme, "dark");
         assert.equal(response.body.refreshInterval, 5000);
+    });
+
+    it("does not follow symlinked settings files", async () => {
+        const linkedSettings = path.join(homeDir, "linked-settings.json");
+        await writeFile(linkedSettings, JSON.stringify({ theme: "light" }), "utf8");
+        await rm(settingsPath, { force: true });
+        await symlink(linkedSettings, settingsPath);
+
+        const response = await requestJson<{ theme: string }>(server, "/api/settings");
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.theme, "dark");
     });
 
     it("reports gateway-status and save failures", async () => {

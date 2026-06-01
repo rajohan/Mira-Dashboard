@@ -78,9 +78,11 @@ describe("value fallback helpers", () => {
         assert.equal(nullableString(), null);
     });
 
-    it("returns fallback objects for nullish values", () => {
+    it("returns fallback objects for non-object values", () => {
         assert.deepEqual(objectFallback({ ok: true }), { ok: true });
         assert.deepEqual(objectFallback(), {});
+        assert.deepEqual(objectFallback("oops" as unknown as object), {});
+        assert.deepEqual(objectFallback(true as unknown as object), {});
     });
 
     it("returns arrays or array fallbacks", () => {

@@ -29,15 +29,22 @@ function buildN8nScriptEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: envFallback("DATABASE_USERNAME", "postgres"),
-        DB_POSTGRESDB_PASSWORD: envFallback("DATABASE_PASSWORD", "postgres"),
+        DB_POSTGRESDB_USER:
+            process.env.DB_POSTGRESDB_USER ??
+            envFallback("DATABASE_USERNAME", "postgres"),
+        DB_POSTGRESDB_PASSWORD:
+            process.env.DB_POSTGRESDB_PASSWORD ??
+            envFallback("DATABASE_PASSWORD", "postgres"),
     };
 }
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = envFallback("DATABASE_USERNAME", "postgres");
-    const password = envFallback("DATABASE_PASSWORD", "postgres");
+    const username =
+        process.env.DB_POSTGRESDB_USER ?? envFallback("DATABASE_USERNAME", "postgres");
+    const password =
+        process.env.DB_POSTGRESDB_PASSWORD ??
+        envFallback("DATABASE_PASSWORD", "postgres");
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
     const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
     return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;

@@ -76,10 +76,9 @@ function cleanupUser(username: string): void {
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
 }
 
-function cleanupBootstrapRows(username: string): void {
-    cleanupUser(username);
-    cleanupUser("bootstrap-dupe");
-    cleanupUser("bootstrap-fail");
+function cleanupBootstrapRows(_username: string): void {
+    db.prepare("DELETE FROM auth_sessions").run();
+    db.prepare("DELETE FROM users").run();
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
         bootstrapGatewayToken
     );

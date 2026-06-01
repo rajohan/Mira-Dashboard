@@ -446,7 +446,11 @@ describe("docker routes", { concurrency: false }, () => {
                 .map((child) => stopChildProcess(child))
         );
         __testing.dockerExecJobs.clear();
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         for (const key of fakeEnvKeys) {
             const originalValue = originalFakeEnv.get(key);
             if (originalValue === undefined) {

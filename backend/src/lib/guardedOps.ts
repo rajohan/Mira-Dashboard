@@ -142,7 +142,15 @@ export async function copyNoFollowGuarded(
                 if (bytesRead === 0) {
                     break;
                 }
-                await destinationFile.write(buffer, 0, bytesRead);
+                let written = 0;
+                while (written < bytesRead) {
+                    const { bytesWritten } = await destinationFile.write(
+                        buffer,
+                        written,
+                        bytesRead - written
+                    );
+                    written += bytesWritten;
+                }
                 position += bytesRead;
             }
         } finally {

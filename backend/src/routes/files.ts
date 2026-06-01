@@ -35,7 +35,7 @@ function getDefaultWorkspaceRoot(): string {
 
 const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
-const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE;
+const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE + 1024;
 
 /** Represents file item. */
 interface FileItem {

@@ -151,9 +151,13 @@ describe("ops routes", () => {
 
         const originalUsername = process.env.DATABASE_USERNAME;
         const originalPassword = process.env.DATABASE_PASSWORD;
+        const originalNativeUsername = process.env.DB_POSTGRESDB_USER;
+        const originalNativePassword = process.env.DB_POSTGRESDB_PASSWORD;
         const originalHost = process.env.DATABASE_HOST;
         const originalPort = process.env.DATABASE_PORT;
         try {
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
             process.env.DATABASE_USERNAME = "";
             process.env.DATABASE_PASSWORD = "";
             process.env.DATABASE_HOST = "";
@@ -161,6 +165,13 @@ describe("ops routes", () => {
             const { __testing } = await import("./ops.js");
             assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "");
             assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD, "");
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "native-user");
+            assert.equal(
+                __testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD,
+                "native-password"
+            );
             const defaultCredentials = await requestJson<{
                 success: boolean;
                 lastRun: { completedAt: string; ok: boolean };
@@ -177,6 +188,16 @@ describe("ops routes", () => {
                 delete process.env.DATABASE_PASSWORD;
             } else {
                 process.env.DATABASE_PASSWORD = originalPassword;
+            }
+            if (originalNativeUsername === undefined) {
+                delete process.env.DB_POSTGRESDB_USER;
+            } else {
+                process.env.DB_POSTGRESDB_USER = originalNativeUsername;
+            }
+            if (originalNativePassword === undefined) {
+                delete process.env.DB_POSTGRESDB_PASSWORD;
+            } else {
+                process.env.DB_POSTGRESDB_PASSWORD = originalNativePassword;
             }
             if (originalHost === undefined) {
                 delete process.env.DATABASE_HOST;
@@ -195,9 +216,13 @@ describe("ops routes", () => {
         const { __testing } = await import("./ops.js");
         const originalUsername = process.env.DATABASE_USERNAME;
         const originalPassword = process.env.DATABASE_PASSWORD;
+        const originalNativeUsername = process.env.DB_POSTGRESDB_USER;
+        const originalNativePassword = process.env.DB_POSTGRESDB_PASSWORD;
         const originalHost = process.env.DATABASE_HOST;
         const originalPort = process.env.DATABASE_PORT;
         try {
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
             process.env.DATABASE_USERNAME = "postgres user";
             process.env.DATABASE_PASSWORD = "p@ss/word";
             process.env.DATABASE_HOST = "db.example";
@@ -212,6 +237,12 @@ describe("ops routes", () => {
                 __testing.buildPostgresUri("n8n"),
                 "postgresql://:@db.example:6543/n8n"
             );
+            process.env.DB_POSTGRESDB_USER = "native user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native/pass";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://native%20user:native%2Fpass@db.example:6543/n8n"
+            );
         } finally {
             if (originalUsername === undefined) {
                 delete process.env.DATABASE_USERNAME;
@@ -222,6 +253,16 @@ describe("ops routes", () => {
                 delete process.env.DATABASE_PASSWORD;
             } else {
                 process.env.DATABASE_PASSWORD = originalPassword;
+            }
+            if (originalNativeUsername === undefined) {
+                delete process.env.DB_POSTGRESDB_USER;
+            } else {
+                process.env.DB_POSTGRESDB_USER = originalNativeUsername;
+            }
+            if (originalNativePassword === undefined) {
+                delete process.env.DB_POSTGRESDB_PASSWORD;
+            } else {
+                process.env.DB_POSTGRESDB_PASSWORD = originalNativePassword;
             }
             if (originalHost === undefined) {
                 delete process.env.DATABASE_HOST;

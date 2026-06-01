@@ -1,11 +1,11 @@
 import express, { type RequestHandler } from "express";
-import fs from "fs";
 import os from "os";
 import path from "path";
 
 import {
     guardedPath,
     mkdirGuarded,
+    readTextNoFollowGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 
@@ -35,9 +35,9 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Performs load settings. */
-function loadSettings(): Settings {
+async function loadSettings(): Promise<Settings> {
     try {
-        const content = fs.readFileSync(resolveSettingsFile(), "utf8");
+        const content = await readTextNoFollowGuarded(guardedPath(resolveSettingsFile()));
         const persisted = JSON.parse(content) as unknown;
         return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
     } catch {
@@ -116,7 +116,7 @@ export default function settingsRoutes(
     // Get settings
     app.get("/api/settings", (async (_req, res) => {
         try {
-            const settings = loadSettings();
+            const settings = await loadSettings();
             const gatewayStatus = getGatewayStatus();
             res.json({ ...settings, gateway: gatewayStatus });
         } catch (error) {
@@ -128,7 +128,7 @@ export default function settingsRoutes(
     app.put("/api/settings", express.json(), (async (req, res) => {
         let updated: Settings;
         try {
-            const current = loadSettings();
+            const current = await loadSettings();
             updated = { ...current, ...parseSettingsPatch(req.body) };
         } catch (error) {
             res.status(400).json({ error: (error as Error).message });
