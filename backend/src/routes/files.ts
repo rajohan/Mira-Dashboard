@@ -204,9 +204,12 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    /* c8 ignore next 3 -- covered by platform-specific integration behavior on Linux */
     if (process.platform !== "linux") {
-        return callback(safePath);
+        const error = new Error(
+            "Parent path validation is not available on this platform"
+        ) as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
     }
 
     const parentPath = path.dirname(safePath);
@@ -533,11 +536,17 @@ export default function filesRoutes(
                             }
                         }
 
-                        await writeTextNoFollowGuarded(
-                            guardedPath(rootedFullPath),
-                            content
-                        );
-                        return statGuarded(guardedPath(rootedFullPath));
+                        const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.tmp`;
+                        try {
+                            await writeTextNoFollowGuarded(
+                                guardedPath(tempPath),
+                                content
+                            );
+                            await fs.promises.rename(tempPath, rootedFullPath);
+                            return statGuarded(guardedPath(rootedFullPath));
+                        } finally {
+                            await fs.promises.rm(tempPath, { force: true });
+                        }
                     }
                 );
                 if (!stat) {

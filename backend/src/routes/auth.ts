@@ -62,12 +62,13 @@ function validatePassword(password: unknown): string | null {
 function rollbackFirstUserBootstrap(
     userId: number,
     gatewayToken: string,
-    previousGatewayToken: string | null = null
+    previousGatewayToken: string | null = null,
+    persistToken: typeof persistGatewayToken = persistGatewayToken
 ): void {
     db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM users WHERE id = ?").run(userId);
     if (previousGatewayToken) {
-        persistGatewayToken(previousGatewayToken);
+        persistToken(previousGatewayToken);
         return;
     }
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
@@ -88,6 +89,7 @@ export default function authRoutes(
     dependencies: {
         createSession?: typeof createSession;
         createUser?: typeof createUser;
+        getPersistedGatewayToken?: typeof getPersistedGatewayToken;
         initGateway?: typeof gateway.init;
         persistGatewayToken?: typeof persistGatewayToken;
         rollbackBootstrap?: typeof rollbackFirstUserBootstrap;
@@ -101,8 +103,17 @@ export default function authRoutes(
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
         dependencies.persistGatewayToken ?? persistGatewayToken;
+    const getPersistedAuthGatewayToken =
+        dependencies.getPersistedGatewayToken ?? getPersistedGatewayToken;
     const rollbackBootstrap =
-        dependencies.rollbackBootstrap ?? rollbackFirstUserBootstrap;
+        dependencies.rollbackBootstrap ??
+        ((userId: number, token: string, previousToken: string | null = null): void =>
+            rollbackFirstUserBootstrap(
+                userId,
+                token,
+                previousToken,
+                persistAuthGatewayToken
+            ));
     const setAuthSessionCookie = dependencies.setSessionCookie ?? setSessionCookie;
     const shutdownGateway = dependencies.shutdownGateway ?? (() => gateway.shutdown());
 
@@ -162,7 +173,7 @@ export default function authRoutes(
             return;
         }
 
-        const previousGatewayToken = getPersistedGatewayToken();
+        const previousGatewayToken = getPersistedAuthGatewayToken();
         try {
             persistAuthGatewayToken(gatewayToken);
             initGateway(gatewayToken);

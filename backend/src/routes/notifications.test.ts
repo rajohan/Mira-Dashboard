@@ -470,6 +470,14 @@ describe("notifications routes", () => {
         assert.equal(globalClearRead.status, 200);
         assert.equal(globalClearRead.body.deleted >= 0, true);
 
+        const malformedSource = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/clear-read?source=a&source=b",
+            { method: "POST" }
+        );
+        assert.equal(malformedSource.status, 400);
+        assert.equal(malformedSource.body.error, "source must be a string");
+
         const deleteNeverExisted = await requestJson<{ ok: true; deleted: number }>(
             server,
             "/api/notifications/999999999",

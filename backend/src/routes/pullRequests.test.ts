@@ -421,8 +421,8 @@ async function requestJson<T>(
 }
 
 describe("pull request routes", () => {
-    let server: TestServer;
-    let tempDir: string;
+    let server = undefined as unknown as TestServer;
+    let tempDir = "";
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-pull-requests-"));
@@ -446,7 +446,7 @@ describe("pull request routes", () => {
     });
 
     after(async () => {
-        await server.close();
+        await server?.close();
         process.chdir(originalCwd);
         if (originalPath === undefined) {
             delete process.env.PATH;
@@ -463,7 +463,9 @@ describe("pull request routes", () => {
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
         }
-        await rm(tempDir, { recursive: true, force: true });
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("lists open main-targeted pull requests from GitHub", async () => {

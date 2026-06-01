@@ -52,16 +52,16 @@ describe("STT routes", () => {
 
     afterEach(() => {
         globalThis.fetch = originalFetch;
-    });
-
-    after(async () => {
-        await server.close();
-        globalThis.fetch = originalFetch;
         if (originalApiKey === undefined) {
             delete process.env.ELEVENLABS_API_KEY;
         } else {
             process.env.ELEVENLABS_API_KEY = originalApiKey;
         }
+    });
+
+    after(async () => {
+        await server.close();
+        globalThis.fetch = originalFetch;
     });
 
     it("requires an audio payload and ElevenLabs configuration", async () => {

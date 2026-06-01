@@ -10,7 +10,7 @@ import {
     parseJsonField,
 } from "../lib/cacheStore.js";
 import { errorMessage } from "../lib/errors.js";
-import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
@@ -215,11 +215,11 @@ export async function refreshCacheKey(key: string) {
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
         DB_POSTGRESDB_USER:
             process.env.DB_POSTGRESDB_USER === undefined
-                ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+                ? (process.env.DATABASE_USERNAME ?? "postgres")
                 : process.env.DB_POSTGRESDB_USER,
         DB_POSTGRESDB_PASSWORD:
             process.env.DB_POSTGRESDB_PASSWORD === undefined
-                ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+                ? (process.env.DATABASE_PASSWORD ?? "postgres")
                 : process.env.DB_POSTGRESDB_PASSWORD,
     };
 

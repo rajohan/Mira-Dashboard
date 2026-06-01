@@ -1,4 +1,5 @@
 import express, { type RequestHandler } from "express";
+import fs from "fs";
 import os from "os";
 import path from "path";
 
@@ -27,7 +28,17 @@ function resolveSettingsDir(home = process.env.HOME): string {
     ) {
         throw new Error("Invalid settings home directory");
     }
-    return path.resolve(path.join(normalizedHome, ".openclaw"));
+    const settingsDir = path.resolve(path.join(normalizedHome, ".openclaw"));
+    try {
+        if (fs.lstatSync(settingsDir).isSymbolicLink()) {
+            throw new Error("Invalid settings directory");
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    }
+    return settingsDir;
 }
 
 function resolveSettingsFile(): string {

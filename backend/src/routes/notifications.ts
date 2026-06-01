@@ -176,9 +176,16 @@ export default function notificationsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/notifications/clear-read", express.json(), ((req, res) => {
-        const source = nullableString(
-            stringFallback(req.body?.source ?? req.query.source).trim()
-        );
+        const rawSource = req.body?.source ?? req.query.source;
+        if (
+            rawSource !== undefined &&
+            rawSource !== null &&
+            typeof rawSource !== "string"
+        ) {
+            res.status(400).json({ error: "source must be a string" });
+            return;
+        }
+        const source = nullableString(stringFallback(rawSource).trim());
         const result = source
             ? db
                   .prepare("DELETE FROM notifications WHERE is_read = 1 AND source = ?")

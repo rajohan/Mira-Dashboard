@@ -834,6 +834,10 @@ describe("agents routes", () => {
         assert.equal(nullBody.status, 400);
         assert.equal(nullBody.body.error, "Provide currentTask");
 
+        await rm(path.join(homeDir, ".openclaw", "agents"), {
+            recursive: true,
+            force: true,
+        });
         const firstTask = await requestJson<{ currentTask: string; updatedAt: string }>(
             server,
             `/api/agents/${agentId}/metadata`,

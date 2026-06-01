@@ -615,6 +615,33 @@ describe("files routes", () => {
         }
     });
 
+    it("fails closed for writes on non-Linux platforms", async () => {
+        const originalPlatform = process.platform;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fdarwin-write.txt",
+                { method: "PUT", body: { content: "blocked" } }
+            );
+
+            assert.equal(response.status, 500);
+            assert.equal(
+                response.body.error,
+                "Parent path validation is not available on this platform"
+            );
+        } finally {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: originalPlatform,
+            });
+        }
+    });
+
     it("writes files, creates parents, and backs up overwritten content", async () => {
         const malformedWrite = await requestJson<{ error: string }>(
             server,

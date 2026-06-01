@@ -175,6 +175,19 @@ type GatewayClientConstructor = new (
 ) => OpenClawGatewayClientInstance;
 let GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
 
+async function refreshSessionsAfterRequest(
+    activeGateway: OpenClawGatewayClientInstance
+): Promise<void> {
+    try {
+        await refreshSessions(activeGateway);
+    } catch (error) {
+        console.warn(
+            "[Gateway] Failed to refresh sessions after request:",
+            errorMessage(error, String(error))
+        );
+    }
+}
+
 /** Performs transform session. */
 function transformSession(session: GatewaySession): Session {
     let type = "UNKNOWN";
@@ -783,7 +796,7 @@ async function forwardRequest(
                 // Ignore reply write failures; the Gateway call already succeeded.
             }
             if (method.startsWith("sessions.")) {
-                await refreshSessions(activeGateway);
+                await refreshSessionsAfterRequest(activeGateway);
             }
         } catch (error) {
             const pending = pendingRequests.get(id);
@@ -809,7 +822,7 @@ async function forwardRequest(
     try {
         await activeGateway.request(method, params);
         if (method.startsWith("sessions.")) {
-            await refreshSessions(activeGateway);
+            await refreshSessionsAfterRequest(activeGateway);
         }
         return true;
     } catch {

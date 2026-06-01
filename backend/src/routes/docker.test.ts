@@ -633,6 +633,12 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.DATABASE_PORT = "";
             assert.equal(
                 __testing.buildPostgresUri(),
+                "postgresql://:@postgres:5432/n8n"
+            );
+            delete process.env.DATABASE_USERNAME;
+            delete process.env.DATABASE_PASSWORD;
+            assert.equal(
+                __testing.buildPostgresUri(),
                 "postgresql://postgres:postgres@postgres:5432/n8n"
             );
         } finally {
@@ -1478,6 +1484,8 @@ describe("docker routes", { concurrency: false }, () => {
 
         const originalPostgresUser = process.env.DB_POSTGRESDB_USER;
         const originalPostgresPassword = process.env.DB_POSTGRESDB_PASSWORD;
+        const originalDatabaseUser = process.env.DATABASE_USERNAME;
+        const originalDatabasePassword = process.env.DATABASE_PASSWORD;
         const originalEnvPath = process.env.MIRA_FAKE_UPDATER_ENV_PATH;
         const envPath = path.join(tempDir, "updater-env.json");
         try {
@@ -1509,6 +1517,22 @@ describe("docker routes", { concurrency: false }, () => {
                 user: "",
                 password: "",
             });
+
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
+            delete process.env.DATABASE_USERNAME;
+            delete process.env.DATABASE_PASSWORD;
+            const defaultRun = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(defaultRun.status, 200);
+            assert.equal(defaultRun.body.success, true);
+            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
+                user: "postgres",
+                password: "postgres",
+            });
         } finally {
             if (originalPostgresUser === undefined) delete process.env.DB_POSTGRESDB_USER;
             else process.env.DB_POSTGRESDB_USER = originalPostgresUser;
@@ -1516,6 +1540,13 @@ describe("docker routes", { concurrency: false }, () => {
                 delete process.env.DB_POSTGRESDB_PASSWORD;
             } else {
                 process.env.DB_POSTGRESDB_PASSWORD = originalPostgresPassword;
+            }
+            if (originalDatabaseUser === undefined) delete process.env.DATABASE_USERNAME;
+            else process.env.DATABASE_USERNAME = originalDatabaseUser;
+            if (originalDatabasePassword === undefined) {
+                delete process.env.DATABASE_PASSWORD;
+            } else {
+                process.env.DATABASE_PASSWORD = originalDatabasePassword;
             }
             if (originalEnvPath === undefined) {
                 delete process.env.MIRA_FAKE_UPDATER_ENV_PATH;

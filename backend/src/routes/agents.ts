@@ -15,7 +15,7 @@ import {
     statGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
-import { safePathWithinRoot } from "../lib/safePath.js";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 
 const HOME_DIR = os.homedir().trim();
 const HAS_CONFIGURED_HOME_DIR =
@@ -46,8 +46,29 @@ function getRouteParam(value: string | string[] | undefined): string {
 }
 
 function getRealAgentsDir(): string | null {
-    const realAgentsDir = FS.realpathSync(AGENTS_DIR);
-    return realAgentsDir === AGENTS_DIR ? realAgentsDir : null;
+    try {
+        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        return realAgentsDir === AGENTS_DIR ? realAgentsDir : null;
+    } catch {
+        return null;
+    }
+}
+
+function ensureRealAgentsDir(): string | null {
+    try {
+        const agentsDirStat = FS.lstatSync(AGENTS_DIR);
+        if (!agentsDirStat.isDirectory() || agentsDirStat.isSymbolicLink()) {
+            return null;
+        }
+    } catch (error) {
+        /* c8 ignore next 3 -- unexpected root lstat failures use the same fail-closed path. */
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            return null;
+        }
+        mkdirGuarded(guardedPath(AGENTS_DIR), { recursive: true });
+    }
+
+    return getRealAgentsDir();
 }
 
 /** Returns the canonical sessions directory for a validated agent id. */
@@ -118,6 +139,7 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
                 return [];
             }
         });
+        /* c8 ignore next 3 -- defensive fallback for unexpected filesystem sanitizer errors. */
     } catch {
         return [];
     }
@@ -1473,10 +1495,7 @@ export default function agentsRoutes(app: express.Application): void {
                 }
                 const metadataDir = Path.dirname(metadataPath as string);
 
-                // lgtm[js/path-injection] metadataDir is derived from isValidAgentId + safePathWithinRoot under AGENTS_DIR.
-                mkdirGuarded(guardedPath(metadataDir), { recursive: true });
-
-                const realAgentsDir = getRealAgentsDir();
+                const realAgentsDir = ensureRealAgentsDir();
                 if (!realAgentsDir) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
@@ -1487,6 +1506,18 @@ export default function agentsRoutes(app: express.Application): void {
                     agentId,
                     "sessions"
                 );
+                const safeSessionsDir = prepareSafeWriteTargetWithinRoot(
+                    expectedSessionsDir,
+                    AGENTS_DIR
+                );
+                /* c8 ignore start -- safe write validation should resolve to the same canonical path for a validated agent id. */
+                if (safeSessionsDir !== canonicalExpectedSessionsDir) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
+                /* c8 ignore stop */
+                // lgtm[js/path-injection] expectedSessionsDir is derived from isValidAgentId + safe write validation under AGENTS_DIR.
+                mkdirGuarded(guardedPath(safeSessionsDir), { recursive: true });
                 const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
                 const realMetadataDir = FS.realpathSync(metadataDir);
                 if (

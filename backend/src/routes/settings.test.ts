@@ -126,6 +126,20 @@ describe("settings routes", () => {
             /Invalid settings home directory/u
         );
         assert.equal(__testing.resolveSettingsDir(), path.join(homeDir, ".openclaw"));
+        const symlinkHome = await mkdtemp(path.join(os.tmpdir(), "mira-settings-link-"));
+        const symlinkTarget = await mkdtemp(
+            path.join(os.tmpdir(), "mira-settings-target-")
+        );
+        try {
+            await symlink(symlinkTarget, path.join(symlinkHome, ".openclaw"));
+            assert.throws(
+                () => __testing.resolveSettingsDir(symlinkHome),
+                /Invalid settings directory/u
+            );
+        } finally {
+            await rm(symlinkHome, { recursive: true, force: true });
+            await rm(symlinkTarget, { recursive: true, force: true });
+        }
         const originalHome = process.env.HOME;
         try {
             delete process.env.HOME;

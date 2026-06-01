@@ -319,12 +319,12 @@ function parseJsonField<T>(value: string | undefined): T | null {
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = encodeURIComponent(
         process.env.DB_POSTGRESDB_USER === undefined
-            ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+            ? (process.env.DATABASE_USERNAME ?? "postgres")
             : process.env.DB_POSTGRESDB_USER
     );
     const password = encodeURIComponent(
         process.env.DB_POSTGRESDB_PASSWORD === undefined
-            ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+            ? (process.env.DATABASE_PASSWORD ?? "postgres")
             : process.env.DB_POSTGRESDB_PASSWORD
     );
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
@@ -876,11 +876,11 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
         DB_POSTGRESDB_USER:
             process.env.DB_POSTGRESDB_USER === undefined
-                ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
+                ? (process.env.DATABASE_USERNAME ?? "postgres")
                 : process.env.DB_POSTGRESDB_USER,
         DB_POSTGRESDB_PASSWORD:
             process.env.DB_POSTGRESDB_PASSWORD === undefined
-                ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
+                ? (process.env.DATABASE_PASSWORD ?? "postgres")
                 : process.env.DB_POSTGRESDB_PASSWORD,
     };
 
