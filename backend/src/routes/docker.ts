@@ -1465,8 +1465,17 @@ export default function dockerRoutes(app: express.Application): void {
             } else {
                 job.process.kill("SIGTERM");
             }
-        } catch {
-            job.process.kill("SIGTERM");
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ESRCH") {
+                try {
+                    job.process.kill("SIGTERM");
+                } catch (fallbackError) {
+                    if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+                        throw fallbackError;
+                    }
+                }
+            }
         }
         res.json({ success: true });
     }) as RequestHandler);

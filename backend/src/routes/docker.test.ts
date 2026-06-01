@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -723,9 +723,9 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(unavailable.status, 400);
             assert.equal(unavailable.body.error, "Process not available");
 
-            let fallbackKilled = false;
-            __testing.dockerExecJobs.set("fallback-kill", {
-                id: "fallback-kill",
+            let alreadyExitedKilled = false;
+            __testing.dockerExecJobs.set("already-exited", {
+                id: "already-exited",
                 containerId: "app",
                 status: "running",
                 code: null,
@@ -738,19 +738,96 @@ describe("docker routes", { concurrency: false }, () => {
                     killed: false,
                     kill(signal?: NodeJS.Signals | number) {
                         assert.equal(signal, "SIGTERM");
+                        alreadyExitedKilled = true;
+                        return true;
+                    },
+                }),
+            });
+            const alreadyExited = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/exec/already-exited/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(alreadyExited.status, 200);
+            assert.equal(alreadyExited.body.success, true);
+            assert.equal(alreadyExitedKilled, false);
+
+            let fallbackKilled = false;
+            const processKill = mock.method(process, "kill", () => {
+                throw Object.assign(new Error("operation not permitted"), {
+                    code: "EPERM",
+                });
+            });
+            __testing.dockerExecJobs.set("fallback-kill", {
+                id: "fallback-kill",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    pid: 123,
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
                         fallbackKilled = true;
                         return true;
                     },
                 }),
             });
-            const fallback = await requestJson<{ success: boolean }>(
-                server,
-                "/api/docker/exec/fallback-kill/stop",
-                { method: "POST", body: {} }
-            );
-            assert.equal(fallback.status, 200);
-            assert.equal(fallback.body.success, true);
-            assert.equal(fallbackKilled, true);
+            try {
+                const fallback = await requestJson<{ success: boolean }>(
+                    server,
+                    "/api/docker/exec/fallback-kill/stop",
+                    { method: "POST", body: {} }
+                );
+                assert.equal(fallback.status, 200);
+                assert.equal(fallback.body.success, true);
+                assert.equal(fallbackKilled, true);
+            } finally {
+                processKill.mock.restore();
+            }
+
+            const failingFallbackProcessKill = mock.method(process, "kill", () => {
+                throw Object.assign(new Error("operation not permitted"), {
+                    code: "EPERM",
+                });
+            });
+            __testing.dockerExecJobs.set("failing-fallback-kill", {
+                id: "failing-fallback-kill",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    pid: 124,
+                    killed: false,
+                    kill() {
+                        throw Object.assign(new Error("fallback kill failed"), {
+                            code: "EPERM",
+                        });
+                    },
+                }),
+            });
+            try {
+                const failingFallback = await fetch(
+                    `${server.baseUrl}/api/docker/exec/failing-fallback-kill/stop`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({}),
+                    }
+                );
+                assert.equal(failingFallback.status, 500);
+                assert.match(await failingFallback.text(), /fallback kill failed/);
+            } finally {
+                failingFallbackProcessKill.mock.restore();
+            }
 
             let missingPidKilled = false;
             __testing.dockerExecJobs.set("missing-pid", {
