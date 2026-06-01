@@ -179,7 +179,10 @@ describe("moltbook routes", () => {
                 const response = await fetch(`${server.baseUrl}${route}`);
                 const body = (await response.json()) as { error: string };
                 assert.equal(response.status, 503);
-                assert.match(body.error, new RegExp(expectedError, "u"));
+                assert.ok(
+                    body.error.includes(expectedError),
+                    `unexpected error: ${body.error}`
+                );
             } finally {
                 delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
             }

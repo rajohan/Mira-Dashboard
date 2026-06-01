@@ -192,6 +192,15 @@ describe("OpenClaw config routes", () => {
                 },
             },
         ]);
+
+        calls.length = 0;
+        const invalid = await requestJson<{ error: string }>(server, "/api/config", {
+            method: "PUT",
+            body: ["not", "an", "object"],
+        });
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.body.error, "Invalid config: expected JSON object");
+        assert.deepEqual(calls, []);
     });
 
     it("fails config writes when OpenClaw hash is unavailable", async () => {

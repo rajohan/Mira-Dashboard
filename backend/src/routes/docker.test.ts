@@ -16,11 +16,11 @@ interface TestServer {
 
 const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
-const originalUpdaterNodeBin = process.env.MIRA_UPDATER_NODE_BIN;
-const originalUpdaterCwd = process.env.MIRA_UPDATER_CWD;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
-const originalDockerComposeWrapper = process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
 const fakeEnvKeys = [
+    "MIRA_DOCKER_COMPOSE_WRAPPER",
+    "MIRA_UPDATER_NODE_BIN",
+    "MIRA_UPDATER_CWD",
     "MIRA_FAKE_UPDATER_FAIL_STEP",
     "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
     "MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP",
@@ -64,6 +64,7 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
             }
             settled = true;
             clearTimeout(timeout);
+            clearTimeout(overallTimeout);
             child.off("exit", done);
             resolve();
         };
@@ -76,6 +77,7 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
                 done();
             }
         }, 100);
+        const overallTimeout = setTimeout(done, 3000);
         child.once("exit", done);
         try {
             if (!child.kill("SIGTERM")) {
@@ -428,6 +430,28 @@ async function withFakeUpdaterFailStep<T>(
     }
 }
 
+async function withEnvValue<T>(
+    key: string,
+    value: string | undefined,
+    callback: () => Promise<T>
+): Promise<T> {
+    const previous = process.env[key];
+    try {
+        if (value === undefined) {
+            delete process.env[key];
+        } else {
+            process.env[key] = value;
+        }
+        return await callback();
+    } finally {
+        if (previous === undefined) {
+            delete process.env[key];
+        } else {
+            process.env[key] = previous;
+        }
+    }
+}
+
 describe("docker routes", { concurrency: false }, () => {
     let server: TestServer;
     let tempDir: string;
@@ -474,23 +498,8 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
         __testing.setDockerBinForTests(originalDockerBin);
-        if (originalDockerComposeWrapper === undefined) {
-            delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
-        } else {
-            process.env.MIRA_DOCKER_COMPOSE_WRAPPER = originalDockerComposeWrapper;
-        }
-        if (originalUpdaterNodeBin === undefined) {
-            delete process.env.MIRA_UPDATER_NODE_BIN;
-        } else {
-            process.env.MIRA_UPDATER_NODE_BIN = originalUpdaterNodeBin;
-        }
-        __testing.setUpdaterNodeBinForTests(originalUpdaterNodeBin);
-        if (originalUpdaterCwd === undefined) {
-            delete process.env.MIRA_UPDATER_CWD;
-        } else {
-            process.env.MIRA_UPDATER_CWD = originalUpdaterCwd;
-        }
-        __testing.setUpdaterCwdForTests(originalUpdaterCwd);
+        __testing.setUpdaterNodeBinForTests(originalFakeEnv.get("MIRA_UPDATER_NODE_BIN"));
+        __testing.setUpdaterCwdForTests(originalFakeEnv.get("MIRA_UPDATER_CWD"));
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }
@@ -636,7 +645,7 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.DATABASE_PORT = "";
             assert.equal(
                 __testing.buildPostgresUri(),
-                "postgresql://:@postgres:5432/n8n"
+                "postgresql://postgres:postgres@postgres:5432/n8n"
             );
             delete process.env.DATABASE_USERNAME;
             delete process.env.DATABASE_PASSWORD;
@@ -803,7 +812,7 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(alreadyExited.status, 200);
             assert.equal(alreadyExited.body.success, true);
-            assert.equal(alreadyExitedKilled, false);
+            assert.equal(alreadyExitedKilled, true);
 
             let fallbackKilled = false;
             const processKill = mock.method(process, "kill", () => {
@@ -909,6 +918,34 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(missingPid.status, 200);
             assert.equal(missingPidKilled, true);
 
+            let pidOneKilled = false;
+            __testing.dockerExecJobs.set("pid-one", {
+                id: "pid-one",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    pid: 1,
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
+                        pidOneKilled = true;
+                        return true;
+                    },
+                }),
+            });
+            const pidOne = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/exec/pid-one/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(pidOne.status, 200);
+            assert.equal(pidOneKilled, true);
+
             __testing.updateDockerExecJobOutput("missing-output", "stdout", "stderr");
             __testing.completeDockerExecJob("missing-complete", {
                 code: 0,
@@ -984,8 +1021,7 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("covers docker fallback branches for inspect, image sizes, events cleanup, and exec spawn errors", async () => {
-        process.env.MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT", "1", async () => {
             const containers = await requestJson<{
                 containers: Array<{ imageId: string; mounts: unknown[] }>;
             }>(server, "/api/docker/containers");
@@ -998,36 +1034,27 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(details.status, 404);
             assert.equal(details.body.error, "Container not found");
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT;
-        }
+        });
 
-        process.env.MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE", "1", async () => {
             const images = await requestJson<{ images: Array<{ size: number }> }>(
                 server,
                 "/api/docker/images"
             );
             assert.equal(images.status, 200);
             assert.equal(images.body.images[0]?.size, 1234);
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE;
-        }
+        });
 
-        process.env.MIRA_FAKE_DOCKER_RM_FAIL = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_RM_FAIL", "1", async () => {
             const events = await requestJson<{ events: unknown[] }>(
                 server,
                 "/api/docker/updater/events"
             );
             assert.equal(events.status, 200);
             assert.equal(events.body.events.length, 1);
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_RM_FAIL;
-        }
+        });
 
-        process.env.MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH", "1", async () => {
             const volumes = await requestJson<{ volumes: Array<{ usedBy: string[] }> }>(
                 server,
                 "/api/docker/volumes"
@@ -1037,9 +1064,7 @@ describe("docker routes", { concurrency: false }, () => {
                 volumes.body.volumes.map((volume) => volume.usedBy),
                 [["app"], ["app"]]
             );
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH;
-        }
+        });
 
         const { __testing } = await import("./docker.js");
         __testing.setDockerBinForTests(path.join(tempDir, "missing-docker"));
@@ -1112,8 +1137,7 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("returns sparse docker resources with safe defaults", async () => {
-        process.env.MIRA_FAKE_DOCKER_SPARSE = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_SPARSE", "1", async () => {
             const containers = await requestJson<{
                 containers: Array<{
                     id: string;
@@ -1171,14 +1195,11 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(volumes.status, 200);
             assert.deepEqual(volumes.body.volumes[0]?.labels, {});
             assert.deepEqual(volumes.body.volumes[0]?.usedBy, []);
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_SPARSE;
-        }
+        });
     });
 
     it("handles empty docker resource lists", async () => {
-        process.env.MIRA_FAKE_DOCKER_EMPTY = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_EMPTY", "1", async () => {
             const containers = await requestJson<{ containers: unknown[] }>(
                 server,
                 "/api/docker/containers"
@@ -1199,9 +1220,7 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(volumes.status, 200);
             assert.deepEqual(volumes.body.volumes, []);
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_EMPTY;
-        }
+        });
     });
 
     it("returns container details and combined logs", async () => {
@@ -1242,6 +1261,20 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(logsWithDefaultTail.status, 200);
         assert.equal(logsWithDefaultTail.body.content, "stdout log\n\nstderr log");
+
+        const invalidDetails = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/containers/-bad"
+        );
+        assert.equal(invalidDetails.status, 400);
+        assert.equal(invalidDetails.body.error, "Invalid containerId");
+
+        const invalidLogs = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/containers/-bad/logs"
+        );
+        assert.equal(invalidLogs.status, 400);
+        assert.equal(invalidLogs.body.error, "Invalid containerId");
 
         const missing = await requestJson<{ error: string }>(
             server,
@@ -1338,6 +1371,30 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(deleteVolume.status, 200);
         assert.equal(deleteVolume.body.success, true);
 
+        const invalidAction = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/containers/-bad/action",
+            { method: "POST", body: { action: "restart" } }
+        );
+        assert.equal(invalidAction.status, 400);
+        assert.equal(invalidAction.body.error, "Invalid containerId");
+
+        const invalidImage = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/images/-bad",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidImage.status, 400);
+        assert.equal(invalidImage.body.error, "Invalid imageId");
+
+        const invalidVolume = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/volumes/-bad",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidVolume.status, 400);
+        assert.equal(invalidVolume.body.error, "Invalid volumeName");
+
         const pruneImages = await requestJson<{ success: boolean; output: string }>(
             server,
             "/api/docker/prune",
@@ -1401,8 +1458,7 @@ describe("docker routes", { concurrency: false }, () => {
             },
         ]);
 
-        process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS = "1";
-        try {
+        await withEnvValue("MIRA_FAKE_DOCKER_SPARSE_EVENTS", "1", async () => {
             const sparseEvents = await requestJson<{
                 events: Array<{
                     id: number;
@@ -1426,9 +1482,7 @@ describe("docker routes", { concurrency: false }, () => {
                     createdAt: "",
                 },
             ]);
-        } finally {
-            delete process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS;
-        }
+        });
 
         const invalid = await requestJson<{ error: string }>(
             server,
@@ -1636,22 +1690,71 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(manualFailure.body.stderr, "manual-update failed\n");
         });
 
-        process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP = "manual-update";
-        try {
-            await withFakeUpdaterFailStep(undefined, async () => {
-                const blankSuccess = await requestJson<{
-                    success: boolean;
-                    result: Record<string, never>;
-                }>(server, "/api/docker/updater/services/1/update", {
-                    method: "POST",
-                    body: {},
+        await withEnvValue(
+            "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
+            "manual-update",
+            async () => {
+                await withFakeUpdaterFailStep(undefined, async () => {
+                    const blankSuccess = await requestJson<{
+                        success: boolean;
+                        result: Record<string, never>;
+                        stderr: string;
+                    }>(server, "/api/docker/updater/services/1/update", {
+                        method: "POST",
+                        body: {},
+                    });
+                    assert.equal(blankSuccess.status, 200);
+                    assert.equal(blankSuccess.body.success, false);
+                    assert.deepEqual(blankSuccess.body.result, {});
+                    assert.match(
+                        blankSuccess.body.stderr,
+                        /Invalid manual updater output/u
+                    );
                 });
-                assert.equal(blankSuccess.status, 200);
-                assert.deepEqual(blankSuccess.body.result, {});
-            });
 
-            await withFakeUpdaterFailStep("manual-update", async () => {
-                const blankManualFailure = await requestJson<{
+                await withFakeUpdaterFailStep("manual-update", async () => {
+                    const blankManualFailure = await requestJson<{
+                        success: boolean;
+                        result: Record<string, never>;
+                        stderr: string;
+                    }>(server, "/api/docker/updater/services/1/update", {
+                        method: "POST",
+                        body: {},
+                    });
+                    assert.equal(blankManualFailure.status, 200);
+                    assert.equal(blankManualFailure.body.success, false);
+                    assert.deepEqual(blankManualFailure.body.result, {});
+                    assert.equal(
+                        blankManualFailure.body.stderr,
+                        "manual-update failed\n"
+                    );
+                });
+
+                await withFakeUpdaterFailStep("notify", async () => {
+                    const blankNotifyFailure = await requestJson<{
+                        success: boolean;
+                        result: Record<string, never>;
+                        stderr: string;
+                    }>(server, "/api/docker/updater/services/1/update", {
+                        method: "POST",
+                        body: {},
+                    });
+                    assert.equal(blankNotifyFailure.status, 200);
+                    assert.equal(blankNotifyFailure.body.success, false);
+                    assert.deepEqual(blankNotifyFailure.body.result, {});
+                    assert.match(
+                        blankNotifyFailure.body.stderr,
+                        /Invalid manual updater output/u
+                    );
+                });
+            }
+        );
+
+        await withEnvValue(
+            "MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP",
+            "manual-update",
+            async () => {
+                const malformedSuccess = await requestJson<{
                     success: boolean;
                     result: Record<string, never>;
                     stderr: string;
@@ -1659,62 +1762,33 @@ describe("docker routes", { concurrency: false }, () => {
                     method: "POST",
                     body: {},
                 });
-                assert.equal(blankManualFailure.status, 200);
-                assert.equal(blankManualFailure.body.success, false);
-                assert.deepEqual(blankManualFailure.body.result, {});
-                assert.equal(blankManualFailure.body.stderr, "manual-update failed\n");
-            });
-
-            await withFakeUpdaterFailStep("notify", async () => {
-                const blankNotifyFailure = await requestJson<{
-                    success: boolean;
-                    result: Record<string, never>;
-                    stderr: string;
-                }>(server, "/api/docker/updater/services/1/update", {
-                    method: "POST",
-                    body: {},
-                });
-                assert.equal(blankNotifyFailure.status, 200);
-                assert.equal(blankNotifyFailure.body.success, false);
-                assert.deepEqual(blankNotifyFailure.body.result, {});
-                assert.equal(blankNotifyFailure.body.stderr, "notify failed\n");
-            });
-        } finally {
-            delete process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP;
-        }
-
-        process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP = "manual-update";
-        try {
-            const malformedSuccess = await requestJson<{
-                success: boolean;
-                result: Record<string, never>;
-            }>(server, "/api/docker/updater/services/1/update", {
-                method: "POST",
-                body: {},
-            });
-            assert.equal(malformedSuccess.status, 200);
-            assert.deepEqual(malformedSuccess.body.result, {});
-
-            await withFakeUpdaterFailStep("manual-update", async () => {
-                const malformedManualFailure = await requestJson<{
-                    success: boolean;
-                    result: Record<string, never>;
-                    stderr: string;
-                }>(server, "/api/docker/updater/services/1/update", {
-                    method: "POST",
-                    body: {},
-                });
-                assert.equal(malformedManualFailure.status, 200);
-                assert.equal(malformedManualFailure.body.success, false);
-                assert.deepEqual(malformedManualFailure.body.result, {});
-                assert.equal(
-                    malformedManualFailure.body.stderr,
-                    "manual-update failed\n"
+                assert.equal(malformedSuccess.status, 200);
+                assert.equal(malformedSuccess.body.success, false);
+                assert.deepEqual(malformedSuccess.body.result, {});
+                assert.match(
+                    malformedSuccess.body.stderr,
+                    /Invalid manual updater output/u
                 );
-            });
-        } finally {
-            delete process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP;
-        }
+
+                await withFakeUpdaterFailStep("manual-update", async () => {
+                    const malformedManualFailure = await requestJson<{
+                        success: boolean;
+                        result: Record<string, never>;
+                        stderr: string;
+                    }>(server, "/api/docker/updater/services/1/update", {
+                        method: "POST",
+                        body: {},
+                    });
+                    assert.equal(malformedManualFailure.status, 200);
+                    assert.equal(malformedManualFailure.body.success, false);
+                    assert.deepEqual(malformedManualFailure.body.result, {});
+                    assert.equal(
+                        malformedManualFailure.body.stderr,
+                        "manual-update failed\n"
+                    );
+                });
+            }
+        );
     });
 
     it("starts and reads docker exec jobs", async () => {
@@ -1725,6 +1799,72 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(invalid.status, 400);
         assert.equal(invalid.body.error, "Missing containerId or command");
+
+        const nullPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: null }
+        );
+        assert.equal(nullPayload.status, 400);
+        assert.equal(nullPayload.body.error, "Missing containerId or command");
+
+        const invalidContainerId = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: "-bad", command: "echo hi" } }
+        );
+        assert.equal(invalidContainerId.status, 400);
+        assert.equal(invalidContainerId.body.error, "Invalid containerId");
+
+        const objectContainerId = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: { id: "app" }, command: "echo ok" } }
+        );
+        assert.equal(objectContainerId.status, 400);
+        assert.equal(objectContainerId.body.error, "Invalid containerId");
+
+        const objectCommand = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: "app", command: { run: "echo ok" } } }
+        );
+        assert.equal(objectCommand.status, 400);
+        assert.equal(objectCommand.body.error, "Invalid command");
+
+        const blankCommand = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/exec/start",
+            { method: "POST", body: { containerId: "app", command: "   " } }
+        );
+        assert.equal(blankCommand.status, 400);
+        assert.equal(blankCommand.body.error, "Invalid command");
+
+        const { __testing } = await import("./docker.js");
+        __testing.dockerExecJobs.clear();
+        try {
+            for (let index = 0; index < 100; index += 1) {
+                __testing.dockerExecJobs.set(`active-${index}`, {
+                    id: `active-${index}`,
+                    containerId: "app",
+                    status: "running",
+                    code: null,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: Date.now(),
+                    endedAt: null,
+                });
+            }
+            const tooMany = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/exec/start",
+                { method: "POST", body: { containerId: "app", command: "echo hi" } }
+            );
+            assert.equal(tooMany.status, 429);
+            assert.equal(tooMany.body.error, "Too many active Docker exec jobs");
+        } finally {
+            __testing.dockerExecJobs.clear();
+        }
 
         const start = await requestJson<{ jobId: string }>(
             server,

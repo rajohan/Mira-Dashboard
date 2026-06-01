@@ -96,11 +96,43 @@ export default function notificationsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/notifications", express.json(), ((req, res) => {
-        const title = (req.body?.title || "").toString().trim();
-        const description = (req.body?.description || "").toString().trim();
+        const rawTitle = req.body?.title;
+        const rawDescription = req.body?.description;
         const type = (req.body?.type || "info").toString() as NotificationType;
-        const source = nullableString(stringFallback(req.body?.source).trim());
-        const dedupeKey = nullableString(stringFallback(req.body?.dedupeKey).trim());
+        const rawSource = req.body?.source;
+        const rawDedupeKey = req.body?.dedupeKey;
+        if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
+            res.status(400).json({ error: "title must be a string" });
+            return;
+        }
+        if (
+            rawDescription !== undefined &&
+            rawDescription !== null &&
+            typeof rawDescription !== "string"
+        ) {
+            res.status(400).json({ error: "description must be a string" });
+            return;
+        }
+        if (
+            rawSource !== undefined &&
+            rawSource !== null &&
+            typeof rawSource !== "string"
+        ) {
+            res.status(400).json({ error: "source must be a string" });
+            return;
+        }
+        if (
+            rawDedupeKey !== undefined &&
+            rawDedupeKey !== null &&
+            typeof rawDedupeKey !== "string"
+        ) {
+            res.status(400).json({ error: "dedupeKey must be a string" });
+            return;
+        }
+        const title = nullableString((rawTitle ?? "").trim());
+        const description = nullableString((rawDescription ?? "").trim());
+        const source = nullableString((rawSource ?? "").trim());
+        const dedupeKey = nullableString((rawDedupeKey ?? "").trim());
         const metadata =
             req.body?.metadata &&
             typeof req.body.metadata === "object" &&

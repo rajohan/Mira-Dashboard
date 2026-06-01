@@ -311,6 +311,10 @@ if (args[0] === "worktree" && args[1] === "remove") {
   process.exit(0);
 }
 if (["fetch", "checkout", "pull"].includes(args[0])) {
+  if (args[0] === "pull" && process.env.FAKE_GIT_PULL_FAIL === "1") {
+    process.stderr.write("pull failed");
+    process.exit(2);
+  }
   process.stdout.write(args.join(" ") + "\n");
   process.exit(0);
 }
@@ -645,6 +649,15 @@ describe("pull request routes", () => {
             message: "Invalid pull request number",
         });
         assert.throws(() => __testing.validatePrNumber("1.5"), {
+            message: "Invalid pull request number",
+        });
+        assert.throws(() => __testing.validatePrNumber("1e2"), {
+            message: "Invalid pull request number",
+        });
+        assert.throws(() => __testing.validatePrNumber("0x10"), {
+            message: "Invalid pull request number",
+        });
+        assert.throws(() => __testing.validatePrNumber(10), {
             message: "Invalid pull request number",
         });
         assert.throws(
@@ -1030,6 +1043,65 @@ describe("pull request routes", () => {
             assert.equal(approveAndDeploy.body.deployment.status, "restart-scheduled");
         } finally {
             restoreGitEnv();
+        }
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        const restoreSyncOnlyFailureEnv = saveEnv([
+            "FAKE_GIT_WORKTREE_LIST",
+            "FAKE_GIT_PULL_FAIL",
+        ]);
+        process.env.FAKE_GIT_WORKTREE_LIST = "short-branch";
+        process.env.FAKE_GIT_PULL_FAIL = "1";
+        try {
+            const syncOnlyFailure = await requestJson<{
+                ok: boolean;
+                message: string;
+                syncError: string;
+            }>(server, "/api/pull-requests/10/approve", {
+                method: "POST",
+                body: { deploy: false },
+            });
+            assert.equal(syncOnlyFailure.status, 200);
+            assert.equal(syncOnlyFailure.body.ok, true);
+            assert.equal(
+                syncOnlyFailure.body.message,
+                "PR #10 merged; production sync failed"
+            );
+            assert.match(syncOnlyFailure.body.syncError, /pull failed/u);
+        } finally {
+            restoreSyncOnlyFailureEnv();
+        }
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        const restoreSyncFailureEnv = saveEnv([
+            "FAKE_GIT_WORKTREE_LIST",
+            "FAKE_GIT_PULL_FAIL",
+        ]);
+        process.env.FAKE_GIT_WORKTREE_LIST = "short-branch";
+        process.env.FAKE_GIT_PULL_FAIL = "1";
+        try {
+            const partialSuccess = await requestJson<{
+                ok: boolean;
+                message: string;
+                cleanup: { status: string };
+                syncError: string;
+                deployError: string;
+            }>(server, "/api/pull-requests/10/approve", {
+                method: "POST",
+                body: { deploy: true },
+            });
+            assert.equal(partialSuccess.status, 200);
+            assert.equal(partialSuccess.body.ok, true);
+            assert.equal(partialSuccess.body.message, "PR #10 merged; deploy failed");
+            assert.equal(partialSuccess.body.cleanup.status, "removed");
+            assert.match(partialSuccess.body.syncError, /pull failed/u);
+            assert.match(partialSuccess.body.deployError, /pull failed/u);
+        } finally {
+            restoreSyncFailureEnv();
         }
     });
 

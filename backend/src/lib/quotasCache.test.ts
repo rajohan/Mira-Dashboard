@@ -58,7 +58,11 @@ describe("quota cache helpers", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         if (originalMode === undefined) {
             delete process.env.FAKE_QUOTAS_CACHE_MODE;
         } else {

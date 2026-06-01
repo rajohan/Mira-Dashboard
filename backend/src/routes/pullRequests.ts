@@ -367,7 +367,7 @@ async function runGhJsonLines<T>(
                     parseGhJsonLine(stdoutBuffer, rows);
                     resolve(rows);
                 } catch (error) {
-                    reject(error);
+                    reject(toGhJsonParseError(error));
                 }
             });
         });
@@ -471,6 +471,9 @@ async function getPullRequest(number: number): Promise<PullRequestSummary> {
 
 /** Validates pr number. */
 function validatePrNumber(value: unknown): number {
+    if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+        throw new Error("Invalid pull request number");
+    }
     const number = Number(value);
     if (!Number.isInteger(number) || number <= 0) {
         throw new Error("Invalid pull request number");
@@ -800,13 +803,38 @@ async function approvePullRequest(number: number, deploy: boolean) {
         { timeoutMs: 120_000 }
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
-    await syncMain();
+    let syncError: string | undefined;
+    let deployment: DeploymentJob | undefined;
+    let deployError: string | undefined;
+
+    try {
+        await syncMain();
+    } catch (error) {
+        syncError = errorMessage(error, "Failed to sync main after merge");
+    }
+
+    if (deploy) {
+        try {
+            deployment = await deployLatest();
+        } catch (error) {
+            deployError = errorMessage(error, "Deploy failed after merge");
+        }
+    }
 
     return {
         ok: true,
-        message: deploy ? `PR #${number} merged; deploy started` : `PR #${number} merged`,
-        deployment: deploy ? await deployLatest() : undefined,
+        message:
+            deploy && deployError
+                ? `PR #${number} merged; deploy failed`
+                : syncError
+                  ? `PR #${number} merged; production sync failed`
+                  : deploy
+                    ? `PR #${number} merged; deploy started`
+                    : `PR #${number} merged`,
+        deployment,
         cleanup,
+        syncError,
+        deployError,
     };
 }
 

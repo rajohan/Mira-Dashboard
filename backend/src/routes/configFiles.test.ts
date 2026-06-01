@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,11 @@ import express from "express";
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
+    testing: {
+        setValidateOpenclawLeafForTest: (
+            next?: (openclawRoot: string) => boolean
+        ) => void;
+    };
 }
 
 interface ConfigFileItem {
@@ -23,21 +28,35 @@ interface ConfigFileItem {
 
 async function startServer(homeDir?: string): Promise<TestServer> {
     const originalHome = process.env.HOME;
+    const originalOpenclawHome = process.env.OPENCLAW_HOME;
+    const originalDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     if (homeDir === undefined) {
         delete process.env.HOME;
     } else {
         process.env.HOME = homeDir;
     }
+    delete process.env.OPENCLAW_HOME;
+    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     const restoreHome = () => {
         if (originalHome === undefined) {
             delete process.env.HOME;
         } else {
             process.env.HOME = originalHome;
         }
+        if (originalOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = originalOpenclawHome;
+        }
+        if (originalDashboardOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenclawHome;
+        }
     };
 
     try {
-        const { default: configFilesRoutes } = await import(
+        const { default: configFilesRoutes, __testing } = await import(
             `./configFiles.js?test=${Date.now()}-${Math.random()}`
         );
         const app = express();
@@ -67,6 +86,7 @@ async function startServer(homeDir?: string): Promise<TestServer> {
 
         return {
             baseUrl: `http://127.0.0.1:${address.port}`,
+            testing: __testing,
             close: () =>
                 new Promise((resolve) =>
                     server.close(() => {
@@ -233,8 +253,13 @@ describe("config files routes", () => {
     it("returns an empty list when the OpenClaw root does not exist", async () => {
         const { __testing } = await import("./configFiles.js");
         const originalHome = process.env.HOME;
+        const originalOpenclawHome = process.env.OPENCLAW_HOME;
+        const originalDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         const originalHomedir = os.homedir;
         try {
+            delete process.env.OPENCLAW_HOME;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+
             process.env.HOME = "relative-home";
             assert.equal(__testing.resolveOpenclawRoot(), null);
             delete process.env.HOME;
@@ -284,6 +309,16 @@ describe("config files routes", () => {
             } else {
                 process.env.HOME = originalHome;
             }
+            if (originalOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenclawHome;
+            }
+            if (originalDashboardOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenclawHome;
+            }
         }
 
         const emptyHomeDir = await mkdtemp(path.join(os.tmpdir(), "mira-empty-home-"));
@@ -297,9 +332,89 @@ describe("config files routes", () => {
             assert.equal(response.status, 200);
             assert.equal(response.body.root, path.join(emptyHomeDir, ".openclaw"));
             assert.deepEqual(response.body.files, []);
+
+            const created = await requestJson<{ success: boolean; relPath: string }>(
+                emptyServer,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(created.status, 200);
+            assert.equal(created.body.success, true);
+            assert.equal(created.body.relPath, "openclaw.json");
+            assert.equal(
+                await readFile(
+                    path.join(emptyHomeDir, ".openclaw", "openclaw.json"),
+                    "utf8"
+                ),
+                "{}\n"
+            );
         } finally {
             await emptyServer.close();
             await rm(emptyHomeDir, { recursive: true, force: true });
+        }
+    });
+
+    it("resolves OpenClaw root from environment overrides", async () => {
+        const { __testing } = await import("./configFiles.js");
+        const originalHome = process.env.HOME;
+        const originalOpenclawHome = process.env.OPENCLAW_HOME;
+        const originalDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-"));
+        const dashboardOpenclawHome = await mkdtemp(
+            path.join(os.tmpdir(), "mira-dashboard-openclaw-")
+        );
+        const linkedOpenclawHome = path.join(os.tmpdir(), `mira-linked-${Date.now()}`);
+        const originalLstatSync = fs.lstatSync;
+
+        try {
+            process.env.HOME = "/";
+            process.env.OPENCLAW_HOME = openclawHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            assert.equal(__testing.resolveOpenclawRoot(), openclawHome);
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardOpenclawHome;
+            assert.equal(__testing.resolveOpenclawRoot(), openclawHome);
+
+            delete process.env.OPENCLAW_HOME;
+            assert.equal(__testing.resolveOpenclawRoot(), dashboardOpenclawHome);
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "/";
+            assert.equal(__testing.resolveOpenclawRoot(), null);
+
+            await symlink(dashboardOpenclawHome, linkedOpenclawHome);
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = linkedOpenclawHome;
+            assert.equal(__testing.resolveOpenclawRoot(), null);
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardOpenclawHome;
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (target === dashboardOpenclawHome) {
+                    const error = new Error("root unavailable") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+            assert.equal(__testing.resolveOpenclawRoot(), null);
+        } finally {
+            fs.lstatSync = originalLstatSync;
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+            if (originalOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenclawHome;
+            }
+            if (originalDashboardOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenclawHome;
+            }
+            await rm(openclawHome, { recursive: true, force: true });
+            await rm(dashboardOpenclawHome, { recursive: true, force: true });
+            await rm(linkedOpenclawHome, { force: true });
         }
     });
 
@@ -380,6 +495,87 @@ describe("config files routes", () => {
             await rm(openclawConfig, { force: true });
             await writeFile(openclawConfig, originalOpenclawConfig);
             await rm(outsideDir, { recursive: true, force: true });
+        }
+
+        const hardLinkPath = path.join(openclawRoot, "openclaw-hardlink.json");
+        await link(openclawConfig, hardLinkPath);
+        try {
+            const hardLinkedRead = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(hardLinkedRead.status, 403);
+            assert.equal(hardLinkedRead.body.error, "Hard-linked files are not allowed");
+
+            const hardLinkedWrite = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(hardLinkedWrite.status, 403);
+            assert.equal(hardLinkedWrite.body.error, "Hard-linked files are not allowed");
+        } finally {
+            await rm(hardLinkPath, { force: true });
+        }
+
+        const originalOpen = fs.promises.open;
+        fs.promises.open = (async (
+            target: fs.PathLike,
+            flags: string | number,
+            mode?: fs.Mode
+        ) => {
+            if (
+                String(target).endsWith(`${path.sep}openclaw.json`) &&
+                typeof flags === "number" &&
+                (flags & fs.constants.O_WRONLY) !== 0
+            ) {
+                return {
+                    stat: async () => ({ isFile: () => true, nlink: 2 }),
+                    close: async () => {},
+                } as fs.promises.FileHandle;
+            }
+            return originalOpen.call(fs.promises, target, flags, mode);
+        }) as typeof fs.promises.open;
+        try {
+            const racedHardLink = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(racedHardLink.status, 403);
+            assert.equal(racedHardLink.body.error, "Hard-linked files are not allowed");
+        } finally {
+            fs.promises.open = originalOpen;
+            await rm(path.join(openclawRoot, "openclaw.json.bak"), { force: true });
+        }
+
+        fs.promises.open = (async (
+            target: fs.PathLike,
+            flags: string | number,
+            mode?: fs.Mode
+        ) => {
+            if (
+                String(target).endsWith(`${path.sep}openclaw.json`) &&
+                typeof flags === "number" &&
+                (flags & fs.constants.O_WRONLY) !== 0
+            ) {
+                const error = new Error("write open failed") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return originalOpen.call(fs.promises, target, flags, mode);
+        }) as typeof fs.promises.open;
+        try {
+            const failedWriteOpen = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(failedWriteOpen.status, 500);
+            assert.equal(failedWriteOpen.body.error, "write open failed");
+        } finally {
+            fs.promises.open = originalOpen;
+            await rm(path.join(openclawRoot, "openclaw.json.bak"), { force: true });
         }
     });
 
@@ -646,6 +842,40 @@ describe("config files routes", () => {
             await rm(outsideDir, { recursive: true, force: true });
         }
 
+        const originalLstatSync = fs.lstatSync;
+        try {
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target) === openclawRoot) {
+                    const error = new Error("root unavailable") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+
+            const { __testing } = await import("./configFiles.js");
+            assert.equal(__testing.validateOpenclawLeaf(openclawRoot), false);
+        } finally {
+            fs.lstatSync = originalLstatSync;
+        }
+
+        try {
+            server.testing.setValidateOpenclawLeafForTest(() => false);
+
+            const unsafeRootLeaf = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(unsafeRootLeaf.status, 403);
+            assert.equal(
+                unsafeRootLeaf.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            server.testing.setValidateOpenclawLeafForTest();
+        }
+
         const originalMkdirSync = fs.mkdirSync;
         try {
             fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
@@ -676,6 +906,32 @@ describe("config files routes", () => {
             fs.mkdirSync = originalMkdirSync;
         }
 
+        try {
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath === openclawRoot) {
+                    const error = new Error(
+                        "root creation crashed"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EIO";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const failedPreparedTarget = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(failedPreparedTarget.status, 500);
+            assert.equal(failedPreparedTarget.body.error, "root creation crashed");
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+        }
+
         const transformsDir = path.join(openclawRoot, "hooks", "transforms");
         const outsideParent = await mkdtemp(
             path.join(os.tmpdir(), "mira-config-parent-")
@@ -700,6 +956,80 @@ describe("config files routes", () => {
         }
 
         const { __testing } = await import("./configFiles.js");
+        const originalRootMkdirSync = fs.mkdirSync;
+        try {
+            fs.mkdirSync = ((target: fs.PathLike) => {
+                if (String(target) === openclawRoot) {
+                    const error = new Error("already exists") as NodeJS.ErrnoException;
+                    error.code = "EEXIST";
+                    throw error;
+                }
+                return originalRootMkdirSync(target);
+            }) as typeof fs.mkdirSync;
+            await __testing.ensureParentDirsForWrite(openclawConfig, openclawRoot);
+
+            fs.mkdirSync = ((target: fs.PathLike) => {
+                if (String(target) === openclawRoot) {
+                    const error = new Error("permission denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRootMkdirSync(target);
+            }) as typeof fs.mkdirSync;
+            await assert.rejects(
+                () => __testing.ensureParentDirsForWrite(openclawConfig, openclawRoot),
+                (error: unknown) => (error as NodeJS.ErrnoException).code === "EACCES"
+            );
+        } finally {
+            fs.mkdirSync = originalRootMkdirSync;
+        }
+
+        const originalPlatform = process.platform;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            await assert.rejects(
+                () =>
+                    __testing.withRootedParentPath(
+                        openclawConfig,
+                        openclawRoot,
+                        (rootedPath) => rootedPath
+                    ),
+                (error: unknown) =>
+                    (error as NodeJS.ErrnoException).code === "EACCES" &&
+                    (error as Error).message === "Parent path validation failed"
+            );
+        } finally {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: originalPlatform,
+            });
+        }
+
+        const rejectedParent = await mkdtemp(
+            path.join(os.tmpdir(), "mira-config-parent-")
+        );
+        await rm(transformsDir, { recursive: true, force: true });
+        try {
+            await symlink(rejectedParent, transformsDir);
+            await assert.rejects(
+                () =>
+                    __testing.ensureParentDirsForWrite(
+                        path.join(transformsDir, "agentmail.ts"),
+                        openclawRoot
+                    ),
+                (error: unknown) =>
+                    (error as NodeJS.ErrnoException).code === "EACCES" &&
+                    (error as Error).message === "Parent directory validation failed"
+            );
+        } finally {
+            await rm(transformsDir, { force: true });
+            await mkdir(transformsDir, { recursive: true });
+            await rm(rejectedParent, { recursive: true, force: true });
+        }
+
         await assert.rejects(
             () =>
                 __testing.ensureParentDirsForWrite(
@@ -759,8 +1089,8 @@ describe("config files routes", () => {
                 "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
                 { method: "PUT", body: { content: "export const next = true;\n" } }
             );
-            assert.equal(oversizedBackup.status, 500);
-            assert.match(oversizedBackup.body.error, /backup size limit/u);
+            assert.equal(oversizedBackup.status, 413);
+            assert.equal(oversizedBackup.body.error, "Config file too large to back up");
             const targetContent = await readFile(target, "utf8");
             assert.equal(targetContent.startsWith("a"), true);
         } finally {
@@ -782,8 +1112,11 @@ describe("config files routes", () => {
                 "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
                 { method: "PUT", body: { content: "export const next = true;\n" } }
             );
-            assert.equal(escapedParent.status, 500);
-            assert.match(escapedParent.body.error, /Parent path validation failed/u);
+            assert.equal(escapedParent.status, 403);
+            assert.equal(
+                escapedParent.body.error,
+                "Access denied: path outside allowed root"
+            );
         } finally {
             fs.realpathSync = originalRealpathSync;
         }

@@ -65,15 +65,29 @@ function rollbackFirstUserBootstrap(
     previousGatewayToken: string | null = null,
     persistToken: typeof persistGatewayToken = persistGatewayToken
 ): void {
-    db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
-    db.prepare("DELETE FROM users WHERE id = ?").run(userId);
-    if (previousGatewayToken) {
-        persistToken(previousGatewayToken);
-        return;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        if (previousGatewayToken) {
+            persistToken(previousGatewayToken);
+        } else {
+            db.prepare(
+                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+            ).run(gatewayToken);
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "[Auth] First-user rollback transaction rollback failed:",
+                rollbackError
+            );
+        }
+        throw error;
     }
-    db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
-        gatewayToken
-    );
 }
 
 export const __testing = {
@@ -184,8 +198,11 @@ export default function authRoutes(
         } catch {
             try {
                 rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
-            } catch {
-                // Preserve the original bootstrap failure response.
+            } catch (rollbackError) {
+                console.error(
+                    "[Auth] First-user bootstrap rollback failed:",
+                    rollbackError
+                );
             }
             try {
                 shutdownGateway();

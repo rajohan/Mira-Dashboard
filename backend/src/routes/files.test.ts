@@ -9,9 +9,12 @@ import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
+import { __testing as guardedOpsTesting } from "../lib/guardedOps.js";
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
+    testing: typeof import("./files.js").__testing;
 }
 
 interface FileItem {
@@ -27,7 +30,7 @@ async function startServer(workspaceRoot: string): Promise<TestServer> {
     process.env.WORKSPACE_ROOT = workspaceRoot;
     let server: http.Server | undefined;
     try {
-        const { default: filesRoutes } = await import(
+        const { __testing, default: filesRoutes } = await import(
             `./files.js?test=${crypto.randomUUID()}`
         );
 
@@ -80,6 +83,7 @@ async function startServer(workspaceRoot: string): Promise<TestServer> {
                         resolve();
                     })
                 ),
+            testing: __testing,
         };
     } catch (error) {
         if (server?.listening) {
@@ -235,6 +239,7 @@ describe("files routes", () => {
             blankServer = {
                 baseUrl: `http://127.0.0.1:${address.port}`,
                 close: () => new Promise((resolve) => httpServer.close(() => resolve())),
+                testing: __testing,
             };
 
             const response = await requestJson<{ root: string; files: FileItem[] }>(
@@ -380,10 +385,70 @@ describe("files routes", () => {
             await mkdir(path.join(workspaceRoot, "sort", "alpha-dir"));
             await writeFile(path.join(workspaceRoot, "sort", "z-file.txt"), "z");
             await writeFile(path.join(workspaceRoot, "sort", "alpha.txt"), "a");
+            const outsideRealDir = await mkdtemp(
+                path.join(os.tmpdir(), "mira-files-real-outside-")
+            );
+            try {
+                __testing.setListDirectoryRealpathSyncForTest(((target: fs.PathLike) => {
+                    const targetPath = Buffer.isBuffer(target)
+                        ? target.toString("utf8")
+                        : String(target);
+                    if (targetPath === path.join(workspaceRoot, "sort")) {
+                        return outsideRealDir;
+                    }
+                    return fs.realpathSync(target);
+                }) as typeof fs.realpathSync);
+                assert.equal(__testing.listDirectory("sort"), null);
+            } finally {
+                __testing.setListDirectoryRealpathSyncForTest();
+                await rm(outsideRealDir, { recursive: true, force: true });
+            }
             assert.deepEqual(
                 __testing.listDirectory("sort")?.map((entry) => entry.name),
                 ["alpha-dir", "zeta", "alpha.txt", "z-file.txt"]
             );
+            const originalLstatSync = fs.lstatSync;
+            try {
+                guardedOpsTesting.setLstatSyncForTest(((target: fs.PathLike) => {
+                    const targetPath = Buffer.isBuffer(target)
+                        ? target.toString("utf8")
+                        : String(target);
+                    if (targetPath.endsWith(path.join("sort", "alpha.txt"))) {
+                        const error = new Error(
+                            "entry disappeared"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "ENOENT";
+                        throw error;
+                    }
+                    return originalLstatSync(target);
+                }) as typeof fs.lstatSync);
+                const alphaEntry = __testing
+                    .listDirectory("sort")
+                    ?.find((entry) => entry.name === "alpha.txt");
+                assert.equal(alphaEntry?.error, true);
+            } finally {
+                guardedOpsTesting.setLstatSyncForTest();
+            }
+
+            const statusCalls: number[] = [];
+            const handled = __testing.sendRootedParentError(
+                {
+                    status(code: number) {
+                        statusCalls.push(code);
+                        return this;
+                    },
+                    json() {
+                        throw new Error("json should not be called");
+                    },
+                } as never,
+                {
+                    code: "EACCES",
+                    message: "unexpected parent failure",
+                } as NodeJS.ErrnoException
+            );
+            assert.equal(handled, false);
+            assert.deepEqual(statusCalls, []);
+
             const srcEntries = __testing.listDirectory("src");
             assert.equal(srcEntries?.[0]?.path, "src/app.ts");
         } finally {
@@ -696,6 +761,20 @@ describe("files routes", () => {
             "first"
         );
 
+        const largePath = path.join(workspaceRoot, "generated", "large.txt");
+        await writeFile(largePath, Buffer.alloc(2 * 1024 * 1024 + 1, "a"));
+        const largeUpdate = await requestJson<{ success: boolean }>(
+            server,
+            "/api/files/generated%2Flarge.txt",
+            { method: "PUT", body: { content: "small replacement" } }
+        );
+        assert.equal(largeUpdate.status, 200);
+        assert.equal(await readFile(largePath, "utf8"), "small replacement");
+        await assert.rejects(
+            readFile(path.join(workspaceRoot, "generated", "large.txt.bak"), "utf8"),
+            { code: "ENOENT" }
+        );
+
         const executablePath = path.join(workspaceRoot, "generated", "script.sh");
         await writeFile(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
         await fs.promises.chmod(executablePath, 0o755);
@@ -855,6 +934,52 @@ describe("files routes", () => {
         } finally {
             await rm(backup, { recursive: true, force: true });
         }
+
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value.startsWith("/proc/self/fd/")) {
+                    throw new Error("unexpected parent failure");
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fnote.txt",
+                { method: "PUT", body: { content: "after" } }
+            );
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "unexpected parent failure");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        const originalStatSync = fs.statSync;
+        try {
+            guardedOpsTesting.setStatSyncForTest(((targetPath: fs.PathLike) => {
+                const value = Buffer.isBuffer(targetPath)
+                    ? targetPath.toString("utf8")
+                    : String(targetPath);
+                if (value.endsWith("note.txt")) {
+                    const error = new Error("stat denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalStatSync(targetPath);
+            }) as typeof fs.statSync);
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fnote.txt",
+                { method: "PUT", body: { content: "after" } }
+            );
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "stat denied");
+        } finally {
+            guardedOpsTesting.setStatSyncForTest();
+        }
     });
 
     it("maps unexpected canonicalization failures to 500 responses", async () => {
@@ -886,6 +1011,7 @@ describe("files routes", () => {
             }
             return originalRealpathSync(target);
         }) as typeof fs.realpathSync;
+        server.testing.setListDirectoryRealpathSyncForTest(fs.realpathSync);
 
         try {
             const listFailure = await requestJson<{ error: string }>(
@@ -921,6 +1047,7 @@ describe("files routes", () => {
                 "Access denied: path outside workspace"
             );
         } finally {
+            server.testing.setListDirectoryRealpathSyncForTest();
             fs.realpathSync = originalRealpathSync;
             await rm(outsideDir, { recursive: true, force: true });
         }

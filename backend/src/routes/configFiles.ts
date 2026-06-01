@@ -63,17 +63,27 @@ function isBinaryFile(content: string): boolean {
 
 /** Resolves the OpenClaw root without falling back to a root-level path. */
 function resolveOpenclawRoot(): string | null {
-    const envHome = process.env.HOME?.trim();
-    const homeDir =
-        envHome && path.isAbsolute(envHome) && envHome !== path.parse(envHome).root
-            ? envHome
-            : os.homedir().trim();
-    if (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root) {
+    const configuredRoot =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const homeDir = os.homedir().trim();
+    if (
+        !configuredRoot &&
+        (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root)
+    ) {
         return null;
     }
-    const openclawRoot = path.join(homeDir, ".openclaw");
+    const openclawRoot = configuredRoot || path.join(homeDir, ".openclaw");
+    const resolvedRoot = path.resolve(openclawRoot);
+    if (
+        !openclawRoot ||
+        !path.isAbsolute(openclawRoot) ||
+        resolvedRoot === path.parse(resolvedRoot).root
+    ) {
+        return null;
+    }
     try {
-        if (fs.lstatSync(openclawRoot).isSymbolicLink()) {
+        if (fs.lstatSync(resolvedRoot).isSymbolicLink()) {
             return null;
         }
     } catch (error) {
@@ -81,8 +91,18 @@ function resolveOpenclawRoot(): string | null {
             return null;
         }
     }
-    return openclawRoot;
+    return resolvedRoot;
 }
+
+function validateOpenclawLeaf(openclawRoot: string): boolean {
+    try {
+        return !fs.lstatSync(openclawRoot).isSymbolicLink();
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "ENOENT";
+    }
+}
+
+let validateOpenclawLeafForWrite = validateOpenclawLeaf;
 
 function decodeConfigPath(encodedPath: string): string | null {
     try {
@@ -97,9 +117,10 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    /* c8 ignore next 3 -- covered by platform-specific integration behavior on Linux */
     if (process.platform !== "linux") {
-        return callback(safePath);
+        const error = new Error("Parent path validation failed") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
     }
 
     const parentPath = path.dirname(safePath);
@@ -129,6 +150,14 @@ async function ensureParentDirsForWrite(
     rootPath: string
 ): Promise<void> {
     const targetParent = path.dirname(safePath);
+    try {
+        fs.mkdirSync(rootPath, { recursive: true });
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST") {
+            throw error;
+        }
+    }
     const canonicalRoot = fs.realpathSync(rootPath);
     const relativeParent = path.relative(canonicalRoot, targetParent);
     if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
@@ -149,7 +178,6 @@ async function ensureParentDirsForWrite(
             currentPath,
             canonicalRoot
         );
-        /* c8 ignore next 7 -- fail-closed guard for filesystem races after root validation. */
         if (!safeDirectoryPath) {
             const error = new Error(
                 "Parent directory validation failed"
@@ -338,6 +366,13 @@ export default function configFilesRoutes(
                         return;
                     }
 
+                    if (stat.nlink > 1) {
+                        res.status(403).json({
+                            error: "Hard-linked files are not allowed",
+                        });
+                        return;
+                    }
+
                     if (stat.size > MAX_FILE_SIZE) {
                         const buffer = Buffer.alloc(MAX_FILE_SIZE);
                         const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
@@ -429,8 +464,24 @@ export default function configFilesRoutes(
                     });
                     return;
                 }
+                if (!validateOpenclawLeafForWrite(openclawRoot)) {
+                    res.status(403).json({
+                        error: "Access denied: path outside allowed root",
+                    });
+                    return;
+                }
 
-                await ensureParentDirsForWrite(safeFullPath, openclawRoot);
+                try {
+                    await ensureParentDirsForWrite(safeFullPath, openclawRoot);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "EACCES") {
+                        res.status(403).json({
+                            error: "Access denied: path outside allowed root",
+                        });
+                        return;
+                    }
+                    throw error;
+                }
 
                 // Create backup
                 try {
@@ -451,6 +502,13 @@ export default function configFilesRoutes(
                         openclawRoot,
                         async (rootedFullPath) => {
                             const currentStat = statGuarded(guardedPath(rootedFullPath));
+                            if (currentStat.nlink > 1) {
+                                const error = new Error(
+                                    "Hard-linked files are not allowed"
+                                ) as NodeJS.ErrnoException;
+                                error.code = "EMLINK";
+                                throw error;
+                            }
                             if (currentStat.size > MAX_CONFIG_WRITE_SIZE) {
                                 const error = new Error(
                                     "Existing config file exceeds backup size limit"
@@ -470,7 +528,20 @@ export default function configFilesRoutes(
                         }
                     );
                 } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "EMLINK") {
+                        res.status(403).json({
+                            error: "Hard-linked files are not allowed",
+                        });
+                        return;
+                    }
+                    if (code === "EFBIG") {
+                        res.status(413).json({
+                            error: "Config file too large to back up",
+                        });
+                        return;
+                    }
+                    if (code !== "ENOENT") {
                         throw error;
                     }
                 }
@@ -485,7 +556,18 @@ export default function configFilesRoutes(
                         );
                         return statGuarded(guardedPath(rootedFullPath));
                     }
-                );
+                ).catch((error: NodeJS.ErrnoException) => {
+                    if (error.code === "EMLINK") {
+                        res.status(403).json({
+                            error: "Hard-linked files are not allowed",
+                        });
+                        return null;
+                    }
+                    throw error;
+                });
+                if (!stat) {
+                    return;
+                }
 
                 res.json({
                     success: true,
@@ -506,4 +588,11 @@ export default function configFilesRoutes(
 export const __testing = {
     ensureParentDirsForWrite,
     resolveOpenclawRoot,
+    setValidateOpenclawLeafForTest(
+        nextValidateOpenclawLeaf?: typeof validateOpenclawLeaf
+    ): void {
+        validateOpenclawLeafForWrite = nextValidateOpenclawLeaf ?? validateOpenclawLeaf;
+    },
+    validateOpenclawLeaf,
+    withRootedParentPath,
 };

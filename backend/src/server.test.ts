@@ -18,9 +18,11 @@ import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 let originalPort: string | undefined;
 let originalTrustProxy: string | undefined;
 let originalOpenClawHome: string | undefined;
+let originalDashboardOpenClawHome: string | undefined;
 let originalGatewayToken: { value: string } | undefined;
 let openclawHome: string | undefined;
 const ENTRYPOINT_SHUTDOWN_TIMEOUT_MS = 3_000;
+const ENTRYPOINT_START_TIMEOUT_MS = 5_000;
 
 let apiAuthMiddleware: (typeof import("./server.js"))["apiAuthMiddleware"];
 let handleWebSocketConnection: (typeof import("./server.js"))["handleWebSocketConnection"];
@@ -50,6 +52,20 @@ async function requestJson<T>(pathName: string): Promise<{ status: number; body:
     };
 }
 
+async function assertChildStillRunning(
+    child: ReturnType<typeof spawn>,
+    timeoutMs = ENTRYPOINT_START_TIMEOUT_MS
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (child.exitCode !== null || child.signalCode !== null) {
+            assert.fail("Process exited prematurely");
+        }
+        await delay(50);
+    }
+    assert.equal(child.exitCode, null);
+}
+
 async function restoreBootstrapState(): Promise<void> {
     if (openclawHome) {
         await rm(openclawHome, { recursive: true, force: true });
@@ -71,6 +87,11 @@ async function restoreBootstrapState(): Promise<void> {
     } else {
         process.env.OPENCLAW_HOME = originalOpenClawHome;
     }
+    if (originalDashboardOpenClawHome === undefined) {
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+    } else {
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenClawHome;
+    }
 
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
     if (originalGatewayToken) {
@@ -85,6 +106,7 @@ describe("server bootstrap", () => {
         originalPort = process.env.PORT;
         originalTrustProxy = process.env.TRUST_PROXY;
         originalOpenClawHome = process.env.OPENCLAW_HOME;
+        originalDashboardOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         originalGatewayToken = db
             .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
             .get() as { value: string } | undefined;
@@ -95,6 +117,7 @@ describe("server bootstrap", () => {
             openclawHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-openclaw-"));
             await mkdir(path.join(openclawHome, "media"));
             process.env.OPENCLAW_HOME = openclawHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
             db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
 
             ({
@@ -162,6 +185,10 @@ describe("server bootstrap", () => {
         assert.equal(parseTrustProxy("true"), true);
         assert.equal(parseTrustProxy("FALSE"), false);
         assert.equal(parseTrustProxy("2"), 2);
+        assert.equal(parseTrustProxy("0"), 0);
+        assert.equal(parseTrustProxy("255"), 255);
+        assert.equal(parseTrustProxy("256"), "loopback");
+        assert.equal(parseTrustProxy("999999999999999999999999999999"), "loopback");
         assert.equal(parseTrustProxy("0010"), 10);
         assert.equal(parseTrustProxy("+2"), "+2");
         assert.equal(parseTrustProxy("0x10"), "0x10");
@@ -448,6 +475,8 @@ describe("server bootstrap", () => {
 
     it("lets config-file writes use the route-specific JSON parser", async () => {
         const originalHome = process.env.HOME;
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalRouteOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         const tempHome = await mkdtemp(path.join(os.tmpdir(), "mira-server-home-"));
         const configRoot = path.join(tempHome, ".openclaw");
         const configPath = path.join(configRoot, "openclaw.json");
@@ -457,6 +486,8 @@ describe("server bootstrap", () => {
             await mkdir(configRoot, { recursive: true });
             await writeFile(configPath, "{}", "utf8");
             process.env.HOME = tempHome;
+            process.env.OPENCLAW_HOME = configRoot;
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = configRoot;
 
             const response = await fetch(
                 `${getBaseUrl()}/api/config-files/openclaw.json`,
@@ -474,6 +505,16 @@ describe("server bootstrap", () => {
                 delete process.env.HOME;
             } else {
                 process.env.HOME = originalHome;
+            }
+            if (originalRouteOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalRouteOpenClawHome;
+            }
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
             }
             await rm(tempHome, { recursive: true, force: true });
         }
@@ -787,14 +828,15 @@ describe("server bootstrap", () => {
                         "mira-server-entrypoint-coverage"
                     ),
                     OPENCLAW_TOKEN: "test-token",
+                    OPENCLAW_HOME: openclawHome,
+                    MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
                     PORT: "0",
                 },
                 stdio: "ignore",
             }
         );
         try {
-            await delay(300);
-            assert.equal(child.exitCode, null);
+            await assertChildStillRunning(child);
         } finally {
             let exited = child.exitCode !== null || child.signalCode !== null;
             if (!exited) {

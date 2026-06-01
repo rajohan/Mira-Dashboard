@@ -99,7 +99,7 @@ function startLogWatcher(): void {
 }
 
 /** Performs send log history. */
-function sendLogHistory(ws: WebSocket): void {
+async function sendLogHistory(ws: WebSocket): Promise<void> {
     try {
         const logFile = getTodayLogFile();
         const fileName = path.basename(logFile);
@@ -107,14 +107,18 @@ function sendLogHistory(ws: WebSocket): void {
         // Send file name
         ws.send(JSON.stringify({ type: "log_file", file: fileName }));
 
-        if (!fs.existsSync(logFile)) {
-            // No log file yet
+        let file: fs.promises.FileHandle;
+        try {
+            file = await openReadNoFollowGuarded(guardedPath(logFile));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
             ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
             return;
         }
 
-        // Read last 100 lines
-        const content = fs.readFileSync(logFile, "utf8");
+        const content = await file.readFile("utf8").finally(() => file.close());
         const lines = content
             .split("\n")
             .filter((l) => l.trim())
@@ -138,7 +142,7 @@ export function subscribeToLogs(ws: WebSocket): void {
     logSubscribers.add(ws);
 
     // Send log history first
-    sendLogHistory(ws);
+    void sendLogHistory(ws);
 
     // Start watching for new logs
     startLogWatcher();
@@ -184,11 +188,31 @@ export default function logsRoutes(app: express.Application): void {
                 return;
             }
 
-            const files: LogFile[] = fs
-                .readdirSync(logsDir)
+            let names: string[];
+            try {
+                names = fs.readdirSync(logsDir);
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    res.json({ logs: [] });
+                    return;
+                }
+                throw error;
+            }
+
+            const files: LogFile[] = names
                 .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
                 .flatMap((f) => {
-                    const stat = fs.lstatSync(path.join(logsDir, f));
+                    let stat: fs.Stats;
+                    try {
+                        stat = fs.lstatSync(path.join(logsDir, f));
+                    } catch (error) {
+                        const code = (error as NodeJS.ErrnoException).code;
+                        if (code === "ENOENT" || code === "ENOTDIR") {
+                            return [];
+                        }
+                        throw error;
+                    }
                     if (!stat.isFile() || stat.isSymbolicLink()) {
                         return [];
                     }
@@ -268,8 +292,17 @@ export default function logsRoutes(app: express.Application): void {
             let file: fs.promises.FileHandle;
             try {
                 file = await openReadNoFollowGuarded(guardedPath(filePath));
-            } catch {
-                res.status(404).json({ error: "Log file not found" });
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                console.error("[Logs] Failed to open log file:", error);
+                res.status(500).json({
+                    detail: errorMessage(error, "Unknown error"),
+                    error: "Failed to open log file",
+                });
                 return;
             }
 

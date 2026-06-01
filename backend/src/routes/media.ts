@@ -55,8 +55,12 @@ export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
         const requestedPath = stringFallback(request.query.path);
         const fullPath = path.resolve(requestedPath);
+        const realMediaRoot = path.resolve(MEDIA_ROOT);
+        const isUnderMediaRoot =
+            fullPath.startsWith(`${realMediaRoot}${path.sep}`) ||
+            fullPath.startsWith(`${MEDIA_ROOT}${path.sep}`);
 
-        if (!requestedPath || !fullPath.startsWith(`${MEDIA_ROOT}${path.sep}`)) {
+        if (!requestedPath || !isUnderMediaRoot) {
             response.status(403).json({ error: "Access denied" });
             return;
         }
@@ -67,12 +71,15 @@ export default function mediaRoutes(app: express.Application): void {
         }
 
         const realPath = fs.realpathSync(fullPath);
-        const realMediaRoot = getRealMediaRoot();
-        if (!realMediaRoot) {
+        const canonicalMediaRoot = getRealMediaRoot();
+        if (!canonicalMediaRoot) {
             response.status(404).json({ error: "Media not found" });
             return;
         }
-        if (!realPath.startsWith(`${realMediaRoot}${path.sep}`)) {
+        if (
+            !realPath.startsWith(`${canonicalMediaRoot}${path.sep}`) &&
+            !realPath.startsWith(`${MEDIA_ROOT}${path.sep}`)
+        ) {
             response.status(403).json({ error: "Access denied" });
             return;
         }

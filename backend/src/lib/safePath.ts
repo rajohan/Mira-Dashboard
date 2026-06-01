@@ -31,13 +31,62 @@ function canonicalizePotentialPath(targetPath: string): string {
     }
 }
 
-function withTrailingPathSeparator(rootPath: string): string {
-    /* c8 ignore next -- filesystem roots are rejected before containment checks. */
-    return rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep;
-}
-
 function isFilesystemRoot(rootPath: string): boolean {
     return path.parse(rootPath).root === rootPath;
+}
+
+function isWithinCanonicalRoot(candidate: string, root: string, normalizedRoot: string) {
+    return candidate === root || candidate.startsWith(normalizedRoot);
+}
+
+function sameFile(left: fs.Stats, right: fs.Stats): boolean {
+    return left.dev === right.dev && left.ino === right.ino;
+}
+
+function createChildDirectoryFromVerifiedParent(
+    realParent: string,
+    childName: string
+): string | null {
+    const parentFd = fs.openSync(
+        Buffer.from(realParent),
+        fs.constants.O_DIRECTORY | fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const parentStatBefore = fs.fstatSync(parentFd);
+        const pathParentStatBefore = fs.statSync(Buffer.from(realParent));
+        if (!sameFile(parentStatBefore, pathParentStatBefore)) {
+            return null;
+        }
+
+        const nextParent = path.join("/proc/self/fd", String(parentFd), childName);
+        try {
+            fs.mkdirSync(Buffer.from(nextParent));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
+
+        const parentStatAfter = fs.fstatSync(parentFd);
+        const pathParentStatAfter = fs.statSync(Buffer.from(realParent));
+        if (
+            !sameFile(parentStatBefore, parentStatAfter) ||
+            !sameFile(parentStatAfter, pathParentStatAfter)
+        ) {
+            return null;
+        }
+
+        const realNextParent = fs.realpathSync(Buffer.from(nextParent));
+        if (
+            realNextParent !== path.join(realParent, childName) ||
+            !fs.statSync(Buffer.from(realNextParent)).isDirectory()
+        ) {
+            return null;
+        }
+        return realNextParent;
+    } finally {
+        fs.closeSync(parentFd);
+    }
 }
 
 /**
@@ -69,12 +118,9 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
         const canonicalResolved = canonicalizePotentialPath(
             path.resolve(rootDir, userPath)
         );
-        const normalizedRoot = withTrailingPathSeparator(canonicalRoot);
+        const normalizedRoot = canonicalRoot + path.sep;
 
-        if (
-            canonicalResolved === canonicalRoot ||
-            canonicalResolved.startsWith(normalizedRoot)
-        ) {
+        if (isWithinCanonicalRoot(canonicalResolved, canonicalRoot, normalizedRoot)) {
             return canonicalResolved;
         }
 
@@ -105,26 +151,73 @@ export function prepareSafeWriteTargetWithinRoot(
             return null;
         }
 
-        fs.mkdirSync(Buffer.from(canonicalRoot), { recursive: true });
-
-        const realRoot = fs.realpathSync(canonicalRoot);
-        const normalizedRoot = withTrailingPathSeparator(realRoot);
         const resolvedTarget = path.resolve(fullPath);
         let canonicalTarget: string;
         try {
             canonicalTarget = fs.realpathSync(fullPath);
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
-            /* c8 ignore next 3 */
             if (code !== "ENOENT") {
                 throw error;
             }
             canonicalTarget = canonicalizePotentialPath(resolvedTarget);
         }
 
-        if (canonicalTarget !== realRoot && !canonicalTarget.startsWith(normalizedRoot)) {
+        const normalizedCanonicalRoot = canonicalRoot + path.sep;
+        if (
+            !isWithinCanonicalRoot(
+                canonicalTarget,
+                canonicalRoot,
+                normalizedCanonicalRoot
+            )
+        ) {
             return null;
         }
+
+        const rootMissingSegments: string[] = [];
+        let rootExistingAncestor = canonicalRoot;
+        while (true) {
+            try {
+                const realRootAncestor = fs.realpathSync(rootExistingAncestor);
+                if (
+                    realRootAncestor !== rootExistingAncestor ||
+                    !fs.statSync(Buffer.from(realRootAncestor)).isDirectory()
+                ) {
+                    return null;
+                }
+
+                let realParent = realRootAncestor;
+                for (let index = rootMissingSegments.length - 1; index >= 0; index -= 1) {
+                    const realNextParent = createChildDirectoryFromVerifiedParent(
+                        realParent,
+                        rootMissingSegments[index]
+                    );
+                    if (!realNextParent) {
+                        return null;
+                    }
+                    realParent = realNextParent;
+                }
+                break;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+
+                const parent = path.dirname(rootExistingAncestor);
+                if (parent === rootExistingAncestor) {
+                    return null;
+                }
+
+                rootMissingSegments.push(path.basename(rootExistingAncestor));
+                rootExistingAncestor = parent;
+            }
+        }
+
+        const realRoot = fs.realpathSync(canonicalRoot);
+        if (realRoot !== canonicalRoot) {
+            return null;
+        }
+        const normalizedRoot = realRoot + path.sep;
 
         try {
             if (fs.lstatSync(Buffer.from(resolvedTarget)).isSymbolicLink()) {
@@ -149,35 +242,17 @@ export function prepareSafeWriteTargetWithinRoot(
                     return null;
                 }
 
-                /* c8 ignore next 6 */
-                if (
-                    realAncestor !== realRoot &&
-                    !realAncestor.startsWith(normalizedRoot)
-                ) {
+                if (!isWithinCanonicalRoot(realAncestor, realRoot, normalizedRoot)) {
                     return null;
                 }
 
                 let realParent = realAncestor;
                 for (let index = missingSegments.length - 1; index >= 0; index -= 1) {
-                    const nextParent = path.join(realParent, missingSegments[index]);
-                    try {
-                        fs.mkdirSync(Buffer.from(nextParent));
-                    } catch (error) {
-                        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-                            throw error;
-                        }
-                    }
-
-                    const realNextParent = fs.realpathSync(nextParent);
-                    const nextParentStat = fs.statSync(Buffer.from(realNextParent));
-                    if (!nextParentStat.isDirectory()) {
-                        return null;
-                    }
-
-                    if (
-                        realNextParent !== realRoot &&
-                        !realNextParent.startsWith(normalizedRoot)
-                    ) {
+                    const realNextParent = createChildDirectoryFromVerifiedParent(
+                        realParent,
+                        missingSegments[index]
+                    );
+                    if (!realNextParent) {
                         return null;
                     }
 
@@ -191,7 +266,6 @@ export function prepareSafeWriteTargetWithinRoot(
                 }
 
                 const parent = path.dirname(existingAncestor);
-                /* c8 ignore next 3 */
                 if (parent === existingAncestor) {
                     return null;
                 }

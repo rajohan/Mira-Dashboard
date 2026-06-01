@@ -18,6 +18,33 @@ interface TestServer {
 const originalDopplerBin = process.env.DOPPLER_BIN;
 const originalN8nRoot = process.env.MIRA_N8N_ROOT;
 
+async function withEnv<T>(
+    vars: Record<string, string | undefined>,
+    callback: () => T | Promise<T>
+): Promise<T> {
+    const previous = new Map(
+        Object.keys(vars).map((key) => [key, process.env[key]] as const)
+    );
+    try {
+        for (const [key, value] of Object.entries(vars)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+        return await callback();
+    } finally {
+        for (const [key, value] of previous) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+    }
+}
+
 async function installFakeDoppler(tempDir: string): Promise<string> {
     const dopplerPath = path.join(tempDir, "doppler");
     await writeFile(
@@ -319,75 +346,52 @@ describe("backup routes", () => {
         assert.equal(backupTesting.mapJob(null), null);
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
-        const previousDatabaseUser = process.env.DB_POSTGRESDB_USER;
-        const previousDatabasePassword = process.env.DB_POSTGRESDB_PASSWORD;
-        const previousLegacyDatabaseUser = process.env.DATABASE_USERNAME;
-        const previousLegacyDatabasePassword = process.env.DATABASE_PASSWORD;
-        try {
-            process.env.DB_POSTGRESDB_USER = "native-user";
-            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
-            const env = backupTesting.createBackupEnv();
-            assert.equal(env.DB_POSTGRESDB_USER, "native-user");
-            assert.equal(env.DB_POSTGRESDB_PASSWORD, "native-password");
-
-            process.env.DB_POSTGRESDB_USER = "";
-            process.env.DB_POSTGRESDB_PASSWORD = "";
-            process.env.DATABASE_USERNAME = "legacy-user";
-            process.env.DATABASE_PASSWORD = "legacy-password";
-            const fallbackEnv = backupTesting.createBackupEnv();
-            assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "");
-            assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "");
-
-            delete process.env.DB_POSTGRESDB_USER;
-            delete process.env.DB_POSTGRESDB_PASSWORD;
-            const legacyEnv = backupTesting.createBackupEnv();
-            assert.equal(legacyEnv.DB_POSTGRESDB_USER, "legacy-user");
-            assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-        } finally {
-            if (previousDatabaseUser === undefined) {
-                delete process.env.DB_POSTGRESDB_USER;
-            } else {
-                process.env.DB_POSTGRESDB_USER = previousDatabaseUser;
+        await withEnv(
+            {
+                DB_POSTGRESDB_USER: "native-user",
+                DB_POSTGRESDB_PASSWORD: "native-password",
+                DATABASE_USERNAME: undefined,
+                DATABASE_PASSWORD: undefined,
+            },
+            async () => {
+                const env = backupTesting.createBackupEnv();
+                assert.equal(env.DB_POSTGRESDB_USER, "native-user");
+                assert.equal(env.DB_POSTGRESDB_PASSWORD, "native-password");
             }
-            if (previousDatabasePassword === undefined) {
-                delete process.env.DB_POSTGRESDB_PASSWORD;
-            } else {
-                process.env.DB_POSTGRESDB_PASSWORD = previousDatabasePassword;
+        );
+        await withEnv(
+            {
+                DB_POSTGRESDB_USER: "",
+                DB_POSTGRESDB_PASSWORD: "",
+                DATABASE_USERNAME: "legacy-user",
+                DATABASE_PASSWORD: "legacy-password",
+            },
+            async () => {
+                const fallbackEnv = backupTesting.createBackupEnv();
+                assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "");
+                assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "");
             }
-            if (previousLegacyDatabaseUser === undefined) {
-                delete process.env.DATABASE_USERNAME;
-            } else {
-                process.env.DATABASE_USERNAME = previousLegacyDatabaseUser;
+        );
+        await withEnv(
+            {
+                DB_POSTGRESDB_USER: undefined,
+                DB_POSTGRESDB_PASSWORD: undefined,
+                DATABASE_USERNAME: "legacy-user",
+                DATABASE_PASSWORD: "legacy-password",
+            },
+            async () => {
+                const legacyEnv = backupTesting.createBackupEnv();
+                assert.equal(legacyEnv.DB_POSTGRESDB_USER, "legacy-user");
+                assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
             }
-            if (previousLegacyDatabasePassword === undefined) {
-                delete process.env.DATABASE_PASSWORD;
-            } else {
-                process.env.DATABASE_PASSWORD = previousLegacyDatabasePassword;
-            }
-        }
+        );
         assert.equal(backupTesting.getN8nRoot(), tempDir);
-        const previousN8nRoot = process.env.MIRA_N8N_ROOT;
-        try {
-            process.env.MIRA_N8N_ROOT = "";
+        await withEnv({ MIRA_N8N_ROOT: "" }, async () => {
             assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");
-        } finally {
-            if (previousN8nRoot === undefined) {
-                delete process.env.MIRA_N8N_ROOT;
-            } else {
-                process.env.MIRA_N8N_ROOT = previousN8nRoot;
-            }
-        }
-        const previousDopplerBin = process.env.DOPPLER_BIN;
-        try {
-            process.env.DOPPLER_BIN = "";
+        });
+        await withEnv({ DOPPLER_BIN: "" }, async () => {
             assert.equal(backupTesting.getDopplerBin(), "/usr/local/bin/doppler");
-        } finally {
-            if (previousDopplerBin === undefined) {
-                delete process.env.DOPPLER_BIN;
-            } else {
-                process.env.DOPPLER_BIN = previousDopplerBin;
-            }
-        }
+        });
         assert.equal(typeof backupTesting.getDopplerBin(), "string");
         assert.equal(
             backupTesting.shellQuote("/srv/mira dashboard/it's/scripts/status.mjs"),

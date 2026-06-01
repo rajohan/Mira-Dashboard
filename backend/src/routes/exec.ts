@@ -343,17 +343,25 @@ function runExecCommand(
 
 /** Performs cleanup jobs. */
 function cleanupJobs(): void {
-    if (jobs.size <= MAX_JOBS) {
+    if (jobs.size < MAX_JOBS) {
         return;
     }
     const entries = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
-    const overflow = entries.length - MAX_JOBS;
-    for (let index = 0; index < overflow; index += 1) {
-        const job = entries[index];
-        if (job.process && !job.process.killed) {
-            job.process.kill("SIGTERM");
+    let overflow = entries.length - (MAX_JOBS - 1);
+
+    for (const job of entries) {
+        if (overflow <= 0) {
+            break;
+        }
+        if (job.status === "running" && job.process && !job.process.killed) {
+            continue;
         }
         jobs.delete(job.id);
+        overflow -= 1;
+    }
+
+    if (overflow > 0) {
+        console.warn("[Exec] Job cleanup skipped active jobs while enforcing cap");
     }
 }
 
@@ -442,6 +450,12 @@ export default function execRoutes(
         } catch (error) {
             const response = execErrorResponse(error);
             res.status(response.status).json({ error: response.error });
+            return;
+        }
+
+        cleanupJobs();
+        if (jobs.size >= MAX_JOBS) {
+            res.status(429).json({ error: "Too many exec jobs" });
             return;
         }
 

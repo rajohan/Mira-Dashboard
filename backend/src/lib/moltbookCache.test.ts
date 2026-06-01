@@ -64,7 +64,11 @@ describe("Moltbook cache helpers", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         if (originalMode === undefined) {
             delete process.env.FAKE_MOLTBOOK_CACHE_MODE;
         } else {

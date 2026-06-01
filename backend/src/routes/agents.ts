@@ -17,13 +17,51 @@ import {
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 
-const HOME_DIR = os.homedir().trim();
-const HAS_CONFIGURED_HOME_DIR =
-    HOME_DIR.length > 0 &&
-    Path.resolve(HOME_DIR) === HOME_DIR &&
-    Path.parse(HOME_DIR).root !== HOME_DIR;
-const OPENCLAW_ROOT = Path.join(HOME_DIR, ".openclaw");
-const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
+function resolveOpenclawRoot(): string | null {
+    const configuredRoot =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    if (configuredRoot) {
+        const resolved = Path.resolve(configuredRoot);
+        return Path.isAbsolute(configuredRoot) && Path.parse(resolved).root !== resolved
+            ? resolved
+            : null;
+    }
+
+    const homeDir = os.homedir().trim();
+    if (
+        homeDir.length === 0 ||
+        Path.resolve(homeDir) !== homeDir ||
+        Path.parse(homeDir).root === homeDir
+    ) {
+        return null;
+    }
+    return Path.join(homeDir, ".openclaw");
+}
+
+const OPENCLAW_ROOT = resolveOpenclawRoot();
+const HAS_CONFIGURED_HOME_DIR = OPENCLAW_ROOT !== null;
+const AGENTS_DIR = OPENCLAW_ROOT ? Path.join(OPENCLAW_ROOT, "agents") : "";
+let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
+
+function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
+    const parentFd = FS.openSync(
+        Buffer.from(parent),
+        FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
+    );
+    try {
+        const fdPath = Path.join("/proc/self/fd", String(parentFd), childName);
+        try {
+            FS.mkdirSync(Buffer.from(fdPath));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
+    } finally {
+        FS.closeSync(parentFd);
+    }
+}
 
 /** Matches agent ids that are safe to use as path segments. */
 const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
@@ -61,7 +99,6 @@ function ensureRealAgentsDir(): string | null {
             return null;
         }
     } catch (error) {
-        /* c8 ignore next 3 -- unexpected root lstat failures use the same fail-closed path. */
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
             return null;
         }
@@ -118,31 +155,26 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
         },
     ];
 
-    try {
-        const realAgentsDir = getRealAgentsDir();
-        if (!realAgentsDir) {
-            return [];
-        }
-        return roots.flatMap((root) => {
-            const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR);
-            if (!rootDir) {
-                return [];
-            }
-
-            try {
-                const expected = Path.join(realAgentsDir, root.relative);
-                const realRootDir = FS.realpathSync(rootDir);
-                return realRootDir === expected
-                    ? [{ dir: realRootDir, recursive: root.recursive }]
-                    : [];
-            } catch {
-                return [];
-            }
-        });
-        /* c8 ignore next 3 -- defensive fallback for unexpected filesystem sanitizer errors. */
-    } catch {
+    const realAgentsDir = getRealAgentsDir();
+    if (!realAgentsDir) {
         return [];
     }
+    return roots.flatMap((root) => {
+        const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR);
+        if (!rootDir) {
+            return [];
+        }
+
+        try {
+            const expected = Path.join(realAgentsDir, root.relative);
+            const realRootDir = FS.realpathSync(rootDir);
+            return realRootDir === expected
+                ? [{ dir: realRootDir, recursive: root.recursive }]
+                : [];
+        } catch {
+            return [];
+        }
+    });
 }
 
 // Activity thresholds (in milliseconds)
@@ -440,7 +472,7 @@ function parseAgentsConfig(): AgentsConfig | null {
     if (!HAS_CONFIGURED_HOME_DIR) {
         return null;
     }
-    const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
+    const configPath = Path.join(OPENCLAW_ROOT!, "openclaw.json");
 
     try {
         if (!FS.existsSync(configPath)) {
@@ -1323,6 +1355,7 @@ function normalizeGatewaySessionModel(model: string | undefined): string | undef
 }
 
 export const __testing = {
+    ensureRealAgentsDir,
     getRouteParam,
     getSafeAgentSessionsDir,
     getSafeAgentActivityRoots,
@@ -1353,6 +1386,11 @@ export const __testing = {
     applyGatewaySessionStatus,
     buildAgentStatuses,
     buildSingleAgentStatus,
+    setPrepareAgentMetadataDirForTest(
+        nextPrepare?: typeof prepareSafeWriteTargetWithinRoot
+    ): void {
+        prepareAgentMetadataDirForWrite = nextPrepare ?? prepareSafeWriteTargetWithinRoot;
+    },
 };
 
 /** Registers agents API routes. */
@@ -1506,18 +1544,26 @@ export default function agentsRoutes(app: express.Application): void {
                     agentId,
                     "sessions"
                 );
-                const safeSessionsDir = prepareSafeWriteTargetWithinRoot(
+                const safeSessionsDir = prepareAgentMetadataDirForWrite(
                     expectedSessionsDir,
                     AGENTS_DIR
                 );
-                /* c8 ignore start -- safe write validation should resolve to the same canonical path for a validated agent id. */
                 if (safeSessionsDir !== canonicalExpectedSessionsDir) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                /* c8 ignore stop */
-                // lgtm[js/path-injection] expectedSessionsDir is derived from isValidAgentId + safe write validation under AGENTS_DIR.
-                mkdirGuarded(guardedPath(safeSessionsDir), { recursive: true });
+                const expectedSessionsParent = Path.dirname(safeSessionsDir);
+                mkdirGuarded(guardedPath(expectedSessionsParent), { recursive: true });
+                const realExpectedSessionsParent =
+                    FS.realpathSync(expectedSessionsParent);
+                if (
+                    realExpectedSessionsParent !==
+                    Path.dirname(canonicalExpectedSessionsDir)
+                ) {
+                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    return;
+                }
+                mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
                 const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
                 const realMetadataDir = FS.realpathSync(metadataDir);
                 if (
@@ -1544,10 +1590,7 @@ export default function agentsRoutes(app: express.Application): void {
                             ? (parsedMetadata as AgentMetadata)
                             : {};
                 } catch (error) {
-                    if (
-                        (error as NodeJS.ErrnoException).code !== "ENOENT" &&
-                        !(error instanceof SyntaxError)
-                    ) {
+                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                         throw error;
                     }
                 }
@@ -1573,30 +1616,34 @@ export default function agentsRoutes(app: express.Application): void {
                     JSON.stringify(metadata, null, 2)
                 );
 
-                // Auto history handling on task changes after metadata is durably written.
-                if (safeTask && safeTask.length > 0) {
-                    const currentActive = getActiveHistoryTask(agentId);
-                    if (!currentActive) {
-                        db.prepare(
-                            `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                        ).run(agentId, safeTask, ts, ts);
-                    } else if (currentActive.task === safeTask) {
-                        db.prepare(
-                            `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                        ).run(ts, currentActive.id);
-                    } else {
-                        db.prepare(
-                            `UPDATE agent_task_history
-                         SET status = 'completed', completed_at = ?, last_activity_at = ?
-                         WHERE id = ?`
-                        ).run(ts, ts, currentActive.id);
+                try {
+                    // Auto history handling on task changes after metadata is durably written.
+                    if (safeTask && safeTask.length > 0) {
+                        const currentActive = getActiveHistoryTask(agentId);
+                        if (!currentActive) {
+                            db.prepare(
+                                `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                             VALUES (?, ?, 'active', ?, ?)`
+                            ).run(agentId, safeTask, ts, ts);
+                        } else if (currentActive.task === safeTask) {
+                            db.prepare(
+                                `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                            ).run(ts, currentActive.id);
+                        } else {
+                            db.prepare(
+                                `UPDATE agent_task_history
+                             SET status = 'completed', completed_at = ?, last_activity_at = ?
+                             WHERE id = ?`
+                            ).run(ts, ts, currentActive.id);
 
-                        db.prepare(
-                            `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                        ).run(agentId, safeTask, ts, ts);
+                            db.prepare(
+                                `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                             VALUES (?, ?, 'active', ?, ?)`
+                            ).run(agentId, safeTask, ts, ts);
+                        }
                     }
+                } catch (error) {
+                    console.error("[Agents] Task history sync failed:", error);
                 }
                 res.json(metadata);
             },

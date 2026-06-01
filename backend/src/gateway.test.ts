@@ -1145,6 +1145,58 @@ describe("gateway state and helper utilities", () => {
         });
     });
 
+    it("preserves successful forwarded responses when the Gateway client changes mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRequest!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRequest = resolve;
+            });
+            return { ok: true };
+        };
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        const forwarded = __testing.forwardRequest(
+            "chat.history",
+            {},
+            ws as unknown as WebSocket,
+            "stale-response"
+        );
+        __testing.setGatewayClientForTest(new FakeGatewayClient() as never);
+        releaseRequest();
+
+        assert.equal(await forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "stale-response",
+            ok: true,
+            payload: { ok: true },
+        });
+    });
+
+    it("preserves successful non-client responses when the Gateway disconnects mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRequest!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRequest = resolve;
+            });
+            return { deleted: true };
+        };
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const forwarded = __testing.forwardRequest("sessions.delete", {
+            key: "agent:main:main",
+        });
+        __testing.setGatewayConnectedForTest(false);
+        releaseRequest();
+
+        assert.equal(await forwarded, true);
+    });
+
     it("skips responses for closed client sockets and reports delete refresh warnings", async () => {
         await __testing.refreshSessions();
 

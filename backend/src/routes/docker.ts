@@ -293,6 +293,18 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+function dockerIdentifierFallback(value: unknown): string | null {
+    const identifier = stringFallback(value).trim();
+    if (!identifier || identifier.startsWith("-")) {
+        return null;
+    }
+    return identifier;
+}
+
+function sendInvalidDockerIdentifier(res: express.Response, label: string): void {
+    res.status(400).json({ error: `Invalid ${label}` });
+}
+
 /** Parses JSON lines. */
 function parseJsonLines<T>(input: string): T[] {
     return input
@@ -319,12 +331,12 @@ function parseJsonField<T>(value: string | undefined): T | null {
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = encodeURIComponent(
         process.env.DB_POSTGRESDB_USER === undefined
-            ? (process.env.DATABASE_USERNAME ?? "postgres")
+            ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
             : process.env.DB_POSTGRESDB_USER
     );
     const password = encodeURIComponent(
         process.env.DB_POSTGRESDB_PASSWORD === undefined
-            ? (process.env.DATABASE_PASSWORD ?? "postgres")
+            ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
             : process.env.DB_POSTGRESDB_PASSWORD
     );
     const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
@@ -824,8 +836,18 @@ async function runManualUpdaterForService(serviceId: number) {
     const steps: DockerUpdaterRunResult[] = [manual];
     let parsedOutput: unknown;
     try {
-        parsedOutput = extractTrailingJson(manual.stdout || "{}");
-    } catch {
+        parsedOutput = extractTrailingJson(manual.stdout);
+    } catch (error) {
+        if (manual.ok) {
+            return {
+                success: false,
+                output: {},
+                stderr: [manual.stderr, `Invalid manual updater output: ${String(error)}`]
+                    .filter(Boolean)
+                    .join("\n"),
+                steps,
+            };
+        }
         parsedOutput = {};
     }
 
@@ -876,11 +898,11 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
         DB_POSTGRESDB_USER:
             process.env.DB_POSTGRESDB_USER === undefined
-                ? (process.env.DATABASE_USERNAME ?? "postgres")
+                ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
                 : process.env.DB_POSTGRESDB_USER,
         DB_POSTGRESDB_PASSWORD:
             process.env.DB_POSTGRESDB_PASSWORD === undefined
-                ? (process.env.DATABASE_PASSWORD ?? "postgres")
+                ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
                 : process.env.DB_POSTGRESDB_PASSWORD,
     };
 
@@ -1089,6 +1111,10 @@ function cleanupDockerExecJobs() {
     }
 }
 
+function activeDockerExecJobCount(): number {
+    return [...dockerExecJobs.values()].filter((job) => job.status !== "done").length;
+}
+
 function updateDockerExecJobOutput(jobId: string, stdout: string, stderr: string): void {
     const current = dockerExecJobs.get(jobId);
     if (!current) {
@@ -1137,13 +1163,13 @@ function resolveManualUpdateServiceId(
             return null;
         }
         const routeServiceId = Number(routeServiceIdParam);
-        return Number.isFinite(routeServiceId) && routeServiceId > 0
+        return Number.isSafeInteger(routeServiceId) && routeServiceId > 0
             ? routeServiceId
             : null;
     }
 
     const serviceId = Number(payload.serviceId || 0);
-    return Number.isFinite(serviceId) && serviceId > 0 ? serviceId : null;
+    return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : null;
 }
 
 export const __testing = {
@@ -1156,6 +1182,8 @@ export const __testing = {
     extractTrailingJson,
     dockerExecJobs,
     cleanupDockerExecJobs,
+    activeDockerExecJobCount,
+    dockerIdentifierFallback,
     runUpdaterCommand,
     runDockerExecCommand,
     setDockerBinForTests: (nextDockerBin: string | undefined) => {
@@ -1275,9 +1303,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/containers/:containerId",
         asyncRoute(async (req, res) => {
-            const details = await getContainerDetails(
-                stringFallback(req.params.containerId)
-            );
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            const details = await getContainerDetails(containerId);
             if (!details) {
                 res.status(404).json({ error: "Container not found" });
                 return;
@@ -1290,7 +1322,11 @@ export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/containers/:containerId/logs",
         asyncRoute(async (req, res) => {
-            const containerId = stringFallback(req.params.containerId);
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
             const tail = Math.min(
                 MAX_LOG_TAIL,
                 Math.max(
@@ -1320,10 +1356,13 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerActionRequest;
-            const result = await runContainerAction(
-                stringFallback(req.params.containerId),
-                payload.action
-            );
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            const result = await runContainerAction(containerId, payload.action);
             res.json(result);
         })
     );
@@ -1349,7 +1388,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/images/:imageId",
         asyncRoute(async (req, res) => {
-            await runDocker(["image", "rm", stringFallback(req.params.imageId)]);
+            const imageId = dockerIdentifierFallback(req.params.imageId);
+            if (!imageId) {
+                sendInvalidDockerIdentifier(res, "imageId");
+                return;
+            }
+
+            await runDocker(["image", "rm", imageId]);
             res.json({ success: true });
         })
     );
@@ -1365,7 +1410,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/volumes/:volumeName",
         asyncRoute(async (req, res) => {
-            await runDocker(["volume", "rm", stringFallback(req.params.volumeName)]);
+            const volumeName = dockerIdentifierFallback(req.params.volumeName);
+            if (!volumeName) {
+                sendInvalidDockerIdentifier(res, "volumeName");
+                return;
+            }
+
+            await runDocker(["volume", "rm", volumeName]);
             res.json({ success: true });
         })
     );
@@ -1398,15 +1449,42 @@ export default function dockerRoutes(app: express.Application): void {
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerExecStartRequest;
 
-            if (!payload.containerId || !payload.command) {
+            if (!payload || typeof payload !== "object") {
                 res.status(400).json({ error: "Missing containerId or command" });
+                return;
+            }
+
+            if (payload.containerId === undefined || payload.command === undefined) {
+                res.status(400).json({ error: "Missing containerId or command" });
+                return;
+            }
+
+            if (typeof payload.containerId !== "string") {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            const containerId = dockerIdentifierFallback(payload.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            if (typeof payload.command !== "string" || !payload.command.trim()) {
+                res.status(400).json({ error: "Invalid command" });
+                return;
+            }
+
+            cleanupDockerExecJobs();
+            if (activeDockerExecJobCount() >= MAX_JOBS) {
+                res.status(429).json({ error: "Too many active Docker exec jobs" });
                 return;
             }
 
             const jobId = randomUUID();
             dockerExecJobs.set(jobId, {
                 id: jobId,
-                containerId: payload.containerId,
+                containerId,
                 status: "running",
                 code: null,
                 stdout: "",
@@ -1416,7 +1494,7 @@ export default function dockerRoutes(app: express.Application): void {
             });
 
             void runDockerExecCommand(
-                payload.containerId,
+                containerId,
                 payload.command,
                 jobId,
                 (stdout, stderr) => updateDockerExecJobOutput(jobId, stdout, stderr)
@@ -1467,20 +1545,17 @@ export default function dockerRoutes(app: express.Application): void {
         }
         const { pid } = job.process;
         try {
-            if (typeof pid === "number" && !Number.isNaN(pid)) {
+            if (typeof pid === "number" && !Number.isNaN(pid) && pid > 1) {
                 process.kill(-pid, "SIGTERM");
             } else {
                 job.process.kill("SIGTERM");
             }
-        } catch (error) {
-            const code = (error as NodeJS.ErrnoException).code;
-            if (code !== "ESRCH") {
-                try {
-                    job.process.kill("SIGTERM");
-                } catch (fallbackError) {
-                    if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
-                        throw fallbackError;
-                    }
+        } catch {
+            try {
+                job.process.kill("SIGTERM");
+            } catch (fallbackError) {
+                if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+                    throw fallbackError;
                 }
             }
         }

@@ -15,6 +15,28 @@ interface TestServer {
 
 const originalPath = process.env.PATH;
 const originalN8nRoot = process.env.MIRA_N8N_ROOT;
+const postgresEnvKeys = [
+    "DATABASE_USERNAME",
+    "DATABASE_PASSWORD",
+    "DB_POSTGRESDB_USER",
+    "DB_POSTGRESDB_PASSWORD",
+    "DATABASE_HOST",
+    "DATABASE_PORT",
+] as const;
+
+function snapshotEnv(keys: readonly string[]): Record<string, string | undefined> {
+    return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot: Record<string, string | undefined>): void {
+    for (const [key, value] of Object.entries(snapshot)) {
+        if (value === undefined) {
+            delete process.env[key];
+        } else {
+            process.env[key] = value;
+        }
+    }
+}
 
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
@@ -153,12 +175,7 @@ describe("ops routes", () => {
             delete process.env.FAKE_LOG_ROTATION_EMPTY;
         }
 
-        const originalUsername = process.env.DATABASE_USERNAME;
-        const originalPassword = process.env.DATABASE_PASSWORD;
-        const originalNativeUsername = process.env.DB_POSTGRESDB_USER;
-        const originalNativePassword = process.env.DB_POSTGRESDB_PASSWORD;
-        const originalHost = process.env.DATABASE_HOST;
-        const originalPort = process.env.DATABASE_PORT;
+        const originalPostgresEnv = snapshotEnv(postgresEnvKeys);
         try {
             delete process.env.DB_POSTGRESDB_USER;
             delete process.env.DB_POSTGRESDB_PASSWORD;
@@ -183,47 +200,13 @@ describe("ops routes", () => {
             assert.equal(defaultCredentials.status, 200);
             assert.equal(defaultCredentials.body.success, true);
         } finally {
-            if (originalUsername === undefined) {
-                delete process.env.DATABASE_USERNAME;
-            } else {
-                process.env.DATABASE_USERNAME = originalUsername;
-            }
-            if (originalPassword === undefined) {
-                delete process.env.DATABASE_PASSWORD;
-            } else {
-                process.env.DATABASE_PASSWORD = originalPassword;
-            }
-            if (originalNativeUsername === undefined) {
-                delete process.env.DB_POSTGRESDB_USER;
-            } else {
-                process.env.DB_POSTGRESDB_USER = originalNativeUsername;
-            }
-            if (originalNativePassword === undefined) {
-                delete process.env.DB_POSTGRESDB_PASSWORD;
-            } else {
-                process.env.DB_POSTGRESDB_PASSWORD = originalNativePassword;
-            }
-            if (originalHost === undefined) {
-                delete process.env.DATABASE_HOST;
-            } else {
-                process.env.DATABASE_HOST = originalHost;
-            }
-            if (originalPort === undefined) {
-                delete process.env.DATABASE_PORT;
-            } else {
-                process.env.DATABASE_PORT = originalPort;
-            }
+            restoreEnv(originalPostgresEnv);
         }
     });
 
     it("encodes PostgreSQL URI credentials and database names", async () => {
         const { __testing } = await import("./ops.js");
-        const originalUsername = process.env.DATABASE_USERNAME;
-        const originalPassword = process.env.DATABASE_PASSWORD;
-        const originalNativeUsername = process.env.DB_POSTGRESDB_USER;
-        const originalNativePassword = process.env.DB_POSTGRESDB_PASSWORD;
-        const originalHost = process.env.DATABASE_HOST;
-        const originalPort = process.env.DATABASE_PORT;
+        const originalPostgresEnv = snapshotEnv(postgresEnvKeys);
         try {
             delete process.env.DB_POSTGRESDB_USER;
             delete process.env.DB_POSTGRESDB_PASSWORD;
@@ -248,36 +231,7 @@ describe("ops routes", () => {
                 "postgresql://native%20user:native%2Fpass@db.example:6543/n8n"
             );
         } finally {
-            if (originalUsername === undefined) {
-                delete process.env.DATABASE_USERNAME;
-            } else {
-                process.env.DATABASE_USERNAME = originalUsername;
-            }
-            if (originalPassword === undefined) {
-                delete process.env.DATABASE_PASSWORD;
-            } else {
-                process.env.DATABASE_PASSWORD = originalPassword;
-            }
-            if (originalNativeUsername === undefined) {
-                delete process.env.DB_POSTGRESDB_USER;
-            } else {
-                process.env.DB_POSTGRESDB_USER = originalNativeUsername;
-            }
-            if (originalNativePassword === undefined) {
-                delete process.env.DB_POSTGRESDB_PASSWORD;
-            } else {
-                process.env.DB_POSTGRESDB_PASSWORD = originalNativePassword;
-            }
-            if (originalHost === undefined) {
-                delete process.env.DATABASE_HOST;
-            } else {
-                process.env.DATABASE_HOST = originalHost;
-            }
-            if (originalPort === undefined) {
-                delete process.env.DATABASE_PORT;
-            } else {
-                process.env.DATABASE_PORT = originalPort;
-            }
+            restoreEnv(originalPostgresEnv);
         }
     });
 

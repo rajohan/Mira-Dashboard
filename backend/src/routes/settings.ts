@@ -49,7 +49,6 @@ async function withPinnedSettingsFile<T>(
     settingsDir: string,
     callback: (settingsFile: string) => Promise<T> | T
 ): Promise<T> {
-    /* c8 ignore next 3 -- Linux uses /proc/self/fd to pin the parent directory. */
     if (process.platform !== "linux") {
         return callback(path.join(settingsDir, "dashboard-settings.json"));
     }
@@ -61,7 +60,6 @@ async function withPinnedSettingsFile<T>(
     try {
         const realSettingsDir = fs.realpathSync(settingsDir);
         const realPinnedDir = fs.realpathSync(`/proc/self/fd/${parentFd}`);
-        /* c8 ignore next 3 -- requires swapping the settings dir between open and realpath. */
         if (realPinnedDir !== realSettingsDir) {
             throw new Error("Invalid settings directory");
         }
@@ -81,17 +79,26 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** Performs load settings. */
 async function loadSettings(): Promise<Settings> {
+    const settingsDir = resolveSettingsDir();
+    let content: string;
+
     try {
-        const settingsDir = resolveSettingsDir();
-        const content = await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+        content = await withPinnedSettingsFile(settingsDir, (settingsFile) =>
             readTextNoFollowGuarded(guardedPath(settingsFile))
         );
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return DEFAULT_SETTINGS;
+        }
+        throw error;
+    }
+
+    try {
         const persisted = JSON.parse(content) as unknown;
         return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
     } catch {
-        // File doesn't exist or is unreadable; return defaults
+        return DEFAULT_SETTINGS;
     }
-    return DEFAULT_SETTINGS;
 }
 
 /** Returns a validated settings patch and rejects malformed input before persistence. */
@@ -176,9 +183,17 @@ export default function settingsRoutes(
 
     // Update settings
     app.put("/api/settings", express.json(), (async (req, res) => {
+        let current: Settings;
         let updated: Settings;
+
         try {
-            const current = await loadSettings();
+            current = await loadSettings();
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
+            return;
+        }
+
+        try {
             updated = { ...current, ...parseSettingsPatch(req.body) };
         } catch (error) {
             res.status(400).json({ error: (error as Error).message });
@@ -198,4 +213,5 @@ export default function settingsRoutes(
 export const __testing = {
     resolveSettingsDir,
     resolveSettingsFile,
+    withPinnedSettingsFile,
 };

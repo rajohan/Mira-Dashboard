@@ -14,7 +14,7 @@ import {
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -253,6 +253,21 @@ describe("agents routes", () => {
             assert.deepEqual(__testing.getSafeAgentActivityRoots(agentId), []);
         } finally {
             fs.realpathSync = originalRealpathSync;
+        }
+
+        const originalLstatSync = fs.lstatSync;
+        fs.lstatSync = ((target: fs.PathLike) => {
+            if (String(target).endsWith(".openclaw/agents")) {
+                const error = new Error("agents dir denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return originalLstatSync(target);
+        }) as typeof fs.lstatSync;
+        try {
+            assert.equal(__testing.ensureRealAgentsDir(), null);
+        } finally {
+            fs.lstatSync = originalLstatSync;
         }
     });
 
@@ -888,6 +903,32 @@ describe("agents routes", () => {
             ["Write backend tests"]
         );
 
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (statement: string) => {
+            if (statement.includes("agent_task_history")) {
+                throw new Error("history database unavailable");
+            }
+            return originalPrepare(statement);
+        });
+        const errorMock = mock.method(console, "error", () => {});
+        try {
+            const bestEffortHistoryFailure = await requestJson<{
+                currentTask: string;
+            }>(server, `/api/agents/${agentId}/metadata`, {
+                method: "PUT",
+                body: { currentTask: "Persist despite history failure" },
+            });
+            assert.equal(bestEffortHistoryFailure.status, 200);
+            assert.equal(
+                bestEffortHistoryFailure.body.currentTask,
+                "Persist despite history failure"
+            );
+            assert.equal(errorMock.mock.callCount(), 1);
+        } finally {
+            prepareMock.mock.restore();
+            errorMock.mock.restore();
+        }
+
         const originalMetadataStats = await lstat(metadataPath).catch(() => null);
         const originalMetadataContent =
             originalMetadataStats?.isFile() === true
@@ -904,17 +945,13 @@ describe("agents routes", () => {
             assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
 
             await writeFile(metadataPath, "{ malformed", "utf8");
-            const malformedMetadata = await requestJson<{ currentTask: string }>(
+            const malformedMetadata = await requestJson<{ error: string }>(
                 server,
                 `/api/agents/${agentId}/metadata`,
                 { method: "PUT", body: { currentTask: "Repair malformed metadata" } }
             );
-            assert.equal(malformedMetadata.status, 200);
-            assert.equal(malformedMetadata.body.currentTask, "Repair malformed metadata");
-            const repairedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
-                currentTask: string;
-            };
-            assert.equal(repairedMetadata.currentTask, "Repair malformed metadata");
+            assert.equal(malformedMetadata.status, 500);
+            assert.match(malformedMetadata.body.error, /JSON|parse|malformed/u);
 
             await rm(metadataPath, { force: true, recursive: true });
             await mkdir(metadataPath);
@@ -1034,6 +1071,36 @@ describe("agents routes", () => {
         } finally {
             await rm(symlinkPath, { force: true });
             await rm(outsideDir, { recursive: true, force: true });
+        }
+
+        const originalMkdirSync = fs.mkdirSync;
+        try {
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (
+                    targetPath.startsWith("/proc/self/fd/") &&
+                    targetPath.endsWith(`${path.sep}sessions`)
+                ) {
+                    const error = new Error(
+                        "sessions mkdir failed"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const mkdirFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/mkdir-fails/metadata",
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(mkdirFailure.status, 500);
+            assert.equal(mkdirFailure.body.error, "sessions mkdir failed");
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
         }
     });
 
@@ -2454,6 +2521,8 @@ describe("agents routes", () => {
         const { __testing } = await import("./agents.js");
 
         const savedHome = process.env.HOME;
+        const savedDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const savedOpenclawHome = process.env.OPENCLAW_HOME;
         const originalHomedir = os.homedir;
         let blankHomeServer: http.Server | null = null;
         try {
@@ -2495,6 +2564,40 @@ describe("agents routes", () => {
                 });
             }
 
+            const envOpenclawRoot = await mkdtemp(
+                path.join(os.tmpdir(), "mira-agents-env-root-")
+            );
+            try {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = envOpenclawRoot;
+                delete process.env.OPENCLAW_HOME;
+                const envAgentId = "env-root-agent";
+                const envSessionsDir = path.join(
+                    envOpenclawRoot,
+                    "agents",
+                    envAgentId,
+                    "sessions"
+                );
+                await mkdir(envSessionsDir, { recursive: true });
+                const { __testing: envRootTesting } = await import(
+                    `./agents.js?env-root=${Date.now()}`
+                );
+                assert.equal(
+                    envRootTesting.getSafeAgentSessionsDir(envAgentId),
+                    envSessionsDir
+                );
+            } finally {
+                await rm(envOpenclawRoot, { recursive: true, force: true });
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            }
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "relative-home";
+            delete process.env.OPENCLAW_HOME;
+            const { __testing: invalidEnvTesting } = await import(
+                `./agents.js?invalid-env-root=${Date.now()}`
+            );
+            assert.equal(invalidEnvTesting.getSafeAgentSessionsDir("main"), null);
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+
             process.env.HOME = "relative-home";
             os.homedir = (() => "relative-home") as typeof os.homedir;
             await import(`./agents.js?relative-home=${Date.now()}`);
@@ -2510,6 +2613,16 @@ describe("agents routes", () => {
             }
             os.homedir = originalHomedir;
             process.env.HOME = savedHome;
+            if (savedDashboardOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = savedDashboardOpenclawHome;
+            }
+            if (savedOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = savedOpenclawHome;
+            }
         }
 
         assert.equal(__testing.toDisplayModelName("plain-model"), "plain-model");
@@ -3137,13 +3250,70 @@ describe("agents routes", () => {
 
         const originalRealpathSync = fs.realpathSync;
         try {
+            const { __testing } = await import("./agents.js");
+            __testing.setPrepareAgentMetadataDirForTest(() => null);
+            const unsafePrepared = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/unsafe-prepared/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(unsafePrepared.status, 400);
+            assert.equal(unsafePrepared.body.error, "Invalid agent metadata path");
+            __testing.setPrepareAgentMetadataDirForTest();
+
+            let safeMismatchCalls = 0;
             fs.realpathSync = ((target: fs.PathLike) => {
                 const value = originalRealpathSync(target).toString();
+                if (
+                    value.endsWith(`${path.sep}safe-mismatch${path.sep}sessions`) &&
+                    safeMismatchCalls++ === 0
+                ) {
+                    return path.join(
+                        homeDir,
+                        ".openclaw",
+                        "agents",
+                        "different",
+                        "sessions"
+                    );
+                }
                 if (value.endsWith(`${path.sep}realpath-agent${path.sep}sessions`)) {
                     return homeDir;
                 }
                 return value;
             }) as typeof fs.realpathSync;
+            const safeMismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/safe-mismatch/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(safeMismatch.status, 400);
+            assert.equal(safeMismatch.body.error, "Invalid agent metadata path");
+
+            let parentMismatchCalls = 0;
+            const parentMismatchAgentDir = path.join(
+                homeDir,
+                ".openclaw",
+                "agents",
+                "parent-mismatch"
+            );
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const value = originalRealpathSync(target).toString();
+                if (value === parentMismatchAgentDir && ++parentMismatchCalls === 2) {
+                    return path.join(homeDir, ".openclaw", "agents", "different");
+                }
+                if (value.endsWith(`${path.sep}realpath-agent${path.sep}sessions`)) {
+                    return homeDir;
+                }
+                return value;
+            }) as typeof fs.realpathSync;
+            const parentMismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/parent-mismatch/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(parentMismatch.status, 400);
+            assert.equal(parentMismatch.body.error, "Invalid agent metadata path");
+
             const response = await requestJson<{ error: string }>(
                 server,
                 "/api/agents/realpath-agent/metadata",
@@ -3152,6 +3322,8 @@ describe("agents routes", () => {
             assert.equal(response.status, 400);
             assert.equal(response.body.error, "Invalid agent metadata path");
         } finally {
+            const { __testing } = await import("./agents.js");
+            __testing.setPrepareAgentMetadataDirForTest();
             fs.realpathSync = originalRealpathSync;
         }
 

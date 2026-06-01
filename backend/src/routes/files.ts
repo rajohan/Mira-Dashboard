@@ -9,13 +9,14 @@ import { asyncRoute } from "../lib/errors.js";
 import {
     copyNoFollowGuarded,
     guardedPath,
+    lstatGuarded,
     openReadNoFollowGuarded,
     readdirGuarded,
     statGuarded,
     writeTextNoFollowExclusiveGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
-import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
     const openclawHome = process.env.OPENCLAW_HOME?.trim();
@@ -36,10 +37,7 @@ function getDefaultWorkspaceRoot(): string {
 }
 
 function resolveWorkspaceRoot(): string {
-    const workspaceRoot = nonEmptyEnvFallback(
-        "WORKSPACE_ROOT",
-        getDefaultWorkspaceRoot()
-    );
+    const workspaceRoot = process.env.WORKSPACE_ROOT?.trim() || getDefaultWorkspaceRoot();
     if (
         !path.isAbsolute(workspaceRoot) ||
         path.normalize(workspaceRoot) !== workspaceRoot ||
@@ -52,8 +50,10 @@ function resolveWorkspaceRoot(): string {
 
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
+const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE + 1024;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
+let listDirectoryRealpathSync = fs.realpathSync;
 
 /** Represents file item. */
 interface FileItem {
@@ -136,17 +136,16 @@ function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
 
     try {
-        const workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+        const workspaceRoot = listDirectoryRealpathSync(WORKSPACE_ROOT);
         const fullPath = safePathWithinRoot(dirPath || ".", workspaceRoot);
 
         if (!fullPath) {
             return null;
         }
         const resolvedFullPath = safePathWithinRoot(
-            fs.realpathSync(fullPath),
+            listDirectoryRealpathSync(fullPath),
             workspaceRoot
         );
-        /* c8 ignore next 3 */
         if (!resolvedFullPath) {
             return null;
         }
@@ -167,8 +166,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
                 });
             } else {
                 try {
-                    // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
-                    const stat = statGuarded(
+                    const stat = lstatGuarded(
                         guardedPath(path.join(resolvedFullPath, entry.name))
                     );
                     items.push({
@@ -178,7 +176,6 @@ function listDirectory(dirPath: string): FileItem[] | null {
                         size: stat.size,
                         modified: stat.mtime.toISOString(),
                     });
-                    /* c8 ignore start */
                 } catch {
                     items.push({
                         name: entry.name,
@@ -187,7 +184,6 @@ function listDirectory(dirPath: string): FileItem[] | null {
                         error: true,
                     });
                 }
-                /* c8 ignore stop */
             }
         }
     } catch (error) {
@@ -249,6 +245,9 @@ function sendRootedParentError(
         });
         return true;
     }
+    if (error.message !== "Parent path validation failed") {
+        return false;
+    }
     res.status(403).json({ error: "Access denied: path outside workspace" });
     return true;
 }
@@ -262,6 +261,10 @@ export const __testing = {
     isImageFile,
     listDirectory,
     resolveWorkspaceRoot,
+    sendRootedParentError,
+    setListDirectoryRealpathSyncForTest(nextRealpathSync?: typeof fs.realpathSync): void {
+        listDirectoryRealpathSync = nextRealpathSync ?? fs.realpathSync;
+    },
     shouldHideFile,
 };
 
@@ -530,6 +533,7 @@ export default function filesRoutes(
                         WORKSPACE_ROOT,
                         async (rootedFullPath) => {
                             let existingMode: number | null = null;
+                            let shouldCopyBackup = false;
                             try {
                                 const existingStat = statGuarded(
                                     guardedPath(rootedFullPath)
@@ -538,30 +542,43 @@ export default function filesRoutes(
                                     return null;
                                 }
                                 existingMode = existingStat.mode & 0o777;
+                                if (existingStat.size > MAX_BACKUP_COPY_BYTES) {
+                                    throw Object.assign(
+                                        new Error(
+                                            "Existing file exceeds backup size limit"
+                                        ),
+                                        { code: "EFBIG" }
+                                    );
+                                }
+                                shouldCopyBackup = true;
                             } catch (error) {
-                                /* c8 ignore next 3 -- unexpected stat failures use the route's existing 500 fallback */
-                                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                                const code = (error as NodeJS.ErrnoException).code;
+                                if (code === "EFBIG") {
+                                    // Skip expensive backups for large existing files.
+                                } else if (code !== "ENOENT") {
                                     throw error;
                                 }
                             }
 
-                            try {
-                                await withRootedParentPath(
-                                    safeBackupPath,
-                                    WORKSPACE_ROOT,
-                                    (rootedBackupPath) =>
-                                        copyNoFollowGuarded(
-                                            guardedPath(rootedFullPath),
-                                            guardedPath(rootedBackupPath)
-                                        )
-                                );
-                            } catch (error) {
-                                const code = (error as NodeJS.ErrnoException).code;
-                                if (code === "EMLINK") {
-                                    return null;
-                                }
-                                if (code !== "ENOENT") {
-                                    throw error;
+                            if (shouldCopyBackup) {
+                                try {
+                                    await withRootedParentPath(
+                                        safeBackupPath,
+                                        WORKSPACE_ROOT,
+                                        (rootedBackupPath) =>
+                                            copyNoFollowGuarded(
+                                                guardedPath(rootedFullPath),
+                                                guardedPath(rootedBackupPath)
+                                            )
+                                    );
+                                } catch (error) {
+                                    const code = (error as NodeJS.ErrnoException).code;
+                                    if (code === "EMLINK") {
+                                        return null;
+                                    }
+                                    if (code !== "ENOENT") {
+                                        throw error;
+                                    }
                                 }
                             }
 

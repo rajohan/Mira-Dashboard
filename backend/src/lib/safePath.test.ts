@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -24,6 +24,155 @@ describe("safe path helpers", () => {
             await writeFile(safeTarget, "created", "utf8");
             assert.equal(await readFile(target, "utf8"), "created");
         } finally {
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("does not create a missing root for rejected write targets", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        try {
+            const missingRoot = path.join(baseDir, "missing", "workspace");
+            const outsideTarget = path.join(baseDir, "outside", "note.txt");
+
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(outsideTarget, missingRoot),
+                null
+            );
+            await assert.rejects(stat(missingRoot), { code: "ENOENT" });
+        } finally {
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects unsafe races while creating a missing root", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const root = path.join(baseDir, "missing", "workspace");
+        const target = path.join(root, "note.txt");
+        const originalRealpathSync = fs.realpathSync;
+        const originalStatSync = fs.statSync;
+        const originalFstatSync = fs.fstatSync;
+        const originalMkdirSync = fs.mkdirSync;
+
+        try {
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value === baseDir) {
+                    return `${baseDir}-elsewhere`;
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.realpathSync = originalRealpathSync;
+            fs.statSync = ((targetPath: fs.PathLike) => {
+                if (targetPath.toString() === baseDir) {
+                    return { isDirectory: () => false } as fs.Stats;
+                }
+                return originalStatSync(targetPath);
+            }) as typeof fs.statSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.statSync = originalStatSync;
+            fs.mkdirSync = ((
+                targetPath: fs.PathLike,
+                options?: fs.MakeDirectoryOptions
+            ) => {
+                if (targetPath.toString().endsWith(`${path.sep}missing`)) {
+                    const error = new Error("mkdir failed") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(targetPath, options);
+            }) as typeof fs.mkdirSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.mkdirSync = originalMkdirSync;
+            fs.fstatSync = ((fd: number) => {
+                return {
+                    ...originalFstatSync(fd),
+                    dev: 0,
+                    ino: 0,
+                } as fs.Stats;
+            }) as typeof fs.fstatSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.fstatSync = originalFstatSync;
+            fs.statSync = ((targetPath: fs.PathLike) => {
+                if (targetPath.toString() === baseDir) {
+                    return {
+                        ...originalStatSync(targetPath),
+                        dev: 0,
+                        ino: 0,
+                    } as fs.Stats;
+                }
+                return originalStatSync(targetPath);
+            }) as typeof fs.statSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.statSync = originalStatSync;
+            let mkdirAttempted = false;
+            fs.mkdirSync = ((
+                targetPath: fs.PathLike,
+                options?: fs.MakeDirectoryOptions
+            ) => {
+                mkdirAttempted = true;
+                return originalMkdirSync(targetPath, options);
+            }) as typeof fs.mkdirSync;
+            fs.statSync = ((targetPath: fs.PathLike) => {
+                if (mkdirAttempted && targetPath.toString() === baseDir) {
+                    return {
+                        ...originalStatSync(targetPath),
+                        dev: 0,
+                        ino: 0,
+                    } as fs.Stats;
+                }
+                return originalStatSync(targetPath);
+            }) as typeof fs.statSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.statSync = originalStatSync;
+            fs.mkdirSync = originalMkdirSync;
+            let resolvedMissing = false;
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value.endsWith(`${path.sep}missing`) && !resolvedMissing) {
+                    resolvedMissing = true;
+                    return `${value}-elsewhere`;
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            await mkdir(root, { recursive: true });
+            let rootRealpathCalls = 0;
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value === root && ++rootRealpathCalls === 3) {
+                    return `${baseDir}-outside`;
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            const existingTarget = path.join(root, "existing.txt");
+            await writeFile(existingTarget, "existing", "utf8");
+            let targetCanonicalized = false;
+            fs.realpathSync = ((targetPath: fs.PathLike) => {
+                const value = targetPath.toString();
+                if (value === existingTarget) {
+                    targetCanonicalized = true;
+                }
+                if (value === root && targetCanonicalized) {
+                    return `${baseDir}-outside`;
+                }
+                return originalRealpathSync(targetPath);
+            }) as typeof fs.realpathSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(existingTarget, root), null);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            fs.statSync = originalStatSync;
+            fs.fstatSync = originalFstatSync;
+            fs.mkdirSync = originalMkdirSync;
             await rm(baseDir, { recursive: true, force: true });
         }
     });
@@ -98,6 +247,10 @@ describe("safe path helpers", () => {
                 safePathWithinRoot("nested/note.txt", root),
                 path.join(root, "nested", "note.txt")
             );
+            assert.equal(
+                safePathWithinRoot("nested/note.txt", `${root}${path.sep}`),
+                path.join(root, "nested", "note.txt")
+            );
             assert.equal(safePathWithinRoot("", root), null);
             assert.equal(safePathWithinRoot("../outside.txt", root), null);
             assert.equal(safePathWithinRoot("bad\0name", root), null);
@@ -110,6 +263,7 @@ describe("safe path helpers", () => {
 
             assert.equal(sanitizeFilename("../note.txt"), "note.txt");
             assert.throws(() => sanitizeFilename(""), /Invalid filename/u);
+            assert.throws(() => sanitizeFilename(".."), /Invalid filename/u);
             assert.throws(() => sanitizeFilename("..\0"), /Invalid filename/u);
         } finally {
             await rm(baseDir, { recursive: true, force: true });
@@ -156,7 +310,7 @@ describe("safe path helpers", () => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
-                if (targetPath.endsWith(path.join("workspace", "raced-parent"))) {
+                if (path.basename(targetPath) === "raced-parent") {
                     fs.writeFileSync(targetPath, "not a directory");
                     return;
                 }
@@ -204,6 +358,77 @@ describe("safe path helpers", () => {
                 ),
                 null
             );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(baseDir, { recursive: true, force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects write targets when the existing ancestor resolves outside root", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const outsideDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-safe-path-outside-")
+        );
+        const originalRealpathSync = fs.realpathSync;
+        let escapedParentResolved = false;
+        let escapedParentCalls = 0;
+        try {
+            const root = path.join(baseDir, "workspace");
+            const escapedParent = path.join(root, "escaped");
+            await mkdir(escapedParent, { recursive: true });
+
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (path.resolve(targetPath) === escapedParent) {
+                    escapedParentCalls += 1;
+                    if (escapedParentCalls === 1) {
+                        return originalRealpathSync(target);
+                    }
+                    escapedParentResolved = true;
+                    return outsideDir;
+                }
+                return originalRealpathSync(target);
+            }) as unknown as typeof fs.realpathSync;
+
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(escapedParent, "note.txt"),
+                    root
+                ),
+                null
+            );
+            assert.equal(escapedParentResolved, true);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(baseDir, { recursive: true, force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects write targets when the root resolves elsewhere after creation", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const outsideDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-safe-path-outside-")
+        );
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            const root = path.join(baseDir, "workspace");
+            const target = path.join(root, "note.txt");
+
+            fs.realpathSync = ((realpathTarget: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(realpathTarget)
+                    ? realpathTarget.toString("utf8")
+                    : String(realpathTarget);
+                if (targetPath === root && fs.existsSync(root)) {
+                    return outsideDir;
+                }
+                return originalRealpathSync(realpathTarget);
+            }) as unknown as typeof fs.realpathSync;
+
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
         } finally {
             fs.realpathSync = originalRealpathSync;
             await rm(baseDir, { recursive: true, force: true });
@@ -278,7 +503,7 @@ describe("safe path helpers", () => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
-                if (targetPath.endsWith(path.join("workspace", "existing-parent"))) {
+                if (path.basename(targetPath) === "existing-parent") {
                     originalMkdirSync(target, options);
                     const error = new Error("already exists") as NodeJS.ErrnoException;
                     error.code = "EEXIST";
@@ -299,7 +524,7 @@ describe("safe path helpers", () => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
-                if (targetPath.endsWith(path.join("workspace", "blocked-parent"))) {
+                if (path.basename(targetPath) === "blocked-parent") {
                     const error = new Error("blocked") as NodeJS.ErrnoException;
                     error.code = "EACCES";
                     throw error;
@@ -319,7 +544,7 @@ describe("safe path helpers", () => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
-                if (targetPath.endsWith(path.join("workspace", "linked-parent"))) {
+                if (path.basename(targetPath) === "linked-parent") {
                     fs.symlinkSync(outsideDir, targetPath);
                     const error = new Error("already exists") as NodeJS.ErrnoException;
                     error.code = "EEXIST";
@@ -371,7 +596,7 @@ describe("safe path helpers", () => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
-                if (targetPath.endsWith(path.join("workspace", "nested"))) {
+                if (path.basename(targetPath) === "nested") {
                     const error = new Error("denied") as NodeJS.ErrnoException;
                     error.code = "EACCES";
                     throw error;
@@ -411,15 +636,27 @@ describe("safe path helpers", () => {
             );
 
             fs.statSync = originalStatSync;
+            fs.mkdirSync(path.join(root, "escaping-ancestor"));
             fs.realpathSync = ((target: fs.PathLike) => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
+                if (targetPath.endsWith(path.join("workspace", "escaping-ancestor"))) {
+                    return outsideDir;
+                }
                 if (targetPath.endsWith(path.join("workspace", "moved"))) {
                     return outsideDir;
                 }
                 return originalRealpathSync(target);
             }) as unknown as typeof fs.realpathSync;
+
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(root, "escaping-ancestor", "child", "note.txt"),
+                    root
+                ),
+                null
+            );
 
             assert.equal(
                 prepareSafeWriteTargetWithinRoot(
@@ -482,6 +719,51 @@ describe("safe path helpers", () => {
             );
         } finally {
             fs.realpathSync = originalRealpathSync;
+        }
+    });
+
+    it("returns null when final target and ancestor walks hit unexpected errors", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            const root = path.join(baseDir, "workspace");
+            await mkdir(root, { recursive: true });
+            const target = path.join(root, "blocked.txt");
+
+            fs.realpathSync = ((lookup: fs.PathLike) => {
+                const lookupPath = Buffer.isBuffer(lookup)
+                    ? lookup.toString("utf8")
+                    : String(lookup);
+                if (lookupPath === target) {
+                    const error = new Error("target denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpathSync(lookup);
+            }) as typeof fs.realpathSync;
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, root), null);
+
+            fs.realpathSync = ((lookup: fs.PathLike) => {
+                const lookupPath = Buffer.isBuffer(lookup)
+                    ? lookup.toString("utf8")
+                    : String(lookup);
+                if (lookupPath === root) {
+                    return originalRealpathSync(lookup);
+                }
+                const error = new Error(`missing ${lookupPath}`) as NodeJS.ErrnoException;
+                error.code = "ENOENT";
+                throw error;
+            }) as typeof fs.realpathSync;
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(root, "gone", "note.txt"),
+                    root
+                ),
+                null
+            );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(baseDir, { recursive: true, force: true });
         }
     });
 });

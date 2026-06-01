@@ -14,6 +14,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
+    __testing,
     copyGuarded,
     copyNoFollowGuarded,
     guardedPath,
@@ -146,9 +147,68 @@ describe("guarded filesystem helpers", () => {
             );
             assert.equal(await readFile(otherTarget, "utf8"), "other");
 
+            await assert.rejects(
+                () => writeTextNoFollowGuarded(hardLinkedDestination, "blocked"),
+                /Destination must not be hard-linked/u
+            );
+            assert.equal(await readFile(otherTarget, "utf8"), "other");
+
             const realStat = await stat(realTarget);
             assert.equal(realStat.isFile(), true);
+            await assert.rejects(
+                () =>
+                    copyNoFollowGuarded(
+                        guardedPath("/dev/null"),
+                        guardedPath(realTarget)
+                    ),
+                /Source must be a regular file/u
+            );
+            await assert.rejects(
+                () =>
+                    copyNoFollowGuarded(
+                        guardedPath(realTarget),
+                        guardedPath("/dev/null")
+                    ),
+                /Destination must be a regular file/u
+            );
+            await assert.rejects(
+                () => writeTextNoFollowGuarded(guardedPath("/dev/null"), "blocked"),
+                /Destination must be a regular file/u
+            );
+
+            __testing.setReadChunkForTest(async () => ({ bytesRead: 0 }));
+            try {
+                const zeroReadCopy = path.join(baseDir, "zero-read-copy.txt");
+                await assert.rejects(
+                    () =>
+                        copyNoFollowGuarded(
+                            guardedPath(realTarget),
+                            guardedPath(zeroReadCopy)
+                        ),
+                    { code: "EIO" }
+                );
+            } finally {
+                __testing.setReadChunkForTest();
+            }
+            const defaultReadCopy = path.join(baseDir, "default-read-copy.txt");
+            await copyNoFollowGuarded(
+                guardedPath(realTarget),
+                guardedPath(defaultReadCopy)
+            );
+            assert.equal(await readFile(defaultReadCopy, "utf8"), "real");
+            await chmod(realTarget, 0o600);
+            await chmod(defaultReadCopy, 0o644);
+            await copyNoFollowGuarded(
+                guardedPath(realTarget),
+                guardedPath(defaultReadCopy)
+            );
+            const copiedStat = await stat(defaultReadCopy);
+            assert.equal(copiedStat.mode & 0o777, 0o600);
+            __testing.setStatSyncForTest();
+            assert.equal(statGuarded(guardedPath(realTarget)).isFile(), true);
         } finally {
+            __testing.setReadChunkForTest();
+            __testing.setStatSyncForTest();
             await rm(baseDir, { recursive: true, force: true });
         }
     });

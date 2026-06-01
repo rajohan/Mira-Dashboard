@@ -230,6 +230,11 @@ export default function openClawConfigRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.put("/api/config", express.json(), (async (req, res) => {
+        if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+            res.status(400).json({ error: "Invalid config: expected JSON object" });
+            return;
+        }
+
         try {
             const result = await patchConfig(req.body as Record<string, unknown>);
             res.json({ ok: true, result });

@@ -124,6 +124,25 @@ describe("notifications routes", () => {
         assert.equal(missingDescription.status, 400);
         assert.equal(missingDescription.body.error, "description is required");
 
+        const invalidTitle = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            { method: "POST", body: { title: { nested: true }, description: "body" } }
+        );
+        assert.equal(invalidTitle.status, 400);
+        assert.equal(invalidTitle.body.error, "title must be a string");
+
+        const invalidDescription = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Title", description: ["body"] },
+            }
+        );
+        assert.equal(invalidDescription.status, 400);
+        assert.equal(invalidDescription.body.error, "description must be a string");
+
         const invalidType = await requestJson<{ error: string }>(
             server,
             "/api/notifications",
@@ -134,6 +153,37 @@ describe("notifications routes", () => {
         );
         assert.equal(invalidType.status, 400);
         assert.equal(invalidType.body.error, "invalid notification type");
+
+        const invalidSource = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    source: { nested: true },
+                },
+            }
+        );
+        assert.equal(invalidSource.status, 400);
+        assert.equal(invalidSource.body.error, "source must be a string");
+
+        const invalidDedupeKey = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    source,
+                    dedupeKey: ["bad"],
+                },
+            }
+        );
+        assert.equal(invalidDedupeKey.status, 400);
+        assert.equal(invalidDedupeKey.body.error, "dedupeKey must be a string");
 
         const defaultType = await requestJson<{ ok: true; id: number | null }>(
             server,
@@ -149,6 +199,18 @@ describe("notifications routes", () => {
             .prepare("SELECT type FROM notifications WHERE id = ?")
             .get(defaultType.body.id) as { type: string } | undefined;
         assert.equal(createdDefaultType?.type, "info");
+
+        const noSource = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "No source", description: "body" },
+            }
+        );
+        assert.equal(noSource.status, 200);
+        assert.equal(typeof noSource.body.id, "number");
+        notificationIdToCleanup = noSource.body.id;
     });
 
     it("reports insert failures without pruning notifications", async () => {

@@ -308,6 +308,34 @@ describe("auth first-user bootstrap routes", () => {
                 "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
             ).run("preexisting-token");
         }
+
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "ROLLBACK") {
+                originalExec(sql);
+                throw new Error("rollback failed");
+            }
+            return originalExec(sql);
+        });
+        const errorMock = mock.method(console, "error", () => {});
+        try {
+            assert.throws(
+                () =>
+                    authTesting.rollbackFirstUserBootstrap(
+                        0,
+                        gatewayToken,
+                        "previous-token",
+                        () => {
+                            throw new Error("persist failed");
+                        }
+                    ),
+                /persist failed/u
+            );
+            assert.equal(errorMock.mock.callCount(), 1);
+        } finally {
+            execMock.mock.restore();
+            errorMock.mock.restore();
+        }
     });
 
     it("keeps first-user cleanup best-effort when rollback throws", async () => {

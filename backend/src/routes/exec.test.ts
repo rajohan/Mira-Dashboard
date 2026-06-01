@@ -222,17 +222,102 @@ describe("exec routes", () => {
                     index === 0
                         ? ({
                               killed: false,
-                              kill(signal: NodeJS.Signals): boolean {
-                                  assert.equal(signal, "SIGTERM");
-                                  return true;
+                              kill(): boolean {
+                                  throw new Error("cleanup should not kill jobs");
                               },
                           } as never)
                         : undefined,
             });
         }
         __testing.cleanupJobs();
-        assert.equal(__testing.jobs.size, 100);
+        assert.equal(__testing.jobs.size, 99);
         assert.equal(__testing.jobs.has("cleanup-0"), false);
+        assert.equal(__testing.jobs.has("cleanup-1"), false);
+
+        __testing.jobs.clear();
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 100; index += 1) {
+            const id = `active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 100);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("active-0"), true);
+
+        __testing.jobs.clear();
+        for (let index = 0; index < 101; index += 1) {
+            const id = `all-active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 101);
+        assert.equal(__testing.jobs.has("all-active-0"), true);
+
+        __testing.jobs.clear();
+        let killed = false;
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 101; index += 1) {
+            const id = `kill-active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process:
+                    index === 0
+                        ? ({
+                              killed: false,
+                              kill(): boolean {
+                                  killed = true;
+                                  return true;
+                              },
+                          } as never)
+                        : ({ killed: false } as never),
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 101);
+        assert.equal(killed, false);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("kill-active-0"), true);
 
         __testing.updateExecJobOutput("missing", {
             id: "",
@@ -307,6 +392,77 @@ describe("exec routes", () => {
             __testing.jobs.get("primitive-fail")?.stderr || "",
             /plain failure/u
         );
+    });
+
+    it("rejects new background jobs when only running jobs remain at the cap", async () => {
+        for (let index = 0; index < 100; index += 1) {
+            const id = `cap-running-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/exec/start",
+                {
+                    method: "POST",
+                    body: { command: process.execPath, args: ["-v"] },
+                }
+            );
+            assert.equal(response.status, 429);
+            assert.equal(response.body.error, "Too many exec jobs");
+        } finally {
+            __testing.jobs.clear();
+        }
+    });
+
+    it("makes room for a new background job when stale jobs leave the registry at cap", async () => {
+        __testing.jobs.set("stale", {
+            id: "stale",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 99; index += 1) {
+            const id = `room-running-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+
+        try {
+            const response = await requestJson<{ jobId: string }>(
+                server,
+                "/api/exec/start",
+                {
+                    method: "POST",
+                    body: { command: process.execPath, args: ["-v"] },
+                }
+            );
+            assert.equal(response.status, 200);
+            assert.equal(__testing.jobs.has("stale"), false);
+        } finally {
+            __testing.jobs.clear();
+        }
     });
 
     it("runs one-shot commands with explicit args", async () => {
@@ -392,7 +548,7 @@ describe("exec routes", () => {
                 body,
             });
             assert.equal(response.status, 400);
-            assert.match(response.body.error, new RegExp(expectedError, "u"));
+            assert.equal(response.body.error.includes(expectedError), true);
         }
     });
 

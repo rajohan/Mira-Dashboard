@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -109,6 +118,39 @@ describe("settings routes", () => {
             __testing.resolveSettingsDir("/tmp/settings-home"),
             path.join("/tmp/settings-home", ".openclaw")
         );
+        const originalPlatform = process.platform;
+        try {
+            Object.defineProperty(process, "platform", { value: "darwin" });
+            const nonLinuxPath = await __testing.withPinnedSettingsFile(
+                "/tmp/settings-home/.openclaw",
+                (settingsFile) => settingsFile
+            );
+            assert.equal(
+                nonLinuxPath,
+                path.join("/tmp/settings-home/.openclaw", "dashboard-settings.json")
+            );
+        } finally {
+            Object.defineProperty(process, "platform", { value: originalPlatform });
+        }
+
+        const originalRealpathSync = fs.realpathSync;
+        fs.realpathSync = ((target: fs.PathLike) => {
+            if (typeof target === "string" && target.startsWith("/proc/self/fd/")) {
+                return "/tmp/other-settings-dir";
+            }
+            return originalRealpathSync(target);
+        }) as typeof fs.realpathSync;
+        try {
+            await assert.rejects(
+                () =>
+                    __testing.withPinnedSettingsFile(homeDir, (settingsFile) =>
+                        Promise.resolve(settingsFile)
+                    ),
+                /Invalid settings directory/u
+            );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
         assert.equal(
             __testing.resolveSettingsDir(""),
             path.join(os.homedir(), ".openclaw")
@@ -349,10 +391,23 @@ describe("settings routes", () => {
         await rm(settingsPath, { force: true });
         await symlink(linkedSettings, settingsPath);
 
-        const response = await requestJson<{ theme: string }>(server, "/api/settings");
+        const response = await requestJson<{ error: string }>(server, "/api/settings");
 
-        assert.equal(response.status, 200);
-        assert.equal(response.body.theme, "dark");
+        assert.equal(response.status, 500);
+        assert.match(
+            response.body.error,
+            /Refusing to open symbolic link|too many symbolic links/u
+        );
+
+        const update = await requestJson<{ error: string }>(server, "/api/settings", {
+            method: "PUT",
+            body: { theme: "light" },
+        });
+        assert.equal(update.status, 500);
+        assert.match(
+            update.body.error,
+            /Refusing to open symbolic link|too many symbolic links/u
+        );
     });
 
     it("reports gateway-status and save failures", async () => {
@@ -374,7 +429,9 @@ describe("settings routes", () => {
         }
 
         await rm(settingsPath, { recursive: true, force: true });
-        await mkdir(settingsPath, { recursive: true });
+        await mkdir(path.dirname(settingsPath), { recursive: true });
+        await writeFile(settingsPath, JSON.stringify({ theme: "dark" }), "utf8");
+        await chmod(settingsPath, 0o444);
         const originalError = console.error;
         console.error = () => {};
         try {
@@ -387,6 +444,7 @@ describe("settings routes", () => {
             assert.equal(putResponse.body.error, "Failed to save settings");
         } finally {
             console.error = originalError;
+            await chmod(settingsPath, 0o644).catch(() => {});
             await rm(settingsPath, { recursive: true, force: true });
             await rm(failingHomeDir, { recursive: true, force: true });
         }

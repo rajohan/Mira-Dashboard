@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -86,38 +86,40 @@ describe("logs routes", () => {
     });
 
     it("lists OpenClaw log files and ignores unrelated files", async () => {
-        await symlink(
-            path.join(outsideDir, "secret.log"),
-            path.join(logsDir, "openclaw-secret.log")
-        );
-        const response = await fetch(`${server.baseUrl}/api/logs/info`);
-        const body = (await response.json()) as {
-            logs: Array<{ name: string; size: number; modified: string }>;
-        };
+        const secretLink = path.join(logsDir, "openclaw-secret.log");
+        await symlink(path.join(outsideDir, "secret.log"), secretLink);
+        try {
+            const response = await fetch(`${server.baseUrl}/api/logs/info`);
+            const body = (await response.json()) as {
+                logs: Array<{ name: string; size: number; modified: string }>;
+            };
 
-        assert.equal(response.status, 200);
-        assert.equal(
-            body.logs.some((log) => log.name === testFiles[0]),
-            true
-        );
-        assert.equal(
-            body.logs.some((log) => log.name === testFiles[1]),
-            true
-        );
-        assert.equal(
-            body.logs.some((log) => log.name === "not-openclaw.txt"),
-            false
-        );
-        assert.equal(
-            body.logs.some((log) => log.name === "openclaw-secret.log"),
-            false
-        );
-        await rm(path.join(logsDir, "openclaw-secret.log"), { force: true });
+            assert.equal(response.status, 200);
+            assert.equal(
+                body.logs.some((log) => log.name === testFiles[0]),
+                true
+            );
+            assert.equal(
+                body.logs.some((log) => log.name === testFiles[1]),
+                true
+            );
+            assert.equal(
+                body.logs.some((log) => log.name === "not-openclaw.txt"),
+                false
+            );
+            assert.equal(
+                body.logs.some((log) => log.name === "openclaw-secret.log"),
+                false
+            );
+        } finally {
+            await rm(secretLink, { force: true });
+        }
     });
 
     it("handles log info filesystem edge cases", async () => {
         const originalExistsSync = fs.existsSync;
         const originalReaddirSync = fs.readdirSync;
+        const originalLstatSync = fs.lstatSync;
 
         try {
             fs.existsSync = ((target: fs.PathLike) => {
@@ -130,6 +132,70 @@ describe("logs routes", () => {
             assert.deepEqual(await missingDir.json(), { logs: [] });
 
             fs.existsSync = originalExistsSync;
+            let skippedRotatedEntry = false;
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target).endsWith(testFiles[0])) {
+                    skippedRotatedEntry = true;
+                    const error = new Error("rotated") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+
+            const rotated = await fetch(`${server.baseUrl}/api/logs/info`);
+            const rotatedBody = (await rotated.json()) as {
+                logs: Array<{ name: string }>;
+            };
+            assert.equal(rotated.status, 200);
+            assert.equal(skippedRotatedEntry, true);
+            assert.equal(
+                rotatedBody.logs.some((log) => log.name === testFiles[0]),
+                false
+            );
+
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target).endsWith(testFiles[0])) {
+                    const error = new Error("permission denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+
+            const failedStat = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(failedStat.status, 500);
+            assert.deepEqual(await failedStat.json(), { error: "permission denied" });
+
+            fs.lstatSync = originalLstatSync;
+            fs.readdirSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error("logs disappeared") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalReaddirSync(target);
+            }) as typeof fs.readdirSync;
+
+            const disappearedList = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(disappearedList.status, 200);
+            assert.deepEqual(await disappearedList.json(), { logs: [] });
+
+            fs.readdirSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error(
+                        "logs became a file"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "ENOTDIR";
+                    throw error;
+                }
+                return originalReaddirSync(target);
+            }) as typeof fs.readdirSync;
+
+            const notDirectoryList = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(notDirectoryList.status, 200);
+            assert.deepEqual(await notDirectoryList.json(), { logs: [] });
+
             fs.readdirSync = ((target: fs.PathLike) => {
                 if (target === logsDir) throw new Error("cannot list logs");
                 return originalReaddirSync(target);
@@ -141,6 +207,7 @@ describe("logs routes", () => {
         } finally {
             fs.existsSync = originalExistsSync;
             fs.readdirSync = originalReaddirSync;
+            fs.lstatSync = originalLstatSync;
         }
     });
 
@@ -352,6 +419,26 @@ describe("logs routes", () => {
             fs.realpathSync = originalRealpathSync;
             await rm(racedPath, { force: true });
         }
+
+        const unreadableFile = "openclaw-2099-03-07.log";
+        const unreadablePath = path.join(logsDir, unreadableFile);
+        await writeFile(unreadablePath, "blocked\n", "utf8");
+        try {
+            await chmod(unreadablePath, 0o000);
+            const permissionFailure = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(unreadableFile)}`
+            );
+            assert.equal(permissionFailure.status, 500);
+            const permissionFailureBody = (await permissionFailure.json()) as {
+                detail: string;
+                error: string;
+            };
+            assert.equal(permissionFailureBody.error, "Failed to open log file");
+            assert.match(permissionFailureBody.detail, /EACCES|EPERM/u);
+        } finally {
+            await chmod(unreadablePath, 0o600).catch(() => {});
+            await rm(unreadablePath, { force: true });
+        }
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {
@@ -366,6 +453,14 @@ describe("logs routes", () => {
         const ws = new FakeWebSocket();
         try {
             subscribeToLogs(ws as never);
+            await waitFor(
+                () =>
+                    ws.sent.some((message) => {
+                        const parsed = JSON.parse(message) as { type?: string };
+                        return parsed.type === "log_history_complete";
+                    }),
+                "log history completion"
+            );
 
             assert.equal(__testing.subscriberCount(), 1);
             assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
@@ -400,6 +495,7 @@ describe("logs routes", () => {
         const ws = new FakeWebSocket();
         try {
             subscribeToLogs(ws as never);
+            await waitFor(() => ws.sent.length >= 2, "empty log history");
 
             assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
                 type: "log_file",
@@ -441,19 +537,22 @@ describe("logs routes", () => {
         const today = new Date().toISOString().split("T")[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
-        const originalReadFileSync = fs.readFileSync;
+        const originalOpen = fs.promises.open;
         await writeFile(todayPath, "will fail\n", "utf8");
 
         try {
-            fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+            fs.promises.open = (async (...args: Parameters<typeof fs.promises.open>) => {
                 const [target] = args;
-                if (target === todayPath) throw new Error("cannot read history");
-                return originalReadFileSync(...args);
-            }) as typeof fs.readFileSync;
+                if (Buffer.isBuffer(target) && target.toString("utf8") === todayPath) {
+                    throw new Error("cannot read history");
+                }
+                return originalOpen(...args);
+            }) as typeof fs.promises.open;
 
             const ws = new FakeWebSocket();
             try {
                 subscribeToLogs(ws as never);
+                await waitFor(() => ws.sent.length >= 2, "failed log history");
 
                 assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
                     type: "log_file",
@@ -467,7 +566,7 @@ describe("logs routes", () => {
                 unsubscribeFromLogs(ws as never);
             }
         } finally {
-            fs.readFileSync = originalReadFileSync;
+            fs.promises.open = originalOpen;
             __testing.resetLogWatcherForTest();
             await rm(todayPath, { force: true });
         }
@@ -482,6 +581,14 @@ describe("logs routes", () => {
         const ws = new FakeWebSocket();
         try {
             subscribeToLogs(ws as never);
+            await waitFor(
+                () =>
+                    ws.sent.some((message) => {
+                        const parsed = JSON.parse(message) as { type?: string };
+                        return parsed.type === "log_history_complete";
+                    }),
+                "initial log history completion"
+            );
             ws.sent.length = 0;
 
             await __testing.pollLogFileForTest();

@@ -15,6 +15,8 @@ import { stringFallback } from "../lib/values.js";
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
 const N8N_DATABASE = "n8n";
+const CACHE_REFRESH_TIMEOUT_MS = 60_000;
+const CACHE_REFRESH_MAX_BUFFER = 10 * 1024 * 1024;
 let cacheRefreshCwd = N8N_ROOT;
 
 interface HttpStatusError extends Error {
@@ -228,7 +230,8 @@ export async function refreshCacheKey(key: string) {
         cwd: cacheRefreshCwd,
         env,
         encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: CACHE_REFRESH_MAX_BUFFER,
+        timeout: CACHE_REFRESH_TIMEOUT_MS,
     });
     const row = await getCacheEntry(key);
     if (!row) {

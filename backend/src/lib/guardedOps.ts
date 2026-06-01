@@ -15,8 +15,22 @@ const fsOps = Fs as unknown as {
     readdirSync: typeof Fs.readdirSync;
     readFileSync: typeof Fs.readFileSync;
     copyFileSync: typeof Fs.copyFileSync;
+    lstatSync: typeof Fs.lstatSync;
     statSync: typeof Fs.statSync;
 };
+
+type ReadChunk = (
+    file: Fs.promises.FileHandle,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number
+) => Promise<{ bytesRead: number }>;
+
+let readChunk: ReadChunk = (file, buffer, offset, length, position) =>
+    file.read(buffer, offset, length, position);
+let lstatSync = (path: Fs.PathLike) => fsOps.lstatSync(path);
+let statSync = (path: Fs.PathLike) => fsOps.statSync(path);
 
 const fsPromiseOps = Fs.promises as unknown as {
     open: typeof Fs.promises.open;
@@ -110,6 +124,11 @@ export async function copyNoFollowGuarded(
     const sourceFile = await openReadNoFollowGuarded(source);
     try {
         const sourceStat = await sourceFile.stat();
+        if (!sourceStat.isFile()) {
+            throw Object.assign(new Error("Source must be a regular file"), {
+                code: "EINVAL",
+            });
+        }
         const sourceMode = sourceStat.mode & 0o777;
         const destinationFile = await Fs.promises.open(
             guardedPathBuffer(destination),
@@ -118,6 +137,11 @@ export async function copyNoFollowGuarded(
         );
         try {
             const destinationStat = await destinationFile.stat();
+            if (!destinationStat.isFile()) {
+                throw Object.assign(new Error("Destination must be a regular file"), {
+                    code: "EINVAL",
+                });
+            }
             if (
                 sourceStat.dev === destinationStat.dev &&
                 sourceStat.ino === destinationStat.ino
@@ -137,15 +161,17 @@ export async function copyNoFollowGuarded(
             const buffer = Buffer.allocUnsafe(64 * 1024);
             let position = 0;
             while (position < sourceStat.size) {
-                const { bytesRead } = await sourceFile.read(
+                const { bytesRead } = await readChunk(
+                    sourceFile,
                     buffer,
                     0,
                     buffer.length,
                     position
                 );
-                /* c8 ignore next 3 */
                 if (bytesRead === 0) {
-                    break;
+                    throw Object.assign(new Error("Source changed during copy"), {
+                        code: "EIO",
+                    });
                 }
                 let written = 0;
                 while (written < bytesRead) {
@@ -195,18 +221,28 @@ export async function writeTextNoFollowGuarded(
     content: string,
     mode?: number
 ): Promise<void> {
+    const fileMode = (mode ?? 0o666) & 0o777;
     const file = await Fs.promises.open(
         guardedPathBuffer(path),
-        Fs.constants.O_WRONLY |
-            Fs.constants.O_CREAT |
-            Fs.constants.O_TRUNC |
-            Fs.constants.O_NOFOLLOW,
-        mode ?? 0o666
+        Fs.constants.O_WRONLY | Fs.constants.O_CREAT | Fs.constants.O_NOFOLLOW,
+        fileMode
     );
     try {
-        if (mode !== undefined) {
-            await file.chmod(mode & 0o777);
+        const destinationStat = await file.stat();
+        if (!destinationStat.isFile()) {
+            throw Object.assign(new Error("Destination must be a regular file"), {
+                code: "EINVAL",
+            });
         }
+        if (destinationStat.nlink > 1) {
+            throw Object.assign(new Error("Destination must not be hard-linked"), {
+                code: "EMLINK",
+            });
+        }
+        if (mode !== undefined) {
+            await file.chmod(fileMode);
+        }
+        await file.truncate(0);
         await file.writeFile(content, "utf8");
     } finally {
         await file.close();
@@ -219,17 +255,18 @@ export async function writeTextNoFollowExclusiveGuarded(
     content: string,
     mode?: number
 ): Promise<void> {
+    const fileMode = (mode ?? 0o666) & 0o777;
     const file = await Fs.promises.open(
         guardedPathBuffer(path),
         Fs.constants.O_WRONLY |
             Fs.constants.O_CREAT |
             Fs.constants.O_EXCL |
             Fs.constants.O_NOFOLLOW,
-        mode ?? 0o666
+        fileMode
     );
     try {
         if (mode !== undefined) {
-            await file.chmod(mode & 0o777);
+            await file.chmod(fileMode);
         }
         await file.writeFile(content, "utf8");
     } finally {
@@ -239,8 +276,28 @@ export async function writeTextNoFollowExclusiveGuarded(
 
 /** Stats a validated path. */
 export function statGuarded(path: GuardedPath): Fs.Stats {
-    return fsOps.statSync(guardedPathBuffer(path));
+    return statSync(guardedPathBuffer(path));
 }
+
+/** Stats a validated path without following the final component. */
+export function lstatGuarded(path: GuardedPath): Fs.Stats {
+    return lstatSync(guardedPathBuffer(path));
+}
+
+export const __testing = {
+    setReadChunkForTest(nextReadChunk?: ReadChunk): void {
+        readChunk =
+            nextReadChunk ??
+            ((file, buffer, offset, length, position) =>
+                file.read(buffer, offset, length, position));
+    },
+    setLstatSyncForTest(nextLstatSync?: typeof Fs.lstatSync): void {
+        lstatSync = nextLstatSync ?? ((path) => fsOps.lstatSync(path));
+    },
+    setStatSyncForTest(nextStatSync?: typeof Fs.statSync): void {
+        statSync = nextStatSync ?? ((path) => fsOps.statSync(path));
+    },
+};
 
 /** Spawns a validated executable with explicit argument vector semantics. */
 export function spawnGuarded(

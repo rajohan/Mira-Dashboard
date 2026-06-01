@@ -586,14 +586,29 @@ describe("OpenClaw gateway client websocket protocol", () => {
         }
         assert.equal(internals.tickIntervalMs, 30_000);
 
-        await assert.rejects(
-            new Promise((_resolve, reject) => {
-                internals.pending.set("bad", {
-                    timeout: setTimeout(() => {}, 1000),
-                    method: "bad",
-                    resolve: () => {},
-                    reject,
+        const rejectPending = async (
+            id: string,
+            trigger: (reject: (reason?: unknown) => void) => void
+        ) => {
+            const timeout = setTimeout(() => {}, 1000);
+            try {
+                await new Promise((_resolve, reject) => {
+                    internals.pending.set(id, {
+                        timeout,
+                        method: id,
+                        resolve: () => {},
+                        reject,
+                    });
+                    trigger(reject);
                 });
+            } finally {
+                clearTimeout(timeout);
+                internals.pending.delete(id);
+            }
+        };
+
+        await assert.rejects(
+            rejectPending("bad", () => {
                 internals.handleMessage(
                     JSON.stringify({
                         type: "res",
@@ -607,13 +622,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         );
 
         await assert.rejects(
-            new Promise((_resolve, reject) => {
-                internals.pending.set("unknown-error", {
-                    timeout: setTimeout(() => {}, 1000),
-                    method: "unknown-error",
-                    resolve: () => {},
-                    reject,
-                });
+            rejectPending("unknown-error", () => {
                 internals.handleMessage(
                     JSON.stringify({
                         type: "res",
@@ -627,13 +636,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         );
 
         await assert.rejects(
-            new Promise((_resolve, reject) => {
-                internals.pending.set("pending", {
-                    timeout: setTimeout(() => {}, 1000),
-                    method: "pending",
-                    resolve: () => {},
-                    reject,
-                });
+            rejectPending("pending", () => {
                 internals.rejectAllPending(new Error("closed"));
             }),
             /closed/u

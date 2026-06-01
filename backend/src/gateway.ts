@@ -34,11 +34,11 @@ const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
     nonEmptyEnvFallback(
         "MIRA_DASHBOARD_OPENCLAW_HOME",
         Path.join(process.cwd(), "data", "openclaw-client")
-    ),
+    ).trim(),
     "MIRA_DASHBOARD_OPENCLAW_HOME"
 );
 const OPENCLAW_HOME = validateOpenClawRoot(
-    nonEmptyEnvFallback("OPENCLAW_HOME", defaultOpenClawHome()),
+    nonEmptyEnvFallback("OPENCLAW_HOME", defaultOpenClawHome()).trim(),
     "OPENCLAW_HOME"
 );
 
