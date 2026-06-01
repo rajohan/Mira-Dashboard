@@ -696,6 +696,18 @@ describe("files routes", () => {
             "first"
         );
 
+        const executablePath = path.join(workspaceRoot, "generated", "script.sh");
+        await writeFile(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
+        await fs.promises.chmod(executablePath, 0o755);
+        const executableUpdate = await requestJson<{ success: boolean }>(
+            server,
+            "/api/files/generated%2Fscript.sh",
+            { method: "PUT", body: { content: "#!/bin/sh\nexit 1\n" } }
+        );
+        assert.equal(executableUpdate.status, 200);
+        const executableStat = await fs.promises.stat(executablePath);
+        assert.equal(executableStat.mode & 0o777, 0o755);
+
         const outsideBackupDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-files-backup-outside-")
         );
@@ -723,6 +735,29 @@ describe("files routes", () => {
                 force: true,
             });
             await rm(outsideBackupDir, { recursive: true, force: true });
+        }
+
+        const linkedBackupSource = path.join(
+            workspaceRoot,
+            "generated",
+            "backup-source.txt"
+        );
+        const linkedBackupPath = path.join(workspaceRoot, "generated", "note.txt.bak");
+        await writeFile(linkedBackupSource, "external backup", "utf8");
+        await rm(linkedBackupPath, { force: true });
+        await link(linkedBackupSource, linkedBackupPath);
+        try {
+            const hardLinkedBackup = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fnote.txt",
+                { method: "PUT", body: { content: "third" } }
+            );
+            assert.equal(hardLinkedBackup.status, 500);
+            assert.match(hardLinkedBackup.body.error, /hard-linked/u);
+            assert.equal(await readFile(linkedBackupSource, "utf8"), "external backup");
+        } finally {
+            await rm(linkedBackupPath, { force: true });
+            await rm(linkedBackupSource, { force: true });
         }
 
         const missingContent = await requestJson<{ error: string }>(

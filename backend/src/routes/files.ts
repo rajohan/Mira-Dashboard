@@ -508,11 +508,13 @@ export default function filesRoutes(
                     safeFullPath,
                     WORKSPACE_ROOT,
                     async (rootedFullPath) => {
+                        let existingMode: number | null = null;
                         try {
                             const existingStat = statGuarded(guardedPath(rootedFullPath));
                             if (existingStat.nlink > 1) {
                                 return null;
                             }
+                            existingMode = existingStat.mode & 0o777;
                         } catch (error) {
                             /* c8 ignore next 3 -- unexpected stat failures use the route's existing 500 fallback */
                             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -542,6 +544,9 @@ export default function filesRoutes(
                                 guardedPath(tempPath),
                                 content
                             );
+                            if (existingMode !== null) {
+                                await fs.promises.chmod(tempPath, existingMode);
+                            }
                             await fs.promises.rename(tempPath, rootedFullPath);
                             return statGuarded(guardedPath(rootedFullPath));
                         } finally {

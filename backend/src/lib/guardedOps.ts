@@ -126,6 +126,11 @@ export async function copyNoFollowGuarded(
                     code: "EINVAL",
                 });
             }
+            if (destinationStat.nlink > 1) {
+                throw Object.assign(new Error("Destination must not be hard-linked"), {
+                    code: "EMLINK",
+                });
+            }
 
             await destinationFile.chmod(sourceMode);
             await destinationFile.truncate(0);

@@ -904,14 +904,17 @@ describe("agents routes", () => {
             assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
 
             await writeFile(metadataPath, "{ malformed", "utf8");
-            const malformedMetadata = await requestJson<{ error: string }>(
+            const malformedMetadata = await requestJson<{ currentTask: string }>(
                 server,
                 `/api/agents/${agentId}/metadata`,
                 { method: "PUT", body: { currentTask: "Repair malformed metadata" } }
             );
-            assert.equal(malformedMetadata.status, 500);
-            assert.match(malformedMetadata.body.error, /metadata|failed|JSON/u);
-            assert.equal(await readFile(metadataPath, "utf8"), "{ malformed");
+            assert.equal(malformedMetadata.status, 200);
+            assert.equal(malformedMetadata.body.currentTask, "Repair malformed metadata");
+            const repairedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
+                currentTask: string;
+            };
+            assert.equal(repairedMetadata.currentTask, "Repair malformed metadata");
 
             await rm(metadataPath, { force: true, recursive: true });
             await mkdir(metadataPath);

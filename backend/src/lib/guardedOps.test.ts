@@ -118,6 +118,19 @@ describe("guarded filesystem helpers", () => {
                 /Source and destination must differ/u
             );
             assert.equal(await readFile(realTarget, "utf8"), originalContent);
+
+            const otherTarget = path.join(baseDir, "other.txt");
+            const hardLinkedDestination = guardedPath(
+                path.join(baseDir, "hard-linked-destination.txt")
+            );
+            await writeFile(otherTarget, "other", "utf8");
+            await link(otherTarget, hardLinkedDestination);
+            await assert.rejects(
+                () => copyNoFollowGuarded(guardedPath(realTarget), hardLinkedDestination),
+                /Destination must not be hard-linked/u
+            );
+            assert.equal(await readFile(otherTarget, "utf8"), "other");
+
             const realStat = await stat(realTarget);
             assert.equal(realStat.isFile(), true);
         } finally {
