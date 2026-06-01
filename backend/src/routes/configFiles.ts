@@ -423,10 +423,17 @@ export default function configFilesRoutes(
                     }
                 }
 
-                await withRootedParentPath(safeFullPath, openclawRoot, (rootedFullPath) =>
-                    writeTextNoFollowGuarded(guardedPath(rootedFullPath), content)
+                const stat = await withRootedParentPath(
+                    safeFullPath,
+                    openclawRoot,
+                    async (rootedFullPath) => {
+                        await writeTextNoFollowGuarded(
+                            guardedPath(rootedFullPath),
+                            content
+                        );
+                        return statGuarded(guardedPath(rootedFullPath));
+                    }
                 );
-                const stat = statGuarded(guardedPath(safeFullPath));
 
                 res.json({
                     success: true,

@@ -42,6 +42,8 @@ function createMockChildProcess(
     overrides: Pick<ChildProcess, "killed" | "kill"> & Partial<ChildProcess>
 ): ChildProcess {
     const child = {
+        exitCode: null,
+        signalCode: null,
         ...overrides,
     } as ChildProcess;
     child.off = () => child;

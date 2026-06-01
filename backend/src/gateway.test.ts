@@ -105,6 +105,7 @@ async function waitForAsyncHandlers(): Promise<void> {
 }
 
 const previousOpenclawHome = process.env.OPENCLAW_HOME;
+const previousDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
 const previousHome = process.env.HOME;
 let openclawHome: string | undefined;
 let gatewayModule: Awaited<typeof import("./gateway.js")> | undefined;
@@ -114,6 +115,7 @@ let __testing: Awaited<typeof import("./gateway.js")>["__testing"];
 describe("gateway state and helper utilities", () => {
     before(async () => {
         openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         process.env.OPENCLAW_HOME = openclawHome;
         gatewayModule = await import("./gateway.js");
         gateway = gatewayModule.default;
@@ -132,6 +134,11 @@ describe("gateway state and helper utilities", () => {
             delete process.env.OPENCLAW_HOME;
         } else {
             process.env.OPENCLAW_HOME = previousOpenclawHome;
+        }
+        if (previousDashboardOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousDashboardOpenclawHome;
         }
         if (previousHome === undefined) {
             delete process.env.HOME;

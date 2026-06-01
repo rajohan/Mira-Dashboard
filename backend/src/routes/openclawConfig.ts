@@ -225,7 +225,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
             const snapshot = await getConfigSnapshot();
             res.json({ ...snapshot.parsed, __hash: snapshot.hash });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(500).json({ error: errorMessage(error, "Failed to load config") });
         }
     }) as RequestHandler);
 
@@ -234,7 +234,9 @@ export default function openClawConfigRoutes(app: express.Application): void {
             const result = await patchConfig(req.body as Record<string, unknown>);
             res.json({ ok: true, result });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(500).json({
+                error: errorMessage(error, "Failed to update config"),
+            });
         }
     }) as RequestHandler);
 
@@ -243,7 +245,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
             const snapshot = await getConfigSnapshot();
             res.json({ skills: getSkills(snapshot.parsed) });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(500).json({ error: errorMessage(error, "Failed to load skills") });
         }
     }) as RequestHandler);
 
@@ -256,7 +258,9 @@ export default function openClawConfigRoutes(app: express.Application): void {
                 config: snapshot.parsed || {},
             });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(500).json({
+                error: errorMessage(error, "Failed to create backup"),
+            });
         }
     }) as RequestHandler);
 
@@ -292,7 +296,9 @@ export default function openClawConfigRoutes(app: express.Application): void {
             );
             res.json({ ok: true });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            res.status(500).json({
+                error: errorMessage(error, "Failed to update skill"),
+            });
         }
     }) as RequestHandler);
 }
