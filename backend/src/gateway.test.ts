@@ -122,7 +122,7 @@ let __testing: Awaited<typeof import("./gateway.js")>["__testing"];
 describe("gateway state and helper utilities", () => {
     before(async () => {
         openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
-        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome;
         process.env.OPENCLAW_HOME = openclawHome;
         gatewayModule = await import("./gateway.js");
         gateway = gatewayModule.default;

@@ -1051,12 +1051,15 @@ export const __testing = {
     },
     /** Clears mutable gateway state between tests. */
     resetGatewayStateForTest(): void {
-        shutdown();
-        subscribers.clear();
-        pendingRequests.clear();
-        sessionList = [];
-        GatewayClientCtor = OpenClawGatewayClient;
-        requestId = 1000;
+        try {
+            shutdown();
+        } finally {
+            subscribers.clear();
+            pendingRequests.clear();
+            sessionList = [];
+            GatewayClientCtor = OpenClawGatewayClient;
+            requestId = 1000;
+        }
     },
 };
 

@@ -269,6 +269,7 @@ describe("metrics routes", () => {
                     throw new Error("df unavailable");
                 },
             });
+            errors.length = 0;
 
             const failedDeps = await fetch(`${server.baseUrl}/api/metrics`);
             assert.equal(failedDeps.status, 200);

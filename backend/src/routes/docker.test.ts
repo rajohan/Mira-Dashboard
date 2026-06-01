@@ -590,7 +590,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(emptyStderrFailure.ok, false);
             assert.match(emptyStderrFailure.stderr, /Command failed/u);
         } finally {
-            __testing.setUpdaterNodeBinForTests(originalUpdaterNodeBin);
+            __testing.setUpdaterNodeBinForTests(fakeUpdaterNodeBin);
         }
 
         const originalEnv = {

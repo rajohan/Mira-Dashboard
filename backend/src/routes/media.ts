@@ -42,11 +42,12 @@ function getRealMediaRoot(): string | null {
     if (cachedRealMediaRoot) {
         return cachedRealMediaRoot;
     }
-    if (!fs.existsSync(MEDIA_ROOT)) {
+    try {
+        cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
+        return cachedRealMediaRoot;
+    } catch {
         return null;
     }
-    cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
-    return cachedRealMediaRoot;
 }
 
 /** Registers media API routes. */

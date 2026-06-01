@@ -129,15 +129,27 @@ async function ensureParentDirsForWrite(
     rootPath: string
 ): Promise<void> {
     const targetParent = path.dirname(safePath);
-    const relativeParent = path.relative(rootPath, targetParent);
+    const canonicalRoot = fs.realpathSync(rootPath);
+    const relativeParent = path.relative(canonicalRoot, targetParent);
+    if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
+        const error = new Error(
+            "Parent directory validation failed"
+        ) as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+    }
     if (!relativeParent) {
         return;
     }
 
-    let currentPath = rootPath;
+    let currentPath = canonicalRoot;
     for (const segment of relativeParent.split(path.sep)) {
         currentPath = path.join(currentPath, segment);
-        const safeDirectoryPath = prepareSafeWriteTargetWithinRoot(currentPath, rootPath);
+        const safeDirectoryPath = prepareSafeWriteTargetWithinRoot(
+            currentPath,
+            canonicalRoot
+        );
+        /* c8 ignore next 7 -- fail-closed guard for filesystem races after root validation. */
         if (!safeDirectoryPath) {
             const error = new Error(
                 "Parent directory validation failed"
@@ -145,7 +157,7 @@ async function ensureParentDirsForWrite(
             error.code = "EACCES";
             throw error;
         }
-        await withRootedParentPath(safeDirectoryPath, rootPath, (rootedPath) => {
+        await withRootedParentPath(safeDirectoryPath, canonicalRoot, (rootedPath) => {
             mkdirGuarded(guardedPath(rootedPath), { recursive: true });
         });
     }

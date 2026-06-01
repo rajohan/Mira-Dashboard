@@ -422,7 +422,11 @@ export default function databaseRoutes(app: express.Application): void {
             const data = await getDatabaseOverview();
             res.json(data);
         } catch (error) {
-            console.error("[databaseRoutes] Failed to load database overview", error);
+            const safeError = {
+                code: (error as NodeJS.ErrnoException).code,
+                name: (error as Error).name,
+            };
+            console.error("[databaseRoutes] Failed to load database overview", safeError);
             res.status(500).json({
                 error: "Failed to load database overview",
             });

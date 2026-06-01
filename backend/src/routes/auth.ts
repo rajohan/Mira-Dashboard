@@ -173,8 +173,9 @@ export default function authRoutes(
             return;
         }
 
-        const previousGatewayToken = getPersistedAuthGatewayToken();
+        let previousGatewayToken: string | null = null;
         try {
+            previousGatewayToken = getPersistedAuthGatewayToken();
             persistAuthGatewayToken(gatewayToken);
             initGateway(gatewayToken);
             const sessionId = createAuthSession(user.id);
