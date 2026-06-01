@@ -103,10 +103,13 @@ function mapJob(job: BackupJob | null) {
 /** Creates backup env. */
 function createBackupEnv() {
     const postgresUser =
-        process.env.DB_POSTGRESDB_USER?.trim() || envFallback("DATABASE_USERNAME", "");
+        process.env.DB_POSTGRESDB_USER === undefined
+            ? envFallback("DATABASE_USERNAME", "")
+            : process.env.DB_POSTGRESDB_USER.trim();
     const postgresPassword =
-        process.env.DB_POSTGRESDB_PASSWORD?.trim() ||
-        envFallback("DATABASE_PASSWORD", "");
+        process.env.DB_POSTGRESDB_PASSWORD === undefined
+            ? envFallback("DATABASE_PASSWORD", "")
+            : process.env.DB_POSTGRESDB_PASSWORD.trim();
 
     return {
         ...process.env,

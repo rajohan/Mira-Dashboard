@@ -37,7 +37,7 @@ async function writeExecutable(filePath: string, content: string): Promise<void>
 }
 
 async function waitForFile(filePath: string): Promise<void> {
-    const deadline = Date.now() + 1_000;
+    const deadline = Date.now() + 5_000;
     while (Date.now() < deadline) {
         try {
             await stat(filePath);

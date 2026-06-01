@@ -979,8 +979,9 @@ async function request(
 
 /** Stops the active Gateway client and clears connected state. */
 function shutdown(): void {
-    gatewayClient?.stop();
+    const previousGatewayClient = gatewayClient;
     gatewayClient = null;
+    previousGatewayClient?.stop();
     isGatewayConnected = false;
     sessionList = [];
     currentToken = null;

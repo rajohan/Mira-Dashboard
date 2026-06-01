@@ -574,12 +574,18 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(__testing.resolveManualUpdateServiceId("", {}), null);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
-        __testing.setUpdaterNodeBinForTests("node");
+        __testing.setUpdaterNodeBinForTests(process.execPath);
         try {
             assert.equal(
                 __testing.buildPostgresUri(),
                 "postgresql://postgres:postgres@postgres:5432/n8n"
             );
+            const emptyStderrFailure = await __testing.runUpdaterCommand("empty-stderr", [
+                "-e",
+                "process.exit(7)",
+            ]);
+            assert.equal(emptyStderrFailure.ok, false);
+            assert.match(emptyStderrFailure.stderr, /Command failed/u);
         } finally {
             __testing.setUpdaterNodeBinForTests(originalUpdaterNodeBin);
         }

@@ -903,7 +903,7 @@ async function runUpdaterCommand(
             step,
             ok: false,
             stdout: stringFallback(execError.stdout),
-            stderr: stringFallback(execError.stderr, execError.message),
+            stderr: stringFallback(execError.stderr) || execError.message,
         };
     }
 }
@@ -1156,6 +1156,7 @@ export const __testing = {
     extractTrailingJson,
     dockerExecJobs,
     cleanupDockerExecJobs,
+    runUpdaterCommand,
     runDockerExecCommand,
     setDockerBinForTests: (nextDockerBin: string) => {
         dockerBin = nextDockerBin;

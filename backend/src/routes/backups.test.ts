@@ -294,10 +294,13 @@ describe("backup routes", () => {
             assert.notEqual(done.code, 0);
             assert.match(done.stderr, /ENOENT|missing-doppler/);
         } finally {
-            await brokenServer.close();
-            process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
-            process.env.MIRA_N8N_ROOT = tempDir;
-            await rm(brokenTempDir, { recursive: true, force: true });
+            try {
+                await brokenServer.close();
+            } finally {
+                process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
+                process.env.MIRA_N8N_ROOT = tempDir;
+                await rm(brokenTempDir, { recursive: true, force: true });
+            }
         }
     });
 
@@ -332,8 +335,14 @@ describe("backup routes", () => {
             process.env.DATABASE_USERNAME = "legacy-user";
             process.env.DATABASE_PASSWORD = "legacy-password";
             const fallbackEnv = backupTesting.createBackupEnv();
-            assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "legacy-user");
-            assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
+            assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "");
+            assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "");
+
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
+            const legacyEnv = backupTesting.createBackupEnv();
+            assert.equal(legacyEnv.DB_POSTGRESDB_USER, "legacy-user");
+            assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
         } finally {
             if (previousDatabaseUser === undefined) {
                 delete process.env.DB_POSTGRESDB_USER;
