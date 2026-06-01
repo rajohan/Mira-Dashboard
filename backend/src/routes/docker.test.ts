@@ -699,16 +699,16 @@ describe("docker routes", { concurrency: false }, () => {
                 __testing.dockerExecJobs.set(`job-${index}`, {
                     id: `job-${index}`,
                     containerId: "app",
-                    status: "running",
-                    code: null,
+                    status: "done",
+                    code: 0,
                     stdout: "",
                     stderr: "",
                     startedAt: index,
-                    endedAt: null,
+                    endedAt: Date.now(),
                     process:
                         index === 0
                             ? createMockChildProcess({
-                                  killed: false,
+                                  killed: true,
                                   kill(signal?: NodeJS.Signals | number) {
                                       assert.equal(signal, "SIGTERM");
                                       cleanupKilled = true;
@@ -718,12 +718,30 @@ describe("docker routes", { concurrency: false }, () => {
                             : undefined,
                 });
             }
+            __testing.dockerExecJobs.set("active-oldest", {
+                id: "active-oldest",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: -1,
+                endedAt: null,
+                process: createMockChildProcess({
+                    killed: false,
+                    kill() {
+                        cleanupKilled = true;
+                        return true;
+                    },
+                }),
+            });
 
             __testing.cleanupDockerExecJobs();
             assert.equal(__testing.dockerExecJobs.size, 100);
             assert.equal(__testing.dockerExecJobs.has("job-0"), false);
             assert.equal(__testing.dockerExecJobs.has("job-1"), false);
-            assert.equal(cleanupKilled, true);
+            assert.equal(__testing.dockerExecJobs.has("active-oldest"), true);
+            assert.equal(cleanupKilled, false);
 
             __testing.dockerExecJobs.set("no-process", {
                 id: "no-process",

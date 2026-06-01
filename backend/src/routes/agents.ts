@@ -245,25 +245,33 @@ function resolveConfiguredModelName(
 
 /** Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure. */
 async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
-    const cached = gateway
-        .getSessions()
-        .filter((session) => typeof session.key === "string" && session.key.length > 0)
-        .map((session) => ({
-            key: session.key,
-            model:
-                typeof session.model === "string"
-                    ? session.model.trim() || undefined
-                    : undefined,
-            status: session.status,
-            updatedAt: session.updatedAt,
-            startedAt: session.startedAt,
-            endedAt: session.endedAt,
-            runId: session.runId,
-            activeRunId: session.activeRunId,
-            currentRunId: session.currentRunId,
-            isRunning: session.isRunning,
-            running: session.running,
-        }));
+    const cached: GatewaySessionSummary[] = (() => {
+        try {
+            return gateway
+                .getSessions()
+                .filter(
+                    (session) => typeof session.key === "string" && session.key.length > 0
+                )
+                .map((session) => ({
+                    key: session.key,
+                    model:
+                        typeof session.model === "string"
+                            ? session.model.trim() || undefined
+                            : undefined,
+                    status: session.status,
+                    updatedAt: session.updatedAt,
+                    startedAt: session.startedAt,
+                    endedAt: session.endedAt,
+                    runId: session.runId,
+                    activeRunId: session.activeRunId,
+                    currentRunId: session.currentRunId,
+                    isRunning: session.isRunning,
+                    running: session.running,
+                }));
+        } catch {
+            return [];
+        }
+    })();
 
     try {
         const result = (await gateway.request("sessions.list", {})) as {

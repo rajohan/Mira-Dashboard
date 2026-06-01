@@ -102,15 +102,19 @@ function mapJob(job: BackupJob | null) {
 
 /** Creates backup env. */
 function createBackupEnv() {
+    const postgresUser =
+        process.env.DB_POSTGRESDB_USER?.trim() || envFallback("DATABASE_USERNAME", "");
+    const postgresPassword =
+        process.env.DB_POSTGRESDB_PASSWORD?.trim() ||
+        envFallback("DATABASE_PASSWORD", "");
+
     return {
         ...process.env,
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER:
-            process.env.DB_POSTGRESDB_USER ?? envFallback("DATABASE_USERNAME", ""),
-        DB_POSTGRESDB_PASSWORD:
-            process.env.DB_POSTGRESDB_PASSWORD ?? envFallback("DATABASE_PASSWORD", ""),
+        DB_POSTGRESDB_USER: postgresUser,
+        DB_POSTGRESDB_PASSWORD: postgresPassword,
     };
 }
 

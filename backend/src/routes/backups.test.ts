@@ -318,12 +318,22 @@ describe("backup routes", () => {
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
         const previousDatabaseUser = process.env.DB_POSTGRESDB_USER;
         const previousDatabasePassword = process.env.DB_POSTGRESDB_PASSWORD;
+        const previousLegacyDatabaseUser = process.env.DATABASE_USERNAME;
+        const previousLegacyDatabasePassword = process.env.DATABASE_PASSWORD;
         try {
             process.env.DB_POSTGRESDB_USER = "native-user";
             process.env.DB_POSTGRESDB_PASSWORD = "native-password";
             const env = backupTesting.createBackupEnv();
             assert.equal(env.DB_POSTGRESDB_USER, "native-user");
             assert.equal(env.DB_POSTGRESDB_PASSWORD, "native-password");
+
+            process.env.DB_POSTGRESDB_USER = "";
+            process.env.DB_POSTGRESDB_PASSWORD = "";
+            process.env.DATABASE_USERNAME = "legacy-user";
+            process.env.DATABASE_PASSWORD = "legacy-password";
+            const fallbackEnv = backupTesting.createBackupEnv();
+            assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "legacy-user");
+            assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
         } finally {
             if (previousDatabaseUser === undefined) {
                 delete process.env.DB_POSTGRESDB_USER;
@@ -334,6 +344,16 @@ describe("backup routes", () => {
                 delete process.env.DB_POSTGRESDB_PASSWORD;
             } else {
                 process.env.DB_POSTGRESDB_PASSWORD = previousDatabasePassword;
+            }
+            if (previousLegacyDatabaseUser === undefined) {
+                delete process.env.DATABASE_USERNAME;
+            } else {
+                process.env.DATABASE_USERNAME = previousLegacyDatabaseUser;
+            }
+            if (previousLegacyDatabasePassword === undefined) {
+                delete process.env.DATABASE_PASSWORD;
+            } else {
+                process.env.DATABASE_PASSWORD = previousLegacyDatabasePassword;
             }
         }
         assert.equal(backupTesting.getN8nRoot(), tempDir);

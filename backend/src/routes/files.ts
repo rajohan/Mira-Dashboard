@@ -33,7 +33,21 @@ function getDefaultWorkspaceRoot(): string {
     return path.join(homeDir, ".openclaw", "workspace");
 }
 
-const WORKSPACE_ROOT = nonEmptyEnvFallback("WORKSPACE_ROOT", getDefaultWorkspaceRoot());
+function resolveWorkspaceRoot(): string {
+    const workspaceRoot = nonEmptyEnvFallback(
+        "WORKSPACE_ROOT",
+        getDefaultWorkspaceRoot()
+    );
+    if (
+        !path.isAbsolute(workspaceRoot) ||
+        path.normalize(workspaceRoot) !== workspaceRoot
+    ) {
+        throw new Error("WORKSPACE_ROOT must be an absolute normalized path");
+    }
+    return workspaceRoot;
+}
+
+const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE + 1024;
 
@@ -183,6 +197,38 @@ function listDirectory(dirPath: string): FileItem[] | null {
     );
 }
 
+async function withRootedParentPath<T>(
+    safePath: string,
+    rootPath: string,
+    callback: (rootedPath: string) => Promise<T> | T
+): Promise<T> {
+    /* c8 ignore next 3 -- covered by platform-specific integration behavior on Linux */
+    if (process.platform !== "linux") {
+        return callback(safePath);
+    }
+
+    const parentPath = path.dirname(safePath);
+    const parentFd = fs.openSync(
+        parentPath,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const realRoot = fs.realpathSync(rootPath);
+        const realParent = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
+            const error = new Error(
+                "Parent path validation failed"
+            ) as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        }
+
+        return await callback(`/proc/self/fd/${parentFd}/${path.basename(safePath)}`);
+    } finally {
+        fs.closeSync(parentFd);
+    }
+}
+
 export const __testing = {
     compareNames,
     decodeRouteFilePath,
@@ -191,6 +237,7 @@ export const __testing = {
     isBinaryFile,
     isImageFile,
     listDirectory,
+    resolveWorkspaceRoot,
     shouldHideFile,
 };
 
@@ -435,30 +482,45 @@ export default function filesRoutes(
                     return;
                 }
 
-                try {
-                    const backupPath = safeFullPath + ".bak";
-                    const safeBackupPath = prepareSafeWriteTargetWithinRoot(
-                        backupPath,
-                        WORKSPACE_ROOT
-                    );
-                    if (!safeBackupPath) {
-                        res.status(403).json({
-                            error: "Access denied: path outside workspace",
-                        });
-                        return;
-                    }
-                    await copyNoFollowGuarded(
-                        guardedPath(safeFullPath),
-                        guardedPath(safeBackupPath)
-                    );
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                        throw error;
-                    }
+                const backupPath = safeFullPath + ".bak";
+                const safeBackupPath = prepareSafeWriteTargetWithinRoot(
+                    backupPath,
+                    WORKSPACE_ROOT
+                );
+                if (!safeBackupPath) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
+                    return;
                 }
 
-                await writeTextNoFollowGuarded(guardedPath(safeFullPath), content);
-                const stat = statGuarded(guardedPath(safeFullPath));
+                const stat = await withRootedParentPath(
+                    safeFullPath,
+                    WORKSPACE_ROOT,
+                    async (rootedFullPath) => {
+                        try {
+                            await withRootedParentPath(
+                                safeBackupPath,
+                                WORKSPACE_ROOT,
+                                (rootedBackupPath) =>
+                                    copyNoFollowGuarded(
+                                        guardedPath(rootedFullPath),
+                                        guardedPath(rootedBackupPath)
+                                    )
+                            );
+                        } catch (error) {
+                            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                                throw error;
+                            }
+                        }
+
+                        await writeTextNoFollowGuarded(
+                            guardedPath(rootedFullPath),
+                            content
+                        );
+                        return statGuarded(guardedPath(rootedFullPath));
+                    }
+                );
 
                 res.json({
                     success: true,

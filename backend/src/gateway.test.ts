@@ -246,15 +246,29 @@ describe("gateway state and helper utilities", () => {
     it("covers Gateway init warning fallback branches", async () => {
         const warn = mock.method(console, "warn", () => {});
         const originalSetTimeout = globalThis.setTimeout;
+        const originalClearTimeout = globalThis.clearTimeout;
         const scheduledDelays: number[] = [];
+        const cancelledTimers = new Set<number>();
+        let nextTimerId = 0;
         CapturingGatewayClient.instances = [];
         __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
 
         globalThis.setTimeout = ((callback: () => void, delay?: number) => {
             scheduledDelays.push(delay ?? 0);
-            queueMicrotask(callback);
-            return { unref: () => {} } as unknown as NodeJS.Timeout;
+            nextTimerId += 1;
+            const timerId = nextTimerId;
+            queueMicrotask(() => {
+                if (!cancelledTimers.has(timerId)) {
+                    callback();
+                }
+            });
+            return { id: timerId, unref: () => {} } as unknown as NodeJS.Timeout;
         }) as typeof setTimeout;
+        globalThis.clearTimeout = ((timeout?: NodeJS.Timeout | number) => {
+            if (typeof timeout === "object" && timeout && "id" in timeout) {
+                cancelledTimers.add(Number(timeout.id));
+            }
+        }) as typeof clearTimeout;
 
         try {
             assert.ok(openclawHome);
@@ -287,6 +301,7 @@ describe("gateway state and helper utilities", () => {
             );
         } finally {
             globalThis.setTimeout = originalSetTimeout;
+            globalThis.clearTimeout = originalClearTimeout;
             __testing.resetGatewayStateForTest();
             warn.mock.restore();
         }

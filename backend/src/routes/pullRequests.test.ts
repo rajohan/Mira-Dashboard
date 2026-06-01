@@ -448,7 +448,11 @@ describe("pull request routes", () => {
     after(async () => {
         await server.close();
         process.chdir(originalCwd);
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         if (originalDashboardRoot === undefined) {
             delete process.env.MIRA_DASHBOARD_ROOT;
         } else {

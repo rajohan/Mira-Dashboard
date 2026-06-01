@@ -26,6 +26,8 @@ const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
 );
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
+const MIN_LOG_TAIL = 50;
+const MAX_LOG_TAIL = 5_000;
 const N8N_DATABASE = "n8n";
 
 function updaterScriptPath(fileName: string): string {
@@ -1077,15 +1079,12 @@ function cleanupDockerExecJobs() {
     if (dockerExecJobs.size <= MAX_JOBS) {
         return;
     }
-    const entries = [...dockerExecJobs.values()].sort(
-        (a, b) => a.startedAt - b.startedAt
-    );
-    const overflow = entries.length - MAX_JOBS;
+    const entries = [...dockerExecJobs.values()]
+        .filter((job) => job.status === "done")
+        .sort((a, b) => a.startedAt - b.startedAt);
+    const overflow = Math.min(entries.length, dockerExecJobs.size - MAX_JOBS);
     for (let index = 0; index < overflow; index += 1) {
         const job = entries[index];
-        if (job.process && !job.process.killed) {
-            job.process.kill("SIGTERM");
-        }
         dockerExecJobs.delete(job.id);
     }
 }
@@ -1291,9 +1290,12 @@ export default function dockerRoutes(app: express.Application): void {
         "/api/docker/containers/:containerId/logs",
         asyncRoute(async (req, res) => {
             const containerId = stringFallback(req.params.containerId);
-            const tail = Math.max(
-                50,
-                Number.parseInt(stringFallback(req.query.tail, "200"), 10) || 200
+            const tail = Math.min(
+                MAX_LOG_TAIL,
+                Math.max(
+                    MIN_LOG_TAIL,
+                    Number.parseInt(stringFallback(req.query.tail, "200"), 10) || 200
+                )
             );
             const { stdout, stderr } = await execFileAsync(
                 dockerBin,

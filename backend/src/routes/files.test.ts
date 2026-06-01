@@ -286,6 +286,11 @@ describe("files routes", () => {
         process.env.WORKSPACE_ROOT = workspaceRoot;
 
         try {
+            process.env.WORKSPACE_ROOT = "relative-workspace";
+            assert.throws(() => __testing.resolveWorkspaceRoot(), {
+                message: "WORKSPACE_ROOT must be an absolute normalized path",
+            });
+            process.env.WORKSPACE_ROOT = workspaceRoot;
             assert.equal(__testing.isBinaryFile("abc"), false);
             assert.equal(__testing.isBinaryFile("abc\0def"), true);
             assert.equal(__testing.isImageFile("photo.WEBP"), true);
@@ -952,6 +957,36 @@ describe("files routes", () => {
         } finally {
             fs.realpathSync = originalRealpathSync;
             await rm(targetParent, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects writes when an opened parent resolves outside the workspace", async () => {
+        const originalRealpathSync = fs.realpathSync;
+        const outsideDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-files-parent-race-")
+        );
+        fs.realpathSync = ((target: fs.PathLike) => {
+            const targetText = Buffer.isBuffer(target)
+                ? target.toString("utf8")
+                : String(target);
+            if (targetText.startsWith("/proc/self/fd/")) {
+                return outsideDir;
+            }
+            return originalRealpathSync(target);
+        }) as typeof fs.realpathSync;
+
+        try {
+            const denied = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fparent-race.txt",
+                { method: "PUT", body: { content: "nope" } }
+            );
+
+            assert.equal(denied.status, 500);
+            assert.equal(denied.body.error, "Parent path validation failed");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(outsideDir, { recursive: true, force: true });
         }
     });
 });

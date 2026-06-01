@@ -3262,6 +3262,12 @@ describe("agents routes", () => {
             };
             const cachedSessions = await __testing.getGatewaySessionsForAgents();
             assert.equal(cachedSessions[1]?.model, undefined);
+
+            gateway.getSessions = () => {
+                throw new Error("cache unavailable");
+            };
+            const unavailableSessions = await __testing.getGatewaySessionsForAgents();
+            assert.deepEqual(unavailableSessions, []);
         } finally {
             gateway.getSessions = previousGatewaySessions;
             gateway.request = previousGatewayRequest;

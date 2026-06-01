@@ -180,7 +180,7 @@ describe("media routes", () => {
         let module: typeof import("./media.js");
         try {
             process.env.OPENCLAW_HOME = missingHome;
-            module = await import(`./media.js?missing-root=${Date.now()}`);
+            module = await import(`./media.js?missing-root=${randomUUID()}`);
         } finally {
             if (previousOpenclawHome === undefined) {
                 delete process.env.OPENCLAW_HOME;
@@ -223,7 +223,7 @@ describe("media routes", () => {
         let module: typeof import("./media.js");
         try {
             process.env.OPENCLAW_HOME = missingHome;
-            module = await import(`./media.js?missing-real-root=${Date.now()}`);
+            module = await import(`./media.js?missing-real-root=${randomUUID()}`);
         } finally {
             if (previousOpenclawHome === undefined) {
                 delete process.env.OPENCLAW_HOME;

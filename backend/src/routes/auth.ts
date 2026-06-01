@@ -176,6 +176,13 @@ export default function authRoutes(
                 // Preserve the original bootstrap failure response.
             }
             shutdownGateway();
+            if (previousGatewayToken) {
+                try {
+                    initGateway(previousGatewayToken);
+                } catch {
+                    // Preserve the original bootstrap failure response.
+                }
+            }
             response.status(500).json({ error: "Failed to complete first-user setup" });
         }
     });

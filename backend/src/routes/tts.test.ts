@@ -91,32 +91,39 @@ describe("TTS routes", () => {
     it("proxies successful speech generation as MPEG audio", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         fetchCalls.length = 0;
-        globalThis.fetch = async (url, init) => {
-            fetchCalls.push({ url: String(url), init: init || {} });
-            return new Response(Buffer.from([1, 2, 3]), { status: 200 });
-        };
+        try {
+            globalThis.fetch = async (url, init) => {
+                fetchCalls.push({ url: String(url), init: init || {} });
+                return new Response(Buffer.from([1, 2, 3]), { status: 200 });
+            };
 
-        const response = await originalFetch(`${server.baseUrl}/api/tts/speak`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: "  Hello Mira  " }),
-        });
+            const response = await originalFetch(`${server.baseUrl}/api/tts/speak`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: "  Hello Mira  " }),
+            });
 
-        assert.equal(response.status, 200);
-        assert.equal(response.headers.get("content-type"), "audio/mpeg");
-        assert.equal(response.headers.get("cache-control"), "no-store");
-        assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3]);
-        assert.equal(fetchCalls.length, 1);
-        assert.match(fetchCalls[0]?.url || "", /\/v1\/text-to-speech\//u);
-        assert.equal(
-            (fetchCalls[0]?.init.headers as Record<string, string>)["xi-api-key"],
-            "test-key"
-        );
-        assert.deepEqual(JSON.parse(String(fetchCalls[0]?.init.body)), {
-            text: "Hello Mira",
-            model_id: "eleven_turbo_v2_5",
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-        });
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get("content-type"), "audio/mpeg");
+            assert.equal(response.headers.get("cache-control"), "no-store");
+            assert.deepEqual(
+                [...new Uint8Array(await response.arrayBuffer())],
+                [1, 2, 3]
+            );
+            assert.equal(fetchCalls.length, 1);
+            assert.match(fetchCalls[0]?.url || "", /\/v1\/text-to-speech\//u);
+            assert.equal(
+                (fetchCalls[0]?.init.headers as Record<string, string>)["xi-api-key"],
+                "test-key"
+            );
+            assert.deepEqual(JSON.parse(String(fetchCalls[0]?.init.body)), {
+                text: "Hello Mira",
+                model_id: "eleven_turbo_v2_5",
+                voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 
     it("forwards ElevenLabs error responses", async () => {

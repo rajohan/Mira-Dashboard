@@ -76,9 +76,8 @@ function cleanupUser(username: string): void {
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
 }
 
-function cleanupBootstrapRows(_username: string): void {
-    db.prepare("DELETE FROM auth_sessions").run();
-    db.prepare("DELETE FROM users").run();
+function cleanupBootstrapRows(username: string): void {
+    cleanupUser(username);
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
         bootstrapGatewayToken
     );
@@ -231,6 +230,7 @@ describe("auth first-user bootstrap routes", () => {
         cleanupBootstrapRows(username);
         let rolledBack = false;
         let shutdown = false;
+        let restoredGatewayToken: string | null = null;
         let previousGatewayToken: string | null = null;
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
@@ -250,6 +250,9 @@ describe("auth first-user bootstrap routes", () => {
                 shutdownGateway: () => {
                     shutdown = true;
                 },
+                initGateway: (token) => {
+                    restoredGatewayToken = token;
+                },
             });
             const registered = await requestJson<{
                 error: string;
@@ -262,6 +265,7 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.body.error, "Failed to complete first-user setup");
             assert.equal(rolledBack, true);
             assert.equal(shutdown, true);
+            assert.equal(restoredGatewayToken, "preexisting-token");
             assert.equal(previousGatewayToken, "preexisting-token");
             assert.equal(
                 db
@@ -298,6 +302,7 @@ describe("auth first-user bootstrap routes", () => {
             await sideEffectServer?.close();
             await retryServer?.close();
             cleanupUser("bootstrap-side-effect");
+            cleanupUser("bootstrap-dupe");
             cleanupBootstrapRows(username);
             db.prepare(
                 "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
@@ -339,6 +344,46 @@ describe("auth first-user bootstrap routes", () => {
             await throwingRollbackServer.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
+        }
+    });
+
+    it("keeps bootstrap rollback best-effort when restoring the previous gateway fails", async () => {
+        cleanupBootstrapRows(username);
+        db.prepare(
+            "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ).run("restore-fails-token", new Date().toISOString());
+        let restoreAttempted = false;
+        const restoreServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+            initGateway: (token) => {
+                if (token === "restore-fails-token") {
+                    restoreAttempted = true;
+                    throw new Error("restore unavailable");
+                }
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                restoreServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-restore", password, gatewayToken },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(restoreAttempted, true);
+        } finally {
+            await restoreServer.close();
+            cleanupUser("bootstrap-restore");
+            cleanupBootstrapRows(username);
+            db.prepare(
+                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+            ).run("restore-fails-token");
         }
     });
 });

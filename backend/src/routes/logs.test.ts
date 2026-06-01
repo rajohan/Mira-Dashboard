@@ -437,9 +437,10 @@ describe("logs routes", () => {
         await writeFile(todayPath, "will fail\n", "utf8");
 
         try {
-            fs.readFileSync = ((target: fs.PathOrFileDescriptor) => {
+            fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+                const [target] = args;
                 if (target === todayPath) throw new Error("cannot read history");
-                return originalReadFileSync(target);
+                return originalReadFileSync(...args);
             }) as typeof fs.readFileSync;
 
             const ws = new FakeWebSocket();
