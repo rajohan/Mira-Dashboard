@@ -240,6 +240,43 @@ describe("config files routes", () => {
             delete process.env.HOME;
             os.homedir = (() => "relative-home") as typeof os.homedir;
             assert.equal(__testing.resolveOpenclawRoot(), null);
+
+            const linkedHomeDir = await mkdtemp(
+                path.join(os.tmpdir(), "mira-linked-home-")
+            );
+            const linkedTarget = await mkdtemp(
+                path.join(os.tmpdir(), "mira-linked-openclaw-")
+            );
+            process.env.HOME = linkedHomeDir;
+            try {
+                await symlink(linkedTarget, path.join(linkedHomeDir, ".openclaw"));
+                assert.equal(__testing.resolveOpenclawRoot(), null);
+            } finally {
+                await rm(linkedHomeDir, { recursive: true, force: true });
+                await rm(linkedTarget, { recursive: true, force: true });
+            }
+
+            const unreadableHomeDir = await mkdtemp(
+                path.join(os.tmpdir(), "mira-unreadable-home-")
+            );
+            const originalRealpathSync = fs.realpathSync;
+            process.env.HOME = unreadableHomeDir;
+            try {
+                fs.realpathSync = ((target: fs.PathLike) => {
+                    if (target === path.join(unreadableHomeDir, ".openclaw")) {
+                        const error = new Error(
+                            "root unavailable"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "EACCES";
+                        throw error;
+                    }
+                    return originalRealpathSync(target);
+                }) as typeof fs.realpathSync;
+                assert.equal(__testing.resolveOpenclawRoot(), null);
+            } finally {
+                fs.realpathSync = originalRealpathSync;
+                await rm(unreadableHomeDir, { recursive: true, force: true });
+            }
         } finally {
             os.homedir = originalHomedir;
             if (originalHome === undefined) {

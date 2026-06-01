@@ -347,6 +347,46 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
+    it("keeps bootstrap rollback best-effort when shutdown throws", async () => {
+        cleanupBootstrapRows(username);
+        db.prepare(
+            "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ).run("shutdown-throws-token", new Date().toISOString());
+        let restoreAttempted = false;
+        const throwingShutdownServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+            shutdownGateway: () => {
+                throw new Error("shutdown unavailable");
+            },
+            initGateway: (token) => {
+                restoreAttempted = token === "shutdown-throws-token";
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                throwingShutdownServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-side-effect", password, gatewayToken },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(restoreAttempted, true);
+        } finally {
+            await throwingShutdownServer.close();
+            cleanupUser("bootstrap-side-effect");
+            cleanupBootstrapRows(username);
+            db.prepare(
+                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+            ).run("shutdown-throws-token");
+        }
+    });
+
     it("keeps bootstrap rollback best-effort when restoring the previous gateway fails", async () => {
         cleanupBootstrapRows(username);
         db.prepare(

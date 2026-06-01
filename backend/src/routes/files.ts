@@ -51,6 +51,7 @@ function resolveWorkspaceRoot(): string {
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE + 1024;
+const HARD_LINK_ERROR = "Access denied: hard links are not supported";
 
 /** Represents file item. */
 interface FileItem {
@@ -374,6 +375,11 @@ export default function filesRoutes(
                         return;
                     }
 
+                    if (stat.nlink > 1) {
+                        res.status(403).json({ error: HARD_LINK_ERROR });
+                        return;
+                    }
+
                     const filename = path.basename(filePath);
 
                     // Handle image files
@@ -500,6 +506,18 @@ export default function filesRoutes(
                     WORKSPACE_ROOT,
                     async (rootedFullPath) => {
                         try {
+                            const existingStat = statGuarded(guardedPath(rootedFullPath));
+                            if (existingStat.nlink > 1) {
+                                return null;
+                            }
+                        } catch (error) {
+                            /* c8 ignore next 3 -- unexpected stat failures use the route's existing 500 fallback */
+                            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                                throw error;
+                            }
+                        }
+
+                        try {
                             await withRootedParentPath(
                                 safeBackupPath,
                                 WORKSPACE_ROOT,
@@ -522,6 +540,10 @@ export default function filesRoutes(
                         return statGuarded(guardedPath(rootedFullPath));
                     }
                 );
+                if (!stat) {
+                    res.status(403).json({ error: HARD_LINK_ERROR });
+                    return;
+                }
 
                 res.json({
                     success: true,

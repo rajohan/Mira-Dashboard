@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -728,6 +728,34 @@ describe("files routes", () => {
             { method: "PUT", body: { content: "nope" } }
         );
         assert.equal(deniedWrite.status, 403);
+    });
+
+    it("rejects hard-linked files for reads and writes", async () => {
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-files-hardlink-"));
+        const outsideFile = path.join(outsideDir, "shared.txt");
+        const linkedPath = path.join(workspaceRoot, "hard-linked.txt");
+        await writeFile(outsideFile, "outside");
+        await link(outsideFile, linkedPath);
+        try {
+            const read = await requestJson<{ error: string }>(
+                server,
+                "/api/files/hard-linked.txt"
+            );
+            assert.equal(read.status, 403);
+            assert.equal(read.body.error, "Access denied: hard links are not supported");
+
+            const write = await requestJson<{ error: string }>(
+                server,
+                "/api/files/hard-linked.txt",
+                { method: "PUT", body: { content: "updated" } }
+            );
+            assert.equal(write.status, 403);
+            assert.equal(write.body.error, "Access denied: hard links are not supported");
+            assert.equal(await readFile(outsideFile, "utf8"), "outside");
+        } finally {
+            await rm(linkedPath, { force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
     });
 
     it("reports read and write filesystem errors", async () => {

@@ -175,7 +175,11 @@ export default function authRoutes(
             } catch {
                 // Preserve the original bootstrap failure response.
             }
-            shutdownGateway();
+            try {
+                shutdownGateway();
+            } catch {
+                // Preserve the original bootstrap failure response.
+            }
             if (previousGatewayToken) {
                 try {
                     initGateway(previousGatewayToken);

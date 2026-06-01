@@ -70,7 +70,17 @@ function resolveOpenclawRoot(): string | null {
     if (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root) {
         return null;
     }
-    return path.join(homeDir, ".openclaw");
+    const openclawRoot = path.join(homeDir, ".openclaw");
+    try {
+        if (fs.realpathSync(openclawRoot) !== openclawRoot) {
+            return null;
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            return null;
+        }
+    }
+    return openclawRoot;
 }
 
 function decodeConfigPath(encodedPath: string): string | null {

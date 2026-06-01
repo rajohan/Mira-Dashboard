@@ -15,7 +15,7 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-const logsDir = "/tmp/openclaw";
+const logsDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-"));
 const outsideDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-logs-outside-"));
 const testFiles = ["openclaw-2099-03-03.log", "openclaw-2099-03-04.log"];
 const RealDate = Date;
@@ -60,6 +60,7 @@ describe("logs routes", () => {
     let server: TestServer;
 
     before(async () => {
+        __testing.setLogsDirForTest(logsDir);
         await mkdir(logsDir, { recursive: true });
         await mkdir(outsideDir, { recursive: true });
         await writeFile(
@@ -80,9 +81,7 @@ describe("logs routes", () => {
     after(async () => {
         __testing.resetLogWatcherForTest();
         await server.close();
-        for (const file of [...testFiles, "not-openclaw.txt"]) {
-            await rm(path.join(logsDir, file), { force: true });
-        }
+        await rm(logsDir, { recursive: true, force: true });
         await rm(outsideDir, { recursive: true, force: true });
     });
 

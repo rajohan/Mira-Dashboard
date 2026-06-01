@@ -6,8 +6,8 @@ import type WebSocket from "ws";
 import { errorMessage } from "../lib/errors.js";
 import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 
-const LOGS_DIR = "/tmp/openclaw";
-const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
+let logsDir = "/tmp/openclaw";
+let realLogsDir = path.resolve(logsDir);
 let logWatcher: NodeJS.Timeout | null = null;
 let logPollInFlight = false;
 let lastLogSize = 0;
@@ -24,7 +24,7 @@ interface LogFile {
 /** Returns today log file. */
 function getTodayLogFile(): string {
     const today = new Date().toISOString().split("T")[0];
-    return path.join(LOGS_DIR, "openclaw-" + today + ".log");
+    return path.join(logsDir, "openclaw-" + today + ".log");
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
@@ -166,6 +166,11 @@ export const __testing = {
     subscriberCount(): number {
         return logSubscribers.size;
     },
+    setLogsDirForTest(nextLogsDir: string): void {
+        this.resetLogWatcherForTest();
+        logsDir = nextLogsDir;
+        realLogsDir = path.resolve(nextLogsDir);
+    },
 };
 
 /** Registers logs API routes. */
@@ -173,16 +178,16 @@ export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {
         try {
-            if (!fs.existsSync(LOGS_DIR)) {
+            if (!fs.existsSync(logsDir)) {
                 res.json({ logs: [] });
                 return;
             }
 
             const files: LogFile[] = fs
-                .readdirSync(LOGS_DIR)
+                .readdirSync(logsDir)
                 .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
                 .map((f) => {
-                    const stat = fs.statSync(path.join(LOGS_DIR, f));
+                    const stat = fs.statSync(path.join(logsDir, f));
                     return { name: f, size: stat.size, modified: stat.mtime };
                 })
                 .sort((a, b) => b.modified.getTime() - a.modified.getTime());
@@ -209,7 +214,7 @@ export default function logsRoutes(app: express.Application): void {
         try {
             let realRoot: string;
             try {
-                realRoot = fs.realpathSync(REAL_LOGS_DIR);
+                realRoot = fs.realpathSync(realLogsDir);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "ENOENT") {
                     res.status(404).json({ error: "Log file not found" });
