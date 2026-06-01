@@ -1,5 +1,9 @@
 /** Formats number for display. */
 export function formatNumber(n: number): string {
+    if (!Number.isFinite(n)) {
+        return "0";
+    }
+
     return n.toLocaleString("en-US");
 }
 
