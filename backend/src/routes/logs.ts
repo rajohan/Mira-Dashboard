@@ -168,8 +168,9 @@ export const __testing = {
     },
     setLogsDirForTest(nextLogsDir: string): void {
         this.resetLogWatcherForTest();
-        logsDir = nextLogsDir;
-        realLogsDir = path.resolve(nextLogsDir);
+        const resolvedLogsDir = path.resolve(nextLogsDir);
+        logsDir = resolvedLogsDir;
+        realLogsDir = resolvedLogsDir;
     },
 };
 
