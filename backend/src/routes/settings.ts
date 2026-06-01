@@ -19,7 +19,14 @@ interface Settings {
 
 /** Resolves dashboard settings directory from a home directory value. */
 function resolveSettingsDir(home = process.env.HOME): string {
-    const normalizedHome = (home && home.trim()) || os.homedir();
+    const normalizedHome = home?.trim() || os.homedir().trim();
+    if (
+        !normalizedHome ||
+        !path.isAbsolute(normalizedHome) ||
+        path.resolve(normalizedHome) === path.parse(path.resolve(normalizedHome)).root
+    ) {
+        throw new Error("Invalid settings home directory");
+    }
     return path.resolve(path.join(normalizedHome, ".openclaw"));
 }
 

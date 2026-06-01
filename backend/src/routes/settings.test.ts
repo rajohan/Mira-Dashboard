@@ -117,6 +117,14 @@ describe("settings routes", () => {
             __testing.resolveSettingsDir("   "),
             path.join(os.homedir(), ".openclaw")
         );
+        assert.throws(
+            () => __testing.resolveSettingsDir("tmp-home"),
+            /Invalid settings home directory/u
+        );
+        assert.throws(
+            () => __testing.resolveSettingsDir(path.parse(homeDir).root),
+            /Invalid settings home directory/u
+        );
         assert.equal(__testing.resolveSettingsDir(), path.join(homeDir, ".openclaw"));
         const originalHome = process.env.HOME;
         try {
