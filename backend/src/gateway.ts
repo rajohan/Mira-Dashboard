@@ -608,7 +608,12 @@ async function refreshSessions(
     const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
     sessionList = sessions
         .map((entry) => asRecord(entry))
-        .filter((entry): entry is Record<string, unknown> => entry !== null)
+        .filter(
+            (entry): entry is Record<string, unknown> =>
+                entry !== null &&
+                (stringFallback(entry.sessionId).trim() ||
+                    stringFallback(entry.key).trim()) !== ""
+        )
         .map((entry) => transformSession(entry as GatewaySession));
     broadcast({ type: "sessions", sessions: sessionList });
 }

@@ -926,7 +926,7 @@ describe("gateway state and helper utilities", () => {
         await __testing.refreshSessions(client as never);
         assert.deepEqual(gateway.getSessions(), []);
 
-        client.responses.set("sessions.list", { sessions: [null, "bad"] });
+        client.responses.set("sessions.list", { sessions: [null, "bad", {}] });
         await __testing.refreshSessions(client as never);
         assert.deepEqual(gateway.getSessions(), []);
     });
