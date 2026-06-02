@@ -92,7 +92,6 @@ function rollbackFirstUserBootstrap(
                 { cause: rollbackError }
             );
         }
-        /* c8 ignore next -- primary cleanup failure is surfaced through the route response; rollback-failure path is ignored above. */
         throw error;
     }
 }
@@ -103,9 +102,7 @@ function rollbackCreatedFirstUser(userId: number): void {
         db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
         db.prepare("DELETE FROM users WHERE id = ?").run(userId);
         db.exec("COMMIT");
-        /* c8 ignore next -- rollback engine faults are defensive SQLite cleanup paths. */
     } catch (error) {
-        /* c8 ignore next 12 -- transaction rollback failure is an SQLite engine fault; outer cleanup logging is covered. */
         try {
             db.exec("ROLLBACK");
         } catch (rollbackError) {
@@ -118,12 +115,8 @@ function rollbackCreatedFirstUser(userId: number): void {
                 "First-user cleanup transaction and rollback failed",
                 { cause: rollbackError }
             );
-            /* c8 ignore next -- defensive rollback-failure branch is covered through AggregateError construction above. */
         }
-        /* c8 ignore start -- primary cleanup failure is surfaced through the route response; rollback-failure path is ignored above. */
         throw error;
-        /* c8 ignore stop */
-        /* c8 ignore next -- covered route behavior observes the cleanup failure through the caller. */
     }
 }
 
@@ -262,9 +255,7 @@ export default function authRoutes(
             } else {
                 try {
                     rollbackCreatedUser(user.id);
-                    /* c8 ignore next -- dependency-injected cleanup failure is covered by route tests; c8 cannot map the mocked callback consistently. */
                 } catch (rollbackError) {
-                    /* c8 ignore next 2 -- dependency-injected cleanup failure is covered by route tests; c8 cannot map the mocked callback consistently. */
                     console.error("[Auth] First-user cleanup failed:", rollbackError);
                 }
             }

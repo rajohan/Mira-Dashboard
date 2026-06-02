@@ -13,9 +13,12 @@ interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
     testing: {
+        isProcfsAvailable: () => boolean;
+        setProcfsAvailabilityProbeForTest: (next?: () => boolean) => void;
         setValidateOpenclawLeafForTest: (
             next?: (openclawRoot: string) => boolean
         ) => void;
+        validateOpenclawLeaf: (openclawRoot: string) => boolean;
     };
 }
 
@@ -1002,6 +1005,75 @@ describe("config files routes", () => {
             await rm(outsideDir, { recursive: true, force: true });
         }
 
+        const originalWriteOpen = fs.promises.open;
+        const agentmailConfig = path.join(
+            openclawRoot,
+            "hooks",
+            "transforms",
+            "agentmail.ts"
+        );
+        await rm(agentmailConfig, { force: true });
+        try {
+            fs.promises.open = (async (
+                target: fs.PathLike,
+                flags: string | number,
+                mode?: fs.Mode
+            ) => {
+                if (
+                    String(target).includes(`${path.sep}.agentmail.ts.`) &&
+                    String(target).endsWith(".tmp") &&
+                    typeof flags === "number" &&
+                    (flags & fs.constants.O_WRONLY) !== 0
+                ) {
+                    const error = new Error("write denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalWriteOpen.call(fs.promises, target, flags, mode);
+            }) as typeof fs.promises.open;
+            const deniedWrite = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const ok = true;\n" } }
+            );
+            assert.equal(deniedWrite.status, 403);
+            assert.equal(deniedWrite.body.error, "Access denied");
+        } finally {
+            fs.promises.open = originalWriteOpen;
+            await rm(agentmailConfig, { force: true });
+        }
+
+        await rm(agentmailConfig, { force: true });
+        try {
+            fs.promises.open = (async (
+                target: fs.PathLike,
+                flags: string | number,
+                mode?: fs.Mode
+            ) => {
+                if (
+                    String(target).includes(`${path.sep}.agentmail.ts.`) &&
+                    String(target).endsWith(".tmp") &&
+                    typeof flags === "number" &&
+                    (flags & fs.constants.O_WRONLY) !== 0
+                ) {
+                    const error = new Error("write crashed") as NodeJS.ErrnoException;
+                    error.code = "EIO";
+                    throw error;
+                }
+                return originalWriteOpen.call(fs.promises, target, flags, mode);
+            }) as typeof fs.promises.open;
+            const failedWrite = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export const ok = true;\n" } }
+            );
+            assert.equal(failedWrite.status, 500);
+            assert.equal(failedWrite.body.error, "write crashed");
+        } finally {
+            fs.promises.open = originalWriteOpen;
+            await rm(agentmailConfig, { force: true });
+        }
+
         const originalLstatSync = fs.lstatSync;
         try {
             fs.lstatSync = ((target: fs.PathLike) => {
@@ -1013,16 +1085,15 @@ describe("config files routes", () => {
                 return originalLstatSync(target);
             }) as typeof fs.lstatSync;
 
-            const { __testing } = await import("./configFiles.js");
-            assert.equal(__testing.validateOpenclawLeaf(openclawRoot), false);
+            assert.equal(server.testing.validateOpenclawLeaf(openclawRoot), false);
             assert.equal(
-                __testing.validateOpenclawLeaf(path.join(openclawRoot, "missing")),
+                server.testing.validateOpenclawLeaf(path.join(openclawRoot, "missing")),
                 false
             );
-            assert.equal(__testing.validateOpenclawLeaf(openclawConfig), false);
+            assert.equal(server.testing.validateOpenclawLeaf(openclawConfig), false);
             const leafSymlink = path.join(homeDir, "openclaw-root-link");
             await symlink(openclawRoot, leafSymlink);
-            assert.equal(__testing.validateOpenclawLeaf(leafSymlink), false);
+            assert.equal(server.testing.validateOpenclawLeaf(leafSymlink), false);
         } finally {
             await rm(path.join(homeDir, "openclaw-root-link"), { force: true });
             fs.lstatSync = originalLstatSync;
@@ -1158,7 +1229,7 @@ describe("config files routes", () => {
             await rm(outsideParent, { recursive: true, force: true });
         }
 
-        const { __testing } = await import("./configFiles.js");
+        const { __testing: parentPathTesting } = await import("./configFiles.js");
         const originalRootMkdirSync = fs.mkdirSync;
         try {
             fs.mkdirSync = ((target: fs.PathLike) => {
@@ -1169,7 +1240,10 @@ describe("config files routes", () => {
                 }
                 return originalRootMkdirSync(target);
             }) as typeof fs.mkdirSync;
-            await __testing.ensureParentDirsForWrite(openclawConfig, openclawRoot);
+            await parentPathTesting.ensureParentDirsForWrite(
+                openclawConfig,
+                openclawRoot
+            );
 
             fs.mkdirSync = ((target: fs.PathLike) => {
                 if (String(target) === openclawRoot) {
@@ -1180,22 +1254,23 @@ describe("config files routes", () => {
                 return originalRootMkdirSync(target);
             }) as typeof fs.mkdirSync;
             await assert.rejects(
-                () => __testing.ensureParentDirsForWrite(openclawConfig, openclawRoot),
+                () =>
+                    parentPathTesting.ensureParentDirsForWrite(
+                        openclawConfig,
+                        openclawRoot
+                    ),
                 (error: unknown) => (error as NodeJS.ErrnoException).code === "EACCES"
             );
         } finally {
             fs.mkdirSync = originalRootMkdirSync;
         }
 
-        const originalPlatform = process.platform;
         try {
-            Object.defineProperty(process, "platform", {
-                configurable: true,
-                value: "darwin",
-            });
+            parentPathTesting.setProcfsAvailabilityProbeForTest(() => false);
+            assert.equal(parentPathTesting.isProcfsAvailable(), false);
             await assert.rejects(
                 () =>
-                    __testing.withRootedParentPath(
+                    parentPathTesting.withRootedParentPath(
                         openclawConfig,
                         openclawRoot,
                         (rootedPath) => rootedPath
@@ -1205,10 +1280,34 @@ describe("config files routes", () => {
                     (error as Error).message === "Parent path validation failed"
             );
         } finally {
-            Object.defineProperty(process, "platform", {
-                configurable: true,
-                value: originalPlatform,
-            });
+            parentPathTesting.setProcfsAvailabilityProbeForTest();
+        }
+
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (String(target).startsWith("/proc/self/fd/")) {
+                    const error = new Error(
+                        "procfs unavailable"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            await assert.rejects(
+                () =>
+                    parentPathTesting.withRootedParentPath(
+                        openclawConfig,
+                        openclawRoot,
+                        (rootedPath) => rootedPath
+                    ),
+                (error: unknown) =>
+                    (error as NodeJS.ErrnoException).code === "EACCES" &&
+                    (error as Error).message === "Parent path validation failed"
+            );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
         }
 
         const rejectedParent = await mkdtemp(
@@ -1219,7 +1318,7 @@ describe("config files routes", () => {
             await symlink(rejectedParent, transformsDir);
             await assert.rejects(
                 () =>
-                    __testing.ensureParentDirsForWrite(
+                    parentPathTesting.ensureParentDirsForWrite(
                         path.join(transformsDir, "agentmail.ts"),
                         openclawRoot
                     ),
@@ -1235,7 +1334,7 @@ describe("config files routes", () => {
 
         await assert.rejects(
             () =>
-                __testing.ensureParentDirsForWrite(
+                parentPathTesting.ensureParentDirsForWrite(
                     path.join(openclawRoot, "..", "outside", "openclaw.json"),
                     openclawRoot
                 ),

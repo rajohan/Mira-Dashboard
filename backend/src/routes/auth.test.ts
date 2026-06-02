@@ -552,6 +552,55 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
+    it("keeps first-user cleanup best-effort when database cleanup throws", async () => {
+        cleanupBootstrapRows(username);
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "BEGIN IMMEDIATE") {
+                return db;
+            }
+            if (sql === "COMMIT") {
+                throw new Error("cleanup commit unavailable");
+            }
+            if (sql === "ROLLBACK") {
+                return db;
+            }
+            return originalExec(sql);
+        });
+        const consoleError = mock.method(console, "error", () => {});
+        const cleanupFailureServer = await startServer({
+            createFirstUser: (newUsername, newPassword) =>
+                createUser(newUsername, newPassword),
+            persistGatewayToken: () => {
+                throw new Error("token persistence unavailable");
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                cleanupFailureServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: {
+                        username: "bootstrap-db-cleanup-failure",
+                        password,
+                        gatewayToken,
+                    },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(consoleError.mock.callCount(), 2);
+        } finally {
+            await cleanupFailureServer.close();
+            consoleError.mock.restore();
+            execMock.mock.restore();
+            cleanupUser("bootstrap-db-cleanup-failure");
+            cleanupBootstrapRows(username);
+        }
+    });
+
     it("keeps bootstrap rollback best-effort when shutdown throws", async () => {
         cleanupBootstrapRows(username);
         db.prepare(
@@ -631,6 +680,35 @@ describe("auth first-user bootstrap routes", () => {
             db.prepare(
                 "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
             ).run("restore-fails-token");
+        }
+    });
+
+    it("surfaces first-user cleanup rollback transaction failures", () => {
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "BEGIN IMMEDIATE") {
+                return db;
+            }
+            if (sql === "COMMIT") {
+                throw new Error("cleanup commit unavailable");
+            }
+            if (sql === "ROLLBACK") {
+                throw new Error("cleanup rollback unavailable");
+            }
+            return originalExec(sql);
+        });
+        const consoleError = mock.method(console, "error", () => {});
+        try {
+            assert.throws(
+                () => authTesting.rollbackCreatedFirstUser(-1),
+                (error: unknown) =>
+                    error instanceof AggregateError &&
+                    error.message === "First-user cleanup transaction and rollback failed"
+            );
+            assert.equal(consoleError.mock.callCount(), 1);
+        } finally {
+            consoleError.mock.restore();
+            execMock.mock.restore();
         }
     });
 });

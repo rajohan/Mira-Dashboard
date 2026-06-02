@@ -30,6 +30,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT",
     "MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE",
     "MIRA_FAKE_DOCKER_RM_FAIL",
+    "MIRA_FAKE_DOCKER_ACTION_FAIL",
     "MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH",
     "MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT",
     "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
@@ -235,6 +236,10 @@ if (args[0] === "logs") {
   process.stdout.write("stdout log\n");
   process.stderr.write("stderr log\n");
   process.exit(0);
+}
+if (process.env.MIRA_FAKE_DOCKER_ACTION_FAIL === "1" && ["start", "stop", "restart"].includes(args[0])) {
+  process.stderr.write("docker action unavailable\n");
+  process.exit(12);
 }
 if (["start", "stop", "restart"].includes(args[0])) {
   process.stdout.write(args[0] + " ok\n");
@@ -1150,8 +1155,8 @@ describe("docker routes", { concurrency: false }, () => {
                         updatedStdout = stdout;
                     }
                 );
-                assert.equal(partialRun.stdout, "partial stdout\n");
-                assert.equal(updatedStdout, "partial stdout\n");
+                assert.equal(partialRun.stdout, "partial stdout");
+                assert.equal(updatedStdout, "partial stdout");
             });
             await withEnvValue(
                 "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
@@ -1609,8 +1614,18 @@ describe("docker routes", { concurrency: false }, () => {
             "/api/docker/containers/missing/action",
             { method: "POST", body: { action: "restart" } }
         );
-        assert.equal(missingContainer.status, 500);
+        assert.equal(missingContainer.status, 404);
         assert.equal(missingContainer.body.error, "Container not found");
+
+        await withEnvValue("MIRA_FAKE_DOCKER_ACTION_FAIL", "1", async () => {
+            const failedAction = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/containers/abc123/action",
+                { method: "POST", body: { action: "restart" } }
+            );
+            assert.equal(failedAction.status, 500);
+            assert.match(failedAction.body.error, /docker action unavailable/u);
+        });
     });
 
     it("returns updater services, events, and validates manual update state", async () => {

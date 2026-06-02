@@ -600,15 +600,11 @@ export default function filesRoutes(
                                     await fs.promises
                                         .unlink(safeBackupPath)
                                         .catch((error) => {
-                                            /* c8 ignore next -- unexpected unlink failures bubble as route errors; normal stale backup cleanup is covered. */
                                             if (
                                                 (error as NodeJS.ErrnoException).code !==
                                                 "ENOENT"
                                             ) {
-                                                /* c8 ignore start -- unexpected unlink failures bubble as route errors; normal stale backup cleanup is covered. */
                                                 throw error;
-                                                /* c8 ignore stop */
-                                                /* c8 ignore next -- defensive non-ENOENT cleanup failure is surfaced by the route. */
                                             }
                                         });
                                     shouldCopyBackup = false;

@@ -1212,23 +1212,19 @@ describe("agents routes", () => {
             fs.mkdirSync = originalMkdirSync;
         }
 
-        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        const { __testing } = await import("./agents.js");
         try {
-            Object.defineProperty(process, "platform", {
-                configurable: true,
-                value: "darwin",
-            });
+            __testing.setProcfsAvailabilityProbeForTest(() => false);
+            assert.equal(__testing.isProcfsAvailable(), false);
             const unsupported = await requestJson<{ error: string }>(
                 server,
                 "/api/agents/unsupported-platform/metadata",
                 { method: "PUT", body: { currentTask: "Nope" } }
             );
-            assert.equal(unsupported.status, 400);
-            assert.equal(unsupported.body.error, "Invalid agent metadata path");
+            assert.equal(unsupported.status, 501);
+            assert.equal(unsupported.body.error, "unsupported-platform");
         } finally {
-            if (originalPlatform) {
-                Object.defineProperty(process, "platform", originalPlatform);
-            }
+            __testing.setProcfsAvailabilityProbeForTest();
         }
     });
 

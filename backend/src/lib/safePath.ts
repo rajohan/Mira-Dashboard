@@ -57,7 +57,6 @@ function createChildDirectoryFromVerifiedParent(
             return null;
         }
         const realNextParent = fs.realpathSync(Buffer.from(nextParent));
-        /* c8 ignore start -- defensive non-Linux race/success check depends on host platform. */
         if (
             realNextParent !== nextParent ||
             !fs.statSync(Buffer.from(realNextParent)).isDirectory()
@@ -65,7 +64,6 @@ function createChildDirectoryFromVerifiedParent(
             return null;
         }
         return realNextParent;
-        /* c8 ignore stop */
     }
 
     const parentFd = fs.openSync(

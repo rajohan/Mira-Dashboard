@@ -1122,9 +1122,9 @@ async function runDockerExecCommand(
         let stderr = "";
         let stdoutPending = "";
 
-        const processStdoutLine = (line: string): void => {
+        const processStdoutLine = (line: string, trailingNewline = false): void => {
             if (!line.startsWith(DOCKER_EXEC_PID_MARKER)) {
-                stdout = trimOutput(stdout + line + "\n");
+                stdout = trimOutput(stdout + line + (trailingNewline ? "\n" : ""));
                 return;
             }
             const parsedPid = Number.parseInt(
@@ -1155,7 +1155,7 @@ async function runDockerExecCommand(
             while (newlineIndex !== -1) {
                 const line = stdoutPending.slice(0, newlineIndex);
                 stdoutPending = stdoutPending.slice(newlineIndex + 1);
-                processStdoutLine(line);
+                processStdoutLine(line, true);
                 newlineIndex = stdoutPending.indexOf("\n");
             }
             flushNonMarkerPendingStdout();
@@ -1504,7 +1504,16 @@ export default function dockerRoutes(app: express.Application): void {
                 return;
             }
 
-            const result = await runContainerAction(containerId, action);
+            let result: Awaited<ReturnType<typeof runContainerAction>>;
+            try {
+                result = await runContainerAction(containerId, action);
+            } catch (error) {
+                if ((error as Error).message.includes("Container not found")) {
+                    res.status(404).json({ error: (error as Error).message });
+                    return;
+                }
+                throw error;
+            }
             res.json(result);
         })
     );

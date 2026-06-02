@@ -537,7 +537,12 @@ export default function execRoutes(
                 process.kill(-processId, "SIGTERM");
             } catch {
                 // Fallback to killing just the process if process group fails
-                job.process.kill("SIGTERM");
+                const sent = job.process.kill("SIGTERM");
+                if (!sent) {
+                    // Process already gone – close handler will transition to done
+                    res.json({ success: true, message: "Process already terminated" });
+                    return;
+                }
             }
             job.status = "signaled";
 

@@ -102,6 +102,18 @@ function validateOpenclawLeaf(openclawRoot: string): boolean {
 }
 
 let validateOpenclawLeafForWrite = validateOpenclawLeaf;
+let procfsAvailabilityProbe = (): boolean =>
+    process.platform === "linux" && fs.existsSync("/proc/self/fd");
+
+function createAccessDeniedError(message: string): NodeJS.ErrnoException {
+    const error = new Error(message) as NodeJS.ErrnoException;
+    error.code = "EACCES";
+    return error;
+}
+
+export function isProcfsAvailable(): boolean {
+    return procfsAvailabilityProbe();
+}
 
 function decodeConfigPath(encodedPath: string): string | null {
     try {
@@ -116,10 +128,8 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    if (process.platform !== "linux") {
-        const error = new Error("Parent path validation failed") as NodeJS.ErrnoException;
-        error.code = "EACCES";
-        throw error;
+    if (!isProcfsAvailable()) {
+        throw createAccessDeniedError("Parent path validation failed");
     }
 
     const parentPath = path.dirname(safePath);
@@ -128,17 +138,22 @@ async function withRootedParentPath<T>(
         fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
     );
     try {
-        const realRoot = fs.realpathSync(rootPath);
-        const realParent = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        let realRoot: string;
+        let realParent: string;
+        let rootedPath: string;
+        try {
+            realRoot = fs.realpathSync(rootPath);
+            const fdPath = `/proc/self/fd/${parentFd}`;
+            realParent = fs.realpathSync(fdPath);
+            rootedPath = path.join(fdPath, path.basename(safePath));
+        } catch {
+            throw createAccessDeniedError("Parent path validation failed");
+        }
         if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
-            const error = new Error(
-                "Parent path validation failed"
-            ) as NodeJS.ErrnoException;
-            error.code = "EACCES";
-            throw error;
+            throw createAccessDeniedError("Parent path validation failed");
         }
 
-        return await callback(`/proc/self/fd/${parentFd}/${path.basename(safePath)}`);
+        return await callback(rootedPath);
     } finally {
         fs.closeSync(parentFd);
     }
@@ -589,7 +604,6 @@ export default function configFilesRoutes(
                         return statGuarded(guardedPath(rootedFullPath));
                     }
                 ).catch((error: NodeJS.ErrnoException) => {
-                    /* c8 ignore next 4 -- no-follow write EACCES is covered in guardedOps; route mapping is defensive. */
                     if (error.code === "EACCES") {
                         res.status(403).json({ error: "Access denied" });
                         return null;
@@ -600,7 +614,6 @@ export default function configFilesRoutes(
                         });
                         return null;
                     }
-                    /* c8 ignore next -- unexpected write errors bubble to the route error handler. */
                     throw error;
                 });
                 if (!stat) {
@@ -627,10 +640,16 @@ export const __testing = {
     ensureParentDirsForWrite,
     listConfigFiles,
     resolveOpenclawRoot,
+    isProcfsAvailable,
     setValidateOpenclawLeafForTest(
         nextValidateOpenclawLeaf?: typeof validateOpenclawLeaf
     ): void {
         validateOpenclawLeafForWrite = nextValidateOpenclawLeaf ?? validateOpenclawLeaf;
+    },
+    setProcfsAvailabilityProbeForTest(nextProbe?: typeof procfsAvailabilityProbe): void {
+        procfsAvailabilityProbe =
+            nextProbe ??
+            (() => process.platform === "linux" && fs.existsSync("/proc/self/fd"));
     },
     validateOpenclawLeaf,
     withRootedParentPath,

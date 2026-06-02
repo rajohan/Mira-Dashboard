@@ -815,6 +815,7 @@ describe("exec routes", () => {
     it("falls back to direct process kill when process group stop fails", async () => {
         const originalKill = process.kill;
         const jobId = "running-with-fallback-kill";
+        const unsentJobId = "running-with-unsent-fallback-kill";
         let fallbackKilled = false;
         const fakeProcess = {
             killed: false,
@@ -824,6 +825,14 @@ describe("exec routes", () => {
                 fakeProcess.killed = true;
                 fallbackKilled = true;
                 return true;
+            },
+        };
+        const unsentProcess = {
+            killed: false,
+            pid: 123_457,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                return false;
             },
         };
         __testing.jobs.set(jobId, {
@@ -836,9 +845,19 @@ describe("exec routes", () => {
             endedAt: null,
             process: fakeProcess as never,
         });
+        __testing.jobs.set(unsentJobId, {
+            id: unsentJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: unsentProcess as never,
+        });
 
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-            assert.equal(pid, -123_456);
+            assert.ok(pid === -123_456 || pid === -123_457);
             assert.equal(signal, "SIGTERM");
             throw new Error("no process group");
         }) as typeof process.kill;
@@ -852,9 +871,19 @@ describe("exec routes", () => {
 
             assert.equal(stop.status, 200);
             assert.equal(fallbackKilled, true);
+            assert.equal(__testing.jobs.get(jobId)?.status, "signaled");
+
+            const unsentStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${unsentJobId}/stop`,
+                { method: "POST" }
+            );
+            assert.equal(unsentStop.status, 200);
+            assert.equal(__testing.jobs.get(unsentJobId)?.status, "running");
         } finally {
             process.kill = originalKill;
             __testing.jobs.delete(jobId);
+            __testing.jobs.delete(unsentJobId);
         }
     });
 

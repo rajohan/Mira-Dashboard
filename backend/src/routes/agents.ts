@@ -43,10 +43,15 @@ const OPENCLAW_ROOT = resolveOpenclawRoot();
 const HAS_CONFIGURED_HOME_DIR = OPENCLAW_ROOT !== null;
 const AGENTS_DIR = OPENCLAW_ROOT ? Path.join(OPENCLAW_ROOT, "agents") : "";
 let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
+let procfsAvailabilityProbe = (): boolean =>
+    process.platform === "linux" && FS.existsSync("/proc/self/fd");
+
+export function isProcfsAvailable(): boolean {
+    return procfsAvailabilityProbe();
+}
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
-    /* c8 ignore next 8 -- platform/procfs guard is host-dependent; route fallback behavior is covered. */
-    if (process.platform !== "linux" || !FS.existsSync("/proc/self/fd")) {
+    if (!isProcfsAvailable()) {
         throw Object.assign(
             new Error(
                 "Verified child directory creation is unsupported on this platform"
@@ -1406,10 +1411,16 @@ export const __testing = {
     applyGatewaySessionStatus,
     buildAgentStatuses,
     buildSingleAgentStatus,
+    isProcfsAvailable,
     setPrepareAgentMetadataDirForTest(
         nextPrepare?: typeof prepareSafeWriteTargetWithinRoot
     ): void {
         prepareAgentMetadataDirForWrite = nextPrepare ?? prepareSafeWriteTargetWithinRoot;
+    },
+    setProcfsAvailabilityProbeForTest(nextProbe?: typeof procfsAvailabilityProbe): void {
+        procfsAvailabilityProbe =
+            nextProbe ??
+            (() => process.platform === "linux" && FS.existsSync("/proc/self/fd"));
     },
 };
 
@@ -1576,7 +1587,6 @@ export default function agentsRoutes(app: express.Application): void {
                 try {
                     mkdirChildFromVerifiedParent(realAgentsDir, agentId);
                 } catch (error) {
-                    /* c8 ignore next 4 -- only reachable on unsupported host/procfs combinations. */
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
                         res.status(501).json({ error: "unsupported-platform" });
                         return;

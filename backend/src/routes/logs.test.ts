@@ -282,12 +282,17 @@ describe("logs routes", () => {
         assert.equal(negativeTailBody.content, "first\n\nsecond\nthird\n");
 
         const directoryName = "openclaw-2099-03-05.log";
-        await mkdir(path.join(logsDir, directoryName));
-        const directory = await fetch(
-            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(directoryName)}`
-        );
-        assert.equal(directory.status, 404);
-        assert.deepEqual(await directory.json(), { error: "Log file not found" });
+        const directoryPath = path.join(logsDir, directoryName);
+        await mkdir(directoryPath);
+        try {
+            const directory = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(directoryName)}`
+            );
+            assert.equal(directory.status, 404);
+            assert.deepEqual(await directory.json(), { error: "Log file not found" });
+        } finally {
+            await rm(directoryPath, { recursive: true, force: true });
+        }
 
         const mockedToday = new RealDate("2099-12-31T12:00:00.000Z")
             .toISOString()
