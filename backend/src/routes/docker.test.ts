@@ -31,6 +31,9 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_NUMERIC_IMAGE_SIZE",
     "MIRA_FAKE_DOCKER_RM_FAIL",
     "MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH",
+    "MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT",
+    "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
+    "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
 ] as const;
 const originalFakeEnv = new Map(
@@ -252,7 +255,24 @@ if (command === "volume prune -f") {
   process.exit(0);
 }
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("__MIRA_DOCKER_EXEC_PID__=")) {
+  if (process.env.MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER === "1") {
+    process.stdout.write("__MIRA_DOCKER_");
+    setTimeout(() => {
+      process.stdout.write("EXEC_PID__=4321\nexec stdout\n");
+      process.stderr.write("exec stderr\n");
+    }, 10);
+    setTimeout(() => process.exit(0), 20);
+    return;
+  }
   process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\n");
+}
+if (process.env.MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+  process.stdout.write("partial stdout");
+  process.exit(0);
+}
+if (process.env.MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("kill -TERM")) {
+  process.stderr.write("container stop failed\n");
+  process.exit(12);
 }
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("sleep")) {
   process.stdout.write("started long exec\n");
@@ -859,6 +879,58 @@ describe("docker routes", { concurrency: false }, () => {
                 processKill.mock.restore();
             }
 
+            let hostCleanupAfterContainerFailure = false;
+            __testing.dockerExecJobs.set("container-stop-fails", {
+                id: "container-stop-fails",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+                inContainerPid: 4321,
+                process: createMockChildProcess({
+                    pid: 125,
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
+                        hostCleanupAfterContainerFailure = true;
+                        return true;
+                    },
+                }),
+            });
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
+                "1",
+                async () => {
+                    const processKillForContainerFailure = mock.method(
+                        process,
+                        "kill",
+                        () => {
+                            throw Object.assign(new Error("operation not permitted"), {
+                                code: "EPERM",
+                            });
+                        }
+                    );
+                    try {
+                        const failedContainerStop = await requestJson<{ error: string }>(
+                            server,
+                            "/api/docker/exec/container-stop-fails/stop",
+                            { method: "POST", body: {} }
+                        );
+                        assert.equal(failedContainerStop.status, 500);
+                        assert.match(
+                            failedContainerStop.body.error,
+                            /container stop failed/u
+                        );
+                        assert.equal(hostCleanupAfterContainerFailure, true);
+                    } finally {
+                        processKillForContainerFailure.mock.restore();
+                    }
+                }
+            );
+
             const failingFallbackProcessKill = mock.method(process, "kill", () => {
                 throw Object.assign(new Error("operation not permitted"), {
                     code: "EPERM",
@@ -1022,6 +1094,41 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(directRun.code, 0);
             assert.equal(directRun.stdout, "exec stdout\n");
+            await withEnvValue("MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER", "1", async () => {
+                __testing.dockerExecJobs.set("split-marker", {
+                    id: "split-marker",
+                    containerId: "app",
+                    status: "running",
+                    code: null,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: Date.now(),
+                    endedAt: null,
+                });
+                const splitRun = await __testing.runDockerExecCommand(
+                    "app",
+                    "echo hi",
+                    "split-marker"
+                );
+                assert.equal(
+                    __testing.dockerExecJobs.get("split-marker")?.inContainerPid,
+                    4321
+                );
+                assert.equal(splitRun.stdout, "exec stdout\n");
+            });
+            await withEnvValue("MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT", "1", async () => {
+                let updatedStdout = "";
+                const partialRun = await __testing.runDockerExecCommand(
+                    "app",
+                    "echo hi",
+                    "missing-job",
+                    (stdout) => {
+                        updatedStdout = stdout;
+                    }
+                );
+                assert.equal(partialRun.stdout, "partial stdout\n");
+                assert.equal(updatedStdout, "partial stdout\n");
+            });
         } finally {
             __testing.dockerExecJobs.clear();
         }

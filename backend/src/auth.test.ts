@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, it } from "node:test";
+import { beforeEach, describe, it, mock } from "node:test";
 
 import {
     bootstrapRequired,
     clearSessionCookie,
+    createFirstUser,
     createSession,
     createUser,
     findUserByUsername,
@@ -82,6 +83,26 @@ describe("auth helpers", () => {
             sessionId
         );
         assert.equal(getAuthUserFromSessionId(sessionId), null);
+    });
+
+    it("rolls back atomic first-user creation failures", () => {
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO users")) {
+                return {
+                    run() {
+                        throw new Error("insert failed");
+                    },
+                } as never;
+            }
+            return originalPrepare(sql);
+        });
+        try {
+            assert.throws(() => createFirstUser("first", "secret"), /insert failed/u);
+            assert.equal(bootstrapRequired(), true);
+        } finally {
+            prepareMock.mock.restore();
+        }
     });
 
     it("reads auth users from loopback and session cookies", () => {

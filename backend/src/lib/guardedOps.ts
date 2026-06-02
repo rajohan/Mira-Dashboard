@@ -1,5 +1,6 @@
 import * as ChildProcess from "node:child_process";
 import * as Fs from "node:fs";
+import Path from "node:path";
 
 import JSON5 from "json5";
 
@@ -130,12 +131,18 @@ export async function copyNoFollowGuarded(
             });
         }
         const sourceMode = sourceStat.mode & 0o777;
-        const destinationFile = await Fs.promises.open(
-            guardedPathBuffer(destination),
-            Fs.constants.O_WRONLY | Fs.constants.O_CREAT | Fs.constants.O_NOFOLLOW,
-            sourceMode
+        const destinationPath = destination as string;
+        const destinationDir = Path.dirname(destinationPath);
+        const tempPath = Path.join(
+            destinationDir,
+            `.${Path.basename(destinationPath)}.${process.pid}.${Date.now()}.tmp`
         );
+        let destinationFile: Fs.promises.FileHandle | undefined;
         try {
+            destinationFile = await Fs.promises.open(
+                guardedPathBuffer(destination),
+                Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+            );
             const destinationStat = await destinationFile.stat();
             if (!destinationStat.isFile()) {
                 throw Object.assign(new Error("Destination must be a regular file"), {
@@ -155,41 +162,72 @@ export async function copyNoFollowGuarded(
                     code: "EMLINK",
                 });
             }
-
-            await destinationFile.chmod(sourceMode);
-            await destinationFile.truncate(0);
-            const buffer = Buffer.allocUnsafe(64 * 1024);
-            let position = 0;
-            while (true) {
-                const remaining = sourceStat.size - position;
-                if (remaining <= 0) {
-                    break;
-                }
-                const { bytesRead } = await readChunk(
-                    sourceFile,
-                    buffer,
-                    0,
-                    Math.min(buffer.length, remaining),
-                    position
-                );
-                if (bytesRead === 0) {
-                    throw Object.assign(new Error("Source changed during copy"), {
-                        code: "EIO",
-                    });
-                }
-                let written = 0;
-                while (written < bytesRead) {
-                    const { bytesWritten } = await destinationFile.write(
-                        buffer,
-                        written,
-                        bytesRead - written
-                    );
-                    written += bytesWritten;
-                }
-                position += bytesRead;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
             }
         } finally {
-            await destinationFile.close();
+            await destinationFile?.close();
+        }
+        let tempCreated = false;
+        const tempFile = await Fs.promises.open(
+            Buffer.from(tempPath),
+            Fs.constants.O_WRONLY |
+                Fs.constants.O_CREAT |
+                Fs.constants.O_EXCL |
+                Fs.constants.O_NOFOLLOW,
+            sourceMode
+        );
+        try {
+            tempCreated = true;
+            try {
+                await tempFile.chmod(sourceMode);
+                const buffer = Buffer.allocUnsafe(64 * 1024);
+                let position = 0;
+                while (true) {
+                    const remaining = sourceStat.size - position;
+                    if (remaining <= 0) {
+                        break;
+                    }
+                    const { bytesRead } = await readChunk(
+                        sourceFile,
+                        buffer,
+                        0,
+                        Math.min(buffer.length, remaining),
+                        position
+                    );
+                    if (bytesRead === 0) {
+                        throw Object.assign(new Error("Source changed during copy"), {
+                            code: "EIO",
+                        });
+                    }
+                    let written = 0;
+                    while (written < bytesRead) {
+                        const { bytesWritten } = await tempFile.write(
+                            buffer,
+                            written,
+                            bytesRead - written
+                        );
+                        written += bytesWritten;
+                    }
+                    position += bytesRead;
+                }
+                await tempFile.sync();
+            } finally {
+                await tempFile.close();
+            }
+            await Fs.promises.rename(tempPath, destinationPath);
+            tempCreated = false;
+            const parentDir = await Fs.promises.open(Buffer.from(destinationDir), "r");
+            try {
+                await parentDir.sync();
+            } finally {
+                await parentDir.close();
+            }
+        } finally {
+            if (tempCreated) {
+                await Fs.promises.rm(tempPath, { force: true });
+            }
         }
     } finally {
         await sourceFile.close();

@@ -841,6 +841,19 @@ async function forwardRequest(
 
 /** Processes Gateway WebSocket client events. */
 function handleClient(ws: WebSocket): void {
+    const cleanupClient = () => {
+        subscribers.delete(ws);
+        logsUnsubscribe(ws);
+    };
+
+    ws.on("error", (error) => {
+        console.error(
+            "[Gateway] Client socket error:",
+            errorMessage(error, String(error))
+        );
+        cleanupClient();
+    });
+
     subscribers.add(ws);
     ws.send(
         JSON.stringify({
@@ -920,8 +933,7 @@ function handleClient(ws: WebSocket): void {
     });
 
     ws.on("close", () => {
-        subscribers.delete(ws);
-        logsUnsubscribe(ws);
+        cleanupClient();
     });
 }
 

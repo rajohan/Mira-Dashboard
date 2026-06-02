@@ -24,7 +24,7 @@ interface LogFile {
 /** Returns today log file. */
 function getTodayLogFile(): string {
     const today = new Date().toISOString().split("T")[0];
-    return path.join(logsDir, "openclaw-" + today + ".log");
+    return path.join(realLogsDir, "openclaw-" + today + ".log");
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
@@ -182,7 +182,11 @@ export const __testing = {
         this.resetLogWatcherForTest();
         const resolvedLogsDir = path.resolve(nextLogsDir);
         logsDir = resolvedLogsDir;
-        realLogsDir = resolvedLogsDir;
+        try {
+            realLogsDir = fs.realpathSync(resolvedLogsDir);
+        } catch {
+            realLogsDir = resolvedLogsDir;
+        }
     },
 };
 
@@ -191,14 +195,26 @@ export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {
         try {
-            if (!fs.existsSync(logsDir)) {
+            let realRoot: string;
+            try {
+                realRoot = fs.realpathSync(realLogsDir);
+                realLogsDir = realRoot;
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    res.json({ logs: [] });
+                    return;
+                }
+                throw error;
+            }
+            if (!fs.existsSync(realRoot)) {
                 res.json({ logs: [] });
                 return;
             }
 
             let names: string[];
             try {
-                names = fs.readdirSync(logsDir);
+                names = fs.readdirSync(realRoot);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
@@ -213,7 +229,7 @@ export default function logsRoutes(app: express.Application): void {
                 .flatMap((f) => {
                     let stat: fs.Stats;
                     try {
-                        stat = fs.lstatSync(path.join(logsDir, f));
+                        stat = fs.lstatSync(path.join(realRoot, f));
                     } catch (error) {
                         const code = (error as NodeJS.ErrnoException).code;
                         if (code === "ENOENT" || code === "ENOTDIR") {
@@ -251,6 +267,7 @@ export default function logsRoutes(app: express.Application): void {
             let realRoot: string;
             try {
                 realRoot = fs.realpathSync(realLogsDir);
+                realLogsDir = realRoot;
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {

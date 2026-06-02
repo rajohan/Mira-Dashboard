@@ -1562,7 +1562,15 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
                 const expectedSessionsParent = Path.dirname(safeSessionsDir);
-                mkdirGuarded(guardedPath(expectedSessionsParent), { recursive: true });
+                try {
+                    mkdirChildFromVerifiedParent(realAgentsDir, agentId);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
+                        res.status(501).json({ error: "unsupported-platform" });
+                        return;
+                    }
+                    throw error;
+                }
                 const realExpectedSessionsParent =
                     FS.realpathSync(expectedSessionsParent);
                 if (

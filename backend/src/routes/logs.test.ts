@@ -122,6 +122,34 @@ describe("logs routes", () => {
         const originalLstatSync = fs.lstatSync;
 
         try {
+            const missingRealRoot = path.join(logsDir, "missing-real-root");
+            __testing.setLogsDirForTest(missingRealRoot);
+            const missingRealRootList = await fetch(`${server.baseUrl}/api/logs/info`);
+            assert.equal(missingRealRootList.status, 200);
+            assert.deepEqual(await missingRealRootList.json(), { logs: [] });
+            __testing.setLogsDirForTest(logsDir);
+
+            const originalRealpathSync = fs.realpathSync;
+            try {
+                fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding) => {
+                    if (String(target) === logsDir) {
+                        const error = new Error(
+                            "log root denied"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "EACCES";
+                        throw error;
+                    }
+                    return originalRealpathSync(target, options as never);
+                }) as typeof fs.realpathSync;
+                const deniedRealRoot = await fetch(`${server.baseUrl}/api/logs/info`);
+                assert.equal(deniedRealRoot.status, 500);
+                assert.deepEqual(await deniedRealRoot.json(), {
+                    error: "log root denied",
+                });
+            } finally {
+                fs.realpathSync = originalRealpathSync;
+            }
+
             fs.existsSync = ((target: fs.PathLike) => {
                 if (target === logsDir) return false;
                 return originalExistsSync(target);

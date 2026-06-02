@@ -38,7 +38,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
     await writeFile(
         dockerPath,
         String.raw`#!${process.execPath}
-	const command = process.argv.at(-1) || "";
+	const command = process.argv.slice(2).join(" ");
 	const mode = process.env.FAKE_DB_MODE || "default";
 	function out(value) { process.stdout.write(value); }
 	if (mode === 'error') {
@@ -167,6 +167,31 @@ describe("database routes", () => {
                 __testing.buildPgBouncerUri(),
                 "postgresql://user%40name:p%3Aa%2Fss%23@pgbouncer:5432/pgbouncer"
             );
+
+            process.env.DATABASE_HOST = "[::1]";
+            process.env.DATABASE_PORT = "05432";
+            assert.equal(
+                __testing.buildPostgresUri("ipv6"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@[::1]:5432/ipv6"
+            );
+
+            process.env.DATABASE_HOST = "999.1.1.1";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                code: "EINVAL",
+            });
+            process.env.DATABASE_HOST = "db;touch /tmp/pwned";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                code: "EINVAL",
+            });
+            process.env.DATABASE_HOST = "db";
+            process.env.DATABASE_PORT = "5432;id";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                code: "EINVAL",
+            });
+            process.env.DATABASE_PORT = "70000";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                code: "EINVAL",
+            });
         } finally {
             for (const [key, value] of Object.entries(originalEnv)) {
                 if (value === undefined) {

@@ -861,6 +861,7 @@ describe("exec routes", () => {
     it("force kills lingering stopped jobs and ignores missing process groups", async () => {
         const originalKill = process.kill;
         const jobId = "running-with-force-kill";
+        const noPidJobId = "running-without-force-kill-pid";
         const signals: Array<NodeJS.Signals | number | undefined> = [];
         const fakeProcess = {
             killed: false,
@@ -868,6 +869,14 @@ describe("exec routes", () => {
             kill(signal: NodeJS.Signals): boolean {
                 assert.equal(signal, "SIGTERM");
                 fakeProcess.killed = true;
+                return true;
+            },
+        };
+        const noPidProcess = {
+            killed: false,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                noPidProcess.killed = true;
                 return true;
             },
         };
@@ -881,10 +890,23 @@ describe("exec routes", () => {
             endedAt: null,
             process: fakeProcess as never,
         });
+        __testing.jobs.set(noPidJobId, {
+            id: noPidJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: noPidProcess as never,
+        });
 
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
             signals.push(signal);
             if (signal === "SIGTERM") {
+                if (Number.isNaN(pid)) {
+                    throw new TypeError("missing pid");
+                }
                 assert.equal(pid, -234_567);
             } else if (pid === -234_567 && signal === "SIGKILL") {
                 throw new Error("already gone");
@@ -904,17 +926,32 @@ describe("exec routes", () => {
             );
 
             assert.equal(stop.status, 200);
+            const noPidStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${noPidJobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(noPidStop.status, 200);
+            assert.equal(noPidProcess.killed, true);
             mock.timers.tick(3_050);
-            assert.deepEqual(signals, ["SIGTERM", "SIGKILL", "SIGKILL"]);
+            assert.deepEqual(signals, ["SIGTERM", "SIGTERM", "SIGKILL", "SIGKILL"]);
             const stoppedJob = __testing.jobs.get(jobId);
             assert.equal(stoppedJob?.status, "done");
             assert.equal(stoppedJob?.code, 137);
             assert.equal(stoppedJob?.process, undefined);
             assert.equal(typeof stoppedJob?.endedAt, "number");
+
+            const noPidJob = __testing.jobs.get(noPidJobId);
+            assert.equal(noPidJob?.status, "done");
+            assert.equal(noPidJob?.code, 137);
+            assert.equal(noPidJob?.process, undefined);
+            assert.equal(typeof noPidJob?.endedAt, "number");
         } finally {
             mock.timers.reset();
             process.kill = originalKill;
             __testing.jobs.delete(jobId);
+            __testing.jobs.delete(noPidJobId);
         }
     });
 });

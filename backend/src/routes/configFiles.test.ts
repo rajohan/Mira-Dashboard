@@ -215,6 +215,37 @@ describe("config files routes", () => {
         } finally {
             await rm(symlinkedConfig, { recursive: true, force: true });
         }
+
+        const originalLstatSync = fs.lstatSync;
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target) === symlinkedConfig) {
+                    return {
+                        isSymbolicLink: () => false,
+                    } as fs.Stats;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+            fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding) => {
+                if (String(target) === symlinkedConfig) {
+                    return path.join(homeDir, "outside-agentmail.ts");
+                }
+                return originalRealpathSync(target, options as never);
+            }) as typeof fs.realpathSync;
+            const escapedRealpathList = await requestJson<{
+                files: ConfigFileItem[];
+            }>(server, "/api/config-files");
+            assert.equal(
+                escapedRealpathList.body.files.some(
+                    (file) => file.relPath === "hooks/transforms/agentmail.ts"
+                ),
+                false
+            );
+        } finally {
+            fs.lstatSync = originalLstatSync;
+            fs.realpathSync = originalRealpathSync;
+        }
     });
 
     it("reports missing home configuration per request", async () => {
@@ -490,6 +521,94 @@ describe("config files routes", () => {
         } finally {
             await rm(openclawConfig, { force: true });
             await writeFile(openclawConfig, originalOpenclawConfig);
+        }
+
+        const originalLstatForSymlink = fs.lstatSync;
+        try {
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target) === openclawConfig) {
+                    return {
+                        isSymbolicLink: () => true,
+                    } as fs.Stats;
+                }
+                return originalLstatForSymlink(target);
+            }) as typeof fs.lstatSync;
+            const lexicalSymlink = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(lexicalSymlink.status, 404);
+            assert.equal(lexicalSymlink.body.error, "File not found");
+        } finally {
+            fs.lstatSync = originalLstatForSymlink;
+        }
+
+        const originalOpenSyncForMissing = fs.openSync;
+        try {
+            fs.openSync = ((
+                target: fs.PathLike,
+                flags: string | number,
+                mode?: number
+            ) => {
+                if (String(target) === openclawConfig) {
+                    const error = new Error("open raced") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalOpenSyncForMissing(target, flags, mode);
+            }) as typeof fs.openSync;
+            const openRace = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(openRace.status, 404);
+            assert.equal(openRace.body.error, "File not found");
+        } finally {
+            fs.openSync = originalOpenSyncForMissing;
+        }
+
+        const originalLstatSync = fs.lstatSync;
+        try {
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target) === openclawConfig) {
+                    const error = new Error("lstat unavailable") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(target);
+            }) as typeof fs.lstatSync;
+            const lstatFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(lstatFailure.status, 500);
+            assert.equal(lstatFailure.body.error, "lstat unavailable");
+        } finally {
+            fs.lstatSync = originalLstatSync;
+        }
+
+        const originalOpenSync = fs.openSync;
+        try {
+            fs.openSync = ((
+                target: fs.PathLike,
+                flags: string | number,
+                mode?: number
+            ) => {
+                if (String(target) === openclawConfig) {
+                    const error = new Error("open unavailable") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalOpenSync(target, flags, mode);
+            }) as typeof fs.openSync;
+            const openFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json"
+            );
+            assert.equal(openFailure.status, 500);
+            assert.equal(openFailure.body.error, "open unavailable");
+        } finally {
+            fs.openSync = originalOpenSync;
         }
 
         const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-config-outside-"));
@@ -1099,7 +1218,7 @@ describe("config files routes", () => {
                 { method: "PUT", body: { content: "export const next = true;\n" } }
             );
             assert.equal(response.status, 500);
-            assert.match(response.body.error, /EISDIR|directory/i);
+            assert.match(response.body.error, /EISDIR|directory|regular file/i);
             assert.equal(
                 await readFile(target, "utf8"),
                 "export const previous = true;\n"

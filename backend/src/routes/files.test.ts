@@ -963,7 +963,7 @@ describe("files routes", () => {
                 { method: "PUT", body: { content: "after" } }
             );
             assert.equal(response.status, 400);
-            assert.match(response.body.error, /EISDIR|directory/i);
+            assert.match(response.body.error, /EISDIR|directory|regular file/i);
             assert.equal(await readFile(target, "utf8"), "before");
         } finally {
             await rm(backup, { recursive: true, force: true });

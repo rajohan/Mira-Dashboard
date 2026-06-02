@@ -605,9 +605,16 @@ export default function filesRoutes(
                         }
                     );
                 } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === "EISDIR") {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "EISDIR") {
                         res.status(400).json({
                             error: "Path is a directory, not a file",
+                        });
+                        return;
+                    }
+                    if (code === "EINVAL") {
+                        res.status(400).json({
+                            error: (error as Error).message,
                         });
                         return;
                     }

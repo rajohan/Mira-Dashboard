@@ -882,6 +882,23 @@ describe("gateway state and helper utilities", () => {
         __testing.setGatewayConnectedForTest(true);
         await __testing.refreshSessions();
         throwingWs.emit("close");
+
+        const errorWs = new FakeWebSocket();
+        const consoleError = mock.method(console, "error", () => {});
+        gateway.handleClient(errorWs as unknown as WebSocket);
+        errorWs.emit(
+            "message",
+            Buffer.from(
+                JSON.stringify({
+                    channel: "logs",
+                    type: "subscribe",
+                })
+            )
+        );
+        assert.equal(logsTesting.subscriberCount(), 1);
+        errorWs.emit("error", new Error("client socket failed"));
+        assert.equal(logsTesting.subscriberCount(), 0);
+        consoleError.mock.restore();
     });
 
     it("discards stale session refresh results from replaced clients", async () => {

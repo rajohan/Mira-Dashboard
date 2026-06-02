@@ -219,10 +219,27 @@ describe("auth first-user bootstrap routes", () => {
             );
             assert.equal(failed.status, 500);
             assert.equal(failed.body.error, "Failed to create first user");
+
+            cleanupBootstrapRows(username);
+            createUser("bootstrap-existing", password);
+            const dependencyAfterBootstrap = await requestJson<{ error: string }>(
+                duplicateServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: { username: "bootstrap-late", password, gatewayToken },
+                }
+            );
+            assert.equal(dependencyAfterBootstrap.status, 409);
+            assert.equal(
+                dependencyAfterBootstrap.body.error,
+                "Bootstrap registration is no longer available"
+            );
         } finally {
             await duplicateServer?.close();
             await failingServer?.close();
             cleanupBootstrapRows(username);
+            cleanupUser("bootstrap-existing");
         }
     });
 

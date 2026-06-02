@@ -199,6 +199,10 @@ function listConfigFiles(openclawRoot: string): ConfigFile[] {
     for (const relPath of ALLOWED_CONFIG_FILES) {
         const fullPath = path.join(openclawRoot, relPath);
         try {
+            const lexicalStat = fs.lstatSync(fullPath);
+            if (lexicalStat.isSymbolicLink()) {
+                continue;
+            }
             const resolvedFullPath = fs.realpathSync(fullPath);
             if (
                 resolvedFullPath !== rootReal &&
@@ -306,6 +310,21 @@ export default function configFilesRoutes(
                         error: "Access denied: path outside allowed root",
                     });
                     return;
+                }
+
+                try {
+                    const lexicalStat = fs.lstatSync(fullPath);
+                    if (lexicalStat.isSymbolicLink()) {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                    throw error;
                 }
 
                 let fd: number | undefined;

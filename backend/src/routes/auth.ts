@@ -3,6 +3,7 @@ import type express from "express";
 import {
     bootstrapRequired,
     clearSessionCookie,
+    createFirstUser,
     createSession,
     createUser,
     deleteSession,
@@ -113,6 +114,8 @@ export default function authRoutes(
 ): void {
     const createAuthSession = dependencies.createSession ?? createSession;
     const createAuthUser = dependencies.createUser ?? createUser;
+    const createFirstAuthUser =
+        dependencies.createUser === undefined ? createFirstUser : null;
     const initGateway =
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
@@ -148,12 +151,6 @@ export default function authRoutes(
     });
 
     app.post("/api/auth/register-first-user", (request, response) => {
-        if (!bootstrapRequired()) {
-            response
-                .status(409)
-                .json({ error: "Bootstrap registration is no longer available" });
-            return;
-        }
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
         const rawGatewayToken = request.body?.gatewayToken;
@@ -176,7 +173,24 @@ export default function authRoutes(
         const gatewayToken = rawGatewayToken.trim();
         let user: ReturnType<typeof createUser>;
         try {
-            user = createAuthUser(username, password);
+            if (createFirstAuthUser) {
+                const createdUser = createFirstAuthUser(username, password);
+                if (!createdUser) {
+                    response.status(409).json({
+                        error: "Bootstrap registration is no longer available",
+                    });
+                    return;
+                }
+                user = createdUser;
+            } else {
+                if (!bootstrapRequired()) {
+                    response.status(409).json({
+                        error: "Bootstrap registration is no longer available",
+                    });
+                    return;
+                }
+                user = createAuthUser(username, password);
+            }
         } catch (error_) {
             const message = error_ instanceof Error ? error_.message : String(error_);
             if (message.includes("UNIQUE")) {
@@ -197,7 +211,8 @@ export default function authRoutes(
             const sessionId = createAuthSession(user.id);
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
-        } catch {
+        } catch (bootstrapError) {
+            console.error("[Auth] First-user bootstrap failed:", bootstrapError);
             try {
                 rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
             } catch (rollbackError) {

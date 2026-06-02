@@ -3,6 +3,7 @@ import {
     chmod,
     link,
     mkdtemp,
+    readdir,
     readFile,
     rm,
     stat,
@@ -179,6 +180,7 @@ describe("guarded filesystem helpers", () => {
             __testing.setReadChunkForTest(async () => ({ bytesRead: 0 }));
             try {
                 const zeroReadCopy = path.join(baseDir, "zero-read-copy.txt");
+                await writeFile(zeroReadCopy, "keep me", "utf8");
                 await assert.rejects(
                     () =>
                         copyNoFollowGuarded(
@@ -186,6 +188,12 @@ describe("guarded filesystem helpers", () => {
                             guardedPath(zeroReadCopy)
                         ),
                     { code: "EIO" }
+                );
+                assert.equal(await readFile(zeroReadCopy, "utf8"), "keep me");
+                const entries = await readdir(baseDir);
+                assert.equal(
+                    entries.some((entry) => entry.startsWith(".zero-read-copy.txt.")),
+                    false
                 );
             } finally {
                 __testing.setReadChunkForTest();

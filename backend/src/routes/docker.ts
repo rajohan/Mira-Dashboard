@@ -1086,26 +1086,32 @@ async function runDockerExecCommand(
 
         let stdout = "";
         let stderr = "";
+        let stdoutPending = "";
+
+        const processStdoutLine = (line: string): void => {
+            if (!line.startsWith(DOCKER_EXEC_PID_MARKER)) {
+                stdout = trimOutput(stdout + line + "\n");
+                return;
+            }
+            const parsedPid = Number.parseInt(
+                line.slice(DOCKER_EXEC_PID_MARKER.length),
+                10
+            );
+            const currentJob = dockerExecJobs.get(jobId);
+            if (currentJob && Number.isSafeInteger(parsedPid) && parsedPid > 1) {
+                currentJob.inContainerPid = parsedPid;
+            }
+        };
 
         child.stdout?.on("data", (data) => {
-            const chunk = String(data)
-                .split("\n")
-                .filter((line) => {
-                    if (!line.startsWith(DOCKER_EXEC_PID_MARKER)) {
-                        return true;
-                    }
-                    const parsedPid = Number.parseInt(
-                        line.slice(DOCKER_EXEC_PID_MARKER.length),
-                        10
-                    );
-                    const currentJob = dockerExecJobs.get(jobId);
-                    if (currentJob && Number.isSafeInteger(parsedPid) && parsedPid > 1) {
-                        currentJob.inContainerPid = parsedPid;
-                    }
-                    return false;
-                })
-                .join("\n");
-            stdout = trimOutput(stdout + chunk);
+            stdoutPending += String(data);
+            let newlineIndex = stdoutPending.indexOf("\n");
+            while (newlineIndex !== -1) {
+                const line = stdoutPending.slice(0, newlineIndex);
+                stdoutPending = stdoutPending.slice(newlineIndex + 1);
+                processStdoutLine(line);
+                newlineIndex = stdoutPending.indexOf("\n");
+            }
             onUpdate?.(stdout, stderr);
         });
 
@@ -1115,6 +1121,11 @@ async function runDockerExecCommand(
         });
 
         child.on("close", (code, signal) => {
+            if (stdoutPending) {
+                processStdoutLine(stdoutPending);
+                stdoutPending = "";
+                onUpdate?.(stdout, stderr);
+            }
             resolve({
                 code: signal ? 130 : code,
                 stdout,
@@ -1629,8 +1640,17 @@ export default function dockerRoutes(app: express.Application): void {
                 return;
             }
             const hostProcess = job.process;
-            await stopDockerExecInContainer(job);
-            stopDockerExecHostProcess(hostProcess);
+            let stopError: unknown;
+            try {
+                await stopDockerExecInContainer(job);
+            } catch (error) {
+                stopError = error;
+            } finally {
+                stopDockerExecHostProcess(hostProcess);
+            }
+            if (stopError) {
+                throw stopError;
+            }
             res.json({ success: true });
         })
     );

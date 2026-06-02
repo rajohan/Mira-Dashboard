@@ -384,7 +384,9 @@ function completeExecJob(jobId: string, result: ExecResponse): void {
     }
 
     current.status = "done";
-    current.code = result.code;
+    if (current.code !== 137) {
+        current.code = result.code;
+    }
     current.stdout = result.stdout;
     current.stderr = result.stderr;
     current.endedAt = Date.now();
@@ -521,9 +523,11 @@ export default function execRoutes(
                 if (job.process && job.status === "signaled") {
                     const processId = job.process.pid;
                     try {
-                        process.kill(-processId!, "SIGKILL");
+                        if (typeof processId === "number") {
+                            process.kill(-processId, "SIGKILL");
+                        }
                     } catch {
-                        if (processId) {
+                        if (typeof processId === "number") {
                             try {
                                 process.kill(processId, "SIGKILL");
                             } catch {

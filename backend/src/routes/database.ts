@@ -1,4 +1,5 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
@@ -98,6 +99,8 @@ function parseTable<T extends object>(output: string): T[] {
 export const __testing = {
     buildPgBouncerUri,
     buildPostgresUri,
+    normalizePostgresHost,
+    normalizePostgresPort,
     numberFrom,
     parseTable,
     stringWithDefault,
@@ -113,8 +116,8 @@ function numberFrom(value: string | null | undefined): number {
     return Number(value || 0);
 }
 
-/** Runs a shell command inside a Docker container and returns raw stdout. */
-async function runDockerExec(container: string, command: string) {
+/** Runs a command inside a Docker container and returns raw stdout. */
+async function runDockerExec(container: string, command: string[]) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
@@ -122,7 +125,7 @@ async function runDockerExec(container: string, command: string) {
     };
     const { stdout } = await execFileAsync(
         "docker",
-        ["exec", container, "bash", "-lc", command],
+        ["exec", container, ...command],
         options
     );
     return stdout;
@@ -139,6 +142,41 @@ function envValueOrDefault(value: string | undefined, fallback: string): string 
     return value === undefined ? fallback : value;
 }
 
+/** Returns a safe PostgreSQL hostname for URI construction. */
+function normalizePostgresHost(value: string | undefined, fallback: string): string {
+    const host = trimmedEnvValue(value) ?? fallback;
+    const validIpv4 =
+        /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
+    const validIpv6 =
+        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
+        throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
+    }
+    if (
+        !/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/u.test(
+            host
+        ) &&
+        !validIpv6 &&
+        !validIpv4
+    ) {
+        throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
+    }
+    return host;
+}
+
+/** Returns a safe PostgreSQL port for URI construction. */
+function normalizePostgresPort(value: string | undefined): string {
+    const port = trimmedEnvValue(value) ?? "5432";
+    if (!/^\d+$/u.test(port)) {
+        throw Object.assign(new Error("Invalid PostgreSQL port"), { code: "EINVAL" });
+    }
+    const portNumber = Number(port);
+    if (!Number.isSafeInteger(portNumber) || portNumber < 1 || portNumber > 65_535) {
+        throw Object.assign(new Error("Invalid PostgreSQL port"), { code: "EINVAL" });
+    }
+    return String(portNumber);
+}
+
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
     const username = encodeURIComponent(
@@ -147,11 +185,8 @@ function buildPostgresUri(database = "postgres") {
     const password = encodeURIComponent(
         envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
-    const host = stringWithDefault(
-        trimmedEnvValue(process.env.DATABASE_HOST),
-        "postgres"
-    );
-    const port = stringWithDefault(trimmedEnvValue(process.env.DATABASE_PORT), "5432");
+    const host = normalizePostgresHost(process.env.DATABASE_HOST, "postgres");
+    const port = normalizePostgresPort(process.env.DATABASE_PORT);
     const db = encodeURIComponent(database);
     return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
@@ -164,11 +199,8 @@ function buildPgBouncerUri(database = "pgbouncer") {
     const password = encodeURIComponent(
         envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
-    const host = stringWithDefault(
-        trimmedEnvValue(process.env.PGBOUNCER_HOST),
-        "pgbouncer"
-    );
-    const port = stringWithDefault(trimmedEnvValue(process.env.PGBOUNCER_PORT), "5432");
+    const host = normalizePostgresHost(process.env.PGBOUNCER_HOST, "pgbouncer");
+    const port = normalizePostgresPort(process.env.PGBOUNCER_PORT);
     const db = encodeURIComponent(database);
     return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
@@ -176,21 +208,33 @@ function buildPgBouncerUri(database = "pgbouncer") {
 /** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
 async function queryPostgres(sql: string, database = "postgres") {
     const uri = buildPostgresUri(database);
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
 async function queryPgBouncer(sql: string) {
     const uri = buildPgBouncerUri();
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Sums numeric values selected from a row collection. */
