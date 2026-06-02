@@ -14,6 +14,7 @@ import { __testing as logsTesting } from "./routes/logs.js";
 class FakeWebSocket {
     readonly sent: string[] = [];
     private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    closed = false;
     readyState: number = WebSocket.OPEN;
 
     /** Registers one fake WebSocket event listener. */
@@ -32,6 +33,11 @@ class FakeWebSocket {
     /** Captures outbound WebSocket data for assertions. */
     send(data: string): void {
         this.sent.push(data);
+    }
+
+    close(): void {
+        this.closed = true;
+        this.readyState = WebSocket.CLOSED;
     }
 }
 
@@ -93,11 +99,15 @@ class CapturingGatewayClient extends FakeGatewayClient {
 }
 
 class HangingGatewayClient extends CapturingGatewayClient {
+    releaseRequest: (() => void) | undefined;
+
     override async request(method: string, params: unknown = {}): Promise<unknown> {
         if (method === "chat.send") {
             assert.ok(params && typeof params === "object" && !Array.isArray(params));
             this.calls.push({ method, params: params as Record<string, unknown> });
-            return new Promise(() => {});
+            return new Promise((resolve) => {
+                this.releaseRequest = () => resolve({});
+            });
         }
         return super.request(method, params);
     }
@@ -411,12 +421,14 @@ describe("gateway state and helper utilities", () => {
         CapturingGatewayClient.instances = [];
         __testing.setGatewayClientConstructorForTest(HangingGatewayClient);
         gateway.init("token-pending-close");
-        const active = CapturingGatewayClient.instances.at(-1);
+        const active = CapturingGatewayClient.instances.at(-1) as
+            | HangingGatewayClient
+            | undefined;
         active?.options.onHelloOk?.({ type: "hello.ok" });
         await waitForAsyncHandlers();
 
         const clientWs = new FakeWebSocket();
-        void __testing.forwardRequest(
+        const forwarded = __testing.forwardRequest(
             "chat.send",
             { sessionKey: "agent:main:main" },
             clientWs as unknown as WebSocket,
@@ -434,6 +446,8 @@ describe("gateway state and helper utilities", () => {
             ok: false,
             error: "Gateway disconnected",
         });
+        active?.releaseRequest?.();
+        assert.equal(await forwarded, true);
     });
 
     it("transforms Gateway sessions into dashboard session summaries", () => {
@@ -925,6 +939,13 @@ describe("gateway state and helper utilities", () => {
 
         const errorWs = new FakeWebSocket();
         const consoleError = mock.method(console, "error", () => {});
+        const initialThrowingWs = new ThrowingWebSocket();
+        initialThrowingWs.throwOnSend = true;
+        assert.doesNotThrow(() =>
+            gateway.handleClient(initialThrowingWs as unknown as WebSocket)
+        );
+        assert.equal(initialThrowingWs.closed, true);
+
         gateway.handleClient(errorWs as unknown as WebSocket);
         errorWs.emit(
             "message",

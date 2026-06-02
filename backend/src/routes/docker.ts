@@ -338,7 +338,8 @@ function nonEmptyEnvValueOrFallback(
     fallbackName: string,
     fallback: string
 ): string {
-    return value?.trim() ? value : nonEmptyEnvFallback(fallbackName, fallback);
+    const trimmed = value?.trim();
+    return trimmed || nonEmptyEnvFallback(fallbackName, fallback);
 }
 
 /** Builds PostgreSQL uri. */
@@ -1087,8 +1088,7 @@ async function runDockerExecCommand(
 ): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
         const wrappedCommand = [
-            `sh -lc ${shellQuote(command)} &`,
-            "command_pid=$!",
+            `sh -lc ${shellQuote(command)} & command_pid=$!`,
             String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$command_pid"`,
             String.raw`wait "$command_pid"`,
         ].join("; ");

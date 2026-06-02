@@ -92,9 +92,12 @@ function resolveOpenclawRoot(): string | null {
 
 function validateOpenclawLeaf(openclawRoot: string): boolean {
     try {
-        return !fs.lstatSync(openclawRoot).isSymbolicLink();
-    } catch (error) {
-        return (error as NodeJS.ErrnoException).code === "ENOENT";
+        if (fs.lstatSync(openclawRoot).isSymbolicLink()) {
+            return false;
+        }
+        return fs.statSync(openclawRoot).isDirectory();
+    } catch {
+        return false;
     }
 }
 
@@ -389,7 +392,12 @@ export default function configFilesRoutes(
 
                     if (stat.size > MAX_FILE_SIZE) {
                         const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                        const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+                        const { bytesRead } = await file.read(
+                            buffer,
+                            0,
+                            MAX_FILE_SIZE,
+                            0
+                        );
                         const content = buffer.toString("utf8", 0, bytesRead);
                         const isBinary = isBinaryFile(content);
 
@@ -405,7 +413,7 @@ export default function configFilesRoutes(
                         return;
                     }
 
-                    const content = fs.readFileSync(fd, "utf8");
+                    const content = await file.readFile("utf8");
                     const isBinary = isBinaryFile(content);
 
                     res.json({

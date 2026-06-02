@@ -53,7 +53,7 @@ function resolveWorkspaceRoot(): string {
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
-const JSON_PARSER_SIZE_HEADROOM = Math.ceil(MAX_FILE_SIZE * 0.1);
+const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
 const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
 let listDirectoryRealpathSync = fs.realpathSync;
@@ -501,10 +501,15 @@ export default function filesRoutes(
                 try {
                     workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
                 } catch (error) {
-                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
-                        return;
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT") {
+                        workspaceRoot = path.resolve(WORKSPACE_ROOT);
+                    } else {
+                        if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                            return;
+                        }
+                        throw error;
                     }
-                    throw error;
                 }
 
                 const fullPath = safePathWithinRoot(filePath, workspaceRoot);

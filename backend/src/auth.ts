@@ -163,11 +163,18 @@ export function createFirstUser(username: string, password: string): AuthUser | 
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = hashPassword(password);
-    const rollback = () => {
+    const rollback = (transactionError?: unknown) => {
         try {
             db.exec("ROLLBACK");
-        } catch {
-            // Preserve the original transaction error.
+        } catch (rollbackError) {
+            if (transactionError) {
+                throw new AggregateError(
+                    [transactionError, rollbackError],
+                    "First-user transaction and rollback failed",
+                    { cause: rollbackError }
+                );
+            }
+            throw rollbackError;
         }
     };
 
@@ -190,7 +197,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             username: normalizedUsername,
         };
     } catch (error) {
-        rollback();
+        rollback(error);
         throw error;
     }
 }

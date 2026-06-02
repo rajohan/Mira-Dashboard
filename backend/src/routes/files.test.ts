@@ -268,9 +268,8 @@ describe("files routes", () => {
         const missingRootParent = await mkdtemp(
             path.join(os.tmpdir(), "mira-files-missing-root-")
         );
-        const missingServer = await startServer(
-            path.join(missingRootParent, "workspace")
-        );
+        const missingWorkspace = path.join(missingRootParent, "workspace");
+        const missingServer = await startServer(missingWorkspace);
         try {
             const response = await requestJson<{ error: string }>(
                 missingServer,
@@ -278,6 +277,19 @@ describe("files routes", () => {
             );
             assert.equal(response.status, 404);
             assert.equal(response.body.error, "Directory not found");
+
+            const created = await requestJson<{ success: boolean; path: string }>(
+                missingServer,
+                "/api/files/fresh%2Ffirst.txt",
+                { method: "PUT", body: { content: "hello" } }
+            );
+            assert.equal(created.status, 200);
+            assert.equal(created.body.success, true);
+            assert.equal(created.body.path, "fresh/first.txt");
+            assert.equal(
+                await readFile(path.join(missingWorkspace, "fresh", "first.txt"), "utf8"),
+                "hello"
+            );
         } finally {
             await missingServer.close();
             await rm(missingRootParent, { recursive: true, force: true });

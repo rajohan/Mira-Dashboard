@@ -1010,7 +1010,16 @@ describe("config files routes", () => {
 
             const { __testing } = await import("./configFiles.js");
             assert.equal(__testing.validateOpenclawLeaf(openclawRoot), false);
+            assert.equal(
+                __testing.validateOpenclawLeaf(path.join(openclawRoot, "missing")),
+                false
+            );
+            assert.equal(__testing.validateOpenclawLeaf(openclawConfig), false);
+            const leafSymlink = path.join(homeDir, "openclaw-root-link");
+            await symlink(openclawRoot, leafSymlink);
+            assert.equal(__testing.validateOpenclawLeaf(leafSymlink), false);
         } finally {
+            await rm(path.join(homeDir, "openclaw-root-link"), { force: true });
             fs.lstatSync = originalLstatSync;
         }
 

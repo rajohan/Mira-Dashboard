@@ -346,13 +346,37 @@ describe("auth first-user bootstrap routes", () => {
                             throw new Error("persist failed");
                         }
                     ),
-                /persist failed/u
+                (error) =>
+                    error instanceof AggregateError &&
+                    error.errors.some(
+                        (entry) =>
+                            entry instanceof Error &&
+                            /persist failed/u.test(entry.message)
+                    ) &&
+                    error.errors.some(
+                        (entry) =>
+                            entry instanceof Error &&
+                            /rollback failed/u.test(entry.message)
+                    )
             );
             assert.equal(errorMock.mock.callCount(), 1);
         } finally {
             execMock.mock.restore();
             errorMock.mock.restore();
         }
+
+        assert.throws(
+            () =>
+                authTesting.rollbackFirstUserBootstrap(
+                    0,
+                    gatewayToken,
+                    "previous-token",
+                    () => {
+                        throw new Error("persist failed");
+                    }
+                ),
+            /persist failed/u
+        );
     });
 
     it("rolls back first-user bootstrap when token persistence fails", async () => {

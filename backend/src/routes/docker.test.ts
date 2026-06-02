@@ -255,6 +255,10 @@ if (command === "volume prune -f") {
   process.exit(0);
 }
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("__MIRA_DOCKER_EXEC_PID__=")) {
+  if (command.includes("&;")) {
+    process.stderr.write("invalid shell separator\n");
+    process.exit(22);
+  }
   if (process.env.MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER === "1") {
     process.stdout.write("__MIRA_DOCKER_");
     setTimeout(() => {
@@ -653,6 +657,12 @@ describe("docker routes", { concurrency: false }, () => {
             );
             process.env.DB_POSTGRESDB_USER = "native-user";
             process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            assert.equal(
+                __testing.buildPostgresUri("custom"),
+                "postgresql://native-user:native-password@db:6543/custom"
+            );
+            process.env.DB_POSTGRESDB_USER = " native-user ";
+            process.env.DB_POSTGRESDB_PASSWORD = " native-password ";
             assert.equal(
                 __testing.buildPostgresUri("custom"),
                 "postgresql://native-user:native-password@db:6543/custom"

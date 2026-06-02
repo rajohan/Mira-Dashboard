@@ -86,6 +86,11 @@ function rollbackFirstUserBootstrap(
                 "[Auth] First-user rollback transaction rollback failed:",
                 rollbackError
             );
+            throw new AggregateError(
+                [error, rollbackError],
+                "First-user rollback transaction and rollback failed",
+                { cause: rollbackError }
+            );
         }
         throw error;
     }
@@ -115,7 +120,10 @@ export default function authRoutes(
     const createAuthSession = dependencies.createSession ?? createSession;
     const createAuthUser = dependencies.createUser ?? createUser;
     const createFirstAuthUser =
-        dependencies.createUser === undefined ? createFirstUser : null;
+        dependencies.createUser === undefined
+            ? createFirstUser
+            : (username: string, password: string) =>
+                  bootstrapRequired() ? createAuthUser(username, password) : null;
     const initGateway =
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
@@ -173,24 +181,14 @@ export default function authRoutes(
         const gatewayToken = rawGatewayToken.trim();
         let user: ReturnType<typeof createUser>;
         try {
-            if (createFirstAuthUser) {
-                const createdUser = createFirstAuthUser(username, password);
-                if (!createdUser) {
-                    response.status(409).json({
-                        error: "Bootstrap registration is no longer available",
-                    });
-                    return;
-                }
-                user = createdUser;
-            } else {
-                if (!bootstrapRequired()) {
-                    response.status(409).json({
-                        error: "Bootstrap registration is no longer available",
-                    });
-                    return;
-                }
-                user = createAuthUser(username, password);
+            const createdUser = createFirstAuthUser(username, password);
+            if (!createdUser) {
+                response.status(409).json({
+                    error: "Bootstrap registration is no longer available",
+                });
+                return;
             }
+            user = createdUser;
         } catch (error_) {
             const message = error_ instanceof Error ? error_.message : String(error_);
             if (message.includes("UNIQUE")) {

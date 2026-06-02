@@ -105,7 +105,7 @@ describe("auth helpers", () => {
         }
     });
 
-    it("preserves first-user results when rollback cleanup also fails", () => {
+    it("surfaces first-user rollback cleanup failures", () => {
         const originalPrepare = db.prepare.bind(db);
         const originalExec = db.exec.bind(db);
         const prepareMock = mock.method(db, "prepare", (sql: string) => {
@@ -121,7 +121,7 @@ describe("auth helpers", () => {
             return originalExec(sql);
         });
         try {
-            assert.equal(createFirstUser("first", "secret"), null);
+            assert.throws(() => createFirstUser("first", "secret"), /rollback failed/u);
         } finally {
             execMock.mock.restore();
             prepareMock.mock.restore();

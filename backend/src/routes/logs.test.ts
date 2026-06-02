@@ -270,6 +270,23 @@ describe("logs routes", () => {
         assert.equal(invalidTail.status, 200);
         assert.equal(invalidTailBody.content, "first\n\nsecond\nthird\n");
 
+        const negativeTail = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
+                testFiles[1]
+            )}&lines=-2`
+        );
+        const negativeTailBody = (await negativeTail.json()) as { content: string };
+        assert.equal(negativeTail.status, 200);
+        assert.equal(negativeTailBody.content, "first\n\nsecond\nthird\n");
+
+        const directoryName = "openclaw-2099-03-05.log";
+        await mkdir(path.join(logsDir, directoryName));
+        const directory = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(directoryName)}`
+        );
+        assert.equal(directory.status, 404);
+        assert.deepEqual(await directory.json(), { error: "Log file not found" });
+
         const mockedToday = new RealDate("2099-12-31T12:00:00.000Z")
             .toISOString()
             .split("T")[0];

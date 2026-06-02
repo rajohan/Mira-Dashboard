@@ -663,11 +663,6 @@ function init(token: string): void {
         return;
     }
     const previousGatewayClient = gatewayClient;
-    gatewayClient = null;
-    isGatewayConnected = false;
-    sessionList = [];
-    broadcast({ type: "disconnected", gatewayConnected: false });
-    currentToken = token;
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -676,6 +671,14 @@ function init(token: string): void {
             hadPreviousGatewayClient: previousGatewayClient !== null,
         });
     }
+    if (gatewayClient === previousGatewayClient) {
+        gatewayClient = null;
+    }
+    isGatewayConnected = false;
+    sessionList = [];
+    failPendingRequests("Gateway disconnected");
+    broadcast({ type: "disconnected", gatewayConnected: false });
+    currentToken = token;
     let thisGatewayClient: OpenClawGatewayClientInstance | null = null;
     /** Returns the active Gateway client when this callback belongs to it. */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | null {
@@ -869,13 +872,23 @@ function handleClient(ws: WebSocket): void {
     });
 
     subscribers.add(ws);
-    ws.send(
-        JSON.stringify({
-            type: "state",
-            gatewayConnected: isGatewayConnected,
-            sessions: sessionList,
-        })
-    );
+    try {
+        ws.send(
+            JSON.stringify({
+                type: "state",
+                gatewayConnected: isGatewayConnected,
+                sessions: sessionList,
+            })
+        );
+    } catch (error) {
+        console.error(
+            "[Gateway] Failed to send initial client state:",
+            errorMessage(error, String(error))
+        );
+        cleanupClient();
+        ws.close();
+        return;
+    }
 
     ws.on("message", (data: Buffer) => {
         void (async () => {
@@ -1033,12 +1046,6 @@ async function request(
 /** Stops the active Gateway client and clears connected state. */
 function shutdown(): void {
     const previousGatewayClient = gatewayClient;
-    gatewayClient = null;
-    isGatewayConnected = false;
-    sessionList = [];
-    currentToken = null;
-    failPendingRequests("Gateway disconnected");
-    broadcast({ type: "disconnected", gatewayConnected: false });
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -1047,6 +1054,14 @@ function shutdown(): void {
             hadPreviousGatewayClient: previousGatewayClient !== null,
         });
     }
+    if (gatewayClient === previousGatewayClient) {
+        gatewayClient = null;
+    }
+    isGatewayConnected = false;
+    sessionList = [];
+    currentToken = null;
+    failPendingRequests("Gateway disconnected");
+    broadcast({ type: "disconnected", gatewayConnected: false });
 }
 
 /** Defines testing. */

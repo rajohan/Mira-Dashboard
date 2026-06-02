@@ -12,6 +12,8 @@ let logPollInFlight = false;
 let lastLogSize = 0;
 let lastLogFile = "";
 const logSubscribers = new Set<WebSocket>();
+const MIN_LOG_TAIL_BYTES = 64 * 1024;
+const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 
 /** Represents log file. */
 interface LogFile {
@@ -28,6 +30,37 @@ function resolveRealLogsDir(): string {
 function getTodayLogFile(root = resolveRealLogsDir()): string {
     const today = new Date().toISOString().split("T")[0];
     return path.join(root, "openclaw-" + today + ".log");
+}
+
+function parsePositiveLineCount(value: unknown): number | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function readLogContent(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lines: number | null
+): Promise<string> {
+    if (!lines) {
+        return file.readFile("utf8");
+    }
+
+    const windowBytes = Math.min(
+        stat.size,
+        Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
+    );
+    const buffer = Buffer.alloc(windowBytes);
+    const { bytesRead } = await file.read(
+        buffer,
+        0,
+        windowBytes,
+        Math.max(0, stat.size - windowBytes)
+    );
+    return buffer.toString("utf8", 0, bytesRead);
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
@@ -252,9 +285,7 @@ export default function logsRoutes(app: express.Application): void {
     // Get log file content
     app.get("/api/logs/content", (async (req, res) => {
         let logFile = req.query.file as string | undefined;
-        const lines = req.query.lines
-            ? Number.parseInt(req.query.lines as string, 10)
-            : null;
+        const lines = parsePositiveLineCount(req.query.lines);
 
         // If no file specified, use today's log
         if (!logFile) {
@@ -332,7 +363,12 @@ export default function logsRoutes(app: express.Application): void {
 
             let content: string;
             try {
-                content = await file.readFile("utf8");
+                const stat = await file.stat();
+                if (!stat.isFile()) {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                content = await readLogContent(file, stat, lines);
             } finally {
                 await file.close();
             }
