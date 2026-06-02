@@ -175,6 +175,30 @@ type GatewayClientConstructor = new (
 ) => OpenClawGatewayClientInstance;
 let GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
 
+function sendPendingRequestError(pending: PendingRequest, error: string): void {
+    try {
+        if (pending.clientWs.readyState === WebSocket.OPEN) {
+            pending.clientWs.send(
+                JSON.stringify({
+                    type: "res",
+                    id: pending.clientId,
+                    ok: false,
+                    error,
+                })
+            );
+        }
+    } catch {
+        // Ignore reply write failures; the client is already gone.
+    }
+}
+
+function failPendingRequests(error: string): void {
+    for (const pending of pendingRequests.values()) {
+        sendPendingRequestError(pending, error);
+    }
+    pendingRequests.clear();
+}
+
 async function refreshSessionsAfterRequest(
     activeGateway: OpenClawGatewayClientInstance
 ): Promise<void> {
@@ -733,6 +757,7 @@ function init(token: string): void {
         }
         isGatewayConnected = false;
         sessionList = [];
+        failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     thisGatewayClient = new GatewayClientCtor({
@@ -810,19 +835,8 @@ async function forwardRequest(
         } catch (error) {
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
-            try {
-                if (pending?.clientWs.readyState === WebSocket.OPEN) {
-                    pending.clientWs.send(
-                        JSON.stringify({
-                            type: "res",
-                            id: pending.clientId,
-                            ok: false,
-                            error: errorMessage(error, String(error)),
-                        })
-                    );
-                }
-            } catch {
-                // Ignore reply write failures; the client is already gone.
+            if (pending) {
+                sendPendingRequestError(pending, errorMessage(error, String(error)));
             }
         }
         return true;
@@ -1023,6 +1037,7 @@ function shutdown(): void {
     isGatewayConnected = false;
     sessionList = [];
     currentToken = null;
+    failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
     try {
         previousGatewayClient?.stop();

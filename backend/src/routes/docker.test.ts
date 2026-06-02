@@ -661,7 +661,7 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.DB_POSTGRESDB_PASSWORD = "";
             assert.equal(
                 __testing.buildPostgresUri("custom"),
-                "postgresql://:@db:6543/custom"
+                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom"
             );
             delete process.env.DB_POSTGRESDB_USER;
             delete process.env.DB_POSTGRESDB_PASSWORD;
@@ -1701,8 +1701,8 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(blankRun.status, 200);
             assert.equal(blankRun.body.success, true);
             assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
-                user: "",
-                password: "",
+                user: "postgres",
+                password: "postgres",
             });
 
             delete process.env.DB_POSTGRESDB_USER;

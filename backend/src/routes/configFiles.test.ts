@@ -543,20 +543,16 @@ describe("config files routes", () => {
             fs.lstatSync = originalLstatForSymlink;
         }
 
-        const originalOpenSyncForMissing = fs.openSync;
+        const originalOpenForMissing = fs.promises.open;
         try {
-            fs.openSync = ((
-                target: fs.PathLike,
-                flags: string | number,
-                mode?: number
-            ) => {
+            fs.promises.open = (async (target, flags, mode) => {
                 if (String(target) === openclawConfig) {
                     const error = new Error("open raced") as NodeJS.ErrnoException;
                     error.code = "ENOENT";
                     throw error;
                 }
-                return originalOpenSyncForMissing(target, flags, mode);
-            }) as typeof fs.openSync;
+                return originalOpenForMissing(target, flags, mode);
+            }) as typeof fs.promises.open;
             const openRace = await requestJson<{ error: string }>(
                 server,
                 "/api/config-files/openclaw.json"
@@ -564,7 +560,7 @@ describe("config files routes", () => {
             assert.equal(openRace.status, 404);
             assert.equal(openRace.body.error, "File not found");
         } finally {
-            fs.openSync = originalOpenSyncForMissing;
+            fs.promises.open = originalOpenForMissing;
         }
 
         const originalLstatSync = fs.lstatSync;
@@ -587,20 +583,16 @@ describe("config files routes", () => {
             fs.lstatSync = originalLstatSync;
         }
 
-        const originalOpenSync = fs.openSync;
+        const originalOpenForFailure = fs.promises.open;
         try {
-            fs.openSync = ((
-                target: fs.PathLike,
-                flags: string | number,
-                mode?: number
-            ) => {
+            fs.promises.open = (async (target, flags, mode) => {
                 if (String(target) === openclawConfig) {
                     const error = new Error("open unavailable") as NodeJS.ErrnoException;
                     error.code = "EACCES";
                     throw error;
                 }
-                return originalOpenSync(target, flags, mode);
-            }) as typeof fs.openSync;
+                return originalOpenForFailure(target, flags, mode);
+            }) as typeof fs.promises.open;
             const openFailure = await requestJson<{ error: string }>(
                 server,
                 "/api/config-files/openclaw.json"
@@ -608,7 +600,7 @@ describe("config files routes", () => {
             assert.equal(openFailure.status, 500);
             assert.equal(openFailure.body.error, "open unavailable");
         } finally {
-            fs.openSync = originalOpenSync;
+            fs.promises.open = originalOpenForFailure;
         }
 
         const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-config-outside-"));
@@ -799,9 +791,9 @@ describe("config files routes", () => {
     });
 
     it("reports unexpected read errors", async () => {
-        const originalOpenSync = fs.openSync;
+        const originalOpen = fs.promises.open;
         try {
-            fs.openSync = ((target: fs.PathLike, flags: string | number) => {
+            fs.promises.open = (async (target, flags, mode) => {
                 const targetPath = Buffer.isBuffer(target)
                     ? target.toString("utf8")
                     : String(target);
@@ -810,8 +802,8 @@ describe("config files routes", () => {
                     error.code = "EACCES";
                     throw error;
                 }
-                return originalOpenSync(target, flags);
-            }) as typeof fs.openSync;
+                return originalOpen(target, flags, mode);
+            }) as typeof fs.promises.open;
 
             const response = await requestJson<{ error: string }>(
                 server,
@@ -820,7 +812,7 @@ describe("config files routes", () => {
             assert.equal(response.status, 500);
             assert.equal(response.body.error, "permission denied");
         } finally {
-            fs.openSync = originalOpenSync;
+            fs.promises.open = originalOpen;
         }
     });
 

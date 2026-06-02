@@ -333,20 +333,40 @@ function parseJsonField<T>(value: string | undefined): T | null {
     }
 }
 
+function nonEmptyEnvValueOrFallback(
+    value: string | undefined,
+    fallbackName: string,
+    fallback: string
+): string {
+    return value?.trim() ? value : nonEmptyEnvFallback(fallbackName, fallback);
+}
+
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = encodeURIComponent(
-        process.env.DB_POSTGRESDB_USER === undefined
-            ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
-            : process.env.DB_POSTGRESDB_USER
+        nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_USER,
+            "DATABASE_USERNAME",
+            "postgres"
+        )
     );
     const password = encodeURIComponent(
-        process.env.DB_POSTGRESDB_PASSWORD === undefined
-            ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
-            : process.env.DB_POSTGRESDB_PASSWORD
+        nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_PASSWORD,
+            "DATABASE_PASSWORD",
+            "postgres"
+        )
     );
-    const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
-    const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
+    const host = nonEmptyEnvValueOrFallback(
+        process.env.DB_POSTGRESDB_HOST,
+        "DATABASE_HOST",
+        "postgres"
+    );
+    const port = nonEmptyEnvValueOrFallback(
+        process.env.DB_POSTGRESDB_PORT,
+        "DATABASE_PORT",
+        "5432"
+    );
     return `postgresql://${username}:${password}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
@@ -902,14 +922,16 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER:
-            process.env.DB_POSTGRESDB_USER === undefined
-                ? nonEmptyEnvFallback("DATABASE_USERNAME", "postgres")
-                : process.env.DB_POSTGRESDB_USER,
-        DB_POSTGRESDB_PASSWORD:
-            process.env.DB_POSTGRESDB_PASSWORD === undefined
-                ? nonEmptyEnvFallback("DATABASE_PASSWORD", "postgres")
-                : process.env.DB_POSTGRESDB_PASSWORD,
+        DB_POSTGRESDB_USER: nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_USER,
+            "DATABASE_USERNAME",
+            "postgres"
+        ),
+        DB_POSTGRESDB_PASSWORD: nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_PASSWORD,
+            "DATABASE_PASSWORD",
+            "postgres"
+        ),
     };
 
     try {
@@ -1065,8 +1087,10 @@ async function runDockerExecCommand(
 ): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
         const wrappedCommand = [
-            String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$$"`,
-            `exec sh -lc ${shellQuote(command)}`,
+            `sh -lc ${shellQuote(command)} &`,
+            "command_pid=$!",
+            String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$command_pid"`,
+            String.raw`wait "$command_pid"`,
         ].join("; ");
         const child = spawn(
             dockerBin,

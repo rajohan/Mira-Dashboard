@@ -8,6 +8,7 @@ import {
     copyNoFollowGuarded,
     guardedPath,
     mkdirGuarded,
+    openReadNoFollowGuarded,
     statGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
@@ -327,12 +328,11 @@ export default function configFilesRoutes(
                     throw error;
                 }
 
+                let file: fs.promises.FileHandle | undefined;
                 let fd: number | undefined;
                 try {
-                    fd = fs.openSync(
-                        fullPath,
-                        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-                    );
+                    file = await openReadNoFollowGuarded(guardedPath(fullPath));
+                    fd = file.fd;
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
@@ -417,7 +417,7 @@ export default function configFilesRoutes(
                         isBinary: isBinary,
                     } satisfies ConfigFileResponse);
                 } finally {
-                    fs.closeSync(fd);
+                    await file?.close();
                 }
                 return;
             },

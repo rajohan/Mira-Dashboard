@@ -53,7 +53,8 @@ function resolveWorkspaceRoot(): string {
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
-const JSON_PARSER_SIZE_HEADROOM = 1024;
+const JSON_PARSER_SIZE_HEADROOM = Math.ceil(MAX_FILE_SIZE * 0.1);
+const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
 let listDirectoryRealpathSync = fs.realpathSync;
 
@@ -478,7 +479,7 @@ export default function filesRoutes(
     // Write file
     app.put(
         /^\/api\/files\/(.*)$/,
-        express.json({ limit: MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM }),
+        express.json({ limit: JSON_WRITE_BODY_LIMIT }),
         asyncRoute(
             async (req, res) => {
                 const filePath = decodeRouteFilePath(req.params[0]);
@@ -496,7 +497,17 @@ export default function filesRoutes(
                     return;
                 }
 
-                const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
+                let workspaceRoot: string;
+                try {
+                    workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+                } catch (error) {
+                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                        return;
+                    }
+                    throw error;
+                }
+
+                const fullPath = safePathWithinRoot(filePath, workspaceRoot);
 
                 if (!fullPath) {
                     res.status(403).json({
@@ -507,7 +518,7 @@ export default function filesRoutes(
 
                 const safeFullPath = prepareSafeWriteTargetWithinRoot(
                     fullPath,
-                    WORKSPACE_ROOT
+                    workspaceRoot
                 );
                 if (!safeFullPath) {
                     res.status(403).json({
@@ -519,7 +530,7 @@ export default function filesRoutes(
                 const backupPath = safeFullPath + ".bak";
                 const safeBackupPath = prepareSafeWriteTargetWithinRoot(
                     backupPath,
-                    WORKSPACE_ROOT
+                    workspaceRoot
                 );
                 if (!safeBackupPath) {
                     res.status(403).json({
@@ -532,7 +543,7 @@ export default function filesRoutes(
                 try {
                     stat = await withRootedParentPath(
                         safeFullPath,
-                        WORKSPACE_ROOT,
+                        workspaceRoot,
                         async (rootedFullPath) => {
                             let existingMode: number | null = null;
                             let shouldCopyBackup = false;
@@ -572,7 +583,7 @@ export default function filesRoutes(
                                 try {
                                     await withRootedParentPath(
                                         safeBackupPath,
-                                        WORKSPACE_ROOT,
+                                        workspaceRoot,
                                         (rootedBackupPath) =>
                                             copyNoFollowGuarded(
                                                 guardedPath(rootedFullPath),

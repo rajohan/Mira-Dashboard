@@ -105,6 +105,34 @@ describe("auth helpers", () => {
         }
     });
 
+    it("preserves first-user results when rollback cleanup also fails", () => {
+        const originalPrepare = db.prepare.bind(db);
+        const originalExec = db.exec.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO users")) {
+                return { run: () => ({ changes: 0 }) } as never;
+            }
+            return originalPrepare(sql);
+        });
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "ROLLBACK") {
+                throw new Error("rollback failed");
+            }
+            return originalExec(sql);
+        });
+        try {
+            assert.equal(createFirstUser("first", "secret"), null);
+        } finally {
+            execMock.mock.restore();
+            prepareMock.mock.restore();
+            try {
+                originalExec("ROLLBACK");
+            } catch {
+                // No transaction remains when rollback succeeded unexpectedly.
+            }
+        }
+    });
+
     it("reads auth users from loopback and session cookies", () => {
         const user = createUser("Mira", "secret");
         const sessionId = createSession(user.id);

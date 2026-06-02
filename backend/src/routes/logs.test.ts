@@ -117,7 +117,6 @@ describe("logs routes", () => {
     });
 
     it("handles log info filesystem edge cases", async () => {
-        const originalExistsSync = fs.existsSync;
         const originalReaddirSync = fs.readdirSync;
         const originalLstatSync = fs.lstatSync;
 
@@ -150,16 +149,20 @@ describe("logs routes", () => {
                 fs.realpathSync = originalRealpathSync;
             }
 
-            fs.existsSync = ((target: fs.PathLike) => {
-                if (target === logsDir) return false;
-                return originalExistsSync(target);
-            }) as typeof fs.existsSync;
+            fs.readdirSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error("rotated root") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalReaddirSync(target);
+            }) as typeof fs.readdirSync;
 
             const missingDir = await fetch(`${server.baseUrl}/api/logs/info`);
             assert.equal(missingDir.status, 200);
             assert.deepEqual(await missingDir.json(), { logs: [] });
 
-            fs.existsSync = originalExistsSync;
+            fs.readdirSync = originalReaddirSync;
             let skippedRotatedEntry = false;
             fs.lstatSync = ((target: fs.PathLike) => {
                 if (String(target).endsWith(testFiles[0])) {
@@ -233,7 +236,6 @@ describe("logs routes", () => {
             assert.equal(failedList.status, 500);
             assert.deepEqual(await failedList.json(), { error: "cannot list logs" });
         } finally {
-            fs.existsSync = originalExistsSync;
             fs.readdirSync = originalReaddirSync;
             fs.lstatSync = originalLstatSync;
         }
@@ -731,17 +733,40 @@ describe("logs routes", () => {
     });
 
     it("propagates unexpected polling errors", async () => {
+        const originalRealpathSync = fs.realpathSync;
         const today = new Date().toISOString().split("T")[0];
         const todayPath = path.join(logsDir, `openclaw-${today}.log`);
         await rm(todayPath, { force: true });
         await symlink("openclaw-missing-target.log", todayPath);
 
         try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error("root denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            await assert.rejects(() => __testing.pollLogFileForTest(), /root denied/u);
+
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (target === logsDir) {
+                    const error = new Error("root missing") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            await __testing.pollLogFileForTest();
+
+            fs.realpathSync = originalRealpathSync;
             await assert.rejects(
                 () => __testing.pollLogFileForTest(),
                 /Failed to resolve path|Log file not found|ENOENT|ELOOP/
             );
         } finally {
+            fs.realpathSync = originalRealpathSync;
             await rm(todayPath, { force: true });
             __testing.resetLogWatcherForTest();
         }

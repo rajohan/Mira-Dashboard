@@ -92,6 +92,17 @@ class CapturingGatewayClient extends FakeGatewayClient {
     }
 }
 
+class HangingGatewayClient extends CapturingGatewayClient {
+    override async request(method: string, params: unknown = {}): Promise<unknown> {
+        if (method === "chat.send") {
+            assert.ok(params && typeof params === "object" && !Array.isArray(params));
+            this.calls.push({ method, params: params as Record<string, unknown> });
+            return new Promise(() => {});
+        }
+        return super.request(method, params);
+    }
+}
+
 /** Throws synchronously from start to exercise init rollback. */
 class ThrowingStartGatewayClient extends CapturingGatewayClient {
     override start(): void {
@@ -394,6 +405,35 @@ describe("gateway state and helper utilities", () => {
         assert.equal(__testing.pendingRequestCountForTest(), 1);
         __testing.resetGatewayStateForTest();
         assert.equal(__testing.pendingRequestCountForTest(), 0);
+    });
+
+    it("fails pending forwarded requests when the Gateway closes", async () => {
+        CapturingGatewayClient.instances = [];
+        __testing.setGatewayClientConstructorForTest(HangingGatewayClient);
+        gateway.init("token-pending-close");
+        const active = CapturingGatewayClient.instances.at(-1);
+        active?.options.onHelloOk?.({ type: "hello.ok" });
+        await waitForAsyncHandlers();
+
+        const clientWs = new FakeWebSocket();
+        void __testing.forwardRequest(
+            "chat.send",
+            { sessionKey: "agent:main:main" },
+            clientWs as unknown as WebSocket,
+            "request-1"
+        );
+        await waitForAsyncHandlers();
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
+
+        active?.options.onClose?.(1006, "closed");
+
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
+        assert.deepEqual(JSON.parse(clientWs.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "request-1",
+            ok: false,
+            error: "Gateway disconnected",
+        });
     });
 
     it("transforms Gateway sessions into dashboard session summaries", () => {

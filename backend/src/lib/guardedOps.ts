@@ -1,4 +1,5 @@
 import * as ChildProcess from "node:child_process";
+import * as Crypto from "node:crypto";
 import * as Fs from "node:fs";
 import Path from "node:path";
 
@@ -135,7 +136,7 @@ export async function copyNoFollowGuarded(
         const destinationDir = Path.dirname(destinationPath);
         const tempPath = Path.join(
             destinationDir,
-            `.${Path.basename(destinationPath)}.${process.pid}.${Date.now()}.tmp`
+            `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
         );
         let destinationFile: Fs.promises.FileHandle | undefined;
         try {

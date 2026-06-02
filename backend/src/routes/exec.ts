@@ -123,6 +123,7 @@ interface ExecJob {
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    closePending?: boolean;
     process?: ChildProcess;
 }
 
@@ -353,7 +354,10 @@ function cleanupJobs(): void {
         if (overflow <= 0) {
             break;
         }
-        if ((job.status === "running" || job.status === "signaled") && job.process) {
+        if (
+            job.closePending ||
+            ((job.status === "running" || job.status === "signaled") && job.process)
+        ) {
             continue;
         }
         jobs.delete(job.id);
@@ -390,6 +394,7 @@ function completeExecJob(jobId: string, result: ExecResponse): void {
     current.stdout = result.stdout;
     current.stderr = result.stderr;
     current.endedAt = Date.now();
+    current.closePending = false;
     current.process = undefined;
     cleanupJobs();
 }
@@ -406,6 +411,7 @@ function failExecJob(jobId: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
     current.endedAt = Date.now();
+    current.closePending = false;
     current.process = undefined;
     cleanupJobs();
 }
@@ -471,6 +477,7 @@ export default function execRoutes(
             stderr: "",
             startedAt,
             endedAt: null,
+            closePending: false,
         });
 
         let runPromise: Promise<ExecResponse>;
@@ -509,9 +516,13 @@ export default function execRoutes(
         }
 
         if (job.process && !job.process.killed) {
+            const processId = job.process.pid;
             try {
                 // Kill the entire process group (negative PID)
-                process.kill(-job.process.pid!, "SIGTERM");
+                if (typeof processId !== "number") {
+                    throw new TypeError("Process PID is unavailable");
+                }
+                process.kill(-processId, "SIGTERM");
             } catch {
                 // Fallback to killing just the process if process group fails
                 job.process.kill("SIGTERM");
@@ -535,7 +546,7 @@ export default function execRoutes(
                             }
                         }
                     } finally {
-                        job.process = undefined;
+                        job.closePending = true;
                         job.status = "done";
                         job.code = 137;
                         job.endedAt = Date.now();

@@ -163,6 +163,13 @@ export function createFirstUser(username: string, password: string): AuthUser | 
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = hashPassword(password);
+    const rollback = () => {
+        try {
+            db.exec("ROLLBACK");
+        } catch {
+            // Preserve the original transaction error.
+        }
+    };
 
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -174,7 +181,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             )
             .run(normalizedUsername, passwordHash, timestamp, timestamp);
         if (result.changes === 0) {
-            db.exec("ROLLBACK");
+            rollback();
             return null;
         }
         db.exec("COMMIT");
@@ -183,7 +190,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             username: normalizedUsername,
         };
     } catch (error) {
-        db.exec("ROLLBACK");
+        rollback();
         throw error;
     }
 }

@@ -1019,10 +1019,17 @@ describe("files routes", () => {
     it("maps unexpected canonicalization failures to 500 responses", async () => {
         const originalRealpathSync = fs.realpathSync;
         const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-files-outside-"));
-        let mode: "root" | "opened" | "escaped-directory" = "root";
+        let mode: "root" | "parent-validation" | "opened" | "escaped-directory" = "root";
         fs.realpathSync = ((target: fs.PathLike) => {
             if (mode === "root" && target === workspaceRoot) {
                 const error = new Error("root unavailable") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            if (mode === "parent-validation" && target === workspaceRoot) {
+                const error = new Error(
+                    "Parent path validation failed"
+                ) as NodeJS.ErrnoException;
                 error.code = "EACCES";
                 throw error;
             }
@@ -1061,6 +1068,26 @@ describe("files routes", () => {
             );
             assert.equal(rootFailure.status, 500);
             assert.equal(rootFailure.body.error, "root unavailable");
+
+            const writeRootFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Froot-failure.txt",
+                { method: "PUT", body: { content: "blocked" } }
+            );
+            assert.equal(writeRootFailure.status, 500);
+            assert.equal(writeRootFailure.body.error, "root unavailable");
+
+            mode = "parent-validation";
+            const writeParentFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fparent-failure.txt",
+                { method: "PUT", body: { content: "blocked" } }
+            );
+            assert.equal(writeParentFailure.status, 403);
+            assert.equal(
+                writeParentFailure.body.error,
+                "Access denied: path outside workspace"
+            );
 
             mode = "opened";
             const openedFailure = await requestJson<{ error: string }>(

@@ -935,17 +935,19 @@ describe("exec routes", () => {
             assert.equal(noPidStop.status, 200);
             assert.equal(noPidProcess.killed, true);
             mock.timers.tick(3_050);
-            assert.deepEqual(signals, ["SIGTERM", "SIGTERM", "SIGKILL", "SIGKILL"]);
+            assert.deepEqual(signals, ["SIGTERM", "SIGKILL", "SIGKILL"]);
             const stoppedJob = __testing.jobs.get(jobId);
             assert.equal(stoppedJob?.status, "done");
             assert.equal(stoppedJob?.code, 137);
-            assert.equal(stoppedJob?.process, undefined);
+            assert.equal(stoppedJob?.closePending, true);
+            assert.equal(stoppedJob?.process, fakeProcess);
             assert.equal(typeof stoppedJob?.endedAt, "number");
 
             const noPidJob = __testing.jobs.get(noPidJobId);
             assert.equal(noPidJob?.status, "done");
             assert.equal(noPidJob?.code, 137);
-            assert.equal(noPidJob?.process, undefined);
+            assert.equal(noPidJob?.closePending, true);
+            assert.equal(noPidJob?.process, noPidProcess);
             assert.equal(typeof noPidJob?.endedAt, "number");
         } finally {
             mock.timers.reset();

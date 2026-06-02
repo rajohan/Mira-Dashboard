@@ -7,7 +7,6 @@ import { errorMessage } from "../lib/errors.js";
 import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 
 let logsDir = "/tmp/openclaw";
-let realLogsDir = path.resolve(logsDir);
 let logWatcher: NodeJS.Timeout | null = null;
 let logPollInFlight = false;
 let lastLogSize = 0;
@@ -21,15 +20,25 @@ interface LogFile {
     modified: Date;
 }
 
+function resolveRealLogsDir(): string {
+    return fs.realpathSync(logsDir);
+}
+
 /** Returns today log file. */
-function getTodayLogFile(): string {
+function getTodayLogFile(root = resolveRealLogsDir()): string {
     const today = new Date().toISOString().split("T")[0];
-    return path.join(realLogsDir, "openclaw-" + today + ".log");
+    return path.join(root, "openclaw-" + today + ".log");
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
 async function pollLogFile(): Promise<void> {
-    const logFile = getTodayLogFile();
+    let logFile: string;
+    try {
+        logFile = getTodayLogFile();
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
 
     let file: fs.promises.FileHandle | undefined;
     try {
@@ -182,11 +191,6 @@ export const __testing = {
         this.resetLogWatcherForTest();
         const resolvedLogsDir = path.resolve(nextLogsDir);
         logsDir = resolvedLogsDir;
-        try {
-            realLogsDir = fs.realpathSync(resolvedLogsDir);
-        } catch {
-            realLogsDir = resolvedLogsDir;
-        }
     },
 };
 
@@ -197,8 +201,7 @@ export default function logsRoutes(app: express.Application): void {
         try {
             let realRoot: string;
             try {
-                realRoot = fs.realpathSync(realLogsDir);
-                realLogsDir = realRoot;
+                realRoot = resolveRealLogsDir();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
@@ -206,10 +209,6 @@ export default function logsRoutes(app: express.Application): void {
                     return;
                 }
                 throw error;
-            }
-            if (!fs.existsSync(realRoot)) {
-                res.json({ logs: [] });
-                return;
             }
 
             let names: string[];
@@ -266,8 +265,7 @@ export default function logsRoutes(app: express.Application): void {
         try {
             let realRoot: string;
             try {
-                realRoot = fs.realpathSync(realLogsDir);
-                realLogsDir = realRoot;
+                realRoot = resolveRealLogsDir();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
