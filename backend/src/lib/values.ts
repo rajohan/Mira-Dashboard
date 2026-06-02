@@ -6,8 +6,8 @@ export function envFallback(name: string, fallback: string): string {
 
 /** Returns an environment variable when it is non-empty, otherwise a fallback. */
 export function nonEmptyEnvFallback(name: string, fallback: string): string {
-    const value = process.env[name];
-    return value && value.trim().length > 0 ? value : fallback;
+    const value = process.env[name]?.trim();
+    return value && value.length > 0 ? value : fallback;
 }
 
 /** Converts optional values to strings while preserving empty/null fallback behavior. */

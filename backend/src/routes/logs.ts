@@ -100,12 +100,20 @@ function startLogWatcher(): void {
 
 /** Performs send log history. */
 async function sendLogHistory(ws: WebSocket): Promise<void> {
+    const send = (payload: unknown) => {
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (error) {
+            console.error("[Logs] Error sending history:", (error as Error).message);
+        }
+    };
+
     try {
         const logFile = getTodayLogFile();
         const fileName = path.basename(logFile);
 
         // Send file name
-        ws.send(JSON.stringify({ type: "log_file", file: fileName }));
+        send({ type: "log_file", file: fileName });
 
         let file: fs.promises.FileHandle;
         try {
@@ -114,7 +122,7 @@ async function sendLogHistory(ws: WebSocket): Promise<void> {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                 throw error;
             }
-            ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+            send({ type: "log_history_complete", count: 0 });
             return;
         }
 
@@ -126,14 +134,14 @@ async function sendLogHistory(ws: WebSocket): Promise<void> {
 
         // Send each line
         for (const line of lines) {
-            ws.send(JSON.stringify({ type: "log", line }));
+            send({ type: "log", line });
         }
 
         // Send completion
-        ws.send(JSON.stringify({ type: "log_history_complete", count: lines.length }));
+        send({ type: "log_history_complete", count: lines.length });
     } catch (error) {
         console.error("[Logs] Error sending history:", (error as Error).message);
-        ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+        send({ type: "log_history_complete", count: 0 });
     }
 }
 
@@ -244,7 +252,8 @@ export default function logsRoutes(app: express.Application): void {
             try {
                 realRoot = fs.realpathSync(realLogsDir);
             } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }

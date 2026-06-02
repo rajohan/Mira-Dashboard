@@ -188,32 +188,36 @@ export default function authRoutes(
         }
 
         let previousGatewayToken: string | null = null;
+        let attemptedGatewaySwitch = false;
         try {
             previousGatewayToken = getPersistedAuthGatewayToken();
             persistAuthGatewayToken(gatewayToken);
+            attemptedGatewaySwitch = true;
             initGateway(gatewayToken);
             const sessionId = createAuthSession(user.id);
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
-            try {
-                rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
-            } catch (rollbackError) {
-                console.error(
-                    "[Auth] First-user bootstrap rollback failed:",
-                    rollbackError
-                );
-            }
-            try {
-                shutdownGateway();
-            } catch {
-                // Preserve the original bootstrap failure response.
-            }
-            if (previousGatewayToken) {
+            if (attemptedGatewaySwitch) {
                 try {
-                    initGateway(previousGatewayToken);
+                    rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+                } catch (rollbackError) {
+                    console.error(
+                        "[Auth] First-user bootstrap rollback failed:",
+                        rollbackError
+                    );
+                }
+                try {
+                    shutdownGateway();
                 } catch {
                     // Preserve the original bootstrap failure response.
+                }
+                if (previousGatewayToken) {
+                    try {
+                        initGateway(previousGatewayToken);
+                    } catch {
+                        // Preserve the original bootstrap failure response.
+                    }
                 }
             }
             response.status(500).json({ error: "Failed to complete first-user setup" });

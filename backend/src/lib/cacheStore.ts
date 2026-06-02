@@ -50,7 +50,7 @@ export function parseTable<T extends object>(output: string): T[] {
 }
 
 /** Performs run docker exec. */
-async function runDockerExec(container: string, command: string) {
+async function runDockerExec(container: string, command: string[]) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
@@ -59,10 +59,38 @@ async function runDockerExec(container: string, command: string) {
     const dockerBin = getDockerBinForTests() || "docker";
     const { stdout } = await execFileAsync(
         dockerBin,
-        ["exec", container, "bash", "-lc", command],
+        ["exec", container, ...command],
         options
     );
     return stdout;
+}
+
+/** Returns a safe PostgreSQL hostname for URI construction. */
+function normalizePostgresHost(value: string | undefined): string {
+    const host = value?.trim() || "postgres";
+    if (
+        !/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/u.test(
+            host
+        ) &&
+        !/^\[(?:[0-9A-Fa-f:.]+)\]$/u.test(host) &&
+        !/^(?:\d{1,3}\.){3}\d{1,3}$/u.test(host)
+    ) {
+        throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
+    }
+    return host;
+}
+
+/** Returns a safe PostgreSQL port for URI construction. */
+function normalizePostgresPort(value: string | undefined): string {
+    const port = value?.trim() || "5432";
+    if (!/^\d+$/u.test(port)) {
+        throw Object.assign(new Error("Invalid DATABASE_PORT"), { code: "EINVAL" });
+    }
+    const portNumber = Number(port);
+    if (!Number.isSafeInteger(portNumber) || portNumber < 1 || portNumber > 65_535) {
+        throw Object.assign(new Error("Invalid DATABASE_PORT"), { code: "EINVAL" });
+    }
+    return String(portNumber);
 }
 
 /** Builds PostgreSQL uri. */
@@ -72,8 +100,8 @@ function buildPostgresUri(database = "n8n") {
     const encodedUsername = encodeURIComponent(username);
     const encodedPassword = encodeURIComponent(password);
     const encodedDatabase = encodeURIComponent(database);
-    const host = process.env.DATABASE_HOST?.trim() || "postgres";
-    const port = process.env.DATABASE_PORT?.trim() || "5432";
+    const host = normalizePostgresHost(process.env.DATABASE_HOST);
+    const port = normalizePostgresPort(process.env.DATABASE_PORT);
     return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${encodedDatabase}`;
 }
 
@@ -86,11 +114,17 @@ export const __testing = {
 /** Performs query n8n cache. */
 async function queryN8nCache(sql: string) {
     const uri = buildPostgresUri("n8n");
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Parses JSON field. */

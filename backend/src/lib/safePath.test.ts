@@ -568,6 +568,114 @@ describe("safe path helpers", () => {
         }
     });
 
+    it("creates missing children with path-based checks on non-Linux platforms", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            const target = path.join(baseDir, "root", "nested", "file.txt");
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, baseDir), target);
+            const nestedStat = await stat(path.join(baseDir, "root", "nested"));
+            assert.equal(nestedStat.isDirectory(), true);
+        } finally {
+            if (originalPlatform) {
+                Object.defineProperty(process, "platform", originalPlatform);
+            }
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("accepts existing non-Linux child directories during path-based creation", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        const originalMkdirSync = fs.mkdirSync;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            await mkdir(path.join(baseDir, "root"), { recursive: true });
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                originalMkdirSync(target, options);
+                throw Object.assign(new Error("already exists"), { code: "EEXIST" });
+            }) as typeof fs.mkdirSync;
+            const target = path.join(baseDir, "root", "nested", "file.txt");
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, baseDir), target);
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+            if (originalPlatform) {
+                Object.defineProperty(process, "platform", originalPlatform);
+            }
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects non-Linux child creation when path checks mismatch", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath.endsWith(`${path.sep}nested`)) {
+                    return path.join(baseDir, "elsewhere");
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(baseDir, "root", "nested", "file.txt"),
+                    baseDir
+                ),
+                null
+            );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            if (originalPlatform) {
+                Object.defineProperty(process, "platform", originalPlatform);
+            }
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("returns null when non-Linux child directory creation fails unexpectedly", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        const originalMkdirSync = fs.mkdirSync;
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            await mkdir(path.join(baseDir, "root"), { recursive: true });
+            fs.mkdirSync = (() => {
+                throw Object.assign(new Error("mkdir denied"), { code: "EACCES" });
+            }) as typeof fs.mkdirSync;
+            assert.equal(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(baseDir, "root", "nested", "file.txt"),
+                    baseDir
+                ),
+                null
+            );
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+            if (originalPlatform) {
+                Object.defineProperty(process, "platform", originalPlatform);
+            }
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
     it("covers exhausted ancestor walks and nested mkdir race failures", async () => {
         const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
         const outsideDir = await mkdtemp(

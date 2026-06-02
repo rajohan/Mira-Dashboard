@@ -19,7 +19,9 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 import { stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
-    const openclawHome = process.env.OPENCLAW_HOME?.trim();
+    const openclawHome =
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
+        process.env.OPENCLAW_HOME?.trim();
     if (
         openclawHome &&
         path.isAbsolute(openclawHome) &&
@@ -51,7 +53,7 @@ function resolveWorkspaceRoot(): string {
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
-const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE + 1024;
+const JSON_PARSER_SIZE_HEADROOM = 1024;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
 let listDirectoryRealpathSync = fs.realpathSync;
 
@@ -538,6 +540,12 @@ export default function filesRoutes(
                                 const existingStat = statGuarded(
                                     guardedPath(rootedFullPath)
                                 );
+                                if (existingStat.isDirectory()) {
+                                    throw Object.assign(
+                                        new Error("Path is a directory, not a file"),
+                                        { code: "EISDIR" }
+                                    );
+                                }
                                 if (existingStat.nlink > 1) {
                                     return null;
                                 }
@@ -597,6 +605,12 @@ export default function filesRoutes(
                         }
                     );
                 } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "EISDIR") {
+                        res.status(400).json({
+                            error: "Path is a directory, not a file",
+                        });
+                        return;
+                    }
                     if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
                         return;
                     }

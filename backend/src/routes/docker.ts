@@ -1353,16 +1353,26 @@ export default function dockerRoutes(app: express.Application): void {
 
     app.post(
         "/api/docker/containers/:containerId/action",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
-            const payload = req.body as DockerActionRequest;
+            const payload = req.body as Partial<DockerActionRequest> | null;
             const containerId = dockerIdentifierFallback(req.params.containerId);
             if (!containerId) {
                 sendInvalidDockerIdentifier(res, "containerId");
                 return;
             }
 
-            const result = await runContainerAction(containerId, payload.action);
+            if (!payload || typeof payload !== "object") {
+                res.status(400).json({ error: "Invalid container action" });
+                return;
+            }
+            const { action } = payload;
+            if (action !== "start" && action !== "stop" && action !== "restart") {
+                res.status(400).json({ error: "Invalid container action" });
+                return;
+            }
+
+            const result = await runContainerAction(containerId, action);
             res.json(result);
         })
     );
@@ -1445,7 +1455,7 @@ export default function dockerRoutes(app: express.Application): void {
 
     app.post(
         "/api/docker/exec/start",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerExecStartRequest;
 

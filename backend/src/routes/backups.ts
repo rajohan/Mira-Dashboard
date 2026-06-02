@@ -7,6 +7,7 @@ import { asyncRoute } from "../lib/errors.js";
 import { envFallback, nonEmptyEnvFallback } from "../lib/values.js";
 const N8N_DATABASE = "n8n";
 const MAX_OUTPUT_CHARS = 100_000;
+let spawnBackupProcess = spawn;
 
 function getN8nRoot(): string {
     return nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
@@ -147,14 +148,36 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         activeWalgJobId = jobId;
     }
 
-    const child = spawn(
-        getDopplerBin(),
-        ["run", "--project", "rajohan", "--config", "prd", "--", "bash", "-lc", command],
-        {
-            cwd: getN8nRoot(),
-            env: createBackupEnv(),
+    let child: ReturnType<typeof spawn>;
+    try {
+        child = spawnBackupProcess(
+            getDopplerBin(),
+            [
+                "run",
+                "--project",
+                "rajohan",
+                "--config",
+                "prd",
+                "--",
+                "bash",
+                "-lc",
+                command,
+            ],
+            {
+                cwd: getN8nRoot(),
+                env: createBackupEnv(),
+            }
+        );
+    } catch (error) {
+        backupJobs.delete(jobId);
+        if (activeKopiaJobId === jobId) {
+            activeKopiaJobId = null;
         }
-    );
+        if (activeWalgJobId === jobId) {
+            activeWalgJobId = null;
+        }
+        throw error;
+    }
 
     job.process = child;
 
@@ -207,6 +230,9 @@ export const __testing = {
     createBackupEnv,
     getN8nRoot,
     getDopplerBin,
+    setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
+        spawnBackupProcess = nextSpawn ?? spawn;
+    },
     shellQuote,
 };
 

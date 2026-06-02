@@ -60,8 +60,9 @@ async function startServer() {
     const workspaceRoot = path.join(temporaryRoot, "workspace");
     const dataRoot = path.join(temporaryRoot, "app");
     const dashboardOpenClawHome = path.join(dataRoot, "openclaw-client");
-    const mediaRoot = path.join(openClawHome, "media");
+    const mediaRoot = path.join(dashboardOpenClawHome, "media");
     await mkdir(path.join(openClawHome, "media"), { recursive: true });
+    await mkdir(mediaRoot, { recursive: true });
     await mkdir(path.join(openClawHome, "cron"), { recursive: true });
     await mkdir(path.join(openClawHome, "hooks", "transforms"), {
         recursive: true,

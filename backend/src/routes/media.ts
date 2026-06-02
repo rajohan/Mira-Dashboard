@@ -6,8 +6,8 @@ import path from "path";
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const OPENCLAW_HOME = nonEmptyEnvFallback(
-    "OPENCLAW_HOME",
-    path.join(os.homedir(), ".openclaw")
+    "MIRA_DASHBOARD_OPENCLAW_HOME",
+    nonEmptyEnvFallback("OPENCLAW_HOME", path.join(os.homedir(), ".openclaw"))
 );
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
@@ -70,11 +70,24 @@ export default function mediaRoutes(app: express.Application): void {
             return;
         }
 
-        const realPath = fs.realpathSync(fullPath);
-        const canonicalMediaRoot = getRealMediaRoot();
-        if (!canonicalMediaRoot) {
-            response.status(404).json({ error: "Media not found" });
-            return;
+        let realPath: string;
+        let stat: fs.Stats;
+        let canonicalMediaRoot: string | null;
+        try {
+            realPath = fs.realpathSync(fullPath);
+            canonicalMediaRoot = getRealMediaRoot();
+            if (!canonicalMediaRoot) {
+                response.status(404).json({ error: "Media not found" });
+                return;
+            }
+            stat = fs.statSync(realPath);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === "ENOENT" || code === "ENOTDIR") {
+                response.status(404).json({ error: "Media not found" });
+                return;
+            }
+            throw error;
         }
         if (
             !realPath.startsWith(`${canonicalMediaRoot}${path.sep}`) &&
@@ -84,7 +97,6 @@ export default function mediaRoutes(app: express.Application): void {
             return;
         }
 
-        const stat = fs.statSync(realPath);
         if (!stat.isFile()) {
             response.status(400).json({ error: "Media path is not a file" });
             return;

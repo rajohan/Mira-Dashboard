@@ -154,6 +154,33 @@ describe("notifications routes", () => {
         assert.equal(invalidType.status, 400);
         assert.equal(invalidType.body.error, "invalid notification type");
 
+        const numericType = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Title", description: "body", type: 0, source },
+            }
+        );
+        assert.equal(numericType.status, 400);
+        assert.equal(numericType.body.error, "invalid notification type");
+
+        const invalidOccurredAt = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    occurredAt: false,
+                    source,
+                },
+            }
+        );
+        assert.equal(invalidOccurredAt.status, 400);
+        assert.equal(invalidOccurredAt.body.error, "invalid occurredAt");
+
         const invalidSource = await requestJson<{ error: string }>(
             server,
             "/api/notifications",

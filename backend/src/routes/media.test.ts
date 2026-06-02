@@ -264,6 +264,80 @@ describe("media routes", () => {
         }
     });
 
+    it("returns not found when media file canonicalization races with deletion", async () => {
+        const racingFile = path.join(mediaRoot, "racing.txt");
+        await writeFile(racingFile, "gone");
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) => {
+            if (candidate === racingFile) {
+                const error = new Error("missing file") as NodeJS.ErrnoException;
+                error.code = "ENOENT";
+                throw error;
+            }
+            return realRealpathSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(racingFile)}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            realpathSync.mock.restore();
+            await rm(racingFile, { force: true });
+        }
+    });
+
+    it("returns not found when media stat races with a missing parent", async () => {
+        const racingFile = path.join(mediaRoot, "stat-racing.txt");
+        await writeFile(racingFile, "gone");
+        const realStatSync = fs.statSync.bind(fs);
+        const statSync = mock.method(fs, "statSync", (candidate: fs.PathLike) => {
+            if (candidate === racingFile) {
+                const error = new Error("missing parent") as NodeJS.ErrnoException;
+                error.code = "ENOTDIR";
+                throw error;
+            }
+            return realStatSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(racingFile)}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            statSync.mock.restore();
+            await rm(racingFile, { force: true });
+        }
+    });
+
+    it("surfaces unexpected media stat failures", async () => {
+        const failedFile = path.join(mediaRoot, "failed-stat.txt");
+        await writeFile(failedFile, "denied");
+        const realStatSync = fs.statSync.bind(fs);
+        const statSync = mock.method(fs, "statSync", (candidate: fs.PathLike) => {
+            if (candidate === failedFile) {
+                const error = new Error("stat denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return realStatSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(failedFile)}`
+            );
+            assert.equal(response.status, 500);
+        } finally {
+            statSync.mock.restore();
+            await rm(failedFile, { force: true });
+        }
+    });
+
     it("restores OPENCLAW_HOME when startup fails", async () => {
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
         process.env.OPENCLAW_HOME = "previous-home";

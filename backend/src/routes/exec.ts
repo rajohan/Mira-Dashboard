@@ -117,7 +117,7 @@ interface ExecResponse {
 /** Represents exec job. */
 interface ExecJob {
     id: string;
-    status: "running" | "done";
+    status: "running" | "signaled" | "done";
     code: number | null;
     stdout: string;
     stderr: string;
@@ -134,7 +134,7 @@ interface ExecStartResponse {
 /** Represents the exec job API response. */
 interface ExecJobResponse {
     jobId: string;
-    status: "running" | "done";
+    status: "running" | "signaled" | "done";
     code: number | null;
     stdout: string;
     stderr: string;
@@ -353,7 +353,7 @@ function cleanupJobs(): void {
         if (overflow <= 0) {
             break;
         }
-        if (job.status === "running" && job.process && !job.process.killed) {
+        if ((job.status === "running" || job.status === "signaled") && job.process) {
             continue;
         }
         jobs.delete(job.id);
@@ -514,15 +514,27 @@ export default function execRoutes(
                 // Fallback to killing just the process if process group fails
                 job.process.kill("SIGTERM");
             }
+            job.status = "signaled";
 
             // Force kill after 3 seconds if still running
             setTimeout(() => {
-                try {
-                    if (job.process && !job.process.killed) {
-                        process.kill(-job.process.pid!, "SIGKILL");
+                if (job.process && job.status === "signaled") {
+                    const processId = job.process.pid;
+                    try {
+                        process.kill(-processId!, "SIGKILL");
+                    } catch {
+                        if (processId) {
+                            try {
+                                process.kill(processId, "SIGKILL");
+                            } catch {
+                                // Process already exited or cannot be signaled.
+                            }
+                        }
+                    } finally {
+                        job.process = undefined;
+                        job.status = "done";
+                        job.endedAt = Date.now();
                     }
-                } catch {
-                    // Ignore errors - process might already be gone
                 }
             }, 3000);
 

@@ -255,19 +255,37 @@ describe("agents routes", () => {
             fs.realpathSync = originalRealpathSync;
         }
 
-        const originalLstatSync = fs.lstatSync;
-        fs.lstatSync = ((target: fs.PathLike) => {
+        const originalStatSync = fs.statSync;
+        fs.statSync = ((target: fs.PathLike) => {
             if (String(target).endsWith(".openclaw/agents")) {
                 const error = new Error("agents dir denied") as NodeJS.ErrnoException;
                 error.code = "EACCES";
                 throw error;
             }
-            return originalLstatSync(target);
-        }) as typeof fs.lstatSync;
+            return originalStatSync(target);
+        }) as typeof fs.statSync;
+        try {
+            assert.equal(
+                __testing.ensureRealAgentsDir()?.endsWith(".openclaw/agents"),
+                true
+            );
+        } finally {
+            fs.statSync = originalStatSync;
+        }
+
+        const agentsRoot = path.join(homeDir, ".openclaw", "agents");
+        fs.statSync = ((target: fs.PathLike) => {
+            if (String(target) === agentsRoot) {
+                return {
+                    isDirectory: () => false,
+                } as fs.Stats;
+            }
+            return originalStatSync(target);
+        }) as typeof fs.statSync;
         try {
             assert.equal(__testing.ensureRealAgentsDir(), null);
         } finally {
-            fs.lstatSync = originalLstatSync;
+            fs.statSync = originalStatSync;
         }
     });
 
@@ -986,7 +1004,7 @@ describe("agents routes", () => {
         );
     });
 
-    it("rejects a symlinked agents root before writing metadata", async () => {
+    it("accepts a symlinked agents root after canonical validation", async () => {
         const symlinkHome = await mkdtemp(path.join(os.tmpdir(), "mira-agents-link-"));
         const outsideAgents = await mkdtemp(
             path.join(os.tmpdir(), "mira-agents-link-target-")
@@ -997,13 +1015,21 @@ describe("agents routes", () => {
         try {
             await mkdir(openclawRoot, { recursive: true });
             await symlink(outsideAgents, path.join(openclawRoot, "agents"));
+            await mkdir(path.join(outsideAgents, "main", "sessions"), {
+                recursive: true,
+            });
             process.env.HOME = symlinkHome;
             const { default: agentsRoutes, __testing } = await import(
                 `./agents.js?symlink-root=${Date.now()}`
             );
 
-            assert.equal(__testing.getSafeAgentSessionsDir("main"), null);
-            assert.deepEqual(__testing.getSafeAgentActivityRoots("main"), []);
+            assert.equal(
+                __testing.getSafeAgentSessionsDir("main"),
+                path.join(outsideAgents, "main", "sessions")
+            );
+            assert.deepEqual(__testing.getSafeAgentActivityRoots("main"), [
+                { dir: path.join(outsideAgents, "main", "sessions"), recursive: false },
+            ]);
 
             const app = express();
             agentsRoutes(app);
@@ -1020,10 +1046,20 @@ describe("agents routes", () => {
                     body: JSON.stringify({ currentTask: "blocked" }),
                 }
             );
-            assert.equal(response.status, 400);
-            assert.deepEqual(await response.json(), {
-                error: "Invalid agent metadata path",
-            });
+            assert.equal(response.status, 200);
+            const responseBody = (await response.json()) as {
+                currentTask?: unknown;
+                updatedAt?: unknown;
+            };
+            assert.equal(responseBody.currentTask, "blocked");
+            assert.equal(typeof responseBody.updatedAt, "string");
+            assert.equal(
+                await readFile(
+                    path.join(outsideAgents, "main", "sessions", "metadata.json"),
+                    "utf8"
+                ).then((content) => JSON.parse(content).currentTask),
+                "blocked"
+            );
         } finally {
             if (symlinkServer) {
                 await new Promise<void>((resolve, reject) =>
@@ -1101,6 +1137,25 @@ describe("agents routes", () => {
             assert.equal(mkdirFailure.body.error, "sessions mkdir failed");
         } finally {
             fs.mkdirSync = originalMkdirSync;
+        }
+
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+        try {
+            Object.defineProperty(process, "platform", {
+                configurable: true,
+                value: "darwin",
+            });
+            const unsupported = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/unsupported-platform/metadata",
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(unsupported.status, 500);
+            assert.match(unsupported.body.error, /unsupported/u);
+        } finally {
+            if (originalPlatform) {
+                Object.defineProperty(process, "platform", originalPlatform);
+            }
         }
     });
 
@@ -3321,6 +3376,29 @@ describe("agents routes", () => {
             );
             assert.equal(response.status, 400);
             assert.equal(response.body.error, "Invalid agent metadata path");
+
+            __testing.setPrepareAgentMetadataDirForTest(() =>
+                path.join(homeDir, ".openclaw", "agents", "unavailable-root", "sessions")
+            );
+            let agentsRootRealpathCalls = 0;
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (
+                    String(target) === path.join(homeDir, ".openclaw", "agents") &&
+                    ++agentsRootRealpathCalls > 2
+                ) {
+                    const error = new Error("agents dir denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            const unavailableRoot = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/unavailable-root/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(unavailableRoot.status, 400);
+            assert.equal(unavailableRoot.body.error, "Invalid agent metadata path");
         } finally {
             const { __testing } = await import("./agents.js");
             __testing.setPrepareAgentMetadataDirForTest();

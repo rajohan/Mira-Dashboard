@@ -247,6 +247,17 @@ describe("gateway state and helper utilities", () => {
                 CapturingGatewayClient.instances.at(-1)?.options.token,
                 "token-throws"
             );
+
+            __testing.setGatewayClientForTest(new ThrowingStopGatewayClient());
+            __testing.setGatewayConnectedForTest(true);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            gateway.init("token-after-stop-error");
+            assert.equal(
+                CapturingGatewayClient.instances.at(-1)?.options.token,
+                "token-after-stop-error"
+            );
         } finally {
             if (originalGatewayUrl === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_URL;

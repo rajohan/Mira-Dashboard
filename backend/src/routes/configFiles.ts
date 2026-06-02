@@ -83,15 +83,10 @@ function resolveOpenclawRoot(): string | null {
         return null;
     }
     try {
-        if (fs.lstatSync(resolvedRoot).isSymbolicLink()) {
-            return null;
-        }
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-            return null;
-        }
+        return fs.realpathSync(resolvedRoot);
+    } catch {
+        return null;
     }
-    return resolvedRoot;
 }
 
 function validateOpenclawLeaf(openclawRoot: string): boolean {
@@ -529,6 +524,10 @@ export default function configFilesRoutes(
                     );
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "EACCES") {
+                        res.status(403).json({ error: "Access denied" });
+                        return;
+                    }
                     if (code === "EMLINK") {
                         res.status(403).json({
                             error: "Hard-linked files are not allowed",
@@ -557,6 +556,10 @@ export default function configFilesRoutes(
                         return statGuarded(guardedPath(rootedFullPath));
                     }
                 ).catch((error: NodeJS.ErrnoException) => {
+                    if (error.code === "EACCES") {
+                        res.status(403).json({ error: "Access denied" });
+                        return null;
+                    }
                     if (error.code === "EMLINK") {
                         res.status(403).json({
                             error: "Hard-linked files are not allowed",
@@ -587,6 +590,7 @@ export default function configFilesRoutes(
 
 export const __testing = {
     ensureParentDirsForWrite,
+    listConfigFiles,
     resolveOpenclawRoot,
     setValidateOpenclawLeafForTest(
         nextValidateOpenclawLeaf?: typeof validateOpenclawLeaf

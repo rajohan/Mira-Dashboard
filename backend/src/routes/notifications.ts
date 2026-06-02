@@ -98,9 +98,11 @@ export default function notificationsRoutes(app: express.Application): void {
     app.post("/api/notifications", express.json(), ((req, res) => {
         const rawTitle = req.body?.title;
         const rawDescription = req.body?.description;
-        const type = (req.body?.type || "info").toString() as NotificationType;
+        const rawType = req.body?.type;
+        const type = rawType === undefined ? "info" : rawType;
         const rawSource = req.body?.source;
         const rawDedupeKey = req.body?.dedupeKey;
+        const rawOccurredAt = req.body?.occurredAt;
         if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
             res.status(400).json({ error: "title must be a string" });
             return;
@@ -139,9 +141,16 @@ export default function notificationsRoutes(app: express.Application): void {
             !Array.isArray(req.body.metadata)
                 ? objectFallback(req.body.metadata)
                 : {};
-        const occurredAt = req.body?.occurredAt
-            ? String(req.body.occurredAt)
-            : new Date().toISOString();
+        if (rawType !== undefined && typeof rawType !== "string") {
+            res.status(400).json({ error: "invalid notification type" });
+            return;
+        }
+        const occurredAt =
+            rawOccurredAt === undefined ? new Date().toISOString() : rawOccurredAt;
+        if (typeof occurredAt !== "string" || Number.isNaN(Date.parse(occurredAt))) {
+            res.status(400).json({ error: "invalid occurredAt" });
+            return;
+        }
 
         if (!title) {
             res.status(400).json({ error: "title is required" });

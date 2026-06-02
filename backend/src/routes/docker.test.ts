@@ -362,7 +362,6 @@ async function startServer(updaterCwd: string): Promise<TestServer> {
     __testing.setUpdaterNodeBinForTests(fakeUpdaterNodeBin);
     __testing.setUpdaterCwdForTests(updaterCwd);
     const app = express();
-    app.use(express.json());
     dockerRoutes(app);
     const server = http.createServer(app);
 
@@ -395,12 +394,16 @@ async function startServer(updaterCwd: string): Promise<TestServer> {
 async function requestJson<T>(
     server: TestServer,
     pathName: string,
-    options: { method?: string; body?: unknown } = {}
+    options: { method?: string; body?: unknown; rawBody?: string } = {}
 ): Promise<{ status: number; body: T }> {
     const response = await fetch(`${server.baseUrl}${pathName}`, {
         method: options.method || "GET",
-        headers: options.body ? { "Content-Type": "application/json" } : undefined,
-        body: options.body ? JSON.stringify(options.body) : undefined,
+        headers:
+            options.body || options.rawBody
+                ? { "Content-Type": "application/json" }
+                : undefined,
+        body:
+            options.rawBody ?? (options.body ? JSON.stringify(options.body) : undefined),
     });
 
     return {
@@ -1379,6 +1382,22 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(invalidAction.status, 400);
         assert.equal(invalidAction.body.error, "Invalid containerId");
 
+        const invalidContainerAction = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/containers/abc123/action",
+            { method: "POST", body: { action: "rm" } }
+        );
+        assert.equal(invalidContainerAction.status, 400);
+        assert.equal(invalidContainerAction.body.error, "Invalid container action");
+
+        const nullContainerAction = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/containers/abc123/action",
+            { method: "POST", rawBody: JSON.stringify(null) }
+        );
+        assert.equal(nullContainerAction.status, 400);
+        assert.equal(nullContainerAction.body.error, "Invalid container action");
+
         const invalidImage = await requestJson<{ error: string }>(
             server,
             "/api/docker/images/-bad",
@@ -1803,7 +1822,7 @@ describe("docker routes", { concurrency: false }, () => {
         const nullPayload = await requestJson<{ error: string }>(
             server,
             "/api/docker/exec/start",
-            { method: "POST", body: null }
+            { method: "POST", rawBody: JSON.stringify(null) }
         );
         assert.equal(nullPayload.status, 400);
         assert.equal(nullPayload.body.error, "Missing containerId or command");

@@ -45,6 +45,15 @@ const AGENTS_DIR = OPENCLAW_ROOT ? Path.join(OPENCLAW_ROOT, "agents") : "";
 let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
+    if (process.platform !== "linux" || !FS.existsSync("/proc/self/fd")) {
+        throw Object.assign(
+            new Error(
+                "Verified child directory creation is unsupported on this platform"
+            ),
+            { code: "ENOTSUP" }
+        );
+    }
+
     const parentFd = FS.openSync(
         Buffer.from(parent),
         FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
@@ -85,8 +94,7 @@ function getRouteParam(value: string | string[] | undefined): string {
 
 function getRealAgentsDir(): string | null {
     try {
-        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
-        return realAgentsDir === AGENTS_DIR ? realAgentsDir : null;
+        return FS.realpathSync(AGENTS_DIR);
     } catch {
         return null;
     }
@@ -94,8 +102,9 @@ function getRealAgentsDir(): string | null {
 
 function ensureRealAgentsDir(): string | null {
     try {
-        const agentsDirStat = FS.lstatSync(AGENTS_DIR);
-        if (!agentsDirStat.isDirectory() || agentsDirStat.isSymbolicLink()) {
+        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        const agentsDirStat = FS.statSync(realAgentsDir);
+        if (!agentsDirStat.isDirectory()) {
             return null;
         }
     } catch (error) {

@@ -57,6 +57,12 @@ describe("value fallback helpers", () => {
                 nonEmptyEnvFallback("MIRA_VALUE_HELPER_TEST", "fallback"),
                 "configured"
             );
+
+            process.env.MIRA_VALUE_HELPER_TEST = " configured ";
+            assert.equal(
+                nonEmptyEnvFallback("MIRA_VALUE_HELPER_TEST", "fallback"),
+                "configured"
+            );
         } finally {
             if (original === undefined) {
                 delete process.env.MIRA_VALUE_HELPER_TEST;

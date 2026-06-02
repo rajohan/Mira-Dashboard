@@ -329,6 +329,18 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join("/tmp/openclaw-home", "workspace")
             );
+            const originalDashboardOpenClawHome =
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "/tmp/dashboard-openclaw-home";
+            assert.equal(
+                __testing.getDefaultWorkspaceRoot(),
+                path.join("/tmp/dashboard-openclaw-home", "workspace")
+            );
+            if (originalDashboardOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenClawHome;
+            }
             process.env.OPENCLAW_HOME = "relative-home";
             assert.equal(
                 __testing.getDefaultWorkspaceRoot(),
@@ -787,6 +799,15 @@ describe("files routes", () => {
         const executableStat = await fs.promises.stat(executablePath);
         assert.equal(executableStat.mode & 0o777, 0o755);
 
+        await mkdir(path.join(workspaceRoot, "generated", "directory-target"));
+        const directoryUpdate = await requestJson<{ error: string }>(
+            server,
+            "/api/files/generated%2Fdirectory-target",
+            { method: "PUT", body: { content: "not a dir" } }
+        );
+        assert.equal(directoryUpdate.status, 400);
+        assert.equal(directoryUpdate.body.error, "Path is a directory, not a file");
+
         const outsideBackupDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-files-backup-outside-")
         );
@@ -928,7 +949,7 @@ describe("files routes", () => {
                 "/api/files/generated%2Fnote.txt",
                 { method: "PUT", body: { content: "after" } }
             );
-            assert.equal(response.status, 500);
+            assert.equal(response.status, 400);
             assert.match(response.body.error, /EISDIR|directory/i);
             assert.equal(await readFile(target, "utf8"), "before");
         } finally {

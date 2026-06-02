@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -423,8 +423,22 @@ describe("logs routes", () => {
         const unreadableFile = "openclaw-2099-03-07.log";
         const unreadablePath = path.join(logsDir, unreadableFile);
         await writeFile(unreadablePath, "blocked\n", "utf8");
+        const originalOpen = fs.promises.open;
         try {
-            await chmod(unreadablePath, 0o000);
+            fs.promises.open = ((targetPath: fs.PathLike, ...args: unknown[]) => {
+                if (
+                    Buffer.isBuffer(targetPath) &&
+                    targetPath.toString() === unreadablePath
+                ) {
+                    throw Object.assign(new Error("EACCES: permission denied"), {
+                        code: "EACCES",
+                    });
+                }
+                return Reflect.apply(originalOpen, fs.promises, [
+                    targetPath,
+                    ...args,
+                ]) as ReturnType<typeof fs.promises.open>;
+            }) as typeof fs.promises.open;
             const permissionFailure = await fetch(
                 `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(unreadableFile)}`
             );
@@ -436,7 +450,7 @@ describe("logs routes", () => {
             assert.equal(permissionFailureBody.error, "Failed to open log file");
             assert.match(permissionFailureBody.detail, /EACCES|EPERM/u);
         } finally {
-            await chmod(unreadablePath, 0o600).catch(() => {});
+            fs.promises.open = originalOpen;
             await rm(unreadablePath, { force: true });
         }
     });
@@ -509,6 +523,19 @@ describe("logs routes", () => {
             unsubscribeFromLogs(ws as never);
             __testing.resetLogWatcherForTest();
             await rm(todayPath, { force: true });
+        }
+    });
+
+    it("does not throw when log history sends fail", async () => {
+        const ws = new FakeWebSocket();
+        ws.failSend = true;
+        try {
+            subscribeToLogs(ws as never);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            assert.equal(__testing.subscriberCount(), 1);
+        } finally {
+            unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
         }
     });
 
@@ -657,7 +684,7 @@ describe("logs routes", () => {
             fs.realpathSync = ((target: fs.PathLike) => {
                 if (target === logsDir) {
                     const error = new Error("missing root") as NodeJS.ErrnoException;
-                    error.code = "ENOENT";
+                    error.code = "ENOTDIR";
                     throw error;
                 }
                 return originalRealpathSync(target);

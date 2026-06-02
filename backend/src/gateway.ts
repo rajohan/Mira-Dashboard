@@ -644,7 +644,15 @@ function init(token: string): void {
     sessionList = [];
     broadcast({ type: "disconnected", gatewayConnected: false });
     currentToken = token;
-    previousGatewayClient?.stop();
+    try {
+        previousGatewayClient?.stop();
+    } catch (error) {
+        console.error("[Gateway] Failed to stop previous client before init:", {
+            currentToken,
+            error,
+            hadPreviousGatewayClient: previousGatewayClient !== null,
+        });
+    }
     let thisGatewayClient: OpenClawGatewayClientInstance | null = null;
     /** Returns the active Gateway client when this callback belongs to it. */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | null {

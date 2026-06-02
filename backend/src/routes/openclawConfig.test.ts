@@ -41,9 +41,11 @@ async function withSkillEnvironment(
     callback: () => Promise<void> | void
 ): Promise<void> {
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     const originalPackageRootEnv = process.env.OPENCLAW_PACKAGE_ROOT;
     try {
         process.env.HOME = homeDir;
+        process.env.USERPROFILE = homeDir;
         __testing.setOpenClawPackageRootForTest(packageRoot);
         await callback();
     } finally {
@@ -57,6 +59,11 @@ async function withSkillEnvironment(
             delete process.env.HOME;
         } else {
             process.env.HOME = originalHome;
+        }
+        if (originalUserProfile === undefined) {
+            delete process.env.USERPROFILE;
+        } else {
+            process.env.USERPROFILE = originalUserProfile;
         }
     }
 }

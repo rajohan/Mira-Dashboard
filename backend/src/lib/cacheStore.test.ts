@@ -66,6 +66,25 @@ describe("cacheStore utilities", () => {
                 __testing.buildPostgresUri("cache/name?#"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/cache%2Fname%3F%23"
             );
+
+            process.env.DATABASE_HOST = "db$(touch /tmp/nope)";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                message: "Invalid DATABASE_HOST",
+            });
+            process.env.DATABASE_HOST = "[2001:db8::1]";
+            process.env.DATABASE_PORT = "not-a-port";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                message: "Invalid DATABASE_PORT",
+            });
+            process.env.DATABASE_PORT = "70000";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                message: "Invalid DATABASE_PORT",
+            });
+            process.env.DATABASE_PORT = "05432";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@[2001:db8::1]:5432/n8n"
+            );
         } finally {
             if (original.username === undefined) delete process.env.DATABASE_USERNAME;
             else process.env.DATABASE_USERNAME = original.username;

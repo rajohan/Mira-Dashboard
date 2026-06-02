@@ -190,7 +190,26 @@ describe("guarded filesystem helpers", () => {
             } finally {
                 __testing.setReadChunkForTest();
             }
+            const boundedReadCopy = path.join(baseDir, "bounded-read-copy.txt");
+            const readLengths: number[] = [];
+            __testing.setReadChunkForTest(
+                async (file, buffer, offset, length, position) => {
+                    readLengths.push(length);
+                    return file.read(buffer, offset, length, position);
+                }
+            );
+            try {
+                await writeFile(realTarget, Buffer.alloc(64 * 1024 + 7, "x"));
+                await copyNoFollowGuarded(
+                    guardedPath(realTarget),
+                    guardedPath(boundedReadCopy)
+                );
+                assert.deepEqual(readLengths, [64 * 1024, 7]);
+            } finally {
+                __testing.setReadChunkForTest();
+            }
             const defaultReadCopy = path.join(baseDir, "default-read-copy.txt");
+            await writeFile(realTarget, "real", "utf8");
             await copyNoFollowGuarded(
                 guardedPath(realTarget),
                 guardedPath(defaultReadCopy)

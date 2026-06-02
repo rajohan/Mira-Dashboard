@@ -47,6 +47,25 @@ function createChildDirectoryFromVerifiedParent(
     realParent: string,
     childName: string
 ): string | null {
+    if (process.platform !== "linux") {
+        const nextParent = path.join(realParent, childName);
+        try {
+            fs.mkdirSync(Buffer.from(nextParent));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
+        const realNextParent = fs.realpathSync(Buffer.from(nextParent));
+        if (
+            realNextParent !== nextParent ||
+            !fs.statSync(Buffer.from(realNextParent)).isDirectory()
+        ) {
+            return null;
+        }
+        return realNextParent;
+    }
+
     const parentFd = fs.openSync(
         Buffer.from(realParent),
         fs.constants.O_DIRECTORY | fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW

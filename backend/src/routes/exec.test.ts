@@ -281,6 +281,34 @@ describe("exec routes", () => {
         assert.equal(__testing.jobs.has("all-active-0"), true);
 
         __testing.jobs.clear();
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 100; index += 1) {
+            const id = `signaled-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: index === 0 ? "signaled" : "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: index === 0 } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 100);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("signaled-0"), true);
+
+        __testing.jobs.clear();
         let killed = false;
         __testing.jobs.set("old-done", {
             id: "old-done",

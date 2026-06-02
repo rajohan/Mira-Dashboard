@@ -331,6 +331,45 @@ describe("backup routes", () => {
         }
     });
 
+    it("clears active jobs when spawn throws synchronously", async () => {
+        backupTesting.setSpawnBackupProcessForTest(() => {
+            throw new Error("spawn crashed");
+        });
+        try {
+            const failed = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/kopia/run",
+                { method: "POST" }
+            );
+            assert.equal(failed.status, 500);
+            assert.equal(failed.body.error, "spawn crashed");
+
+            const active = await requestJson<{ job: unknown }>(
+                server,
+                "/api/backups/kopia"
+            );
+            assert.equal(active.status, 200);
+            assert.equal(active.body.job, null);
+
+            const failedWalg = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/walg/run",
+                { method: "POST" }
+            );
+            assert.equal(failedWalg.status, 500);
+            assert.equal(failedWalg.body.error, "spawn crashed");
+
+            const activeWalg = await requestJson<{ job: unknown }>(
+                server,
+                "/api/backups/walg"
+            );
+            assert.equal(activeWalg.status, 200);
+            assert.equal(activeWalg.body.job, null);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest();
+        }
+    });
+
     it("covers backup helper edge cases directly", async () => {
         let cleared = false;
         const missing = backupTesting.getCurrentJob("missing-job", () => {

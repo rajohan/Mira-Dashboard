@@ -7,6 +7,10 @@ import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
 import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
+const EXEC_FILE_OPTIONS = {
+    killSignal: "SIGTERM" as const,
+    timeout: 30_000,
+};
 const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
 const N8N_DATABASE = "n8n";
 const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
@@ -57,6 +61,7 @@ async function readLogRotationStatus() {
         dockerBin,
         ["exec", "postgres", "psql", buildPostgresUri(), "-t", "-A", "-c", sql],
         {
+            ...EXEC_FILE_OPTIONS,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
         }
@@ -87,6 +92,7 @@ async function runLogRotation(options: { dryRun: boolean }) {
                   ...args,
               ],
         {
+            ...EXEC_FILE_OPTIONS,
             cwd: N8N_ROOT,
             env: buildN8nScriptEnv(),
             maxBuffer: 20 * 1024 * 1024,

@@ -160,12 +160,16 @@ export async function copyNoFollowGuarded(
             await destinationFile.truncate(0);
             const buffer = Buffer.allocUnsafe(64 * 1024);
             let position = 0;
-            while (position < sourceStat.size) {
+            while (true) {
+                const remaining = sourceStat.size - position;
+                if (remaining <= 0) {
+                    break;
+                }
                 const { bytesRead } = await readChunk(
                     sourceFile,
                     buffer,
                     0,
-                    buffer.length,
+                    Math.min(buffer.length, remaining),
                     position
                 );
                 if (bytesRead === 0) {
