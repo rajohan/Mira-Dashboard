@@ -181,9 +181,7 @@ async function sendLogHistory(ws: WebSocket): Promise<void> {
         }
 
         const stat = await file.stat();
-        const lines = await readLogTailLines(file, stat, 100).finally(() =>
-            file.close()
-        );
+        const lines = await readLogTailLines(file, stat, 100).finally(() => file.close());
 
         // Send each line
         for (const line of lines) {

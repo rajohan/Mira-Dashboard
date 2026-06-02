@@ -7,9 +7,9 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
+import { withEnv } from "../testUtils/env.js";
 import backupRoutes from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
-import { withEnv } from "../testUtils/env.js";
 
 interface TestServer {
     baseUrl: string;
@@ -41,7 +41,10 @@ if (process.env.FAKE_BACKUP_SIGNAL === "1") {
     return dopplerPath;
 }
 
-async function createTestServer(tempDir: string, dopplerBin: string): Promise<TestServer> {
+async function createTestServer(
+    tempDir: string,
+    dopplerBin: string
+): Promise<TestServer> {
     const savedDopplerBin = process.env.DOPPLER_BIN;
     const savedN8nRoot = process.env.MIRA_N8N_ROOT;
     const restoreEnv = () => {

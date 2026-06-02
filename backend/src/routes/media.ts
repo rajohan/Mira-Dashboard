@@ -61,7 +61,8 @@ export default function mediaRoutes(app: express.Application): void {
         const realMediaRoot = getRealMediaRoot();
         const isUnderMediaRoot =
             !!realMediaRoot &&
-            (fullPath === realMediaRoot || fullPath.startsWith(`${realMediaRoot}${path.sep}`));
+            (fullPath === realMediaRoot ||
+                fullPath.startsWith(`${realMediaRoot}${path.sep}`));
 
         if (!requestedPath) {
             response.status(403).json({ error: "Access denied" });

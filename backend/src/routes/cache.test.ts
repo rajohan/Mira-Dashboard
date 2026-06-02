@@ -8,6 +8,7 @@ import { after, before, describe, it } from "node:test";
 import express from "express";
 
 import { __testing as cacheStoreTesting } from "../lib/cacheStore.js";
+import { withEnv } from "../testUtils/env.js";
 import cacheRoutes from "./cache.js";
 import {
     __testing,
@@ -15,7 +16,6 @@ import {
     parseJsonFieldOrValue,
     refreshCacheKey,
 } from "./cache.js";
-import { withEnv } from "../testUtils/env.js";
 
 const baseRow = {
     key: "quotas.summary",

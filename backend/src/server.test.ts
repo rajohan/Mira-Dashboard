@@ -90,9 +90,7 @@ async function waitForChildHealth(
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (child.exitCode !== null || child.signalCode !== null) {
-            assert.fail(
-                `Process exited before serving health checks\n${getOutput()}`
-            );
+            assert.fail(`Process exited before serving health checks\n${getOutput()}`);
         }
         try {
             const response = await fetch(`http://127.0.0.1:${port}/api/health`);
@@ -286,7 +284,8 @@ describe("server bootstrap", () => {
 
         const initialPrepareError = new Error("schema unavailable");
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {},
                     prepare: () => ({
                         all: () => {
@@ -362,7 +361,8 @@ describe("server bootstrap", () => {
         const recheckError = new Error("recheck failed");
         let recheckPrepareCalls = 0;
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
@@ -381,7 +381,8 @@ describe("server bootstrap", () => {
 
         const nonTransientError = new Error("disk unavailable");
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {
                         throw nonTransientError;
                     },
@@ -393,7 +394,8 @@ describe("server bootstrap", () => {
         );
 
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {
                         throw "SQLITE_LOCKED";
                     },
@@ -405,7 +407,8 @@ describe("server bootstrap", () => {
         );
 
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
@@ -418,7 +421,8 @@ describe("server bootstrap", () => {
 
         let finalCheckCalls = 0;
         await assert.rejects(
-            () => ensureTaskAutomationColumn({
+            () =>
+                ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },

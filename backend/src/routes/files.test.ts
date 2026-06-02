@@ -788,7 +788,7 @@ describe("files routes", () => {
                     server.testing.withRootedParentPath(
                         path.join(parentPath, "direct.txt"),
                         workspaceRoot,
-                        () => undefined
+                        () => {}
                     ),
                 /Parent path validation failed/
             );
