@@ -16,19 +16,27 @@ interface TestServer {
 
 async function startServer(openclawHome: string): Promise<TestServer> {
     const prevOpenclawHome = process.env.OPENCLAW_HOME;
+    const prevMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = openclawHome;
+    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     try {
         const { default: mediaRoutes } = await import("./media.js");
         return await startServerWithMediaRoutes(
             openclawHome,
             mediaRoutes,
-            prevOpenclawHome
+            prevOpenclawHome,
+            prevMiraOpenclawHome
         );
     } catch (error) {
         if (prevOpenclawHome === undefined) {
             delete process.env.OPENCLAW_HOME;
         } else {
             process.env.OPENCLAW_HOME = prevOpenclawHome;
+        }
+        if (prevMiraOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = prevMiraOpenclawHome;
         }
         throw error;
     }
@@ -37,7 +45,8 @@ async function startServer(openclawHome: string): Promise<TestServer> {
 async function startServerWithMediaRoutes(
     openclawHome: string,
     mediaRoutes: (app: express.Application) => void,
-    prevOpenclawHome = process.env.OPENCLAW_HOME
+    prevOpenclawHome = process.env.OPENCLAW_HOME,
+    prevMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME
 ): Promise<TestServer> {
     const restoreOpenclawHome = () => {
         if (prevOpenclawHome === undefined) {
@@ -45,8 +54,14 @@ async function startServerWithMediaRoutes(
         } else {
             process.env.OPENCLAW_HOME = prevOpenclawHome;
         }
+        if (prevMiraOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = prevMiraOpenclawHome;
+        }
     };
     process.env.OPENCLAW_HOME = openclawHome;
+    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     let server: http.Server | undefined;
     try {
         const app = express();
@@ -152,8 +167,10 @@ describe("media routes", () => {
 
     it("falls back to the default media root when OPENCLAW_HOME is blank", async () => {
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalMiraOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         try {
             process.env.OPENCLAW_HOME = "";
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
             const module = await import(`./media.js?blank=${randomUUID()}`);
             assert.equal(typeof module.default, "function");
             assert.equal(
@@ -166,6 +183,11 @@ describe("media routes", () => {
             } else {
                 process.env.OPENCLAW_HOME = originalOpenClawHome;
             }
+            if (originalMiraOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalMiraOpenClawHome;
+            }
         }
     });
 
@@ -177,9 +199,11 @@ describe("media routes", () => {
         await writeFile(disappearingFile, "gone");
 
         const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         let module: typeof import("./media.js");
         try {
             process.env.OPENCLAW_HOME = missingHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
             module = await import(`./media.js?missing-root=${randomUUID()}`);
         } finally {
             if (previousOpenclawHome === undefined) {
@@ -187,11 +211,17 @@ describe("media routes", () => {
             } else {
                 process.env.OPENCLAW_HOME = previousOpenclawHome;
             }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
         }
         const missingServer = await startServerWithMediaRoutes(
             missingHome,
             module.default,
-            previousOpenclawHome
+            previousOpenclawHome,
+            previousMiraOpenclawHome
         );
         const realExistsSync = fs.existsSync.bind(fs);
         const existsSync = mock.method(fs, "existsSync", (filePath: fs.PathLike) =>
@@ -220,9 +250,11 @@ describe("media routes", () => {
         await writeFile(resolvedFilePath, "orphaned");
 
         const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         let module: typeof import("./media.js");
         try {
             process.env.OPENCLAW_HOME = missingHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
             module = await import(`./media.js?missing-real-root=${randomUUID()}`);
         } finally {
             if (previousOpenclawHome === undefined) {
@@ -230,11 +262,17 @@ describe("media routes", () => {
             } else {
                 process.env.OPENCLAW_HOME = previousOpenclawHome;
             }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
         }
         const missingServer = await startServerWithMediaRoutes(
             missingHome,
             module.default,
-            previousOpenclawHome
+            previousOpenclawHome,
+            previousMiraOpenclawHome
         );
         const realExistsSync = fs.existsSync.bind(fs);
         const realRealpathSync = fs.realpathSync.bind(fs);
@@ -340,7 +378,9 @@ describe("media routes", () => {
 
     it("restores OPENCLAW_HOME when startup fails", async () => {
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalMiraOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         process.env.OPENCLAW_HOME = "previous-home";
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "previous-mira-home";
         const listen = mock.method(
             http.Server.prototype,
             "listen",
@@ -352,12 +392,18 @@ describe("media routes", () => {
         try {
             await assert.rejects(startServer(openclawHome), /listen failed/u);
             assert.equal(process.env.OPENCLAW_HOME, "previous-home");
+            assert.equal(process.env.MIRA_DASHBOARD_OPENCLAW_HOME, "previous-mira-home");
         } finally {
             listen.mock.restore();
             if (originalOpenClawHome === undefined) {
                 delete process.env.OPENCLAW_HOME;
             } else {
                 process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            if (originalMiraOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalMiraOpenClawHome;
             }
         }
     });

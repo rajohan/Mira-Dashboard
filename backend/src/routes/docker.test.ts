@@ -251,6 +251,9 @@ if (command === "volume prune -f") {
   process.stdout.write("deleted unused volumes\n");
   process.exit(0);
 }
+if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("__MIRA_DOCKER_EXEC_PID__=")) {
+  process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\n");
+}
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("sleep")) {
   process.stdout.write("started long exec\n");
   process.on("SIGTERM", () => process.exit(0));
@@ -832,6 +835,7 @@ describe("docker routes", { concurrency: false }, () => {
                 stderr: "",
                 startedAt: Date.now(),
                 endedAt: null,
+                inContainerPid: 4321,
                 process: createMockChildProcess({
                     pid: 123,
                     killed: false,
@@ -1908,6 +1912,10 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(job.body.code, 0);
         assert.equal(job.body.stdout, "exec stdout\n");
         assert.equal(job.body.stderr, "exec stderr\n");
+        assert.equal(
+            __testing.dockerExecJobs.get(start.body.jobId)?.inContainerPid,
+            4321
+        );
 
         const stopDone = await requestJson<{ error: string }>(
             server,

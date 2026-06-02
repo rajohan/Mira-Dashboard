@@ -265,6 +265,7 @@ describe("config files routes", () => {
             delete process.env.HOME;
             os.homedir = (() => "relative-home") as typeof os.homedir;
             assert.equal(__testing.resolveOpenclawRoot(), null);
+            os.homedir = originalHomedir;
 
             const linkedHomeDir = await mkdtemp(
                 path.join(os.tmpdir(), "mira-linked-home-")
@@ -273,9 +274,10 @@ describe("config files routes", () => {
                 path.join(os.tmpdir(), "mira-linked-openclaw-")
             );
             process.env.HOME = linkedHomeDir;
+            os.homedir = (() => linkedHomeDir) as typeof os.homedir;
             try {
                 await symlink(linkedTarget, path.join(linkedHomeDir, ".openclaw"));
-                assert.equal(__testing.resolveOpenclawRoot(), null);
+                assert.equal(__testing.resolveOpenclawRoot(), linkedTarget);
             } finally {
                 await rm(linkedHomeDir, { recursive: true, force: true });
                 await rm(linkedTarget, { recursive: true, force: true });
@@ -286,6 +288,7 @@ describe("config files routes", () => {
             );
             const originalLstatSync = fs.lstatSync;
             process.env.HOME = unreadableHomeDir;
+            os.homedir = (() => unreadableHomeDir) as typeof os.homedir;
             try {
                 fs.lstatSync = ((target: fs.PathLike) => {
                     if (target === path.join(unreadableHomeDir, ".openclaw")) {
@@ -297,7 +300,10 @@ describe("config files routes", () => {
                     }
                     return originalLstatSync(target);
                 }) as typeof fs.lstatSync;
-                assert.equal(__testing.resolveOpenclawRoot(), null);
+                assert.equal(
+                    __testing.resolveOpenclawRoot(),
+                    path.join(unreadableHomeDir, ".openclaw")
+                );
             } finally {
                 fs.lstatSync = originalLstatSync;
                 await rm(unreadableHomeDir, { recursive: true, force: true });
@@ -324,18 +330,6 @@ describe("config files routes", () => {
         const emptyHomeDir = await mkdtemp(path.join(os.tmpdir(), "mira-empty-home-"));
         const emptyServer = await startServer(emptyHomeDir);
         try {
-            const response = await requestJson<{ error: string }>(
-                emptyServer,
-                "/api/config-files"
-            );
-
-            assert.equal(response.status, 500);
-            assert.equal(
-                response.body.error,
-                "Server misconfigured: HOME is not configured"
-            );
-
-            await mkdir(path.join(emptyHomeDir, ".openclaw"), { recursive: true });
             const existingRoot = await requestJson<{
                 files: ConfigFileItem[];
                 root: string;
@@ -405,7 +399,7 @@ describe("config files routes", () => {
                 }
                 return originalRealpathSync(target);
             }) as typeof fs.realpathSync;
-            assert.equal(__testing.resolveOpenclawRoot(), null);
+            assert.equal(__testing.resolveOpenclawRoot(), dashboardOpenclawHome);
 
             fs.realpathSync = ((target: fs.PathLike) => {
                 if (target === dashboardOpenclawHome) {

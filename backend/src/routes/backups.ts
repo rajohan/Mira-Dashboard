@@ -106,11 +106,11 @@ function createBackupEnv() {
     const postgresUser =
         process.env.DB_POSTGRESDB_USER === undefined
             ? envFallback("DATABASE_USERNAME", "")
-            : process.env.DB_POSTGRESDB_USER.trim();
+            : process.env.DB_POSTGRESDB_USER;
     const postgresPassword =
         process.env.DB_POSTGRESDB_PASSWORD === undefined
             ? envFallback("DATABASE_PASSWORD", "")
-            : process.env.DB_POSTGRESDB_PASSWORD.trim();
+            : process.env.DB_POSTGRESDB_PASSWORD;
 
     return {
         ...process.env,

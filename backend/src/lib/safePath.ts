@@ -49,6 +49,13 @@ function createChildDirectoryFromVerifiedParent(
 ): string | null {
     if (process.platform !== "linux") {
         const nextParent = path.join(realParent, childName);
+        const checkedRealParent = fs.realpathSync(Buffer.from(realParent));
+        if (
+            checkedRealParent !== realParent ||
+            !fs.statSync(Buffer.from(checkedRealParent)).isDirectory()
+        ) {
+            return null;
+        }
         try {
             fs.mkdirSync(Buffer.from(nextParent));
         } catch (error) {

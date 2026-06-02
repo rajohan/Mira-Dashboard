@@ -235,7 +235,7 @@ describe("gateway state and helper utilities", () => {
             __testing.setSessionListForTest([
                 __testing.transformSession({ key: "agent:main:main" }),
             ]);
-            assert.throws(() => gateway.shutdown(), /stop failed/u);
+            assert.doesNotThrow(() => gateway.shutdown());
             assert.equal(gateway.isConnected(), false);
             assert.deepEqual(gateway.getSessions(), []);
 

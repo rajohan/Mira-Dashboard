@@ -1150,8 +1150,8 @@ describe("agents routes", () => {
                 "/api/agents/unsupported-platform/metadata",
                 { method: "PUT", body: { currentTask: "Nope" } }
             );
-            assert.equal(unsupported.status, 500);
-            assert.match(unsupported.body.error, /unsupported/u);
+            assert.equal(unsupported.status, 501);
+            assert.equal(unsupported.body.error, "unsupported-platform");
         } finally {
             if (originalPlatform) {
                 Object.defineProperty(process, "platform", originalPlatform);

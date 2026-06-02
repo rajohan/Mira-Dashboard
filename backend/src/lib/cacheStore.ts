@@ -55,6 +55,8 @@ async function runDockerExec(container: string, command: string[]) {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
+        timeout: 30_000,
+        killSignal: "SIGTERM",
     };
     const dockerBin = getDockerBinForTests() || "docker";
     const { stdout } = await execFileAsync(

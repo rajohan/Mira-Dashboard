@@ -6,8 +6,11 @@ import path from "path";
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const OPENCLAW_HOME = nonEmptyEnvFallback(
-    "MIRA_DASHBOARD_OPENCLAW_HOME",
-    nonEmptyEnvFallback("OPENCLAW_HOME", path.join(os.homedir(), ".openclaw"))
+    "OPENCLAW_HOME",
+    nonEmptyEnvFallback(
+        "MIRA_DASHBOARD_OPENCLAW_HOME",
+        path.join(os.homedir(), ".openclaw")
+    )
 );
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;

@@ -387,15 +387,15 @@ describe("backup routes", () => {
         assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
         await withEnv(
             {
-                DB_POSTGRESDB_USER: "native-user",
-                DB_POSTGRESDB_PASSWORD: "native-password",
+                DB_POSTGRESDB_USER: " native-user ",
+                DB_POSTGRESDB_PASSWORD: " native-password ",
                 DATABASE_USERNAME: undefined,
                 DATABASE_PASSWORD: undefined,
             },
             async () => {
                 const env = backupTesting.createBackupEnv();
-                assert.equal(env.DB_POSTGRESDB_USER, "native-user");
-                assert.equal(env.DB_POSTGRESDB_PASSWORD, "native-password");
+                assert.equal(env.DB_POSTGRESDB_USER, " native-user ");
+                assert.equal(env.DB_POSTGRESDB_PASSWORD, " native-password ");
             }
         );
         await withEnv(

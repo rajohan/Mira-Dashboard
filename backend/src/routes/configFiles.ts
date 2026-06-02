@@ -85,7 +85,7 @@ function resolveOpenclawRoot(): string | null {
     try {
         return fs.realpathSync(resolvedRoot);
     } catch {
-        return null;
+        return resolvedRoot;
     }
 }
 

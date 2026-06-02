@@ -20,8 +20,8 @@ import { stringFallback } from "../lib/values.js";
 
 function getDefaultWorkspaceRoot(): string {
     const openclawHome =
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
-        process.env.OPENCLAW_HOME?.trim();
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
     if (
         openclawHome &&
         path.isAbsolute(openclawHome) &&

@@ -198,15 +198,15 @@ export default function authRoutes(
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch {
+            try {
+                rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+            } catch (rollbackError) {
+                console.error(
+                    "[Auth] First-user bootstrap rollback failed:",
+                    rollbackError
+                );
+            }
             if (attemptedGatewaySwitch) {
-                try {
-                    rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
-                } catch (rollbackError) {
-                    console.error(
-                        "[Auth] First-user bootstrap rollback failed:",
-                        rollbackError
-                    );
-                }
                 try {
                     shutdownGateway();
                 } catch {

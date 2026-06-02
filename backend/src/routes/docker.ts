@@ -28,6 +28,7 @@ const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
+const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
 const N8N_DATABASE = "n8n";
 
 function updaterScriptPath(fileName: string): string {
@@ -267,6 +268,7 @@ interface DockerExecJob {
     startedAt: number;
     endedAt: number | null;
     process?: ChildProcess;
+    inContainerPid?: number | null;
 }
 
 type DockerExecResult = {
@@ -303,6 +305,10 @@ function dockerIdentifierFallback(value: unknown): string | null {
 
 function sendInvalidDockerIdentifier(res: express.Response, label: string): void {
     res.status(400).json({ error: `Invalid ${label}` });
+}
+
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 /** Parses JSON lines. */
@@ -1058,22 +1064,48 @@ async function runDockerExecCommand(
     onUpdate?: (stdout: string, stderr: string) => void
 ): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn(dockerBin, ["exec", containerId, "sh", "-lc", command], {
-            cwd: DOCKER_ROOT,
-            env: process.env,
-            detached: true,
-        });
+        const wrappedCommand = [
+            String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$$"`,
+            `exec sh -lc ${shellQuote(command)}`,
+        ].join("; ");
+        const child = spawn(
+            dockerBin,
+            ["exec", containerId, "sh", "-lc", wrappedCommand],
+            {
+                cwd: DOCKER_ROOT,
+                env: process.env,
+                detached: true,
+            }
+        );
 
         const job = dockerExecJobs.get(jobId);
         if (job) {
             job.process = child;
+            job.inContainerPid = null;
         }
 
         let stdout = "";
         let stderr = "";
 
         child.stdout?.on("data", (data) => {
-            stdout = trimOutput(stdout + String(data));
+            const chunk = String(data)
+                .split("\n")
+                .filter((line) => {
+                    if (!line.startsWith(DOCKER_EXEC_PID_MARKER)) {
+                        return true;
+                    }
+                    const parsedPid = Number.parseInt(
+                        line.slice(DOCKER_EXEC_PID_MARKER.length),
+                        10
+                    );
+                    const currentJob = dockerExecJobs.get(jobId);
+                    if (currentJob && Number.isSafeInteger(parsedPid) && parsedPid > 1) {
+                        currentJob.inContainerPid = parsedPid;
+                    }
+                    return false;
+                })
+                .join("\n");
+            stdout = trimOutput(stdout + chunk);
             onUpdate?.(stdout, stderr);
         });
 
@@ -1094,6 +1126,47 @@ async function runDockerExecCommand(
             reject(error);
         });
     });
+}
+
+async function stopDockerExecInContainer(job: DockerExecJob): Promise<void> {
+    if (!job.inContainerPid) {
+        return;
+    }
+    await execFileAsync(
+        dockerBin,
+        [
+            "exec",
+            job.containerId,
+            "sh",
+            "-lc",
+            `kill -TERM ${job.inContainerPid} 2>/dev/null || true`,
+        ],
+        {
+            cwd: DOCKER_ROOT,
+            env: process.env,
+            timeout: 10_000,
+            killSignal: "SIGTERM",
+        }
+    );
+}
+
+function stopDockerExecHostProcess(childProcess: ChildProcess): void {
+    const { pid } = childProcess;
+    try {
+        if (typeof pid === "number" && !Number.isNaN(pid) && pid > 1) {
+            process.kill(-pid, "SIGTERM");
+        } else {
+            childProcess.kill("SIGTERM");
+        }
+    } catch {
+        try {
+            childProcess.kill("SIGTERM");
+        } catch (fallbackError) {
+            if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+                throw fallbackError;
+            }
+        }
+    }
 }
 
 /** Performs cleanup docker exec jobs. */
@@ -1537,38 +1610,28 @@ export default function dockerRoutes(app: express.Application): void {
         });
     }) as RequestHandler);
 
-    app.post("/api/docker/exec/:jobId/stop", ((req, res) => {
-        const jobId = stringFallback(req.params.jobId);
-        const job = dockerExecJobs.get(jobId);
-        if (!job) {
-            res.status(404).json({ error: "Docker exec job not found" });
-            return;
-        }
+    app.post(
+        "/api/docker/exec/:jobId/stop",
+        asyncRoute(async (req, res) => {
+            const jobId = stringFallback(req.params.jobId);
+            const job = dockerExecJobs.get(jobId);
+            if (!job) {
+                res.status(404).json({ error: "Docker exec job not found" });
+                return;
+            }
 
-        if (job.status !== "running") {
-            res.status(400).json({ error: "Job is not running" });
-            return;
-        }
-        if (!job.process || job.process.killed) {
-            res.status(400).json({ error: "Process not available" });
-            return;
-        }
-        const { pid } = job.process;
-        try {
-            if (typeof pid === "number" && !Number.isNaN(pid) && pid > 1) {
-                process.kill(-pid, "SIGTERM");
-            } else {
-                job.process.kill("SIGTERM");
+            if (job.status !== "running") {
+                res.status(400).json({ error: "Job is not running" });
+                return;
             }
-        } catch {
-            try {
-                job.process.kill("SIGTERM");
-            } catch (fallbackError) {
-                if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
-                    throw fallbackError;
-                }
+            if (!job.process || job.process.killed) {
+                res.status(400).json({ error: "Process not available" });
+                return;
             }
-        }
-        res.json({ success: true });
-    }) as RequestHandler);
+            const hostProcess = job.process;
+            await stopDockerExecInContainer(job);
+            stopDockerExecHostProcess(hostProcess);
+            res.json({ success: true });
+        })
+    );
 }

@@ -338,6 +338,71 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
+    it("rolls back first-user bootstrap when token persistence fails", async () => {
+        for (const scenario of ["lookup", "persist"] as const) {
+            const failingUsername = `bootstrap-${scenario}-failure`;
+            cleanupBootstrapRows(username);
+            let rolledBack = false;
+            let shutdown = false;
+            let failureServer: TestServer | undefined;
+            try {
+                failureServer = await startServer({
+                    getPersistedGatewayToken: () => {
+                        if (scenario === "lookup") {
+                            throw new Error("lookup unavailable");
+                        }
+                        return "previous-token";
+                    },
+                    persistGatewayToken: () => {
+                        if (scenario === "persist") {
+                            throw new Error("persist unavailable");
+                        }
+                    },
+                    rollbackBootstrap: (userId, token, previousToken) => {
+                        rolledBack = true;
+                        authTesting.rollbackFirstUserBootstrap(
+                            userId,
+                            token,
+                            previousToken
+                        );
+                    },
+                    shutdownGateway: () => {
+                        shutdown = true;
+                    },
+                });
+                const registered = await requestJson<{ error: string }>(
+                    failureServer,
+                    "/api/auth/register-first-user",
+                    {
+                        method: "POST",
+                        body: { username: failingUsername, password, gatewayToken },
+                    }
+                );
+
+                assert.equal(registered.status, 500);
+                assert.equal(
+                    registered.body.error,
+                    "Failed to complete first-user setup"
+                );
+                assert.equal(rolledBack, true);
+                assert.equal(shutdown, false);
+                assert.equal(
+                    db
+                        .prepare("SELECT id FROM users WHERE username = ?")
+                        .get(failingUsername),
+                    undefined
+                );
+            } finally {
+                await failureServer?.close();
+                cleanupUser(failingUsername);
+                cleanupBootstrapRows(username);
+                db.prepare(
+                    "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+                ).run("previous-token");
+            }
+        }
+    });
+
     it("keeps first-user cleanup best-effort when rollback throws", async () => {
         cleanupBootstrapRows(username);
         let rollbackCalled = false;

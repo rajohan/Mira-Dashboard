@@ -1572,8 +1572,17 @@ export default function agentsRoutes(app: express.Application): void {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
-                const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
+                let realExpectedSessionsDir: string;
+                try {
+                    mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
+                    realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
+                        res.status(501).json({ error: "unsupported-platform" });
+                        return;
+                    }
+                    throw error;
+                }
                 const realMetadataDir = FS.realpathSync(metadataDir);
                 if (
                     realMetadataDir !== realExpectedSessionsDir ||

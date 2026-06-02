@@ -648,7 +648,6 @@ function init(token: string): void {
         previousGatewayClient?.stop();
     } catch (error) {
         console.error("[Gateway] Failed to stop previous client before init:", {
-            currentToken,
             error,
             hadPreviousGatewayClient: previousGatewayClient !== null,
         });
@@ -1013,7 +1012,14 @@ function shutdown(): void {
     sessionList = [];
     currentToken = null;
     broadcast({ type: "disconnected", gatewayConnected: false });
-    previousGatewayClient?.stop();
+    try {
+        previousGatewayClient?.stop();
+    } catch (error) {
+        console.error("[Gateway] Failed to stop previous client during shutdown:", {
+            error,
+            hadPreviousGatewayClient: previousGatewayClient !== null,
+        });
+    }
 }
 
 /** Defines testing. */

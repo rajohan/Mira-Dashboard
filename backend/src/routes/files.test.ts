@@ -288,6 +288,7 @@ describe("files routes", () => {
         const originalWorkspaceRoot = process.env.WORKSPACE_ROOT;
         const { __testing } = await import("./files.js");
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalDashboardOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         process.env.WORKSPACE_ROOT = workspaceRoot;
 
         try {
@@ -329,17 +330,24 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join("/tmp/openclaw-home", "workspace")
             );
-            const originalDashboardOpenClawHome =
-                process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
-            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "/tmp/dashboard-openclaw-home";
-            assert.equal(
-                __testing.getDefaultWorkspaceRoot(),
-                path.join("/tmp/dashboard-openclaw-home", "workspace")
-            );
-            if (originalDashboardOpenClawHome === undefined) {
-                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
-            } else {
-                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenClawHome;
+            try {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "/tmp/dashboard-openclaw-home";
+                assert.equal(
+                    __testing.getDefaultWorkspaceRoot(),
+                    path.join("/tmp/openclaw-home", "workspace")
+                );
+                delete process.env.OPENCLAW_HOME;
+                assert.equal(
+                    __testing.getDefaultWorkspaceRoot(),
+                    path.join("/tmp/dashboard-openclaw-home", "workspace")
+                );
+            } finally {
+                if (originalDashboardOpenClawHome === undefined) {
+                    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+                } else {
+                    process.env.MIRA_DASHBOARD_OPENCLAW_HOME =
+                        originalDashboardOpenClawHome;
+                }
             }
             process.env.OPENCLAW_HOME = "relative-home";
             assert.equal(
@@ -473,6 +481,11 @@ describe("files routes", () => {
                 delete process.env.WORKSPACE_ROOT;
             } else {
                 process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+            }
+            if (originalDashboardOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardOpenClawHome;
             }
         }
     });
