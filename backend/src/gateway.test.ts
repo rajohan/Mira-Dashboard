@@ -713,6 +713,19 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:my.agent:main", "session-1") || "",
             /agents\/my\.agent\/sessions\/session-1\.jsonl$/u
         );
+        const aliasAgentDir = path.join(home, "agents", "alias-agent", "sessions");
+        await mkdir(aliasAgentDir, { recursive: true });
+        await writeFile(path.join(aliasAgentDir, "session-2.jsonl"), "", "utf8");
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "Agent:Alias-Agent:Main",
+                sessionId: "session-2",
+            }),
+        ]);
+        assert.match(
+            __testing.getTranscriptPath("Agent:Alias-Agent:Main") || "",
+            /agents\/alias-agent\/sessions\/session-2\.jsonl$/u
+        );
         assert.equal(
             __testing.getTranscriptPath("agent:../main:main", "session-1"),
             null
@@ -960,6 +973,34 @@ describe("gateway state and helper utilities", () => {
         errorWs.emit("error", new Error("client socket failed"));
         assert.equal(logsTesting.subscriberCount(), 0);
         consoleError.mock.restore();
+    });
+
+    it("clears pending client requests when WebSocket clients disconnect", async () => {
+        __testing.setGatewayConnectedForTest(true);
+        __testing.setGatewayClientForTest({
+            request: () => new Promise(() => {}),
+            start: () => {},
+            stop: () => {},
+        });
+        const ws = new FakeWebSocket();
+        gateway.handleClient(ws as unknown as WebSocket);
+
+        ws.emit(
+            "message",
+            Buffer.from(
+                JSON.stringify({
+                    id: "client-request-1",
+                    method: "chat.send",
+                    params: { sessionKey: "agent:main:main" },
+                    type: "request",
+                })
+            )
+        );
+        await waitForAsyncHandlers();
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
+
+        ws.emit("close");
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
     });
 
     it("discards stale session refresh results from replaced clients", async () => {

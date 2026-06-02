@@ -1040,6 +1040,33 @@ describe("config files routes", () => {
             server.testing.setValidateOpenclawLeafForTest();
         }
 
+        await rm(openclawRoot, { recursive: true, force: true });
+        try {
+            server.testing.setValidateOpenclawLeafForTest(() => false);
+
+            const missingUnsafeRootLeaf = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(missingUnsafeRootLeaf.status, 403);
+            assert.equal(
+                missingUnsafeRootLeaf.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            server.testing.setValidateOpenclawLeafForTest();
+        }
+
+        const recreatedRoot = await requestJson<{ path: string }>(
+            server,
+            "/api/config-files/openclaw.json",
+            { method: "PUT", body: { content: "{}\n" } }
+        );
+        assert.equal(recreatedRoot.status, 200);
+        assert.equal(recreatedRoot.body.path, "config:openclaw.json");
+        await rm(openclawRoot, { recursive: true, force: true });
+
         const originalMkdirSync = fs.mkdirSync;
         try {
             fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
@@ -1095,6 +1122,13 @@ describe("config files routes", () => {
         } finally {
             fs.mkdirSync = originalMkdirSync;
         }
+
+        await mkdir(path.join(openclawRoot, "cron"), { recursive: true });
+        await mkdir(path.join(openclawRoot, "hooks", "transforms"), {
+            recursive: true,
+        });
+        await writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        await writeFile(path.join(openclawRoot, "cron", "jobs.json"), "[]\n");
 
         const transformsDir = path.join(openclawRoot, "hooks", "transforms");
         const outsideParent = await mkdtemp(

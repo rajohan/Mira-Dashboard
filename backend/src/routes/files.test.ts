@@ -717,7 +717,7 @@ describe("files routes", () => {
         }
     });
 
-    it("fails closed for writes on non-Linux platforms", async () => {
+    it("uses stat identity fallback for writes on non-Linux platforms", async () => {
         const originalPlatform = process.platform;
         try {
             Object.defineProperty(process, "platform", {
@@ -725,22 +725,76 @@ describe("files routes", () => {
                 value: "darwin",
             });
 
-            const response = await requestJson<{ error: string }>(
+            const response = await requestJson<{ path: string }>(
                 server,
                 "/api/files/generated%2Fdarwin-write.txt",
                 { method: "PUT", body: { content: "blocked" } }
             );
 
-            assert.equal(response.status, 501);
-            assert.equal(
-                response.body.error,
-                "File writes are not supported on this platform"
-            );
+            assert.equal(response.status, 200);
+            assert.equal(response.body.path, "generated/darwin-write.txt");
         } finally {
             Object.defineProperty(process, "platform", {
                 configurable: true,
                 value: originalPlatform,
             });
+        }
+    });
+
+    it("rejects procfs-unavailable parent identity mismatches for writes", async () => {
+        const originalStatSync = fs.statSync;
+        const missingProcDir = path.join(workspaceRoot, "missing-proc-fd");
+        try {
+            server.testing.setProcSelfFdPathForTest(missingProcDir);
+            fs.statSync = ((target: fs.PathLike, options?: fs.StatSyncOptions) => {
+                const stat = originalStatSync(target, options) as fs.Stats;
+                if (String(target).endsWith("generated")) {
+                    return { ...stat, ino: stat.ino + 1 } as fs.Stats;
+                }
+                return stat;
+            }) as typeof fs.statSync;
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fproc-fallback-mismatch.txt",
+                { method: "PUT", body: { content: "blocked" } }
+            );
+
+            assert.equal(response.status, 403);
+            assert.equal(response.body.error, "Access denied: path outside workspace");
+        } finally {
+            fs.statSync = originalStatSync;
+            server.testing.setProcSelfFdPathForTest();
+        }
+    });
+
+    it("rejects direct procfs-unavailable parent identity mismatches", async () => {
+        const originalStatSync = fs.statSync;
+        const missingProcDir = path.join(workspaceRoot, "missing-proc-direct");
+        const parentPath = path.join(workspaceRoot, "generated");
+        await mkdir(parentPath, { recursive: true });
+        try {
+            server.testing.setProcSelfFdPathForTest(missingProcDir);
+            fs.statSync = ((target: fs.PathLike, options?: fs.StatSyncOptions) => {
+                const stat = originalStatSync(target, options) as fs.Stats;
+                if (String(target) === parentPath) {
+                    return { ...stat, ino: stat.ino + 1 } as fs.Stats;
+                }
+                return stat;
+            }) as typeof fs.statSync;
+
+            await assert.rejects(
+                () =>
+                    server.testing.withRootedParentPath(
+                        path.join(parentPath, "direct.txt"),
+                        workspaceRoot,
+                        () => undefined
+                    ),
+                /Parent path validation failed/
+            );
+        } finally {
+            fs.statSync = originalStatSync;
+            server.testing.setProcSelfFdPathForTest();
         }
     });
 

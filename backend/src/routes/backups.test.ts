@@ -9,6 +9,7 @@ import express from "express";
 
 import backupRoutes from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
+import { withEnv } from "../testUtils/env.js";
 
 interface TestServer {
     baseUrl: string;
@@ -17,33 +18,6 @@ interface TestServer {
 
 const originalDopplerBin = process.env.DOPPLER_BIN;
 const originalN8nRoot = process.env.MIRA_N8N_ROOT;
-
-async function withEnv<T>(
-    vars: Record<string, string | undefined>,
-    callback: () => T | Promise<T>
-): Promise<T> {
-    const previous = new Map(
-        Object.keys(vars).map((key) => [key, process.env[key]] as const)
-    );
-    try {
-        for (const [key, value] of Object.entries(vars)) {
-            if (value === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = value;
-            }
-        }
-        return await callback();
-    } finally {
-        for (const [key, value] of previous) {
-            if (value === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = value;
-            }
-        }
-    }
-}
 
 async function installFakeDoppler(tempDir: string): Promise<string> {
     const dopplerPath = path.join(tempDir, "doppler");
@@ -67,32 +41,10 @@ if (process.env.FAKE_BACKUP_SIGNAL === "1") {
     return dopplerPath;
 }
 
-async function startServer(tempDir: string): Promise<TestServer> {
+async function createTestServer(tempDir: string, dopplerBin: string): Promise<TestServer> {
     const savedDopplerBin = process.env.DOPPLER_BIN;
     const savedN8nRoot = process.env.MIRA_N8N_ROOT;
-    process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
-    process.env.MIRA_N8N_ROOT = tempDir;
-    try {
-        const app = express();
-        app.use(express.json());
-        backupRoutes(app, express);
-        const server = http.createServer(app);
-
-        await new Promise<void>((resolve, reject) => {
-            server.once("error", reject);
-            server.listen(0, resolve);
-        });
-        const address = server.address();
-        assert.ok(address && typeof address === "object");
-
-        return {
-            baseUrl: `http://127.0.0.1:${address.port}`,
-            close: () =>
-                new Promise((resolve, reject) =>
-                    server.close((error) => (error ? reject(error) : resolve()))
-                ),
-        };
-    } catch (error) {
+    const restoreEnv = () => {
         if (savedDopplerBin === undefined) {
             delete process.env.DOPPLER_BIN;
         } else {
@@ -103,16 +55,8 @@ async function startServer(tempDir: string): Promise<TestServer> {
         } else {
             process.env.MIRA_N8N_ROOT = savedN8nRoot;
         }
-        throw error;
-    }
-}
+    };
 
-async function startServerWithDoppler(
-    tempDir: string,
-    dopplerBin: string
-): Promise<TestServer> {
-    const savedDopplerBin = process.env.DOPPLER_BIN;
-    const savedN8nRoot = process.env.MIRA_N8N_ROOT;
     process.env.DOPPLER_BIN = dopplerBin;
     process.env.MIRA_N8N_ROOT = tempDir;
     try {
@@ -131,23 +75,32 @@ async function startServerWithDoppler(
         return {
             baseUrl: `http://127.0.0.1:${address.port}`,
             close: () =>
-                new Promise((resolve, reject) =>
-                    server.close((error) => (error ? reject(error) : resolve()))
+                new Promise<void>((resolve, reject) =>
+                    server.close((error) => {
+                        restoreEnv();
+                        if (error) {
+                            reject(error);
+                            return;
+                        }
+                        resolve();
+                    })
                 ),
         };
     } catch (error) {
-        if (savedDopplerBin === undefined) {
-            delete process.env.DOPPLER_BIN;
-        } else {
-            process.env.DOPPLER_BIN = savedDopplerBin;
-        }
-        if (savedN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = savedN8nRoot;
-        }
+        restoreEnv();
         throw error;
     }
+}
+
+async function startServer(tempDir: string): Promise<TestServer> {
+    return createTestServer(tempDir, await installFakeDoppler(tempDir));
+}
+
+async function startServerWithDoppler(
+    tempDir: string,
+    dopplerBin: string
+): Promise<TestServer> {
+    return createTestServer(tempDir, dopplerBin);
 }
 
 async function requestJson<T>(

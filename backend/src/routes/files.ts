@@ -57,6 +57,7 @@ const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
 const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
 let listDirectoryRealpathSync = fs.realpathSync;
+let procSelfFdPath = "/proc/self/fd";
 
 /** Represents file item. */
 interface FileItem {
@@ -205,14 +206,6 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    if (process.platform !== "linux") {
-        const error = new Error(
-            "Parent path validation is not available on this platform"
-        ) as NodeJS.ErrnoException;
-        error.code = "EACCES";
-        throw error;
-    }
-
     const parentPath = path.dirname(safePath);
     const parentFd = fs.openSync(
         parentPath,
@@ -220,7 +213,31 @@ async function withRootedParentPath<T>(
     );
     try {
         const realRoot = fs.realpathSync(rootPath);
-        const realParent = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        const procSelfFd = procSelfFdPath;
+        let rootedPath = safePath;
+        let realParent: string;
+        if (
+            process.platform === "linux" &&
+            fs.existsSync(procSelfFd) &&
+            fs.statSync(procSelfFd).isDirectory()
+        ) {
+            realParent = fs.realpathSync(path.join(procSelfFd, String(parentFd)));
+            rootedPath = path.join(procSelfFd, String(parentFd), path.basename(safePath));
+        } else {
+            realParent = fs.realpathSync(parentPath);
+            const openedParentStat = fs.fstatSync(parentFd);
+            const realParentStat = fs.statSync(realParent);
+            if (
+                openedParentStat.dev !== realParentStat.dev ||
+                openedParentStat.ino !== realParentStat.ino
+            ) {
+                const error = new Error(
+                    "Parent path validation failed"
+                ) as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+        }
         if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
             const error = new Error(
                 "Parent path validation failed"
@@ -229,10 +246,34 @@ async function withRootedParentPath<T>(
             throw error;
         }
 
-        return await callback(`/proc/self/fd/${parentFd}/${path.basename(safePath)}`);
+        return await callback(rootedPath);
     } finally {
         fs.closeSync(parentFd);
     }
+}
+
+async function realpathForOpenedFile(
+    file: fs.promises.FileHandle,
+    candidatePath: string
+): Promise<string> {
+    const procSelfFd = procSelfFdPath;
+    if (
+        process.platform === "linux" &&
+        fs.existsSync(procSelfFd) &&
+        fs.statSync(procSelfFd).isDirectory()
+    ) {
+        return fs.realpathSync(path.join(procSelfFd, String(file.fd)));
+    }
+
+    const openedStat = await file.stat();
+    const resolvedCandidatePath = await fs.promises.realpath(candidatePath);
+    const targetStat = fs.statSync(resolvedCandidatePath);
+    if (openedStat.dev !== targetStat.dev || openedStat.ino !== targetStat.ino) {
+        const error = new Error("File path validation failed") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+    }
+    return resolvedCandidatePath;
 }
 
 function sendRootedParentError(
@@ -241,12 +282,6 @@ function sendRootedParentError(
 ): boolean {
     if (error.code !== "EACCES") {
         return false;
-    }
-    if (error.message === "Parent path validation is not available on this platform") {
-        res.status(501).json({
-            error: "File writes are not supported on this platform",
-        });
-        return true;
     }
     if (error.message !== "Parent path validation failed") {
         return false;
@@ -268,7 +303,11 @@ export const __testing = {
     setListDirectoryRealpathSyncForTest(nextRealpathSync?: typeof fs.realpathSync): void {
         listDirectoryRealpathSync = nextRealpathSync ?? fs.realpathSync;
     },
+    setProcSelfFdPathForTest(nextPath?: string): void {
+        procSelfFdPath = nextPath ?? "/proc/self/fd";
+    },
     shouldHideFile,
+    withRootedParentPath,
 };
 
 /** Registers files API routes. */
@@ -341,25 +380,7 @@ export default function filesRoutes(
                 let fullPath: string;
                 try {
                     file = await openReadNoFollowGuarded(guardedPath(candidatePath));
-                    if (process.platform === "linux") {
-                        fullPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
-                    } else {
-                        const openedStat = await file.stat();
-                        const resolvedCandidatePath =
-                            await fs.promises.realpath(candidatePath);
-                        const targetStat = fs.statSync(resolvedCandidatePath);
-                        if (
-                            openedStat.dev !== targetStat.dev ||
-                            openedStat.ino !== targetStat.ino
-                        ) {
-                            res.status(403).json({
-                                error: "Access denied: path outside workspace",
-                            });
-                            await file.close();
-                            return;
-                        }
-                        fullPath = resolvedCandidatePath;
-                    }
+                    fullPath = await realpathForOpenedFile(file, candidatePath);
                 } catch (error) {
                     if (file) {
                         await file.close();
@@ -376,6 +397,15 @@ export default function filesRoutes(
                     if (code === "ELOOP") {
                         res.status(403).json({
                             error: "Access denied: symlinks are not readable",
+                        });
+                        return;
+                    }
+                    if (
+                        code === "EACCES" &&
+                        (error as Error).message === "File path validation failed"
+                    ) {
+                        res.status(403).json({
+                            error: "Access denied: path outside workspace",
                         });
                         return;
                     }

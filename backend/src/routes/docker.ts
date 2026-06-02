@@ -25,6 +25,7 @@ const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
     `${DOCKER_ROOT}/bin/docker-compose-doppler`
 );
 const MAX_OUTPUT_CHARS = 100_000;
+const MAX_STDOUT_PENDING_CHARS = 16_384;
 const MAX_JOBS = 100;
 const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
@@ -1127,6 +1128,18 @@ async function runDockerExecCommand(
             }
         };
 
+        const flushNonMarkerPendingStdout = (): void => {
+            if (
+                stdoutPending.length <= MAX_STDOUT_PENDING_CHARS ||
+                DOCKER_EXEC_PID_MARKER.startsWith(stdoutPending) ||
+                stdoutPending.startsWith(DOCKER_EXEC_PID_MARKER)
+            ) {
+                return;
+            }
+            stdout = trimOutput(stdout + stdoutPending);
+            stdoutPending = "";
+        };
+
         child.stdout?.on("data", (data) => {
             stdoutPending += String(data);
             let newlineIndex = stdoutPending.indexOf("\n");
@@ -1136,6 +1149,7 @@ async function runDockerExecCommand(
                 processStdoutLine(line);
                 newlineIndex = stdoutPending.indexOf("\n");
             }
+            flushNonMarkerPendingStdout();
             onUpdate?.(stdout, stderr);
         });
 

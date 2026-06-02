@@ -165,6 +165,12 @@ describe("media routes", () => {
         assert.equal(unknown.headers.get("content-type"), "application/octet-stream");
     });
 
+    it("rejects media requests without a path", async () => {
+        const response = await fetch(`${server.baseUrl}/api/media`);
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { error: "Access denied" });
+    });
+
     it("falls back to the default media root when OPENCLAW_HOME is blank", async () => {
         const originalOpenClawHome = process.env.OPENCLAW_HOME;
         const originalMiraOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
@@ -291,7 +297,9 @@ describe("media routes", () => {
 
         try {
             const response = await fetch(
-                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(filePath)}`
+                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(
+                    path.relative(missingMediaRoot, filePath)
+                )}`
             );
             assert.equal(response.status, 404);
             assert.deepEqual(await response.json(), { error: "Media not found" });

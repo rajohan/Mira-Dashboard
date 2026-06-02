@@ -486,7 +486,13 @@ export default function configFilesRoutes(
                     });
                     return;
                 }
-                if (!validateOpenclawLeafForWrite(openclawRoot)) {
+                const allowMissingDefaultRoot =
+                    validateOpenclawLeafForWrite === validateOpenclawLeaf &&
+                    !fs.existsSync(openclawRoot);
+                if (
+                    !validateOpenclawLeafForWrite(openclawRoot) &&
+                    !allowMissingDefaultRoot
+                ) {
                     res.status(403).json({
                         error: "Access denied: path outside allowed root",
                     });

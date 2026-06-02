@@ -63,6 +63,18 @@ async function readLogContent(
     return buffer.toString("utf8", 0, bytesRead);
 }
 
+async function readLogTailLines(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lineCount: number
+): Promise<string[]> {
+    const content = await readLogContent(file, stat, lineCount);
+    return content
+        .split("\n")
+        .filter((line) => line.trim())
+        .slice(-lineCount);
+}
+
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
 async function pollLogFile(): Promise<void> {
     let logFile: string;
@@ -168,11 +180,10 @@ async function sendLogHistory(ws: WebSocket): Promise<void> {
             return;
         }
 
-        const content = await file.readFile("utf8").finally(() => file.close());
-        const lines = content
-            .split("\n")
-            .filter((l) => l.trim())
-            .slice(-100);
+        const stat = await file.stat();
+        const lines = await readLogTailLines(file, stat, 100).finally(() =>
+            file.close()
+        );
 
         // Send each line
         for (const line of lines) {
@@ -374,8 +385,11 @@ export default function logsRoutes(app: express.Application): void {
             }
 
             if (lines) {
-                const allLines = content.split("\n").filter((l) => l.trim());
-                content = allLines.slice(-lines).join("\n");
+                content = content
+                    .split("\n")
+                    .filter((line) => line.trim())
+                    .slice(-lines)
+                    .join("\n");
             }
 
             res.json({ content: content, file: logFile });

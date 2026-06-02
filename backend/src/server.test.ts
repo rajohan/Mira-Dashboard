@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -64,6 +65,47 @@ async function assertChildStillRunning(
         await delay(50);
     }
     assert.equal(child.exitCode, null);
+}
+
+async function getFreePort(): Promise<number> {
+    const portServer = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+        portServer.once("error", reject);
+        portServer.listen(0, "127.0.0.1", resolve);
+    });
+    const address = portServer.address();
+    assert.ok(address && typeof address === "object");
+    await new Promise<void>((resolve, reject) => {
+        portServer.close((error) => (error ? reject(error) : resolve()));
+    });
+    return address.port;
+}
+
+async function waitForChildHealth(
+    child: ReturnType<typeof spawn>,
+    port: number,
+    getOutput = () => "",
+    timeoutMs = ENTRYPOINT_START_TIMEOUT_MS
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (child.exitCode !== null || child.signalCode !== null) {
+            assert.fail(
+                `Process exited before serving health checks\n${getOutput()}`
+            );
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+            if (response.ok) {
+                return;
+            }
+        } catch {
+            // The listener is not ready yet.
+        }
+        await delay(50);
+    }
+    await assertChildStillRunning(child, 0);
+    assert.fail(`Timed out waiting for entrypoint health check\n${getOutput()}`);
 }
 
 async function restoreBootstrapState(): Promise<void> {
@@ -215,9 +257,9 @@ describe("server bootstrap", () => {
         }
     });
 
-    it("covers database migration and commit fallback helpers", () => {
+    it("covers database migration and commit fallback helpers", async () => {
         const executedSql: string[] = [];
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: (sql) => executedSql.push(sql),
             prepare: () => ({
                 all: () => [{ name: "id" }],
@@ -227,7 +269,7 @@ describe("server bootstrap", () => {
 
         executedSql.length = 0;
         let initialLockedPrepareCalls = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: (sql) => executedSql.push(sql),
             prepare: () => ({
                 all: () => {
@@ -243,9 +285,8 @@ describe("server bootstrap", () => {
         assert.equal(executedSql.length, 1);
 
         const initialPrepareError = new Error("schema unavailable");
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {},
                     prepare: () => ({
                         all: () => {
@@ -257,7 +298,7 @@ describe("server bootstrap", () => {
         );
 
         executedSql.length = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: (sql) => executedSql.push(sql),
             prepare: () => ({
                 all: () => [{ name: "automation_json" }],
@@ -266,7 +307,7 @@ describe("server bootstrap", () => {
         assert.deepEqual(executedSql, []);
 
         let lockedAttempts = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: () => {
                 lockedAttempts += 1;
                 if (lockedAttempts < 3) {
@@ -284,7 +325,7 @@ describe("server bootstrap", () => {
         assert.equal(lockedAttempts, 3);
 
         let concurrentPrepareChecks = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: () => {
                 throw new Error("SQLITE_BUSY");
             },
@@ -300,7 +341,7 @@ describe("server bootstrap", () => {
         assert.equal(concurrentPrepareChecks, 2);
 
         let transientRecheckAttempts = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: () => {
                 transientRecheckAttempts += 1;
                 if (transientRecheckAttempts === 1) {
@@ -320,9 +361,8 @@ describe("server bootstrap", () => {
 
         const recheckError = new Error("recheck failed");
         let recheckPrepareCalls = 0;
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
@@ -340,9 +380,8 @@ describe("server bootstrap", () => {
         );
 
         const nonTransientError = new Error("disk unavailable");
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {
                         throw nonTransientError;
                     },
@@ -353,9 +392,8 @@ describe("server bootstrap", () => {
             nonTransientError
         );
 
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {
                         throw "SQLITE_LOCKED";
                     },
@@ -366,9 +404,8 @@ describe("server bootstrap", () => {
             /SQLITE_LOCKED/u
         );
 
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
@@ -380,9 +417,8 @@ describe("server bootstrap", () => {
         );
 
         let finalCheckCalls = 0;
-        assert.throws(
-            () =>
-                ensureTaskAutomationColumn({
+        await assert.rejects(
+            () => ensureTaskAutomationColumn({
                     exec: () => {
                         throw new Error("SQLITE_BUSY");
                     },
@@ -402,7 +438,7 @@ describe("server bootstrap", () => {
 
         let resolvedAfterRetries = 0;
         let resolvedAfterRetryChecks = 0;
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: () => {
                 resolvedAfterRetries += 1;
                 throw new Error("SQLITE_BUSY");
@@ -418,7 +454,7 @@ describe("server bootstrap", () => {
         });
         assert.equal(resolvedAfterRetries, 4);
 
-        ensureTaskAutomationColumn({
+        await ensureTaskAutomationColumn({
             exec: () => {
                 throw new Error("duplicate column name: automation_json");
             },
@@ -517,6 +553,26 @@ describe("server bootstrap", () => {
                 process.env.OPENCLAW_HOME = originalOpenClawHome;
             }
             await rm(tempHome, { recursive: true, force: true });
+        }
+    });
+
+    it("lets file writes use the route-specific JSON parser", async () => {
+        const filePath = `.server-json-bypass-${Date.now()}.txt`;
+        const largeEscapedContent = "\\".repeat(1024 * 1024);
+        assert.ok(openclawHome);
+        const workspaceFile = path.join(openclawHome, "workspace", filePath);
+
+        try {
+            const response = await fetch(`${getBaseUrl()}/api/files/${filePath}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: largeEscapedContent }),
+            });
+
+            assert.equal(response.status, 200);
+            assert.equal(await readFile(workspaceFile, "utf8"), largeEscapedContent);
+        } finally {
+            await rm(workspaceFile, { force: true });
         }
     });
 
@@ -816,6 +872,8 @@ describe("server bootstrap", () => {
         const serverStartEntrypoint = fileURLToPath(
             new URL("serverStart.ts", import.meta.url)
         );
+        const port = await getFreePort();
+        let childOutput = "";
         const child = spawn(
             process.execPath,
             ["--import", "tsx", serverStartEntrypoint],
@@ -830,13 +888,19 @@ describe("server bootstrap", () => {
                     OPENCLAW_TOKEN: "test-token",
                     OPENCLAW_HOME: openclawHome,
                     MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
-                    PORT: "0",
+                    PORT: String(port),
                 },
-                stdio: "ignore",
+                stdio: ["ignore", "pipe", "pipe"],
             }
         );
+        child.stdout?.on("data", (data) => {
+            childOutput += String(data);
+        });
+        child.stderr?.on("data", (data) => {
+            childOutput += String(data);
+        });
         try {
-            await assertChildStillRunning(child);
+            await waitForChildHealth(child, port, () => childOutput);
         } finally {
             let exited = child.exitCode !== null || child.signalCode !== null;
             if (!exited) {

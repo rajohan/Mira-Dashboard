@@ -72,6 +72,10 @@ app.use((request, response, next) => {
         next();
         return;
     }
+    if (request.method === "PUT" && request.path.startsWith("/api/files/")) {
+        next();
+        return;
+    }
 
     globalJsonParser(request, response, next);
 });

@@ -407,7 +407,7 @@ function resolvePathInsideRoot(root: string, candidate: string): string | null {
 /** Returns transcript path. */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
     const parts = sessionKey.split(":");
-    if (parts[0] !== "agent") {
+    if (parts[0]?.toLowerCase() !== "agent") {
         return null;
     }
 
@@ -419,7 +419,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         return null;
     }
 
-    const agentId = parts[1];
+    const agentId = parts[1]?.toLowerCase();
     const safeAgentPathSegment = /^[A-Za-z0-9._-]+$/u;
     const safeSessionPathSegment = /^[A-Za-z0-9:._-]+$/u;
     if (
@@ -861,6 +861,11 @@ function handleClient(ws: WebSocket): void {
     const cleanupClient = () => {
         subscribers.delete(ws);
         logsUnsubscribe(ws);
+        for (const [id, pending] of pendingRequests.entries()) {
+            if (pending.clientWs === ws) {
+                pendingRequests.delete(id);
+            }
+        }
     };
 
     ws.on("error", (error) => {

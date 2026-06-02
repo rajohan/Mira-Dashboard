@@ -57,13 +57,21 @@ function getRealMediaRoot(): string | null {
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
         const requestedPath = stringFallback(request.query.path);
-        const fullPath = path.resolve(requestedPath);
-        const realMediaRoot = path.resolve(MEDIA_ROOT);
+        const fullPath = path.resolve(MEDIA_ROOT, requestedPath);
+        const realMediaRoot = getRealMediaRoot();
         const isUnderMediaRoot =
-            fullPath.startsWith(`${realMediaRoot}${path.sep}`) ||
-            fullPath.startsWith(`${MEDIA_ROOT}${path.sep}`);
+            !!realMediaRoot &&
+            (fullPath === realMediaRoot || fullPath.startsWith(`${realMediaRoot}${path.sep}`));
 
-        if (!requestedPath || !isUnderMediaRoot) {
+        if (!requestedPath) {
+            response.status(403).json({ error: "Access denied" });
+            return;
+        }
+        if (!realMediaRoot) {
+            response.status(404).json({ error: "Media not found" });
+            return;
+        }
+        if (!isUnderMediaRoot) {
             response.status(403).json({ error: "Access denied" });
             return;
         }
@@ -78,11 +86,7 @@ export default function mediaRoutes(app: express.Application): void {
         let canonicalMediaRoot: string | null;
         try {
             realPath = fs.realpathSync(fullPath);
-            canonicalMediaRoot = getRealMediaRoot();
-            if (!canonicalMediaRoot) {
-                response.status(404).json({ error: "Media not found" });
-                return;
-            }
+            canonicalMediaRoot = realMediaRoot;
             stat = fs.statSync(realPath);
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;

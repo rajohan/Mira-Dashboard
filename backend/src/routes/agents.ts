@@ -1575,7 +1575,8 @@ export default function agentsRoutes(app: express.Application): void {
                     FS.realpathSync(expectedSessionsParent);
                 if (
                     realExpectedSessionsParent !==
-                    Path.dirname(canonicalExpectedSessionsDir)
+                        Path.dirname(canonicalExpectedSessionsDir) ||
+                    !FS.statSync(realExpectedSessionsParent).isDirectory()
                 ) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
@@ -1594,7 +1595,9 @@ export default function agentsRoutes(app: express.Application): void {
                 const realMetadataDir = FS.realpathSync(metadataDir);
                 if (
                     realMetadataDir !== realExpectedSessionsDir ||
-                    realExpectedSessionsDir !== canonicalExpectedSessionsDir
+                    realExpectedSessionsDir !== canonicalExpectedSessionsDir ||
+                    !FS.statSync(realExpectedSessionsDir).isDirectory() ||
+                    !FS.statSync(realMetadataDir).isDirectory()
                 ) {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;

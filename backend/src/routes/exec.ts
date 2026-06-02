@@ -399,6 +399,18 @@ function completeExecJob(jobId: string, result: ExecResponse): void {
     cleanupJobs();
 }
 
+function markExecJobForcedKilled(job: ExecJob): void {
+    job.closePending = true;
+    job.status = "done";
+    job.code = 137;
+    job.endedAt = Date.now();
+    cleanupJobs();
+}
+
+function isProcessGoneError(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+}
+
 /** Marks an exec job as finished with an execution error. */
 function failExecJob(jobId: string, error: unknown): void {
     const current = jobs.get(jobId);
@@ -536,21 +548,23 @@ export default function execRoutes(
                     try {
                         if (typeof processId === "number") {
                             process.kill(-processId, "SIGKILL");
+                            markExecJobForcedKilled(job);
                         }
-                    } catch {
+                    } catch (groupKillError) {
+                        if (isProcessGoneError(groupKillError)) {
+                            markExecJobForcedKilled(job);
+                            return;
+                        }
                         if (typeof processId === "number") {
                             try {
                                 process.kill(processId, "SIGKILL");
-                            } catch {
-                                // Process already exited or cannot be signaled.
+                                markExecJobForcedKilled(job);
+                            } catch (processKillError) {
+                                if (isProcessGoneError(processKillError)) {
+                                    markExecJobForcedKilled(job);
+                                }
                             }
                         }
-                    } finally {
-                        job.closePending = true;
-                        job.status = "done";
-                        job.code = 137;
-                        job.endedAt = Date.now();
-                        cleanupJobs();
                     }
                 }
             }, 3000);

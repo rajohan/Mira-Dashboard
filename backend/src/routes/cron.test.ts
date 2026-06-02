@@ -196,7 +196,7 @@ describe("cron routes", () => {
     });
 
     it("returns gateway errors as route errors", async () => {
-        const originalRequest = gateway.request;
+        const savedRequest = gateway.request;
         gateway.request = async (method: string) => {
             throw new Error(`${method} unavailable`);
         };
@@ -230,7 +230,7 @@ describe("cron routes", () => {
             assert.equal(run.status, 500);
             assert.equal(run.body.error, "cron.run unavailable");
         } finally {
-            gateway.request = originalRequest;
+            gateway.request = savedRequest;
         }
     });
 });

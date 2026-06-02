@@ -43,8 +43,8 @@ function isTransientSqliteLock(error: unknown): boolean {
     );
 }
 
-function sleepSync(milliseconds: number): void {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+async function sleep(milliseconds: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 db.exec(`
@@ -152,7 +152,9 @@ CREATE TABLE IF NOT EXISTS app_config (
 `);
 
 /** Ensures older task databases have the automation column. */
-export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
+export async function ensureTaskAutomationColumn(
+    targetDb: MigrationDatabase
+): Promise<void> {
     try {
         if (taskAutomationColumnExists(targetDb)) {
             return;
@@ -167,7 +169,7 @@ export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
 
     for (const delay of [0, 10, 25, 50]) {
         if (delay > 0) {
-            sleepSync(delay);
+            await sleep(delay);
         }
 
         try {
@@ -206,4 +208,4 @@ export function ensureTaskAutomationColumn(targetDb: MigrationDatabase): void {
     throw lastError;
 }
 
-ensureTaskAutomationColumn(db);
+await ensureTaskAutomationColumn(db);

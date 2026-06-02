@@ -32,6 +32,8 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_RM_FAIL",
     "MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH",
     "MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT",
+    "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
+    "MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE",
     "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
     "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
@@ -272,6 +274,14 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
 }
 if (process.env.MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
   process.stdout.write("partial stdout");
+  process.exit(0);
+}
+if (process.env.MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+  process.stdout.write("x".repeat(20000));
+  process.exit(0);
+}
+if (process.env.MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+  process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321");
   process.exit(0);
 }
 if (process.env.MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("kill -TERM")) {
@@ -1139,6 +1149,45 @@ describe("docker routes", { concurrency: false }, () => {
                 assert.equal(partialRun.stdout, "partial stdout\n");
                 assert.equal(updatedStdout, "partial stdout\n");
             });
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
+                "1",
+                async () => {
+                    const partialRun = await __testing.runDockerExecCommand(
+                        "app",
+                        "echo hi",
+                        "long-partial"
+                    );
+                    assert.equal(partialRun.stdout.length, 20_000);
+                }
+            );
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE",
+                "1",
+                async () => {
+                    __testing.dockerExecJobs.set("marker-no-newline", {
+                        id: "marker-no-newline",
+                        containerId: "app",
+                        status: "running",
+                        stdout: "",
+                        stderr: "",
+                        code: null,
+                        startedAt: Date.now(),
+                        endedAt: null,
+                    });
+                    const markerRun = await __testing.runDockerExecCommand(
+                        "app",
+                        "echo hi",
+                        "marker-no-newline"
+                    );
+                    assert.equal(markerRun.stdout, "");
+                    assert.equal(
+                        __testing.dockerExecJobs.get("marker-no-newline")?.inContainerPid,
+                        4321
+                    );
+                    __testing.dockerExecJobs.delete("marker-no-newline");
+                }
+            );
         } finally {
             __testing.dockerExecJobs.clear();
         }
