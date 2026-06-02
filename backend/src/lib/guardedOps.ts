@@ -258,6 +258,15 @@ export async function writeTextGuarded(
     }
 }
 
+async function syncParentDirectory(filePath: string): Promise<void> {
+    const parentDir = await Fs.promises.open(Buffer.from(Path.dirname(filePath)), "r");
+    try {
+        await parentDir.sync();
+    } finally {
+        await parentDir.close();
+    }
+}
+
 /** Writes UTF-8 text while atomically refusing a symlink at the final path. */
 export async function writeTextNoFollowGuarded(
     path: GuardedPath,
@@ -265,12 +274,18 @@ export async function writeTextNoFollowGuarded(
     mode?: number
 ): Promise<void> {
     const fileMode = (mode ?? 0o666) & 0o777;
-    const file = await Fs.promises.open(
-        guardedPathBuffer(path),
-        Fs.constants.O_WRONLY | Fs.constants.O_CREAT | Fs.constants.O_NOFOLLOW,
-        fileMode
+    const destinationPath = path as string;
+    const destinationDir = Path.dirname(destinationPath);
+    const tempPath = Path.join(
+        destinationDir,
+        `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
     );
+    let file: Fs.promises.FileHandle | undefined;
     try {
+        file = await Fs.promises.open(
+            guardedPathBuffer(path),
+            Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+        );
         const destinationStat = await file.stat();
         if (!destinationStat.isFile()) {
             throw Object.assign(new Error("Destination must be a regular file"), {
@@ -282,13 +297,41 @@ export async function writeTextNoFollowGuarded(
                 code: "EMLINK",
             });
         }
-        if (mode !== undefined) {
-            await file.chmod(fileMode);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
         }
-        await file.truncate(0);
-        await file.writeFile(content, "utf8");
     } finally {
-        await file.close();
+        await file?.close();
+    }
+
+    let tempCreated = false;
+    const tempFile = await Fs.promises.open(
+        Buffer.from(tempPath),
+        Fs.constants.O_WRONLY |
+            Fs.constants.O_CREAT |
+            Fs.constants.O_EXCL |
+            Fs.constants.O_NOFOLLOW,
+        fileMode
+    );
+    try {
+        tempCreated = true;
+        try {
+            if (mode !== undefined) {
+                await tempFile.chmod(fileMode);
+            }
+            await tempFile.writeFile(content, "utf8");
+            await tempFile.sync();
+        } finally {
+            await tempFile.close();
+        }
+        await Fs.promises.rename(Buffer.from(tempPath), guardedPathBuffer(path));
+        tempCreated = false;
+        await syncParentDirectory(destinationPath);
+    } finally {
+        if (tempCreated) {
+            await Fs.promises.rm(tempPath, { force: true });
+        }
     }
 }
 

@@ -310,6 +310,56 @@ describe("media routes", () => {
         }
     });
 
+    it("surfaces unexpected media root canonicalization failures", async () => {
+        const deniedHome = path.join(tempRoot, "denied-media-root");
+        const deniedMediaRoot = path.join(deniedHome, "media");
+        await mkdir(deniedMediaRoot, { recursive: true });
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = deniedHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            module = await import(`./media.js?denied-real-root=${randomUUID()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
+        }
+        const deniedServer = await startServerWithMediaRoutes(
+            deniedHome,
+            module.default,
+            previousOpenclawHome,
+            previousMiraOpenclawHome
+        );
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) => {
+            if (candidate === deniedMediaRoot) {
+                const error = new Error("media root denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return realRealpathSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${deniedServer.baseUrl}/api/media?path=${encodeURIComponent("note.txt")}`
+            );
+            assert.equal(response.status, 500);
+        } finally {
+            realpathSync.mock.restore();
+            await deniedServer.close();
+        }
+    });
+
     it("returns not found when media file canonicalization races with deletion", async () => {
         const racingFile = path.join(mediaRoot, "racing.txt");
         await writeFile(racingFile, "gone");

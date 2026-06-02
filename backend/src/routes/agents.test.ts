@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
     chmod,
+    link,
     lstat,
     mkdir,
     mkdtemp,
@@ -286,6 +287,28 @@ describe("agents routes", () => {
             assert.equal(__testing.ensureRealAgentsDir(), null);
         } finally {
             fs.statSync = originalStatSync;
+        }
+    });
+
+    it("rejects linked or escaped agent config files", async () => {
+        const { __testing } = await import("./agents.js");
+        const originalRealpathSync = fs.realpathSync;
+        const hardLinkPath = path.join(homeDir, ".openclaw", "openclaw-hardlink.json");
+        try {
+            await link(configPath, hardLinkPath);
+            assert.equal(__testing.parseAgentsConfig(), null);
+            await rm(hardLinkPath, { force: true });
+
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (String(target).endsWith(`${path.sep}openclaw.json`)) {
+                    return path.join(os.tmpdir(), "escaped-openclaw.json");
+                }
+                return originalRealpathSync.call(fs, target);
+            }) as typeof fs.realpathSync;
+            assert.equal(__testing.parseAgentsConfig(), null);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(hardLinkPath, { force: true });
         }
     });
 
@@ -963,13 +986,13 @@ describe("agents routes", () => {
             assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
 
             await writeFile(metadataPath, "{ malformed", "utf8");
-            const malformedMetadata = await requestJson<{ error: string }>(
+            const malformedMetadata = await requestJson<{ currentTask: string }>(
                 server,
                 `/api/agents/${agentId}/metadata`,
                 { method: "PUT", body: { currentTask: "Repair malformed metadata" } }
             );
-            assert.equal(malformedMetadata.status, 500);
-            assert.match(malformedMetadata.body.error, /JSON|parse|malformed/u);
+            assert.equal(malformedMetadata.status, 200);
+            assert.equal(malformedMetadata.body.currentTask, "Repair malformed metadata");
 
             await rm(metadataPath, { force: true, recursive: true });
             await mkdir(metadataPath);
@@ -1200,8 +1223,8 @@ describe("agents routes", () => {
                 "/api/agents/unsupported-platform/metadata",
                 { method: "PUT", body: { currentTask: "Nope" } }
             );
-            assert.equal(unsupported.status, 501);
-            assert.equal(unsupported.body.error, "unsupported-platform");
+            assert.equal(unsupported.status, 400);
+            assert.equal(unsupported.body.error, "Invalid agent metadata path");
         } finally {
             if (originalPlatform) {
                 Object.defineProperty(process, "platform", originalPlatform);

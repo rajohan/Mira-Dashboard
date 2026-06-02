@@ -686,6 +686,7 @@ describe("files routes", () => {
                 configurable: true,
                 value: "darwin",
             });
+            await mkdir(path.join(workspaceRoot, "generated"), { recursive: true });
 
             const response = await requestJson<{ content: string }>(
                 server,
@@ -1033,6 +1034,40 @@ describe("files routes", () => {
             assert.equal(await readFile(target, "utf8"), "before");
         } finally {
             await rm(backup, { recursive: true, force: true });
+        }
+
+        const largeTarget = path.join(workspaceRoot, "generated", "large-existing.txt");
+        const largeBackup = `${largeTarget}.bak`;
+        await writeFile(largeTarget, "x".repeat(2 * 1024 * 1024 + 1));
+        await writeFile(largeBackup, "stale backup");
+        assert.equal(fs.existsSync(largeBackup), true);
+        const largeUpdate = await requestJson<{ ok: boolean }>(
+            server,
+            "/api/files/generated%2Flarge-existing.txt",
+            { method: "PUT", body: { content: "after" } }
+        );
+        assert.equal(largeUpdate.status, 200);
+        assert.equal(fs.existsSync(largeBackup), false);
+        assert.equal(await readFile(largeTarget, "utf8"), "after");
+
+        await writeFile(largeTarget, "x".repeat(2 * 1024 * 1024 + 1));
+        await writeFile(largeBackup, "stale backup");
+        const unlinkMock = mock.method(fs.promises, "unlink", async () => {
+            const error = new Error("backup unlink denied") as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        });
+        try {
+            const failedLargeUpdate = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Flarge-existing.txt",
+                { method: "PUT", body: { content: "after denied unlink" } }
+            );
+            assert.equal(failedLargeUpdate.status, 500);
+            assert.equal(failedLargeUpdate.body.error, "backup unlink denied");
+        } finally {
+            unlinkMock.mock.restore();
+            await rm(largeBackup, { force: true });
         }
 
         const originalRealpathSync = fs.realpathSync;

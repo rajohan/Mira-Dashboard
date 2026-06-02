@@ -388,7 +388,7 @@ function completeExecJob(jobId: string, result: ExecResponse): void {
     }
 
     current.status = "done";
-    if (current.code !== 137) {
+    if (!current.closePending) {
         current.code = result.code;
     }
     current.stdout = result.stdout;

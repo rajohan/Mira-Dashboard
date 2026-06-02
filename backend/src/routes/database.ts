@@ -7,6 +7,7 @@ import express, { type RequestHandler } from "express";
 import { stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
+const DOCKER_EXEC_TIMEOUT_MS = 30_000;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -122,6 +123,7 @@ async function runDockerExec(container: string, command: string[]) {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
+        timeout: DOCKER_EXEC_TIMEOUT_MS,
     };
     const { stdout } = await execFileAsync(
         "docker",
@@ -149,6 +151,7 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
         /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
     const validIpv6 =
         host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    const rawIpv6 = isIP(host) === 6;
     if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
@@ -157,11 +160,12 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
             host
         ) &&
         !validIpv6 &&
-        !validIpv4
+        !validIpv4 &&
+        !rawIpv6
     ) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
-    return host;
+    return rawIpv6 ? `[${host}]` : host;
 }
 
 /** Returns a safe PostgreSQL port for URI construction. */

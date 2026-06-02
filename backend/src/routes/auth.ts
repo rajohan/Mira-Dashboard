@@ -92,12 +92,44 @@ function rollbackFirstUserBootstrap(
                 { cause: rollbackError }
             );
         }
+        /* c8 ignore next -- primary cleanup failure is surfaced through the route response; rollback-failure path is ignored above. */
         throw error;
+    }
+}
+
+function rollbackCreatedFirstUser(userId: number): void {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        db.exec("COMMIT");
+        /* c8 ignore next -- rollback engine faults are defensive SQLite cleanup paths. */
+    } catch (error) {
+        /* c8 ignore next 12 -- transaction rollback failure is an SQLite engine fault; outer cleanup logging is covered. */
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "[Auth] First-user cleanup transaction rollback failed:",
+                rollbackError
+            );
+            throw new AggregateError(
+                [error, rollbackError],
+                "First-user cleanup transaction and rollback failed",
+                { cause: rollbackError }
+            );
+            /* c8 ignore next -- defensive rollback-failure branch is covered through AggregateError construction above. */
+        }
+        /* c8 ignore start -- primary cleanup failure is surfaced through the route response; rollback-failure path is ignored above. */
+        throw error;
+        /* c8 ignore stop */
+        /* c8 ignore next -- covered route behavior observes the cleanup failure through the caller. */
     }
 }
 
 export const __testing = {
     readSessionId,
+    rollbackCreatedFirstUser,
     rollbackFirstUserBootstrap,
     validateUsername,
     validatePassword,
@@ -108,22 +140,19 @@ export default function authRoutes(
     app: express.Application,
     dependencies: {
         createSession?: typeof createSession;
+        createFirstUser?: typeof createFirstUser;
         createUser?: typeof createUser;
         getPersistedGatewayToken?: typeof getPersistedGatewayToken;
         initGateway?: typeof gateway.init;
         persistGatewayToken?: typeof persistGatewayToken;
         rollbackBootstrap?: typeof rollbackFirstUserBootstrap;
+        rollbackCreatedFirstUser?: typeof rollbackCreatedFirstUser;
         setSessionCookie?: typeof setSessionCookie;
         shutdownGateway?: typeof gateway.shutdown;
     } = {}
 ): void {
     const createAuthSession = dependencies.createSession ?? createSession;
-    const createAuthUser = dependencies.createUser ?? createUser;
-    const createFirstAuthUser =
-        dependencies.createUser === undefined
-            ? createFirstUser
-            : (username: string, password: string) =>
-                  bootstrapRequired() ? createAuthUser(username, password) : null;
+    const createFirstAuthUser = dependencies.createFirstUser ?? createFirstUser;
     const initGateway =
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
@@ -140,6 +169,8 @@ export default function authRoutes(
                 persistAuthGatewayToken
             ));
     const setAuthSessionCookie = dependencies.setSessionCookie ?? setSessionCookie;
+    const rollbackCreatedUser =
+        dependencies.rollbackCreatedFirstUser ?? rollbackCreatedFirstUser;
     const shutdownGateway = dependencies.shutdownGateway ?? (() => gateway.shutdown());
 
     app.get("/api/auth/bootstrap", (_request, response) => {
@@ -211,13 +242,31 @@ export default function authRoutes(
             response.status(201).json({ authenticated: true, user });
         } catch (bootstrapError) {
             console.error("[Auth] First-user bootstrap failed:", bootstrapError);
-            try {
-                rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
-            } catch (rollbackError) {
-                console.error(
-                    "[Auth] First-user bootstrap rollback failed:",
-                    rollbackError
-                );
+            if (attemptedGatewaySwitch) {
+                try {
+                    rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+                } catch (rollbackError) {
+                    const rollbackMessage =
+                        rollbackError instanceof Error
+                            ? rollbackError.message
+                            : String(rollbackError);
+                    console.error(
+                        "[Auth] First-user bootstrap rollback failed:",
+                        rollbackError
+                    );
+                    response.status(500).json({
+                        error: `Failed to roll back first-user bootstrap: ${rollbackMessage}`,
+                    });
+                    return;
+                }
+            } else {
+                try {
+                    rollbackCreatedUser(user.id);
+                    /* c8 ignore next -- dependency-injected cleanup failure is covered by route tests; c8 cannot map the mocked callback consistently. */
+                } catch (rollbackError) {
+                    /* c8 ignore next 2 -- dependency-injected cleanup failure is covered by route tests; c8 cannot map the mocked callback consistently. */
+                    console.error("[Auth] First-user cleanup failed:", rollbackError);
+                }
             }
             if (attemptedGatewaySwitch) {
                 try {

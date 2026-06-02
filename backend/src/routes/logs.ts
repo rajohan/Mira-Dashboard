@@ -155,6 +155,9 @@ function startLogWatcher(): void {
 /** Performs send log history. */
 async function sendLogHistory(ws: WebSocket): Promise<void> {
     const send = (payload: unknown) => {
+        if (!logSubscribers.has(ws)) {
+            return;
+        }
         try {
             ws.send(JSON.stringify(payload));
         } catch (error) {
@@ -180,11 +183,19 @@ async function sendLogHistory(ws: WebSocket): Promise<void> {
             return;
         }
 
-        const stat = await file.stat();
-        const lines = await readLogTailLines(file, stat, 100).finally(() => file.close());
+        let lines: string[];
+        try {
+            const stat = await file.stat();
+            lines = await readLogTailLines(file, stat, 100);
+        } finally {
+            await file.close();
+        }
 
         // Send each line
         for (const line of lines) {
+            if (!logSubscribers.has(ws)) {
+                return;
+            }
             send({ type: "log", line });
         }
 
@@ -214,6 +225,7 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 
 /** Defines testing. */
 export const __testing = {
+    sendLogHistoryForTest: sendLogHistory,
     pollLogFileForTest: pollLogFile,
     runLogWatcherTickForTest: runLogWatcherTick,
     resetLogWatcherForTest(): void {

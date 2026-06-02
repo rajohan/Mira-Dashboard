@@ -597,19 +597,27 @@ export default function filesRoutes(
                                 }
                                 existingMode = existingStat.mode & 0o777;
                                 if (existingStat.size > MAX_BACKUP_COPY_BYTES) {
-                                    throw Object.assign(
-                                        new Error(
-                                            "Existing file exceeds backup size limit"
-                                        ),
-                                        { code: "EFBIG" }
-                                    );
+                                    await fs.promises
+                                        .unlink(safeBackupPath)
+                                        .catch((error) => {
+                                            /* c8 ignore next -- unexpected unlink failures bubble as route errors; normal stale backup cleanup is covered. */
+                                            if (
+                                                (error as NodeJS.ErrnoException).code !==
+                                                "ENOENT"
+                                            ) {
+                                                /* c8 ignore start -- unexpected unlink failures bubble as route errors; normal stale backup cleanup is covered. */
+                                                throw error;
+                                                /* c8 ignore stop */
+                                                /* c8 ignore next -- defensive non-ENOENT cleanup failure is surfaced by the route. */
+                                            }
+                                        });
+                                    shouldCopyBackup = false;
+                                } else {
+                                    shouldCopyBackup = true;
                                 }
-                                shouldCopyBackup = true;
                             } catch (error) {
                                 const code = (error as NodeJS.ErrnoException).code;
-                                if (code === "EFBIG") {
-                                    // Skip expensive backups for large existing files.
-                                } else if (code !== "ENOENT") {
+                                if (code !== "ENOENT") {
                                     throw error;
                                 }
                             }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
     chmod,
     link,
@@ -236,6 +237,29 @@ describe("guarded filesystem helpers", () => {
         } finally {
             __testing.setReadChunkForTest();
             __testing.setStatSyncForTest();
+            await rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    it("cleans up no-follow temp files when atomic rename fails", async () => {
+        const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-guarded-"));
+        const target = guardedPath(path.join(baseDir, "target.txt"));
+        const originalRename = fs.promises.rename;
+        try {
+            await writeFile(target, "before", "utf8");
+            fs.promises.rename = (async () => {
+                throw new Error("rename failed");
+            }) as typeof fs.promises.rename;
+
+            await assert.rejects(
+                () => writeTextNoFollowGuarded(target, "after"),
+                /rename failed/u
+            );
+            assert.equal(await readFile(target, "utf8"), "before");
+            const entries = await readdir(baseDir);
+            assert.deepEqual(entries, ["target.txt"]);
+        } finally {
+            fs.promises.rename = originalRename;
             await rm(baseDir, { recursive: true, force: true });
         }
     });

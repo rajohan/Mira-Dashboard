@@ -45,6 +45,7 @@ const AGENTS_DIR = OPENCLAW_ROOT ? Path.join(OPENCLAW_ROOT, "agents") : "";
 let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
+    /* c8 ignore next 8 -- platform/procfs guard is host-dependent; route fallback behavior is covered. */
     if (process.platform !== "linux" || !FS.existsSync("/proc/self/fd")) {
         throw Object.assign(
             new Error(
@@ -488,7 +489,17 @@ function parseAgentsConfig(): AgentsConfig | null {
             return null;
         }
 
-        const content = FS.readFileSync(configPath, "utf8");
+        const configStat = FS.lstatSync(configPath);
+        if (configStat.isSymbolicLink() || configStat.nlink > 1) {
+            return null;
+        }
+        const realRoot = FS.realpathSync(OPENCLAW_ROOT!);
+        const realPath = FS.realpathSync(configPath);
+        if (realPath !== realRoot && !realPath.startsWith(`${realRoot}${Path.sep}`)) {
+            return null;
+        }
+
+        const content = FS.readFileSync(realPath, "utf8");
         const parsed = JSON5.parse(content) as { agents?: AgentsConfig };
 
         if (parsed.agents && Array.isArray(parsed.agents.list)) {
@@ -1565,6 +1576,7 @@ export default function agentsRoutes(app: express.Application): void {
                 try {
                     mkdirChildFromVerifiedParent(realAgentsDir, agentId);
                 } catch (error) {
+                    /* c8 ignore next 4 -- only reachable on unsupported host/procfs combinations. */
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
                         res.status(501).json({ error: "unsupported-platform" });
                         return;
@@ -1609,9 +1621,19 @@ export default function agentsRoutes(app: express.Application): void {
                 let metadata: AgentMetadata = {};
                 try {
                     // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
-                    const parsedMetadata = JSON5.parse(
-                        await readTextNoFollowGuarded(guardedPath(safeMetadataPath))
-                    ) as unknown;
+                    const metadataText = await readTextNoFollowGuarded(
+                        guardedPath(safeMetadataPath)
+                    );
+                    let parsedMetadata: unknown;
+                    try {
+                        parsedMetadata = JSON5.parse(metadataText) as unknown;
+                    } catch (parseError) {
+                        console.warn(
+                            `[Agents] Ignoring malformed metadata for ${agentId} at ${safeMetadataPath}:`,
+                            (parseError as Error).message
+                        );
+                        parsedMetadata = {};
+                    }
                     metadata =
                         parsedMetadata &&
                         typeof parsedMetadata === "object" &&

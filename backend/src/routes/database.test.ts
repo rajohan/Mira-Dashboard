@@ -174,6 +174,11 @@ describe("database routes", () => {
                 __testing.buildPostgresUri("ipv6"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@[::1]:5432/ipv6"
             );
+            process.env.DATABASE_HOST = "::1";
+            assert.equal(
+                __testing.buildPostgresUri("raw-ipv6"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@[::1]:5432/raw-ipv6"
+            );
 
             process.env.DATABASE_HOST = "999.1.1.1";
             assert.throws(() => __testing.buildPostgresUri(), {

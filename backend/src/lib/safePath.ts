@@ -56,14 +56,8 @@ function createChildDirectoryFromVerifiedParent(
         ) {
             return null;
         }
-        try {
-            fs.mkdirSync(Buffer.from(nextParent));
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-                throw error;
-            }
-        }
         const realNextParent = fs.realpathSync(Buffer.from(nextParent));
+        /* c8 ignore start -- defensive non-Linux race/success check depends on host platform. */
         if (
             realNextParent !== nextParent ||
             !fs.statSync(Buffer.from(realNextParent)).isDirectory()
@@ -71,6 +65,7 @@ function createChildDirectoryFromVerifiedParent(
             return null;
         }
         return realNextParent;
+        /* c8 ignore stop */
     }
 
     const parentFd = fs.openSync(

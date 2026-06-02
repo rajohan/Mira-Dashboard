@@ -186,12 +186,12 @@ describe("auth first-user bootstrap routes", () => {
         let failingServer: TestServer | undefined;
         try {
             duplicateServer = await startServer({
-                createUser: () => {
+                createFirstUser: () => {
                     throw new Error("SQLITE_CONSTRAINT_UNIQUE");
                 },
             });
             failingServer = await startServer({
-                createUser: () => {
+                createFirstUser: () => {
                     throw "boom";
                 },
             });
@@ -231,10 +231,7 @@ describe("auth first-user bootstrap routes", () => {
                 }
             );
             assert.equal(dependencyAfterBootstrap.status, 409);
-            assert.equal(
-                dependencyAfterBootstrap.body.error,
-                "Bootstrap registration is no longer available"
-            );
+            assert.equal(dependencyAfterBootstrap.body.error, "Username already exists");
         } finally {
             await duplicateServer?.close();
             await failingServer?.close();
@@ -425,7 +422,7 @@ describe("auth first-user bootstrap routes", () => {
                     registered.body.error,
                     "Failed to complete first-user setup"
                 );
-                assert.equal(rolledBack, true);
+                assert.equal(rolledBack, false);
                 assert.equal(shutdown, false);
                 assert.equal(
                     db
@@ -444,7 +441,7 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
-    it("keeps first-user cleanup best-effort when rollback throws", async () => {
+    it("stops first-user cleanup when bootstrap rollback throws", async () => {
         cleanupBootstrapRows(username);
         let rollbackCalled = false;
         let shutdown = false;
@@ -471,13 +468,87 @@ describe("auth first-user bootstrap routes", () => {
             );
 
             assert.equal(registered.status, 500);
-            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(
+                registered.body.error,
+                "Failed to roll back first-user bootstrap: rollback unavailable"
+            );
             assert.equal(rollbackCalled, true);
-            assert.equal(shutdown, true);
+            assert.equal(shutdown, false);
         } finally {
             await throwingRollbackServer.close();
             cleanupUser("bootstrap-side-effect");
             cleanupBootstrapRows(username);
+        }
+    });
+
+    it("reports primitive first-user bootstrap rollback errors", async () => {
+        cleanupBootstrapRows(username);
+        const throwingRollbackServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+            rollbackBootstrap: () => {
+                throw new Object("primitive rollback unavailable");
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                throwingRollbackServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: {
+                        username: "bootstrap-primitive-rollback",
+                        password,
+                        gatewayToken,
+                    },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(
+                registered.body.error,
+                "Failed to roll back first-user bootstrap: primitive rollback unavailable"
+            );
+        } finally {
+            await throwingRollbackServer.close();
+            cleanupUser("bootstrap-primitive-rollback");
+            cleanupBootstrapRows(username);
+        }
+    });
+
+    it("keeps first-user cleanup best-effort when pre-switch cleanup throws", async () => {
+        cleanupBootstrapRows(username);
+        const consoleError = mock.method(console, "error", () => {});
+        const cleanupFailureServer = await startServer({
+            createSession: () => {
+                throw new Error("session unavailable");
+            },
+            rollbackCreatedFirstUser: () => {
+                throw new Error("cleanup unavailable");
+            },
+        });
+        try {
+            const registered = await requestJson<{ error: string }>(
+                cleanupFailureServer,
+                "/api/auth/register-first-user",
+                {
+                    method: "POST",
+                    body: {
+                        username: "bootstrap-cleanup-failure",
+                        password,
+                        gatewayToken,
+                    },
+                }
+            );
+
+            assert.equal(registered.status, 500);
+            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(consoleError.mock.callCount(), 1);
+        } finally {
+            consoleError.mock.restore();
+            await cleanupFailureServer.close();
+            cleanupUser("bootstrap-cleanup-failure");
         }
     });
 

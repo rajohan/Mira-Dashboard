@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -399,7 +400,7 @@ describe("config files routes", () => {
         const dashboardOpenclawHome = await mkdtemp(
             path.join(os.tmpdir(), "mira-dashboard-openclaw-")
         );
-        const linkedOpenclawHome = path.join(os.tmpdir(), `mira-linked-${Date.now()}`);
+        const linkedOpenclawHome = path.join(os.tmpdir(), `mira-linked-${randomUUID()}`);
         const originalRealpathSync = fs.realpathSync;
 
         try {
@@ -653,12 +654,16 @@ describe("config files routes", () => {
             if (
                 String(target).endsWith(`${path.sep}openclaw.json`) &&
                 typeof flags === "number" &&
-                (flags & fs.constants.O_WRONLY) !== 0
+                (flags & fs.constants.O_NOFOLLOW) !== 0 &&
+                (flags & fs.constants.O_WRONLY) === 0
             ) {
-                return {
-                    stat: async () => ({ isFile: () => true, nlink: 2 }),
-                    close: async () => {},
-                } as fs.promises.FileHandle;
+                const file = await originalOpen.call(fs.promises, target, flags, mode);
+                const originalStat = file.stat.bind(file);
+                file.stat = (async (options?: fs.StatOptions) => {
+                    const stats = await originalStat(options);
+                    return Object.assign(stats, { nlink: 2 });
+                }) as typeof file.stat;
+                return file;
             }
             return originalOpen.call(fs.promises, target, flags, mode);
         }) as typeof fs.promises.open;
@@ -681,7 +686,7 @@ describe("config files routes", () => {
             mode?: fs.Mode
         ) => {
             if (
-                String(target).endsWith(`${path.sep}openclaw.json`) &&
+                String(target).includes(`${path.sep}.openclaw.json.`) &&
                 typeof flags === "number" &&
                 (flags & fs.constants.O_WRONLY) !== 0
             ) {
@@ -710,7 +715,7 @@ describe("config files routes", () => {
             mode?: fs.Mode
         ) => {
             if (
-                String(target).endsWith(`${path.sep}openclaw.json`) &&
+                String(target).includes(`${path.sep}.openclaw.json.`) &&
                 typeof flags === "number" &&
                 (flags & fs.constants.O_WRONLY) !== 0
             ) {

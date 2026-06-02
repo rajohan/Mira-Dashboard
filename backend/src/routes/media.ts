@@ -48,7 +48,11 @@ function getRealMediaRoot(): string | null {
     try {
         cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
         return cachedRealMediaRoot;
-    } catch {
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") {
+            throw error;
+        }
         return null;
     }
 }
@@ -57,23 +61,16 @@ function getRealMediaRoot(): string | null {
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
         const requestedPath = stringFallback(request.query.path);
-        const fullPath = path.resolve(MEDIA_ROOT, requestedPath);
-        const realMediaRoot = getRealMediaRoot();
-        const isUnderMediaRoot =
-            !!realMediaRoot &&
-            (fullPath === realMediaRoot ||
-                fullPath.startsWith(`${realMediaRoot}${path.sep}`));
 
         if (!requestedPath) {
             response.status(403).json({ error: "Access denied" });
             return;
         }
+
+        const fullPath = path.resolve(MEDIA_ROOT, requestedPath);
+        const realMediaRoot = getRealMediaRoot();
         if (!realMediaRoot) {
             response.status(404).json({ error: "Media not found" });
-            return;
-        }
-        if (!isUnderMediaRoot) {
-            response.status(403).json({ error: "Access denied" });
             return;
         }
 
@@ -84,10 +81,8 @@ export default function mediaRoutes(app: express.Application): void {
 
         let realPath: string;
         let stat: fs.Stats;
-        let canonicalMediaRoot: string | null;
         try {
             realPath = fs.realpathSync(fullPath);
-            canonicalMediaRoot = realMediaRoot;
             stat = fs.statSync(realPath);
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
@@ -97,10 +92,8 @@ export default function mediaRoutes(app: express.Application): void {
             }
             throw error;
         }
-        if (
-            !realPath.startsWith(`${canonicalMediaRoot}${path.sep}`) &&
-            !realPath.startsWith(`${MEDIA_ROOT}${path.sep}`)
-        ) {
+        const relativeRealPath = path.relative(realMediaRoot, realPath);
+        if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
             response.status(403).json({ error: "Access denied" });
             return;
         }

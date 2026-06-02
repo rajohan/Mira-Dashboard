@@ -32,12 +32,14 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 class FakeWebSocket {
     readonly sent: string[] = [];
     failSend = false;
+    onSend?: () => void;
 
     send(data: string): void {
         if (this.failSend) {
             throw new Error("socket closed");
         }
         this.sent.push(data);
+        this.onSend?.();
     }
 }
 
@@ -545,6 +547,36 @@ describe("logs routes", () => {
             __testing.resetLogWatcherForTest();
             await rm(path.join(logsDir, todayFile), { force: true });
         }
+    });
+
+    it("stops sending log history after unsubscribe", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        const todayFile = `openclaw-${today}.log`;
+        await writeFile(path.join(logsDir, todayFile), "one\ntwo\n", "utf8");
+
+        const ws = new FakeWebSocket();
+        ws.onSend = () => {
+            unsubscribeFromLogs(ws as never);
+            ws.onSend = undefined;
+        };
+        try {
+            subscribeToLogs(ws as never);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            assert.deepEqual(
+                ws.sent.map((message) => JSON.parse(message)),
+                [{ type: "log_file", file: todayFile }]
+            );
+        } finally {
+            unsubscribeFromLogs(ws as never);
+            __testing.resetLogWatcherForTest();
+            await rm(path.join(logsDir, todayFile), { force: true });
+        }
+    });
+
+    it("does not send log history when the socket is not subscribed", async () => {
+        const ws = new FakeWebSocket();
+        await __testing.sendLogHistoryForTest(ws as never);
+        assert.deepEqual(ws.sent, []);
     });
 
     it("sends empty log history when today's log is missing", async () => {

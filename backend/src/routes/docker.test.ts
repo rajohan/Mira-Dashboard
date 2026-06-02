@@ -433,14 +433,18 @@ async function requestJson<T>(
     pathName: string,
     options: { method?: string; body?: unknown; rawBody?: string } = {}
 ): Promise<{ status: number; body: T }> {
+    const hasBody = options.body !== undefined;
+    const hasRawBody = options.rawBody !== undefined;
+    const requestBody = hasRawBody
+        ? options.rawBody
+        : hasBody
+          ? JSON.stringify(options.body)
+          : undefined;
     const response = await fetch(`${server.baseUrl}${pathName}`, {
         method: options.method || "GET",
         headers:
-            options.body || options.rawBody
-                ? { "Content-Type": "application/json" }
-                : undefined,
-        body:
-            options.rawBody ?? (options.body ? JSON.stringify(options.body) : undefined),
+            hasBody || hasRawBody ? { "Content-Type": "application/json" } : undefined,
+        body: requestBody,
     });
 
     return {

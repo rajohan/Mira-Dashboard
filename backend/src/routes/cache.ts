@@ -23,129 +23,38 @@ interface HttpStatusError extends Error {
     statusCode?: number;
 }
 
-const CACHE_REFRESH_COMMANDS: Record<string, string[]> = {
-    "git.workspace": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/git-cache.mjs`,
-    ],
-    "moltbook.home": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/moltbook-cache.mjs`,
-    ],
-    "moltbook.feed.hot": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/moltbook-feed-cache.mjs`,
-    ],
-    "moltbook.feed.new": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/moltbook-feed-cache.mjs`,
-    ],
-    "moltbook.profile": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/moltbook-profile-cache.mjs`,
-    ],
-    "moltbook.my-content": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/moltbook-profile-cache.mjs`,
-    ],
-    "quotas.summary": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/quotas-cache.mjs`,
-    ],
-    "system.host": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/system-cache.mjs`,
-    ],
-    "backup.kopia.status": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/backup-kopia-status.mjs`,
-    ],
-    "backup.walg.status": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/backup-walg-status.mjs`,
-    ],
-    "weather.spydeberg": [
-        "/usr/local/bin/doppler",
-        "run",
-        "--project",
-        "rajohan",
-        "--config",
-        "prd",
-        "--",
-        "node",
-        `${N8N_ROOT}/scripts/weather-cache.mjs`,
-    ],
+const CACHE_REFRESH_SCRIPTS: Record<string, string> = {
+    "git.workspace": "git-cache.mjs",
+    "moltbook.home": "moltbook-cache.mjs",
+    "moltbook.feed.hot": "moltbook-feed-cache.mjs",
+    "moltbook.feed.new": "moltbook-feed-cache.mjs",
+    "moltbook.profile": "moltbook-profile-cache.mjs",
+    "moltbook.my-content": "moltbook-profile-cache.mjs",
+    "quotas.summary": "quotas-cache.mjs",
+    "system.host": "system-cache.mjs",
+    "backup.kopia.status": "backup-kopia-status.mjs",
+    "backup.walg.status": "backup-walg-status.mjs",
+    "weather.spydeberg": "weather-cache.mjs",
 };
+
+function buildCacheRefreshCommand(scriptName: string): string[] {
+    return [
+        "/usr/local/bin/doppler",
+        "run",
+        "--project",
+        "rajohan",
+        "--config",
+        "prd",
+        "--",
+        "node",
+        `${cacheRefreshCwd}/scripts/${scriptName}`,
+    ];
+}
+
+function getCacheRefreshCommand(key: string): string[] | undefined {
+    const scriptName = CACHE_REFRESH_SCRIPTS[key];
+    return scriptName ? buildCacheRefreshCommand(scriptName) : undefined;
+}
 
 const cacheRefreshCommandOverrides = new Map<string, string[] | undefined>();
 
@@ -170,6 +79,7 @@ function resetCacheRefreshForTests(): void {
 }
 
 export const __testing = {
+    getCacheRefreshCommand,
     resetCacheRefreshForTests,
     setCacheRefreshCommandForTests,
     setCacheRefreshCwdForTests,
@@ -202,7 +112,7 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 export async function refreshCacheKey(key: string) {
     const command = cacheRefreshCommandOverrides.has(key)
         ? cacheRefreshCommandOverrides.get(key)
-        : CACHE_REFRESH_COMMANDS[key];
+        : getCacheRefreshCommand(key);
     if (!command) {
         const error = new Error(
             `No refresh command configured for cache key: ${key}`

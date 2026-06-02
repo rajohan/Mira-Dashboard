@@ -31,6 +31,8 @@ const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
 const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
 const N8N_DATABASE = "n8n";
+const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
+const DOCKER_UPDATER_TIMEOUT_MS = 120_000;
 
 function updaterScriptPath(fileName: string): string {
     return path.resolve(updaterCwd, "scripts", fileName);
@@ -393,6 +395,7 @@ async function queryN8n(sql: string): Promise<string> {
             cwd: DOCKER_ROOT,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            timeout: DOCKER_REQUEST_TIMEOUT_MS,
         }
     );
 
@@ -415,6 +418,7 @@ async function queryN8nTsvRows<T extends object>(
             cwd: DOCKER_ROOT,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            timeout: DOCKER_REQUEST_TIMEOUT_MS,
         }
     );
 
@@ -426,6 +430,7 @@ async function queryN8nTsvRows<T extends object>(
                 cwd: DOCKER_ROOT,
                 env: process.env,
                 maxBuffer: 10 * 1024 * 1024,
+                timeout: DOCKER_REQUEST_TIMEOUT_MS,
             }
         );
 
@@ -442,6 +447,7 @@ async function queryN8nTsvRows<T extends object>(
             await execFileAsync(dockerBin, ["exec", "postgres", "rm", "-f", tempFile], {
                 cwd: DOCKER_ROOT,
                 env: process.env,
+                timeout: DOCKER_REQUEST_TIMEOUT_MS,
             });
         } catch {
             // ignore cleanup errors
@@ -541,6 +547,7 @@ async function runDocker(args: string[]): Promise<string> {
         cwd: DOCKER_ROOT,
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
+        timeout: DOCKER_REQUEST_TIMEOUT_MS,
     });
 
     return String(stdout);
@@ -552,6 +559,7 @@ async function runCompose(args: string[]): Promise<{ stdout: string; stderr: str
         cwd: DOCKER_ROOT,
         env: process.env,
         maxBuffer: 20 * 1024 * 1024,
+        timeout: DOCKER_REQUEST_TIMEOUT_MS,
     });
 
     return {
@@ -941,6 +949,7 @@ async function runUpdaterCommand(
             cwd: updaterCwd,
             env,
             maxBuffer: 20 * 1024 * 1024,
+            timeout: DOCKER_UPDATER_TIMEOUT_MS,
         });
 
         return {
@@ -1463,6 +1472,7 @@ export default function dockerRoutes(app: express.Application): void {
                     cwd: DOCKER_ROOT,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
+                    timeout: DOCKER_REQUEST_TIMEOUT_MS,
                 }
             );
             const content = [String(stdout), String(stderr)]

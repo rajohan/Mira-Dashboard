@@ -29,12 +29,22 @@ const command = args.at(-1) || "";
 if (process.env.FAKE_BACKUP_SIGNAL === "1") {
     process.kill(process.pid, "SIGTERM");
     setInterval(() => {}, 1000);
-} else {
-    process.stdout.write("started backup\n" + command + "\n");
-    process.stderr.write("backup warning\n");
-    setTimeout(() => process.exit(0), 10);
-}
-`,
+	} else {
+	    process.stdout.write("started backup\n" + command + "\n");
+	    process.stderr.write("backup warning\n");
+	    if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
+	        const fs = require("node:fs");
+	        const timer = setInterval(() => {
+	            if (fs.existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL)) {
+	                clearInterval(timer);
+	                process.exit(0);
+	            }
+	        }, 10);
+	        return;
+	    }
+	    setTimeout(() => process.exit(0), 10);
+	}
+	`,
         "utf8"
     );
     await chmod(dopplerPath, 0o755);
@@ -193,25 +203,28 @@ describe("backup routes", () => {
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
-        const firstRequest = requestJson<{
-            ok: boolean;
-            job: { id: string; type: string; status: string };
-        }>(server, "/api/backups/kopia/run", { method: "POST" });
-        const secondRequest = requestJson<{
-            ok: boolean;
-            job: { id: string; type: string; status: string };
-        }>(server, "/api/backups/kopia/run", { method: "POST" });
-        const [firstResp, secondResp] = await Promise.all([firstRequest, secondRequest]);
+        const releasePath = path.join(tempDir, "release-kopia");
+        await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
+            const firstResp = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            const secondResp = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
 
-        assert.equal(firstResp.status, 200);
-        assert.equal(firstResp.body.ok, true);
-        assert.equal(firstResp.body.job.status, "running");
-        assert.equal(secondResp.status, 200);
-        assert.equal(secondResp.body.ok, true);
-        assert.equal(secondResp.body.job.id, firstResp.body.job.id);
-        assert.equal(secondResp.body.job.status, "running");
+            assert.equal(firstResp.status, 200);
+            assert.equal(firstResp.body.ok, true);
+            assert.equal(firstResp.body.job.status, "running");
+            assert.equal(secondResp.status, 200);
+            assert.equal(secondResp.body.ok, true);
+            assert.equal(secondResp.body.job.id, firstResp.body.job.id);
+            assert.equal(secondResp.body.job.status, "running");
 
-        await waitForDone(server, "/api/backups/kopia");
+            await writeFile(releasePath, "release", "utf8");
+            await waitForDone(server, "/api/backups/kopia");
+        });
     });
 
     it("starts and completes WAL-G backup jobs through Doppler", async () => {

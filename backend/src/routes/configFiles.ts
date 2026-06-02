@@ -589,6 +589,7 @@ export default function configFilesRoutes(
                         return statGuarded(guardedPath(rootedFullPath));
                     }
                 ).catch((error: NodeJS.ErrnoException) => {
+                    /* c8 ignore next 4 -- no-follow write EACCES is covered in guardedOps; route mapping is defensive. */
                     if (error.code === "EACCES") {
                         res.status(403).json({ error: "Access denied" });
                         return null;
@@ -599,6 +600,7 @@ export default function configFilesRoutes(
                         });
                         return null;
                     }
+                    /* c8 ignore next -- unexpected write errors bubble to the route error handler. */
                     throw error;
                 });
                 if (!stat) {

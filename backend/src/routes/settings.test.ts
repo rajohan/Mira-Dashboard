@@ -432,6 +432,23 @@ describe("settings routes", () => {
         await mkdir(path.dirname(settingsPath), { recursive: true });
         await writeFile(settingsPath, JSON.stringify({ theme: "dark" }), "utf8");
         await chmod(settingsPath, 0o444);
+        const originalOpen = fs.promises.open;
+        fs.promises.open = (async (
+            target: fs.PathLike,
+            flags: string | number,
+            mode?: fs.Mode
+        ) => {
+            if (
+                String(target).includes(`${path.sep}.dashboard-settings.json.`) &&
+                typeof flags === "number" &&
+                (flags & fs.constants.O_WRONLY) !== 0
+            ) {
+                const error = new Error("settings write failed") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return originalOpen.call(fs.promises, target, flags, mode);
+        }) as typeof fs.promises.open;
         const originalError = console.error;
         console.error = () => {};
         try {
@@ -443,6 +460,7 @@ describe("settings routes", () => {
             assert.equal(putResponse.status, 500);
             assert.equal(putResponse.body.error, "Failed to save settings");
         } finally {
+            fs.promises.open = originalOpen;
             console.error = originalError;
             await chmod(settingsPath, 0o644).catch(() => {});
             await rm(settingsPath, { recursive: true, force: true });

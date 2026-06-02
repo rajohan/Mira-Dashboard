@@ -158,6 +158,18 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     it("rejects refresh requests for unconfigured cache keys before shelling out", async () => {
+        assert.deepEqual(__testing.getCacheRefreshCommand("quotas.summary"), [
+            "/usr/local/bin/doppler",
+            "run",
+            "--project",
+            "rajohan",
+            "--config",
+            "prd",
+            "--",
+            "node",
+            `${tempDir}/scripts/quotas-cache.mjs`,
+        ]);
+
         await assert.rejects(
             () => refreshCacheKey("not.configured"),
             (error: unknown) => {
