@@ -407,8 +407,21 @@ describe("backup routes", () => {
             },
             async () => {
                 const fallbackEnv = backupTesting.createBackupEnv();
-                assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "");
-                assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "");
+                assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "legacy-user");
+                assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
+            }
+        );
+        await withEnv(
+            {
+                DB_POSTGRESDB_USER: "   ",
+                DB_POSTGRESDB_PASSWORD: "\t",
+                DATABASE_USERNAME: "legacy-user",
+                DATABASE_PASSWORD: "legacy-password",
+            },
+            async () => {
+                const whitespaceEnv = backupTesting.createBackupEnv();
+                assert.equal(whitespaceEnv.DB_POSTGRESDB_USER, "legacy-user");
+                assert.equal(whitespaceEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
             }
         );
         await withEnv(

@@ -1,4 +1,5 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -70,12 +71,19 @@ async function runDockerExec(container: string, command: string[]) {
 /** Returns a safe PostgreSQL hostname for URI construction. */
 function normalizePostgresHost(value: string | undefined): string {
     const host = value?.trim() || "postgres";
+    const validIpv4 =
+        /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
+    const validIpv6 =
+        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
+        throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
+    }
     if (
         !/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/u.test(
             host
         ) &&
-        !/^\[(?:[0-9A-Fa-f:.]+)\]$/u.test(host) &&
-        !/^(?:\d{1,3}\.){3}\d{1,3}$/u.test(host)
+        !validIpv6 &&
+        !validIpv4
     ) {
         throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
     }

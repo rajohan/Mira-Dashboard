@@ -66,8 +66,21 @@ describe("cacheStore utilities", () => {
                 __testing.buildPostgresUri("cache/name?#"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/cache%2Fname%3F%23"
             );
+            process.env.DATABASE_HOST = "192.168.0.1";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@192.168.0.1:6543/n8n"
+            );
 
             process.env.DATABASE_HOST = "db$(touch /tmp/nope)";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                message: "Invalid DATABASE_HOST",
+            });
+            process.env.DATABASE_HOST = "999.999.999.999";
+            assert.throws(() => __testing.buildPostgresUri(), {
+                message: "Invalid DATABASE_HOST",
+            });
+            process.env.DATABASE_HOST = "[::::]";
             assert.throws(() => __testing.buildPostgresUri(), {
                 message: "Invalid DATABASE_HOST",
             });

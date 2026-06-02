@@ -883,10 +883,14 @@ describe("exec routes", () => {
         });
 
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-            assert.equal(pid, -234_567);
             signals.push(signal);
-            if (signal === "SIGKILL") {
+            if (signal === "SIGTERM") {
+                assert.equal(pid, -234_567);
+            } else if (pid === -234_567 && signal === "SIGKILL") {
                 throw new Error("already gone");
+            } else {
+                assert.equal(pid, 234_567);
+                assert.equal(signal, "SIGKILL");
             }
             return true;
         }) as typeof process.kill;
@@ -901,7 +905,12 @@ describe("exec routes", () => {
 
             assert.equal(stop.status, 200);
             mock.timers.tick(3_050);
-            assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+            assert.deepEqual(signals, ["SIGTERM", "SIGKILL", "SIGKILL"]);
+            const stoppedJob = __testing.jobs.get(jobId);
+            assert.equal(stoppedJob?.status, "done");
+            assert.equal(stoppedJob?.code, 137);
+            assert.equal(stoppedJob?.process, undefined);
+            assert.equal(typeof stoppedJob?.endedAt, "number");
         } finally {
             mock.timers.reset();
             process.kill = originalKill;

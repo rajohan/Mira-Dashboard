@@ -533,7 +533,9 @@ export default function execRoutes(
                     } finally {
                         job.process = undefined;
                         job.status = "done";
+                        job.code = 137;
                         job.endedAt = Date.now();
+                        cleanupJobs();
                     }
                 }
             }, 3000);
