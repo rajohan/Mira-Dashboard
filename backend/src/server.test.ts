@@ -24,6 +24,7 @@ let originalGatewayToken: { value: string } | undefined;
 let openclawHome: string | undefined;
 const ENTRYPOINT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const ENTRYPOINT_START_TIMEOUT_MS = 5_000;
+const ENTRYPOINT_PORT_ATTEMPTS = 5;
 
 let apiAuthMiddleware: (typeof import("./server.js"))["apiAuthMiddleware"];
 let handleWebSocketConnection: (typeof import("./server.js"))["handleWebSocketConnection"];
@@ -104,6 +105,70 @@ async function waitForChildHealth(
     }
     await assertChildStillRunning(child, 0);
     assert.fail(`Timed out waiting for entrypoint health check\n${getOutput()}`);
+}
+
+async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
+    let exited = child.exitCode !== null || child.signalCode !== null;
+    if (!exited) {
+        const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+        child.kill("SIGTERM");
+        exited =
+            (await Promise.race([
+                exitPromise.then(() => true),
+                delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
+            ])) === true;
+    }
+    exited ||= child.exitCode !== null || child.signalCode !== null;
+    if (!exited) {
+        const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+        child.kill("SIGKILL");
+        await exitPromise;
+    }
+}
+
+async function startEntrypointChild(
+    serverStartEntrypoint: string,
+    env: NodeJS.ProcessEnv
+): Promise<{ child: ReturnType<typeof spawn>; getOutput: () => string }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= ENTRYPOINT_PORT_ATTEMPTS; attempt += 1) {
+        const port = await getFreePort();
+        let childOutput = "";
+        const child = spawn(
+            process.execPath,
+            ["--import", "tsx", serverStartEntrypoint],
+            {
+                cwd: process.cwd(),
+                env: {
+                    ...env,
+                    PORT: String(port),
+                },
+                stdio: ["ignore", "pipe", "pipe"],
+            }
+        );
+        child.stdout?.on("data", (data) => {
+            childOutput += String(data);
+        });
+        child.stderr?.on("data", (data) => {
+            childOutput += String(data);
+        });
+        const getOutput = () => childOutput;
+        try {
+            await waitForChildHealth(child, port, getOutput);
+            return { child, getOutput };
+        } catch (error) {
+            lastError = error;
+            await stopChild(child);
+            if (
+                !/\bEADDRINUSE\b/.test(childOutput) ||
+                attempt === ENTRYPOINT_PORT_ATTEMPTS
+            ) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
 }
 
 async function restoreBootstrapState(): Promise<void> {
@@ -893,52 +958,17 @@ describe("server bootstrap", () => {
         const serverStartEntrypoint = fileURLToPath(
             new URL("serverStart.ts", import.meta.url)
         );
-        const port = await getFreePort();
-        let childOutput = "";
-        const child = spawn(
-            process.execPath,
-            ["--import", "tsx", serverStartEntrypoint],
-            {
-                cwd: process.cwd(),
-                env: {
-                    ...process.env,
-                    NODE_V8_COVERAGE: path.join(
-                        os.tmpdir(),
-                        "mira-server-entrypoint-coverage"
-                    ),
-                    OPENCLAW_TOKEN: "test-token",
-                    OPENCLAW_HOME: openclawHome,
-                    MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
-                    PORT: String(port),
-                },
-                stdio: ["ignore", "pipe", "pipe"],
-            }
-        );
-        child.stdout?.on("data", (data) => {
-            childOutput += String(data);
-        });
-        child.stderr?.on("data", (data) => {
-            childOutput += String(data);
+        const { child } = await startEntrypointChild(serverStartEntrypoint, {
+            ...process.env,
+            NODE_V8_COVERAGE: path.join(os.tmpdir(), "mira-server-entrypoint-coverage"),
+            OPENCLAW_TOKEN: "test-token",
+            OPENCLAW_HOME: openclawHome,
+            MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
         });
         try {
-            await waitForChildHealth(child, port, () => childOutput);
+            await assertChildStillRunning(child, 0);
         } finally {
-            let exited = child.exitCode !== null || child.signalCode !== null;
-            if (!exited) {
-                const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-                child.kill("SIGTERM");
-                exited =
-                    (await Promise.race([
-                        exitPromise.then(() => true),
-                        delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
-                    ])) === true;
-            }
-            exited ||= child.exitCode !== null || child.signalCode !== null;
-            if (!exited) {
-                const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-                child.kill("SIGKILL");
-                await exitPromise;
-            }
+            await stopChild(child);
         }
     });
 });
