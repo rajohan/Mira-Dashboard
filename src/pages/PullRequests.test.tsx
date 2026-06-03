@@ -383,6 +383,59 @@ describe("PullRequests page", () => {
         expect(screen.getByText("-1")).toHaveClass("text-red-400");
     });
 
+    it("blocks merge actions when GitHub reports a merge blocker", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BLOCKED",
+                        mergeable: "MERGEABLE",
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(
+            screen.getByText("GitHub reports this pull request is blocked from merging")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("blocks merge actions when GitHub reports merge conflicts", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeable: "DIRTY",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(
+            screen.getByText("GitHub reports this pull request is blocked from merging")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
     it("does not show expected checks as passed", () => {
         mockPullRequests({
             pullRequests: {

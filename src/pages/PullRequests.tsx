@@ -217,6 +217,14 @@ function checkoutMessage(
     return "Deploys build only from the clean production checkout. PR verification should happen in separate git worktrees.";
 }
 
+/** Returns whether GitHub currently reports a pull request merge blocker. */
+function githubMergeBlocked(pr: PullRequestSummary): boolean {
+    return (
+        pr.mergeStateStatus?.toUpperCase() === "BLOCKED" ||
+        ["CONFLICTING", "DIRTY"].includes(pr.mergeable?.toUpperCase() || "")
+    );
+}
+
 /** Performs action label. */
 function actionLabel(action: Exclude<PendingAction, null>) {
     switch (action.type) {
@@ -607,14 +615,18 @@ export function PullRequests() {
                                             isProductionActionBlocked ||
                                             pr.isDraft ||
                                             !checksPassed ||
-                                            !reviewApproved;
+                                            !reviewApproved ||
+                                            githubMergeBlocked(pr);
                                         let mergeDisabledReason: string | undefined;
                                         if (pr.isDraft) {
                                             mergeDisabledReason =
                                                 "Draft pull requests cannot be merged from the dashboard";
                                         } else if (checksPassed) {
                                             if (reviewApproved) {
-                                                if (isProductionActionBlocked) {
+                                                if (githubMergeBlocked(pr)) {
+                                                    mergeDisabledReason =
+                                                        "GitHub reports this pull request is blocked from merging";
+                                                } else if (isProductionActionBlocked) {
                                                     mergeDisabledReason = checkoutMessage(
                                                         productionCheckout,
                                                         productionCheckoutError

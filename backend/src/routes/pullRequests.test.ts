@@ -175,6 +175,25 @@ const pullRequests = [
   changedFiles: 1
 },
 {
+  number: 15,
+  title: "Refresh lookup fails",
+  body: "Keep the original list state if the fresh lookup fails",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/15",
+  headRefName: "refresh-fails",
+  baseRefName: "main",
+  author: { login: "mira-2026" },
+  createdAt: "2026-05-10T01:45:00Z",
+  updatedAt: "2026-05-11T06:00:00Z",
+  isDraft: false,
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "BLOCKED",
+  reviewDecision: "APPROVED",
+  statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+  additions: 2,
+  deletions: 0,
+  changedFiles: 1
+},
+{
   number: 12,
   title: "Target a release branch",
   body: "Not for the main dashboard review queue",
@@ -263,6 +282,10 @@ if (args[0] === "pr" && args[1] === "view") {
       changedFiles: 1
     }));
     process.exit(0);
+  }
+  if (requested === 15) {
+    process.stderr.write("fresh lookup failed");
+    process.exit(1);
   }
   const pr = pullRequests.find((candidate) => candidate.number === requested);
   if (!pr) {
@@ -567,6 +590,25 @@ describe("pull request routes", () => {
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 3,
                 deletions: 1,
+                changedFiles: 1,
+            },
+            {
+                number: 15,
+                title: "Refresh lookup fails",
+                body: "Keep the original list state if the fresh lookup fails",
+                url: "https://github.com/rajohan/Mira-Dashboard/pull/15",
+                headRefName: "refresh-fails",
+                baseRefName: "main",
+                author: { login: "mira-2026" },
+                createdAt: "2026-05-10T01:45:00Z",
+                updatedAt: "2026-05-11T06:00:00Z",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "BLOCKED",
+                reviewDecision: "APPROVED",
+                statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                additions: 2,
+                deletions: 0,
                 changedFiles: 1,
             },
             {
