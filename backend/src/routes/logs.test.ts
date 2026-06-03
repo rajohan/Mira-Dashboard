@@ -268,18 +268,38 @@ describe("logs routes", () => {
                 testFiles[1]
             )}&lines=not-a-number`
         );
-        const invalidTailBody = (await invalidTail.json()) as { content: string };
-        assert.equal(invalidTail.status, 200);
-        assert.equal(invalidTailBody.content, "first\n\nsecond\nthird\n");
+        const invalidTailBody = (await invalidTail.json()) as { error: string };
+        assert.equal(invalidTail.status, 400);
+        assert.equal(invalidTailBody.error, "Invalid lines");
+
+        const partialNumericTail = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
+                testFiles[1]
+            )}&lines=10abc`
+        );
+        const partialNumericTailBody = (await partialNumericTail.json()) as {
+            error: string;
+        };
+        assert.equal(partialNumericTail.status, 400);
+        assert.equal(partialNumericTailBody.error, "Invalid lines");
 
         const negativeTail = await fetch(
             `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
                 testFiles[1]
             )}&lines=-2`
         );
-        const negativeTailBody = (await negativeTail.json()) as { content: string };
-        assert.equal(negativeTail.status, 200);
-        assert.equal(negativeTailBody.content, "first\n\nsecond\nthird\n");
+        const negativeTailBody = (await negativeTail.json()) as { error: string };
+        assert.equal(negativeTail.status, 400);
+        assert.equal(negativeTailBody.error, "Invalid lines");
+
+        const zeroTail = await fetch(
+            `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(
+                testFiles[1]
+            )}&lines=0`
+        );
+        const zeroTailBody = (await zeroTail.json()) as { error: string };
+        assert.equal(zeroTail.status, 400);
+        assert.equal(zeroTailBody.error, "Invalid lines");
 
         const directoryName = "openclaw-2099-03-05.log";
         const directoryPath = path.join(logsDir, directoryName);

@@ -41,6 +41,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_DUPLICATE_EXEC_MARKER",
+    "MIRA_FAKE_DOCKER_NO_SETSID",
     "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
 ] as const;
 const originalFakeEnv = new Map(
@@ -276,6 +277,10 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
   if (command.includes("&;")) {
     process.stderr.write("invalid shell separator\n");
     process.exit(22);
+  }
+  if (process.env.MIRA_FAKE_DOCKER_NO_SETSID === "1" && !command.includes("else sh -lc")) {
+    process.stderr.write("missing no-setsid fallback\n");
+    process.exit(23);
   }
   if (process.env.MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER === "1") {
     process.stdout.write("__MIRA_DOCKER_");
@@ -1189,6 +1194,15 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(directRun.code, 0);
             assert.equal(directRun.stdout, "exec stdout\n");
+            await withEnvValue("MIRA_FAKE_DOCKER_NO_SETSID", "1", async () => {
+                const noSetsidRun = await __testing.runDockerExecCommand(
+                    "app",
+                    "echo hi",
+                    "missing-job"
+                );
+                assert.equal(noSetsidRun.code, 0);
+                assert.equal(noSetsidRun.stdout, "exec stdout\n");
+            });
             await withEnvValue("MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER", "1", async () => {
                 __testing.dockerExecJobs.set("split-marker", {
                     id: "split-marker",

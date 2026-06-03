@@ -10,7 +10,6 @@ import {
     copyNoFollowGuarded,
     guardedPath,
     lstatGuarded,
-    mkdirGuarded,
     openReadNoFollowGuarded,
     readdirGuarded,
     statGuarded,
@@ -265,7 +264,6 @@ async function ensureSafeParentDirectoryForWrite(
     rootPath: string
 ): Promise<void> {
     const canonicalRoot = fs.realpathSync(rootPath);
-    mkdirGuarded(guardedPath(path.dirname(preparedSafePath)), { recursive: true });
     await withRootedParentPath(preparedSafePath, canonicalRoot, () => {});
 }
 

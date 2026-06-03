@@ -160,9 +160,8 @@ export default function terminalRoutes(app: express.Application): void {
         const { partial, cwd } = body as CompletionRequest;
 
         if (
-            !partial ||
             typeof partial !== "string" ||
-            partial.trim().length === 0 ||
+            partial.length === 0 ||
             partial.includes("\0")
         ) {
             res.status(400).json({ error: "Missing or invalid partial" });

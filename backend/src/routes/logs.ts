@@ -37,7 +37,11 @@ function parsePositiveLineCount(value: unknown): number | null {
     if (typeof value !== "string") {
         return null;
     }
-    const parsed = Number.parseInt(value, 10);
+    const trimmed = value.trim();
+    if (!/^\d+$/u.test(trimmed)) {
+        return null;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -322,6 +326,10 @@ export default function logsRoutes(app: express.Application): void {
     app.get("/api/logs/content", (async (req, res) => {
         let logFile = req.query.file as string | undefined;
         const lines = parsePositiveLineCount(req.query.lines);
+        if (req.query.lines !== undefined && lines === null) {
+            res.status(400).json({ error: "Invalid lines" });
+            return;
+        }
 
         // If no file specified, use today's log
         if (!logFile) {

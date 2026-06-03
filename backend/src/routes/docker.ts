@@ -1118,8 +1118,7 @@ async function runDockerExecCommand(
 ): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
         const wrappedCommand = [
-            `command -v setsid >/dev/null 2>&1 || { echo 'setsid is required for managed docker exec stop' >&2; exit 127; }`,
-            `setsid sh -lc ${shellQuote(command)} & command_pid=$!`,
+            `if command -v setsid >/dev/null 2>&1; then setsid sh -lc ${shellQuote(command)} & command_pid=$!; else sh -lc ${shellQuote(command)} & command_pid=$!; fi`,
             String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$command_pid"`,
             String.raw`wait "$command_pid"`,
         ].join("; ");
