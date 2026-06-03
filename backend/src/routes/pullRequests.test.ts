@@ -79,6 +79,14 @@ async function waitForDeploymentLockReleased(tempDir: string): Promise<void> {
     assert.equal(readDeploymentLockFromDb(tempDir), undefined);
 }
 
+function releaseDeploymentLockInDb(jobId: string, tempDir: string): void {
+    withDeploymentDb(tempDir, (deploymentDb) => {
+        deploymentDb
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(jobId);
+    });
+}
+
 function withDeploymentDb<T>(tempDir: string, action: (db: DatabaseSync) => T): T {
     const deploymentDb = new DatabaseSync(
         path.join(tempDir, "data", "mira-dashboard.db")
@@ -627,10 +635,6 @@ if (!args.includes("--user") || !script.includes("systemctl --user restart mira-
   process.stderr.write("deploy restart should use user systemd service");
   process.exit(1);
 }
-const { DatabaseSync } = require("node:sqlite");
-const deploymentDb = new DatabaseSync(process.env.MIRA_DASHBOARD_DB_PATH || "data/mira-dashboard.db");
-deploymentDb.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
-deploymentDb.close();
 process.stdout.write("systemd-run " + args.join(" ") + "\n");
 `
     );
@@ -1487,6 +1491,7 @@ describe("pull request routes", () => {
             const startJob = __testing.startDeployLatest();
             assert.equal(startJob.status, "building");
             assert.equal(__testing.readDeploymentLock(), startJob.id);
+            await waitForDeploymentStatus(startJob.id, "restart-scheduled", tempDir);
             __testing.releaseDeploymentLock(startJob.id);
 
             const failedJobWriteMock = mock.method(
@@ -1992,6 +1997,7 @@ describe("pull request routes", () => {
             finishedDeploy.note,
             "Build passed; restart + health check scheduled"
         );
+        releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
         await waitForDeploymentLockReleased(tempDir);
 
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
@@ -2016,6 +2022,7 @@ describe("pull request routes", () => {
                 "restart-scheduled",
                 tempDir
             );
+            releaseDeploymentLockInDb(approveAndDeploy.body.deployment.id, tempDir);
             await waitForDeploymentLockReleased(tempDir);
         } finally {
             restoreGitEnv();

@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -1175,7 +1176,7 @@ function reportBackgroundDeploymentError(error: unknown): void {
 function startDeployLatest(): DeploymentJob {
     const now = new Date().toISOString();
     const job: DeploymentJob = {
-        id: Date.now().toString(36),
+        id: randomUUID(),
         status: "building",
         startedAt: now,
         updatedAt: now,

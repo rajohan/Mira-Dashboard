@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,8 +15,13 @@ test("uses process cwd data directory when no explicit db path is configured", a
         delete process.env.MIRA_DASHBOARD_DB_PATH;
         process.chdir(tempDir);
         const { db, miraDbPath } = await import(`./db.js?defaultPath=${randomUUID()}`);
+        const expectedPath = path.join(
+            fs.realpathSync(tempDir),
+            "data",
+            "mira-dashboard.db"
+        );
 
-        assert.equal(miraDbPath, path.join(tempDir, "data", "mira-dashboard.db"));
+        assert.equal(miraDbPath, expectedPath);
         db.close();
     } finally {
         process.chdir(originalCwd);
