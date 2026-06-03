@@ -2093,18 +2093,18 @@ describe("pull request routes", () => {
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
         });
-        const { __testing } = await import(
-            `./pullRequests.js?merge-active=${randomUUID()}`
+        const { db: deploymentDb } = await import("../db.js");
+        const realDeploymentPrepare = deploymentDb.prepare.bind(deploymentDb);
+        const failedDeployStartMock = mock.method(
+            deploymentDb,
+            "prepare",
+            (sql: string) => {
+                if (sql.includes("INSERT INTO deployment_jobs")) {
+                    throw new Error("job write failed");
+                }
+                return realDeploymentPrepare(sql);
+            }
         );
-        const activeUpdatedAt = new Date().toISOString();
-        __testing.writeDeploymentJob({
-            id: "merge-active-job",
-            status: "building",
-            startedAt: activeUpdatedAt,
-            updatedAt: activeUpdatedAt,
-            note: "Deploy started",
-        });
-        __testing.acquireDeploymentLock("merge-active-job");
         try {
             const deployStartFailure = await requestJson<{
                 ok: boolean;
@@ -2124,8 +2124,52 @@ describe("pull request routes", () => {
             );
             assert.equal(deployStartFailure.body.cleanup.status, "removed");
             assert.equal(deployStartFailure.body.deployment, undefined);
+            assert.equal(deployStartFailure.body.deployError, "job write failed");
+        } finally {
+            failedDeployStartMock.mock.restore();
+        }
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        const { __testing } = await import(
+            `./pullRequests.js?merge-active=${randomUUID()}`
+        );
+        const activeUpdatedAt = new Date().toISOString();
+        __testing.writeDeploymentJob({
+            id: "merge-active-job",
+            status: "building",
+            startedAt: activeUpdatedAt,
+            updatedAt: activeUpdatedAt,
+            note: "Deploy started",
+        });
+        __testing.acquireDeploymentLock("merge-active-job");
+        try {
+            const activeDeployFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/10/approve",
+                {
+                    method: "POST",
+                    body: { deploy: true },
+                }
+            );
+            assert.equal(activeDeployFailure.status, 500);
             assert.equal(
-                deployStartFailure.body.deployError,
+                activeDeployFailure.body.error,
+                "Dashboard deploy already in progress (merge-active-job)"
+            );
+
+            const mergeOnlyFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/10/approve",
+                {
+                    method: "POST",
+                    body: { deploy: false },
+                }
+            );
+            assert.equal(mergeOnlyFailure.status, 500);
+            assert.equal(
+                mergeOnlyFailure.body.error,
                 "Dashboard deploy already in progress (merge-active-job)"
             );
         } finally {

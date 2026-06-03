@@ -11,6 +11,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 /** Defines db. */
 export const db = new DatabaseSync(miraDbPath);
+db.exec("PRAGMA busy_timeout = 5000");
 
 interface MigrationDatabase {
     exec(sql: string): unknown;

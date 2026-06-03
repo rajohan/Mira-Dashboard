@@ -277,8 +277,8 @@ function releaseDeploymentLock(jobId: string): void {
     }
 }
 
-/** Acquires the active deploy lock for a new deployment job. */
-function acquireDeploymentLock(jobId: string): void {
+/** Ensures no active deploy owns the production checkout. */
+function ensureNoActiveDeployment(): void {
     const activeLock = readDeploymentLockRow();
     const activeJobId = activeLock?.job_id;
     if (activeJobId) {
@@ -297,7 +297,11 @@ function acquireDeploymentLock(jobId: string): void {
             db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
     }
+}
 
+/** Acquires the active deploy lock for a new deployment job. */
+function acquireDeploymentLock(jobId: string): void {
+    ensureNoActiveDeployment();
     try {
         db.prepare(
             "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
@@ -308,6 +312,16 @@ function acquireDeploymentLock(jobId: string): void {
         }
         throw error;
     }
+}
+
+/** Refreshes the active deploy heartbeat while long-running work continues. */
+function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
+    const updatedJob = { ...job, updatedAt: new Date().toISOString() };
+    writeDeploymentJob(updatedJob);
+    db.prepare(
+        "UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?"
+    ).run(updatedJob.updatedAt, updatedJob.id);
+    return updatedJob;
 }
 
 /** Performs read deployment jobs. */
@@ -1125,13 +1139,19 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
 
 /** Runs deployment work after the API has returned a job to the caller. */
 async function runDeploymentJob(job: DeploymentJob): Promise<void> {
+    let currentJob = job;
     try {
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await syncMain();
+        currentJob = refreshDeploymentHeartbeat(currentJob);
 
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("npm", ["--prefix", "backend", "run", "build"], {
             timeoutMs: 120_000,
         });
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         const { stdout: commit } = await runCommand(
             "git",
             ["rev-parse", "--short", "HEAD"],
@@ -1139,9 +1159,10 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
                 timeoutMs: 30_000,
             }
         );
+        currentJob = refreshDeploymentHeartbeat(currentJob);
 
         const restartScheduled: DeploymentJob = {
-            ...job,
+            ...currentJob,
             status: "restart-scheduled",
             updatedAt: new Date().toISOString(),
             commit: commit.trim(),
@@ -1151,7 +1172,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         await scheduleRestartHealthCheck(restartScheduled);
     } catch (error) {
         const failed: DeploymentJob = {
-            ...job,
+            ...currentJob,
             status: "failed",
             updatedAt: new Date().toISOString(),
             note: errorMessage(error, "Deploy failed"),
@@ -1198,6 +1219,7 @@ async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
+    ensureNoActiveDeployment();
 
     await runCommand(
         "gh",
