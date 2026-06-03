@@ -129,8 +129,8 @@ const pullRequests = [
   updatedAt: "2026-05-11T00:00:00Z",
   isDraft: false,
   mergeable: "MERGEABLE",
-  mergeStateStatus: "CLEAN",
-  reviewDecision: "",
+  mergeStateStatus: "BLOCKED",
+  reviewDecision: "APPROVED",
   statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
   additions: 12,
   deletions: 3,
@@ -154,6 +154,25 @@ const pullRequests = [
   additions: 20,
   deletions: 5,
   changedFiles: 3
+},
+{
+  number: 14,
+  title: "Wait for protected deployment",
+  body: "GitHub still reports a protected branch blocker",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/14",
+  headRefName: "protected-deployment",
+  baseRefName: "main",
+  author: { login: "mira-2026" },
+  createdAt: "2026-05-10T01:30:00Z",
+  updatedAt: "2026-05-11T12:00:00Z",
+  isDraft: false,
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "BLOCKED",
+  reviewDecision: "APPROVED",
+  statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+  additions: 3,
+  deletions: 1,
+  changedFiles: 1
 },
 {
   number: 12,
@@ -216,6 +235,13 @@ if (args[0] === "api" && args[1] === "graphql") {
 }
 if (args[0] === "pr" && args[1] === "view") {
   const requested = Number(args[2]);
+  if (requested === 10) {
+    process.stdout.write(JSON.stringify({
+      ...pullRequests[0],
+      mergeStateStatus: "CLEAN"
+    }));
+    process.exit(0);
+  }
   if (requested === 13) {
     process.stdout.write(JSON.stringify({
       number: 13,
@@ -525,6 +551,25 @@ describe("pull request routes", () => {
                 changedFiles: 3,
             },
             {
+                number: 14,
+                title: "Wait for protected deployment",
+                body: "GitHub still reports a protected branch blocker",
+                url: "https://github.com/rajohan/Mira-Dashboard/pull/14",
+                headRefName: "protected-deployment",
+                baseRefName: "main",
+                author: { login: "mira-2026" },
+                createdAt: "2026-05-10T01:30:00Z",
+                updatedAt: "2026-05-11T12:00:00Z",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "BLOCKED",
+                reviewDecision: "APPROVED",
+                statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                additions: 3,
+                deletions: 1,
+                changedFiles: 1,
+            },
+            {
                 number: 10,
                 title: "Add Playwright smoke tests",
                 body: "Coverage batch",
@@ -537,7 +582,7 @@ describe("pull request routes", () => {
                 isDraft: false,
                 mergeable: "MERGEABLE",
                 mergeStateStatus: "CLEAN",
-                reviewDecision: "",
+                reviewDecision: "APPROVED",
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 12,
                 deletions: 3,

@@ -438,7 +438,32 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
         { timeoutMs: PR_LIST_TIMEOUT_MS }
     );
 
-    return pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const refreshedPullRequests = await Promise.all(
+        pullRequests.map(async (pr) => {
+            if (!shouldRefreshBlockedMergeState(pr)) {
+                return pr;
+            }
+
+            try {
+                return await getPullRequest(pr.number);
+            } catch {
+                return pr;
+            }
+        })
+    );
+
+    return refreshedPullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Returns whether a blocked list state should be verified with fresh PR details. */
+function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
+    return (
+        pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
+        pr.mergeable?.toUpperCase() === "MERGEABLE" &&
+        pr.reviewDecision?.toUpperCase() === "APPROVED" &&
+        !pr.isDraft &&
+        pullRequestChecksPassed(pr.statusCheckRollup)
+    );
 }
 
 /** Returns the current GitHub metadata for one pull request. */

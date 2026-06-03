@@ -86,21 +86,6 @@ function statusVariant(value: string | undefined) {
     return "default" as const;
 }
 
-/** Returns display-safe merge state for known stale GitHub list states. */
-function effectiveMergeStateStatus(pr: PullRequestSummary): string | undefined {
-    if (
-        pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
-        pr.mergeable?.toUpperCase() === "MERGEABLE" &&
-        pr.reviewDecision?.toUpperCase() === "APPROVED" &&
-        !pr.isDraft &&
-        pullRequestChecksPassed(pr.statusCheckRollup)
-    ) {
-        return "CLEAN";
-    }
-
-    return pr.mergeStateStatus;
-}
-
 /** Performs review decision variant. */
 function reviewDecisionVariant(value: string | undefined) {
     const normalized = (value || "").toUpperCase();
@@ -307,7 +292,6 @@ function PullRequestCard({
     actions?: ReactNode;
 }) {
     const checks = summarizeChecks(pr.statusCheckRollup);
-    const mergeStateStatus = effectiveMergeStateStatus(pr);
 
     return (
         <Card variant="bordered" className="space-y-3">
@@ -340,8 +324,8 @@ function PullRequestCard({
                     <Badge variant={statusVariant(pr.mergeable)}>
                         {pr.mergeable || "mergeable unknown"}
                     </Badge>
-                    <Badge variant={statusVariant(mergeStateStatus)}>
-                        {mergeStateStatus || "state unknown"}
+                    <Badge variant={statusVariant(pr.mergeStateStatus)}>
+                        {pr.mergeStateStatus || "state unknown"}
                     </Badge>
                     <Badge variant={checks.variant}>{checks.label}</Badge>
                     {pr.isDraft ? <Badge variant="warning">Draft</Badge> : null}
