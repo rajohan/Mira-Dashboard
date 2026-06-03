@@ -401,6 +401,13 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Merge only" })).not.toBeDisabled();
     });
 
+    it("colors additions and deletions like GitHub diff stats", () => {
+        render(<PullRequests />);
+
+        expect(screen.getByText("+10")).toHaveClass("text-green-400");
+        expect(screen.getByText("-1")).toHaveClass("text-red-400");
+    });
+
     it("does not show expected checks as passed", () => {
         mockPullRequests({
             pullRequests: {

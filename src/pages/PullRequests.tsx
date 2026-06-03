@@ -327,8 +327,9 @@ function PullRequestCard({
                         </a>
                     </CardTitle>
                     <div className="text-primary-500 mt-1 text-xs">
-                        {authorLabel(pr)} · Updated {formatDate(pr.updatedAt)} · +
-                        {pr.additions ?? 0} -{pr.deletions ?? 0} across{" "}
+                        {authorLabel(pr)} · Updated {formatDate(pr.updatedAt)} ·{" "}
+                        <span className="text-green-400">+{pr.additions ?? 0}</span>{" "}
+                        <span className="text-red-400">-{pr.deletions ?? 0}</span> across{" "}
                         {pr.changedFiles ?? 0} files
                     </div>
                 </div>
