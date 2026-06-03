@@ -67,9 +67,16 @@ describe("cron utils", () => {
     it("maps status variants", () => {
         expect(getCronStatusVariant(" ok ")).toBe("success");
         expect(getCronStatusVariant("success")).toBe("success");
+        expect(getCronStatusVariant("succeeded")).toBe("success");
+        expect(getCronStatusVariant("completed")).toBe("success");
         expect(getCronStatusVariant("running")).toBe("warning");
+        expect(getCronStatusVariant("pending")).toBe("warning");
+        expect(getCronStatusVariant("queued")).toBe("warning");
+        expect(getCronStatusVariant("in_progress")).toBe("warning");
+        expect(getCronStatusVariant("in-progress")).toBe("warning");
         expect(getCronStatusVariant("error")).toBe("error");
         expect(getCronStatusVariant("failed")).toBe("error");
+        expect(getCronStatusVariant("failure")).toBe("error");
         expect(getCronStatusVariant("skipped")).toBe("default");
     });
 });
