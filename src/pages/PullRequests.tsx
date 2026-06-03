@@ -767,7 +767,7 @@ export function PullRequests() {
                     </div>
                     <div
                         className={
-                            miraPullRequests.length > 0 ? "xl:pt-[76px]" : undefined
+                            miraPullRequests.length > 0 ? "xl:pt-[60px]" : undefined
                         }
                     >
                         <RecentDeploysCard deployments={deployments} />
