@@ -1140,12 +1140,16 @@ async function runDockerExecCommand(
         let stdoutPending = "";
 
         const processStdoutLine = (line: string, trailingNewline = false): void => {
-            if (!line.startsWith(DOCKER_EXEC_PID_MARKER)) {
+            const markerIndex = line.indexOf(DOCKER_EXEC_PID_MARKER);
+            if (markerIndex === -1) {
                 stdout = trimOutput(stdout + line + (trailingNewline ? "\n" : ""));
                 return;
             }
+            if (markerIndex > 0) {
+                stdout = trimOutput(stdout + line.slice(0, markerIndex));
+            }
             const parsedPid = Number.parseInt(
-                line.slice(DOCKER_EXEC_PID_MARKER.length),
+                line.slice(markerIndex + DOCKER_EXEC_PID_MARKER.length),
                 10
             );
             const currentJob = dockerExecJobs.get(jobId);

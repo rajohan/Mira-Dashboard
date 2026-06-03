@@ -37,6 +37,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE",
     "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
     "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
+    "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
 ] as const;
 const originalFakeEnv = new Map(
@@ -281,6 +282,10 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
     }, 10);
     setTimeout(() => process.exit(0), 20);
     return;
+  }
+  if (process.env.MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER === "1") {
+    process.stdout.write("x__MIRA_DOCKER_EXEC_PID__=4321\nexec stdout\n");
+    process.exit(0);
   }
   process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\n");
 }
@@ -1154,6 +1159,32 @@ describe("docker routes", { concurrency: false }, () => {
                 );
                 assert.equal(splitRun.stdout, "exec stdout\n");
             });
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
+                "1",
+                async () => {
+                    __testing.dockerExecJobs.set("coalesced-marker", {
+                        id: "coalesced-marker",
+                        containerId: "app",
+                        status: "running",
+                        code: null,
+                        stdout: "",
+                        stderr: "",
+                        startedAt: Date.now(),
+                        endedAt: null,
+                    });
+                    const coalescedRun = await __testing.runDockerExecCommand(
+                        "app",
+                        "printf x; sleep 600",
+                        "coalesced-marker"
+                    );
+                    assert.equal(
+                        __testing.dockerExecJobs.get("coalesced-marker")?.inContainerPid,
+                        4321
+                    );
+                    assert.equal(coalescedRun.stdout, "xexec stdout\n");
+                }
+            );
             await withEnvValue("MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT", "1", async () => {
                 let updatedStdout = "";
                 const partialRun = await __testing.runDockerExecCommand(
