@@ -51,6 +51,12 @@ export function isProcfsAvailable(): boolean {
 }
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
+    if (!isValidAgentId(childName)) {
+        throw Object.assign(new Error("Invalid child directory name"), {
+            code: "EINVAL",
+        });
+    }
+
     if (!isProcfsAvailable()) {
         const childPath = Path.join(parent, childName);
         const parentStat = FS.lstatSync(parent);

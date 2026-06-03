@@ -1241,6 +1241,10 @@ describe("agents routes", () => {
             __testing.mkdirChildFromVerifiedParent(parent, "child");
             const childStat = await lstat(path.join(parent, "child"));
             assert.equal(childStat.isDirectory(), true);
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "../child"),
+                /Invalid child directory name/u
+            );
 
             const fileParent = path.join(tempDir, "file-parent");
             await writeFile(fileParent, "not a directory", "utf8");
