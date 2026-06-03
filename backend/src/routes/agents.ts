@@ -1627,7 +1627,6 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
                 const expectedSessionsParent = Path.dirname(safeSessionsDir);
-                mkdirChildFromVerifiedParent(realAgentsDir, agentId);
                 const realExpectedSessionsParent =
                     FS.realpathSync(expectedSessionsParent);
                 if (

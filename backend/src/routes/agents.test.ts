@@ -1140,31 +1140,6 @@ describe("agents routes", () => {
                     : String(target);
                 if (
                     targetPath.startsWith("/proc/self/fd/") &&
-                    targetPath.endsWith(`${path.sep}${agentId}`)
-                ) {
-                    const error = new Error(
-                        "agent mkdir failed"
-                    ) as NodeJS.ErrnoException;
-                    error.code = "EACCES";
-                    throw error;
-                }
-                return originalMkdirSync(target, options);
-            }) as typeof fs.mkdirSync;
-
-            const firstMkdirFailure = await requestJson<{ error: string }>(
-                server,
-                `/api/agents/${agentId}/metadata`,
-                { method: "PUT", body: { currentTask: "Nope" } }
-            );
-            assert.equal(firstMkdirFailure.status, 500);
-            assert.equal(firstMkdirFailure.body.error, "agent mkdir failed");
-
-            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
-                const targetPath = Buffer.isBuffer(target)
-                    ? target.toString("utf8")
-                    : String(target);
-                if (
-                    targetPath.startsWith("/proc/self/fd/") &&
                     targetPath.endsWith(`${path.sep}sessions`)
                 ) {
                     const error = new Error(
