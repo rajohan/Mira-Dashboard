@@ -7,6 +7,8 @@ import { PullRequests } from "./PullRequests";
 const hooks = vi.hoisted(() => ({
     approve: vi.fn(),
     deploy: vi.fn(),
+    refetchDeployments: vi.fn(),
+    refetchProductionCheckout: vi.fn(),
     productionCheckout: {
         branch: "main",
         expectedBranch: "main",
@@ -105,10 +107,12 @@ function mockPullRequests(overrides = {}) {
                 updatedAt: "2026-05-11T00:01:00.000Z",
             },
         ],
+        refetch: hooks.refetchDeployments,
     });
     hooks.useProductionCheckout.mockReturnValue({
         data: hooks.productionCheckout,
         error: null,
+        refetch: hooks.refetchProductionCheckout,
     });
     hooks.useApprovePullRequest.mockReturnValue({
         isPending: false,
@@ -145,6 +149,8 @@ describe("PullRequests page", () => {
             deployment: { note: "Main deploy scheduled" },
         });
         hooks.refetch.mockResolvedValue(Promise.resolve());
+        hooks.refetchDeployments.mockResolvedValue(Promise.resolve());
+        hooks.refetchProductionCheckout.mockResolvedValue(Promise.resolve());
         hooks.reject.mockResolvedValue({
             cleanup: { message: "Review worktree left intact" },
             message: "PR rejected",
@@ -166,10 +172,11 @@ describe("PullRequests page", () => {
         expect(screen.getByText("Checks passed")).toBeInTheDocument();
         expect(screen.getByText("Review approved")).toBeInTheDocument();
         expect(screen.getByText("Ready to deploy")).toBeInTheDocument();
+        expect(screen.getByText("Clean")).toBeInTheDocument();
         expect(screen.getByText("restart-scheduled")).toBeInTheDocument();
     });
 
-    it("refreshes pull requests from the page action", async () => {
+    it("refreshes all page data from the page action", async () => {
         const user = userEvent.setup();
 
         render(<PullRequests />);
@@ -177,6 +184,8 @@ describe("PullRequests page", () => {
         await user.click(screen.getByRole("button", { name: "Refresh" }));
 
         expect(hooks.refetch).toHaveBeenCalledTimes(1);
+        expect(hooks.refetchDeployments).toHaveBeenCalledTimes(1);
+        expect(hooks.refetchProductionCheckout).toHaveBeenCalledTimes(1);
     });
 
     it("shows loading, error retry, and empty states", async () => {

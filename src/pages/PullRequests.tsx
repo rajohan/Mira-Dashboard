@@ -398,10 +398,19 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
 
 /** Renders the pull requests UI. */
 export function PullRequests() {
-    const { data: pullRequests = [], isLoading, error, refetch } = usePullRequests();
-    const { data: deployments = [] } = usePullRequestDeployments();
-    const { data: productionCheckout, error: productionCheckoutError } =
-        useProductionCheckout();
+    const {
+        data: pullRequests = [],
+        isLoading,
+        error,
+        refetch: refetchPullRequests,
+    } = usePullRequests();
+    const { data: deployments = [], refetch: refetchDeployments } =
+        usePullRequestDeployments();
+    const {
+        data: productionCheckout,
+        error: productionCheckoutError,
+        refetch: refetchProductionCheckout,
+    } = useProductionCheckout();
     const approvePullRequest = useApprovePullRequest();
     const rejectPullRequest = useRejectPullRequest();
     const deployDashboard = useDeployDashboard();
@@ -416,6 +425,15 @@ export function PullRequests() {
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
+
+    /** Refreshes every data source displayed on the PR page. */
+    function refreshPageData() {
+        return Promise.all([
+            refetchPullRequests(),
+            refetchDeployments(),
+            refetchProductionCheckout(),
+        ]);
+    }
 
     /** Performs confirm action. */
     async function confirmAction(action: Exclude<PendingAction, null>) {
@@ -474,7 +492,10 @@ export function PullRequests() {
             errorView={
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
                     <p className="text-red-400">{error?.message}</p>
-                    <RefreshButton onClick={() => void refetch()} label="Retry" />
+                    <RefreshButton
+                        onClick={() => void refetchPullRequests()}
+                        label="Retry"
+                    />
                 </div>
             }
         >
@@ -492,7 +513,7 @@ export function PullRequests() {
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:flex">
                         <RefreshButton
-                            onClick={() => void refetch()}
+                            onClick={() => void refreshPageData()}
                             isLoading={isLoading}
                             label="Refresh"
                             variant="secondary"
@@ -560,7 +581,7 @@ export function PullRequests() {
                                         productionCheckout.isClean ? "success" : "error"
                                     }
                                 >
-                                    {productionCheckout.isClean ? "clean" : "dirty"}
+                                    {productionCheckout.isClean ? "Clean" : "Dirty"}
                                 </Badge>
                             ) : null}
                         </div>
