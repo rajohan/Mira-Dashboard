@@ -2694,7 +2694,11 @@ describe("agents routes", () => {
                     body: JSON.stringify({ currentTask: "blocked" }),
                 }
             );
-            assert.equal(blankHomeResponse.status, 500);
+            assert.equal(blankHomeResponse.status, 200);
+            assert.equal(
+                ((await blankHomeResponse.json()) as { currentTask: string }).currentTask,
+                "blocked"
+            );
             for (const pathName of [
                 "/api/agents/config",
                 "/api/agents/status",
@@ -2703,9 +2707,9 @@ describe("agents routes", () => {
                 const response = await fetch(
                     `http://127.0.0.1:${blankHomeAddress.port}${pathName}`
                 );
-                assert.equal(response.status, 500);
+                assert.equal(response.status, 404);
                 assert.deepEqual(await response.json(), {
-                    error: "Agent home directory is not configured",
+                    error: "Agent configuration not found",
                 });
             }
 

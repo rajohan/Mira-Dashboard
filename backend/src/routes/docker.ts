@@ -1157,7 +1157,12 @@ async function runDockerExecCommand(
                 10
             );
             const currentJob = dockerExecJobs.get(jobId);
-            if (currentJob && Number.isSafeInteger(parsedPid) && parsedPid > 1) {
+            if (
+                currentJob &&
+                currentJob.inContainerPid == null &&
+                Number.isSafeInteger(parsedPid) &&
+                parsedPid > 1
+            ) {
                 currentJob.inContainerPid = parsedPid;
             }
         };

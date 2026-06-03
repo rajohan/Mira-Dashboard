@@ -76,6 +76,16 @@ function cleanupUser(username: string): void {
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
 }
 
+function cleanupBootstrapTestUsers(): void {
+    const users = db
+        .prepare("SELECT id FROM users WHERE username LIKE 'bootstrap-%'")
+        .all() as Array<{ id: number }>;
+    for (const user of users) {
+        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(user.id);
+        db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+    }
+}
+
 function cleanupBootstrapRows(username: string): void {
     cleanupUser(username);
     db.prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?").run(
@@ -91,6 +101,7 @@ describe("auth first-user bootstrap routes", () => {
     let server: TestServer;
 
     before(async () => {
+        cleanupBootstrapTestUsers();
         cleanupBootstrapRows(username);
         server = await startServer();
     });
@@ -99,6 +110,7 @@ describe("auth first-user bootstrap routes", () => {
         gatewayTesting.resetGatewayStateForTest();
         await server.close();
         cleanupBootstrapRows(username);
+        cleanupBootstrapTestUsers();
     });
 
     it("validates and completes first-user registration", async () => {
@@ -180,46 +192,39 @@ describe("auth first-user bootstrap routes", () => {
         );
     });
 
-    it("uses the legacy createUser dependency as a first-user fallback", async () => {
+    it("does not use the legacy createUser dependency for first-user bootstrap", async () => {
         cleanupBootstrapRows(username);
+        const fallbackUsername = "bootstrap-fallback-user";
+        cleanupBootstrapRows(fallbackUsername);
         let createdWith: { username: string; password: string } | null = null;
-        let sessionUserId: number | null = null;
-        const fallbackServer = await startServer({
+        const fallbackDependencies = {
             createUser: (newUsername, newPassword) => {
                 createdWith = { username: newUsername, password: newPassword };
                 return { id: 42, username: newUsername };
             },
-            createSession: (userId) => {
-                sessionUserId = userId;
-                return "fallback-session";
-            },
-        });
+        } as Parameters<typeof authRoutes>[1] & { createUser: typeof createUser };
+        const fallbackServer = await startServer(fallbackDependencies);
         try {
             const registered = await requestJson<{
                 authenticated: boolean;
-                user: { id: number; username: string };
+                user: { username: string };
             }>(fallbackServer, "/api/auth/register-first-user", {
                 method: "POST",
                 body: {
-                    username: "bootstrap-fallback-user",
+                    username: fallbackUsername,
                     password,
                     gatewayToken,
                 },
             });
 
             assert.equal(registered.status, 201);
-            assert.deepEqual(createdWith, {
-                username: "bootstrap-fallback-user",
-                password,
-            });
-            assert.equal(sessionUserId, 42);
-            assert.deepEqual(registered.body, {
-                authenticated: true,
-                user: { id: 42, username: "bootstrap-fallback-user" },
-            });
+            assert.equal(createdWith, null);
+            assert.equal(registered.body.authenticated, true);
+            assert.equal(registered.body.user.username, fallbackUsername);
         } finally {
             await fallbackServer.close();
             cleanupBootstrapRows(username);
+            cleanupBootstrapRows(fallbackUsername);
         }
     });
 

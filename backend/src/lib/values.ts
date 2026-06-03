@@ -23,7 +23,9 @@ export function nullableString(value?: unknown): string | null {
 
 /** Returns a fallback object for nullish values. */
 export function objectFallback<T extends object>(value?: T | null): T {
-    return value !== null && typeof value === "object" ? value : ({} as T);
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : ({} as T);
 }
 
 /** Returns an array value or a fallback for non-array inputs. */

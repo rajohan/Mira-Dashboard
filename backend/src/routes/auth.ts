@@ -134,7 +134,6 @@ export default function authRoutes(
     dependencies: {
         createSession?: typeof createSession;
         createFirstUser?: typeof createFirstUser;
-        createUser?: typeof createUser;
         getPersistedGatewayToken?: typeof getPersistedGatewayToken;
         initGateway?: typeof gateway.init;
         persistGatewayToken?: typeof persistGatewayToken;
@@ -145,8 +144,7 @@ export default function authRoutes(
     } = {}
 ): void {
     const createAuthSession = dependencies.createSession ?? createSession;
-    const createFirstAuthUser =
-        dependencies.createFirstUser ?? dependencies.createUser ?? createFirstUser;
+    const createFirstAuthUser = dependencies.createFirstUser ?? createFirstUser;
     const initGateway =
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =

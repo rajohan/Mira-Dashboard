@@ -10,6 +10,7 @@ import {
     copyNoFollowGuarded,
     guardedPath,
     lstatGuarded,
+    mkdirGuarded,
     openReadNoFollowGuarded,
     readdirGuarded,
     statGuarded,
@@ -259,8 +260,13 @@ async function withRootedParentPath<T>(
     }
 }
 
-function ensureSafeParentDirectoryForWrite(safePath: string, rootPath: string): void {
-    prepareSafeWriteTargetWithinRoot(safePath, rootPath);
+async function ensureSafeParentDirectoryForWrite(
+    preparedSafePath: string,
+    rootPath: string
+): Promise<void> {
+    const canonicalRoot = fs.realpathSync(rootPath);
+    mkdirGuarded(guardedPath(path.dirname(preparedSafePath)), { recursive: true });
+    await withRootedParentPath(preparedSafePath, canonicalRoot, () => {});
 }
 
 async function realpathForOpenedFile(
@@ -584,7 +590,14 @@ export default function filesRoutes(
                     });
                     return;
                 }
-                ensureSafeParentDirectoryForWrite(safeFullPath, workspaceRoot);
+                try {
+                    await ensureSafeParentDirectoryForWrite(safeFullPath, workspaceRoot);
+                } catch (error) {
+                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                        return;
+                    }
+                    throw error;
+                }
 
                 let stat: fs.Stats | null;
                 try {

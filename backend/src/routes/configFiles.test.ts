@@ -664,6 +664,18 @@ describe("config files routes", () => {
         const hardLinkPath = path.join(openclawRoot, "openclaw-hardlink.json");
         await link(openclawConfig, hardLinkPath);
         try {
+            const hardLinkedList = await requestJson<{ files: ConfigFileItem[] }>(
+                server,
+                "/api/config-files"
+            );
+            assert.equal(hardLinkedList.status, 200);
+            assert.equal(
+                hardLinkedList.body.files.some(
+                    (file) => file.relPath === "openclaw.json"
+                ),
+                false
+            );
+
             const hardLinkedRead = await requestJson<{ error: string }>(
                 server,
                 "/api/config-files/openclaw.json"

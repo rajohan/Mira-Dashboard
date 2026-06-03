@@ -17,7 +17,11 @@ import {
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
 
-function resolveOpenclawRoot(): string | null {
+function defaultOpenclawRoot(): string {
+    return Path.join(process.cwd(), "data", "openclaw");
+}
+
+function resolveOpenclawRoot(): string {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
@@ -25,7 +29,7 @@ function resolveOpenclawRoot(): string | null {
         const resolved = Path.resolve(configuredRoot);
         return Path.isAbsolute(configuredRoot) && Path.parse(resolved).root !== resolved
             ? resolved
-            : null;
+            : defaultOpenclawRoot();
     }
 
     const homeDir = os.homedir().trim();
@@ -34,14 +38,13 @@ function resolveOpenclawRoot(): string | null {
         Path.resolve(homeDir) !== homeDir ||
         Path.parse(homeDir).root === homeDir
     ) {
-        return null;
+        return defaultOpenclawRoot();
     }
     return Path.join(homeDir, ".openclaw");
 }
 
 const OPENCLAW_ROOT = resolveOpenclawRoot();
-const HAS_CONFIGURED_HOME_DIR = OPENCLAW_ROOT !== null;
-const AGENTS_DIR = OPENCLAW_ROOT ? Path.join(OPENCLAW_ROOT, "agents") : "";
+const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
 let procfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && FS.existsSync("/proc/self/fd");
@@ -129,7 +132,7 @@ function ensureRealAgentsDir(): string | null {
 
 /** Returns the canonical sessions directory for a validated agent id. */
 function getSafeAgentSessionsDir(agentId: string): string | null {
-    if (!HAS_CONFIGURED_HOME_DIR || !isValidAgentId(agentId)) {
+    if (!isValidAgentId(agentId)) {
         return null;
     }
 
@@ -162,7 +165,7 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
 
 /** Returns activity log roots for an agent, including Codex-native rollout logs. */
 function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
-    if (!HAS_CONFIGURED_HOME_DIR || !isValidAgentId(agentId)) {
+    if (!isValidAgentId(agentId)) {
         return [];
     }
 
@@ -488,10 +491,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 
 /** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
 function parseAgentsConfig(): AgentsConfig | null {
-    if (!HAS_CONFIGURED_HOME_DIR) {
-        return null;
-    }
-    const configPath = Path.join(OPENCLAW_ROOT!, "openclaw.json");
+    const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
 
     try {
         if (!FS.existsSync(configPath)) {
@@ -502,7 +502,7 @@ function parseAgentsConfig(): AgentsConfig | null {
         if (configStat.isSymbolicLink() || configStat.nlink > 1) {
             return null;
         }
-        const realRoot = FS.realpathSync(OPENCLAW_ROOT!);
+        const realRoot = FS.realpathSync(OPENCLAW_ROOT);
         const realPath = FS.realpathSync(configPath);
         if (realPath !== realRoot && !realPath.startsWith(`${realRoot}${Path.sep}`)) {
             return null;
@@ -1447,12 +1447,6 @@ export default function agentsRoutes(app: express.Application): void {
         "/api/agents/config",
         asyncRoute(
             async (_req, res) => {
-                if (!HAS_CONFIGURED_HOME_DIR) {
-                    res.status(500).json({
-                        error: "Agent home directory is not configured",
-                    });
-                    return;
-                }
                 const config = parseAgentsConfig();
                 if (!config) {
                     res.status(404).json({ error: "Agent configuration not found" });
@@ -1470,12 +1464,6 @@ export default function agentsRoutes(app: express.Application): void {
         "/api/agents/status",
         asyncRoute(
             async (_req, res) => {
-                if (!HAS_CONFIGURED_HOME_DIR) {
-                    res.status(500).json({
-                        error: "Agent home directory is not configured",
-                    });
-                    return;
-                }
                 closeStaleActiveTasks();
                 const config = parseAgentsConfig();
                 if (!config) {
@@ -1499,13 +1487,6 @@ export default function agentsRoutes(app: express.Application): void {
                     res.status(400).json({ error: "Invalid agent ID" });
                     return;
                 }
-                if (!HAS_CONFIGURED_HOME_DIR) {
-                    res.status(500).json({
-                        error: "Agent home directory is not configured",
-                    });
-                    return;
-                }
-
                 closeStaleActiveTasks();
                 const config = parseAgentsConfig();
                 if (!config) {
@@ -1561,13 +1542,6 @@ export default function agentsRoutes(app: express.Application): void {
                     res.status(400).json({ error: "Provide currentTask" });
                     return;
                 }
-                if (!HAS_CONFIGURED_HOME_DIR) {
-                    res.status(500).json({
-                        error: "Agent home directory is not configured",
-                    });
-                    return;
-                }
-
                 const metadataPath = safePathWithinRoot(
                     Path.join(agentId, "sessions", "metadata.json"),
                     AGENTS_DIR

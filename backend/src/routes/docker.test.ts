@@ -40,6 +40,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
     "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
+    "MIRA_FAKE_DOCKER_DUPLICATE_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
 ] as const;
 const originalFakeEnv = new Map(
@@ -287,6 +288,10 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
   }
   if (process.env.MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER === "1") {
     process.stdout.write("x__MIRA_DOCKER_EXEC_PID__=4321\nexec stdout\n");
+    process.exit(0);
+  }
+  if (process.env.MIRA_FAKE_DOCKER_DUPLICATE_EXEC_MARKER === "1") {
+    process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\n__MIRA_DOCKER_EXEC_PID__=9876\nexec stdout\n");
     process.exit(0);
   }
   if (process.env.MIRA_FAKE_DOCKER_EXEC_SIGNAL === "1") {
@@ -1230,6 +1235,32 @@ describe("docker routes", { concurrency: false }, () => {
                         4321
                     );
                     assert.equal(coalescedRun.stdout, "xexec stdout\n");
+                }
+            );
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_DUPLICATE_EXEC_MARKER",
+                "1",
+                async () => {
+                    __testing.dockerExecJobs.set("duplicate-marker", {
+                        id: "duplicate-marker",
+                        containerId: "app",
+                        status: "running",
+                        code: null,
+                        stdout: "",
+                        stderr: "",
+                        startedAt: Date.now(),
+                        endedAt: null,
+                    });
+                    const duplicateRun = await __testing.runDockerExecCommand(
+                        "app",
+                        "echo hi",
+                        "duplicate-marker"
+                    );
+                    assert.equal(
+                        __testing.dockerExecJobs.get("duplicate-marker")?.inContainerPid,
+                        4321
+                    );
+                    assert.equal(duplicateRun.stdout, "exec stdout\n");
                 }
             );
             await withEnvValue("MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT", "1", async () => {

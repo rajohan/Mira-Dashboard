@@ -1397,6 +1397,41 @@ describe("files routes", () => {
         const outsideDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-files-parent-race-")
         );
+        let procFdRealpathCalls = 0;
+        fs.realpathSync = ((target: fs.PathLike) => {
+            const targetText = Buffer.isBuffer(target)
+                ? target.toString("utf8")
+                : String(target);
+            if (targetText.startsWith("/proc/self/fd/")) {
+                procFdRealpathCalls += 1;
+                if (procFdRealpathCalls === 1) {
+                    return originalRealpathSync(target);
+                }
+                return outsideDir;
+            }
+            return originalRealpathSync(target);
+        }) as typeof fs.realpathSync;
+
+        try {
+            const denied = await requestJson<{ error: string }>(
+                server,
+                "/api/files/generated%2Fparent-race.txt",
+                { method: "PUT", body: { content: "nope" } }
+            );
+
+            assert.equal(denied.status, 403);
+            assert.equal(denied.body.error, "Access denied: path outside workspace");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects writes when the pre-write parent validation escapes the workspace", async () => {
+        const originalRealpathSync = fs.realpathSync;
+        const outsideDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-files-parent-precheck-")
+        );
         fs.realpathSync = ((target: fs.PathLike) => {
             const targetText = Buffer.isBuffer(target)
                 ? target.toString("utf8")
@@ -1410,7 +1445,7 @@ describe("files routes", () => {
         try {
             const denied = await requestJson<{ error: string }>(
                 server,
-                "/api/files/generated%2Fparent-race.txt",
+                "/api/files/generated%2Fparent-precheck.txt",
                 { method: "PUT", body: { content: "nope" } }
             );
 

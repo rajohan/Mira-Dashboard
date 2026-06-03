@@ -290,7 +290,7 @@ function listConfigFiles(openclawRoot: string): ConfigFile[] {
                 continue;
             }
             const stat = fs.statSync(resolvedFullPath);
-            if (!stat.isFile()) {
+            if (!stat.isFile() || stat.nlink > 1) {
                 continue;
             }
             files.push({
