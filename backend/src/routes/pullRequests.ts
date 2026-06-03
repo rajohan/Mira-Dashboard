@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
+import { db, miraDbPath } from "../db.js";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 
@@ -234,14 +234,36 @@ function readDeploymentJob(jobId: string): DeploymentJob | undefined {
 /** Checks whether an active deployment lock is stale enough to replace. */
 function isDeploymentJobStale(job: DeploymentJob, now = Date.now()): boolean {
     const updatedAt = Date.parse(job.updatedAt || job.startedAt);
-    return Number.isFinite(updatedAt) && now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
+    if (!Number.isFinite(updatedAt)) {
+        return true;
+    }
+    return now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
+}
+
+interface DeploymentLockRow {
+    job_id: string;
+    updated_at: string;
+}
+
+/** Checks whether an active deployment lock row is stale enough to replace. */
+function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boolean {
+    const updatedAt = Date.parse(lock.updated_at);
+    if (!Number.isFinite(updatedAt)) {
+        return true;
+    }
+    return now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
 }
 
 /** Reads the active deployment lock. */
+function readDeploymentLockRow(): DeploymentLockRow | undefined {
+    return db
+        .prepare("SELECT job_id, updated_at FROM deployment_lock WHERE id = 1")
+        .get() as DeploymentLockRow | undefined;
+}
+
+/** Reads the active deployment lock job id. */
 function readDeploymentLock(): string | undefined {
-    const row = db.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get() as
-        | { job_id: string }
-        | undefined;
+    const row = readDeploymentLockRow();
     return row?.job_id;
 }
 
@@ -256,19 +278,23 @@ function releaseDeploymentLock(jobId: string): void {
 
 /** Acquires the active deploy lock for a new deployment job. */
 function acquireDeploymentLock(jobId: string): void {
-    const activeJobId = readDeploymentLock();
+    const activeLock = readDeploymentLockRow();
+    const activeJobId = activeLock?.job_id;
     if (activeJobId) {
         const activeJob = readDeploymentJob(activeJobId);
         if (!activeJob) {
-            throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
-        }
-        if (
+            if (!isDeploymentLockStale(activeLock)) {
+                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+            }
+            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+        } else if (
             ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
             !isDeploymentJobStale(activeJob)
         ) {
             throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+        } else {
+            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
-        db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
     }
 
     try {
@@ -1009,7 +1035,6 @@ function shellQuote(value: string): string {
 
 /** Builds a shell command that records deployment status from a detached process. */
 function deploymentJobUpdateCommand(job: DeploymentJob): string {
-    const dbPath = path.join(DASHBOARD_ROOT, "data", "mira-dashboard.db");
     const script = `
 const { DatabaseSync } = require("node:sqlite");
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
@@ -1048,7 +1073,7 @@ db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id
 db.close();
 `;
     return [
-        `MIRA_DEPLOYMENT_DB=${shellQuote(dbPath)}`,
+        `MIRA_DEPLOYMENT_DB=${shellQuote(miraDbPath)}`,
         `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
         shellQuote(process.execPath),
         "-e",

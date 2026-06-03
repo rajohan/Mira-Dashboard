@@ -21,6 +21,7 @@ const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
 const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
 const originalRajohanToken = process.env.RAJOHAN_GITHUB_TOKEN;
 const originalFakeReviewStateFile = process.env.FAKE_GH_REVIEW_STATE_FILE;
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 
 function saveEnv(names: string[]): () => void {
     const previous = new Map(names.map((name) => [name, process.env[name]]));
@@ -627,7 +628,7 @@ if (!args.includes("--user") || !script.includes("systemctl --user restart mira-
   process.exit(1);
 }
 const { DatabaseSync } = require("node:sqlite");
-const deploymentDb = new DatabaseSync("data/mira-dashboard.db");
+const deploymentDb = new DatabaseSync(process.env.MIRA_DASHBOARD_DB_PATH || "data/mira-dashboard.db");
 deploymentDb.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
 deploymentDb.close();
 process.stdout.write("systemd-run " + args.join(" ") + "\n");
@@ -641,9 +642,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
     const previousCwd = process.cwd();
     const previousDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
     const previousWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+    const previousDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     process.chdir(tempDir);
     process.env.MIRA_DASHBOARD_ROOT = tempDir;
     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
+    process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "data", "mira-dashboard.db");
     let server: http.Server | undefined;
     try {
         const { default: pullRequestsRoutes } = await import(
@@ -672,6 +675,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
                 } else {
                     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
                 }
+                if (previousDbPath === undefined) {
+                    delete process.env.MIRA_DASHBOARD_DB_PATH;
+                } else {
+                    process.env.MIRA_DASHBOARD_DB_PATH = previousDbPath;
+                }
                 reject(error);
             };
             server?.once("listening", onListening);
@@ -699,6 +707,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
             delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
+        }
+        if (previousDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = previousDbPath;
         }
         throw error;
     }
@@ -761,6 +774,11 @@ describe("pull request routes", () => {
             delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
+        }
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
         }
         if (originalRajohanToken === undefined) {
             delete process.env.RAJOHAN_GITHUB_TOKEN;
@@ -1257,6 +1275,15 @@ describe("pull request routes", () => {
             { message: "Pull request CI checks must pass before approval" }
         );
         assert.equal(__testing.shellQuote("can't"), String.raw`'can'\''t'`);
+        assert.match(
+            __testing.deploymentJobUpdateCommand({
+                id: "path-check",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+            }),
+            new RegExp(`MIRA_DEPLOYMENT_DB='${process.env.MIRA_DASHBOARD_DB_PATH}'`)
+        );
         assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
     });
 
@@ -1310,6 +1337,14 @@ describe("pull request routes", () => {
                 __testing.isDeploymentJobStale({
                     ...staleJob,
                     updatedAt: "",
+                }),
+                true
+            );
+            assert.equal(
+                __testing.isDeploymentJobStale({
+                    ...staleJob,
+                    startedAt: "not-a-date",
+                    updatedAt: "also-not-a-date",
                 }),
                 true
             );
@@ -1393,6 +1428,28 @@ describe("pull request routes", () => {
                 message: "Dashboard deploy already in progress (missing-active)",
             });
             __testing.releaseDeploymentLock("missing-active");
+
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("stale-missing-active", "2000-01-01T00:00:00.000Z");
+            });
+            __testing.acquireDeploymentLock("after-orphan-stale");
+            assert.equal(__testing.readDeploymentLock(), "after-orphan-stale");
+            __testing.releaseDeploymentLock("after-orphan-stale");
+
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("malformed-missing-active", "not-a-date");
+            });
+            __testing.acquireDeploymentLock("after-malformed-orphan");
+            assert.equal(__testing.readDeploymentLock(), "after-malformed-orphan");
+            __testing.releaseDeploymentLock("after-malformed-orphan");
 
             const job = {
                 id: "background-failed",

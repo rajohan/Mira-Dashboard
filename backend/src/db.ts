@@ -2,12 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const dataDir = path.join(process.cwd(), "data");
+const configuredDbPath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
+export const miraDbPath = configuredDbPath
+    ? path.resolve(configuredDbPath)
+    : path.join(process.cwd(), "data", "mira-dashboard.db");
+const dataDir = path.dirname(miraDbPath);
 fs.mkdirSync(dataDir, { recursive: true });
 
-const dbPath = path.join(dataDir, "mira-dashboard.db");
 /** Defines db. */
-export const db = new DatabaseSync(dbPath);
+export const db = new DatabaseSync(miraDbPath);
 
 interface MigrationDatabase {
     exec(sql: string): unknown;

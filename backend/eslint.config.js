@@ -14,6 +14,14 @@ const eslintConfig = defineConfig(
     tsEslint.configs.recommended,
     unicorn.configs.recommended,
     {
+        files: ["test/setup-environment.js"],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+            },
+        },
+    },
+    {
         files: ["**/*.ts"],
         languageOptions: {
             globals: {

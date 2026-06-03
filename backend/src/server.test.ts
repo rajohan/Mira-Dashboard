@@ -974,6 +974,11 @@ describe("server bootstrap", () => {
                 OPENCLAW_TOKEN: "test-token",
                 OPENCLAW_HOME: openclawHome,
                 MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
+                MIRA_DASHBOARD_DB_PATH: path.join(
+                    entrypointCwd,
+                    "data",
+                    "mira-dashboard.db"
+                ),
             },
             entrypointCwd
         );
