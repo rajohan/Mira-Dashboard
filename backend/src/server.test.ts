@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type http from "node:http";
+import { createRequire } from "node:module";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,8 @@ let openclawHome: string | undefined;
 const ENTRYPOINT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const ENTRYPOINT_START_TIMEOUT_MS = 5_000;
 const ENTRYPOINT_PORT_ATTEMPTS = 5;
+const require = createRequire(import.meta.url);
+const TSX_LOADER_PATH = require.resolve("tsx");
 
 let apiAuthMiddleware: (typeof import("./server.js"))["apiAuthMiddleware"];
 let handleWebSocketConnection: (typeof import("./server.js"))["handleWebSocketConnection"];
@@ -128,7 +131,8 @@ async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
 
 async function startEntrypointChild(
     serverStartEntrypoint: string,
-    env: NodeJS.ProcessEnv
+    env: NodeJS.ProcessEnv,
+    cwd = process.cwd()
 ): Promise<{ child: ReturnType<typeof spawn>; getOutput: () => string }> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= ENTRYPOINT_PORT_ATTEMPTS; attempt += 1) {
@@ -136,9 +140,9 @@ async function startEntrypointChild(
         let childOutput = "";
         const child = spawn(
             process.execPath,
-            ["--import", "tsx", serverStartEntrypoint],
+            ["--import", TSX_LOADER_PATH, serverStartEntrypoint],
             {
-                cwd: process.cwd(),
+                cwd,
                 env: {
                     ...env,
                     PORT: String(port),
@@ -958,17 +962,26 @@ describe("server bootstrap", () => {
         const serverStartEntrypoint = fileURLToPath(
             new URL("serverStart.ts", import.meta.url)
         );
-        const { child } = await startEntrypointChild(serverStartEntrypoint, {
-            ...process.env,
-            NODE_V8_COVERAGE: path.join(os.tmpdir(), "mira-server-entrypoint-coverage"),
-            OPENCLAW_TOKEN: "test-token",
-            OPENCLAW_HOME: openclawHome,
-            MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
-        });
+        const entrypointCwd = await mkdtemp(path.join(os.tmpdir(), "mira-server-cwd-"));
+        const { child } = await startEntrypointChild(
+            serverStartEntrypoint,
+            {
+                ...process.env,
+                NODE_V8_COVERAGE: path.join(
+                    os.tmpdir(),
+                    "mira-server-entrypoint-coverage"
+                ),
+                OPENCLAW_TOKEN: "test-token",
+                OPENCLAW_HOME: openclawHome,
+                MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
+            },
+            entrypointCwd
+        );
         try {
             await assertChildStillRunning(child, 0);
         } finally {
             await stopChild(child);
+            await rm(entrypointCwd, { recursive: true, force: true });
         }
     });
 });

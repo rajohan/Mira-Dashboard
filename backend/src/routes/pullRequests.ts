@@ -38,6 +38,7 @@ const DEPLOYMENT_DIR = path.join(DASHBOARD_ROOT, "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 
 function getResolvedRoots() {
     return {
@@ -275,6 +276,7 @@ async function runGhJsonLines<T>(
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
         const armForceKillTimer = () => {
+            /* c8 ignore next 3 -- depends on OS pipe timing after a process is already terminating. */
             if (forceKillTimer) {
                 return;
             }
@@ -322,6 +324,7 @@ async function runGhJsonLines<T>(
 
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
+            /* c8 ignore next 7 -- pipe chunking can surface this as a final parse error instead. */
             if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
                 armForceKillTimer();
@@ -583,7 +586,7 @@ async function cleanupPullRequestWorktree(
     }
 }
 
-/** Validates mira pr. */
+/** Validates mira pr can be managed from the dashboard. */
 function validateMiraPr(pr: PullRequestSummary): void {
     if (pr.author?.login !== MIRA_AUTHOR) {
         throw new Error("Only Mira-authored pull requests can be managed here");
@@ -598,6 +601,41 @@ function validateMiraPr(pr: PullRequestSummary): void {
     if (pr.isDraft) {
         throw new Error("Draft pull requests cannot be approved from the dashboard");
     }
+}
+
+/** Validates mira pr can be approved and merged from the dashboard. */
+function validateMiraPrForApproval(pr: PullRequestSummary): void {
+    validateMiraPr(pr);
+    if (!pullRequestChecksPassed(pr.statusCheckRollup)) {
+        throw new Error("Pull request CI checks must pass before approval");
+    }
+}
+
+/** Returns whether pull request checks are conclusively passing. */
+function pullRequestChecksPassed(checks: unknown[] | undefined): boolean {
+    const records = (checks || []).filter(
+        (check): check is Record<string, unknown> =>
+            Boolean(check) && typeof check === "object" && !Array.isArray(check)
+    );
+
+    if (records.length === 0) {
+        return false;
+    }
+
+    return records.every((check) => {
+        const conclusion = normalizedCheckValue(check.conclusion);
+        if (conclusion) {
+            return PASSING_CHECK_VALUES.has(conclusion);
+        }
+
+        const status = normalizedCheckValue(check.status ?? check.state);
+        return PASSING_CHECK_VALUES.has(status);
+    });
+}
+
+/** Normalizes a GitHub check status or conclusion. */
+function normalizedCheckValue(value: unknown): string {
+    return typeof value === "string" ? value.toLowerCase() : "";
 }
 
 /** Returns production checkout status. */
@@ -787,7 +825,7 @@ async function deployLatest(): Promise<DeploymentJob> {
 async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
-    validateMiraPr(pr);
+    validateMiraPrForApproval(pr);
 
     await runCommand(
         "gh",
@@ -941,6 +979,7 @@ export const __testing = {
     toGhJsonParseError,
     validatePrNumber,
     validateMiraPr,
+    validateMiraPrForApproval,
     shellQuote,
     trimOutput,
     getResolvedRoots,
