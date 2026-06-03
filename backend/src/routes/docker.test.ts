@@ -34,6 +34,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH",
     "MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT",
     "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
+    "MIRA_FAKE_DOCKER_LONG_MARKER_PREFIX_STDOUT",
     "MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE",
     "MIRA_FAKE_DOCKER_EXEC_SIGNAL",
     "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
@@ -300,6 +301,10 @@ if (process.env.MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT === "1" && args[0] === "exe
 }
 if (process.env.MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
   process.stdout.write("x".repeat(20000));
+  process.exit(0);
+}
+if (process.env.MIRA_FAKE_DOCKER_LONG_MARKER_PREFIX_STDOUT === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
+  process.stdout.write("__MIRA_DOCKER_EXEC_PID__=" + "x".repeat(20000));
   process.exit(0);
 }
 if (process.env.MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE === "1" && args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
@@ -1248,6 +1253,22 @@ describe("docker routes", { concurrency: false }, () => {
                         "long-partial"
                     );
                     assert.equal(partialRun.stdout.length, 20_000);
+                }
+            );
+            await withEnvValue(
+                "MIRA_FAKE_DOCKER_LONG_MARKER_PREFIX_STDOUT",
+                "1",
+                async () => {
+                    const partialRun = await __testing.runDockerExecCommand(
+                        "app",
+                        "echo hi",
+                        "long-marker-prefix"
+                    );
+                    assert.equal(partialRun.stdout.length, 20_025);
+                    assert.equal(
+                        partialRun.stdout.startsWith("__MIRA_DOCKER_EXEC_PID__="),
+                        true
+                    );
                 }
             );
             await withEnvValue(

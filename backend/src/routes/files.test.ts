@@ -271,12 +271,12 @@ describe("files routes", () => {
         const missingWorkspace = path.join(missingRootParent, "workspace");
         const missingServer = await startServer(missingWorkspace);
         try {
-            const response = await requestJson<{ error: string }>(
+            const response = await requestJson<{ files: FileItem[] }>(
                 missingServer,
                 "/api/files"
             );
-            assert.equal(response.status, 404);
-            assert.equal(response.body.error, "Directory not found");
+            assert.equal(response.status, 200);
+            assert.deepEqual(response.body.files, []);
 
             const created = await requestJson<{ success: boolean; path: string }>(
                 missingServer,
@@ -389,6 +389,23 @@ describe("files routes", () => {
             assert.throws(() => __testing.listDirectory("src/app.ts"), {
                 code: "ENOTDIR",
             });
+            const missingWorkspaceRoot = path.join(
+                os.tmpdir(),
+                `mira-missing-workspace-${crypto.randomUUID()}`
+            );
+            try {
+                process.env.WORKSPACE_ROOT = missingWorkspaceRoot;
+                const freshModule = await import(
+                    `./files.js?missing=${crypto.randomUUID()}`
+                );
+                assert.deepEqual(freshModule.__testing.listDirectory(""), []);
+            } finally {
+                if (originalWorkspaceRoot === undefined) {
+                    delete process.env.WORKSPACE_ROOT;
+                } else {
+                    process.env.WORKSPACE_ROOT = originalWorkspaceRoot;
+                }
+            }
             const outsideDir = await mkdtemp(
                 path.join(os.tmpdir(), "mira-files-outside-")
             );

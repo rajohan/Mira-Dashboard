@@ -132,7 +132,7 @@ export default function notificationsRoutes(app: express.Application): void {
             return;
         }
         const title = nullableString((rawTitle ?? "").trim());
-        const description = nullableString((rawDescription ?? "").trim());
+        const description = stringFallback(rawDescription).trim();
         const source = nullableString((rawSource ?? "").trim());
         const dedupeKey = nullableString((rawDedupeKey ?? "").trim());
         const metadata =
@@ -154,11 +154,6 @@ export default function notificationsRoutes(app: express.Application): void {
 
         if (!title) {
             res.status(400).json({ error: "title is required" });
-            return;
-        }
-
-        if (!description) {
-            res.status(400).json({ error: "description is required" });
             return;
         }
 

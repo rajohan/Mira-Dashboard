@@ -75,6 +75,7 @@ function normalizePostgresHost(value: string | undefined): string {
         /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
     const validIpv6 =
         host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    const rawIpv6 = isIP(host) === 6;
     if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
         throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
     }
@@ -83,11 +84,12 @@ function normalizePostgresHost(value: string | undefined): string {
             host
         ) &&
         !validIpv6 &&
-        !validIpv4
+        !validIpv4 &&
+        !rawIpv6
     ) {
         throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
     }
-    return host;
+    return rawIpv6 ? `[${host}]` : host;
 }
 
 /** Returns a safe PostgreSQL port for URI construction. */

@@ -128,28 +128,63 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    let rootedPath: string;
+    const parentPath = path.resolve(path.dirname(safePath));
+    let parentFd: number | null = null;
     try {
-        const realRoot = fs.realpathSync(path.resolve(rootPath));
-        const realParent = fs.realpathSync(path.resolve(path.dirname(safePath)));
-        const relativeParent = path.relative(realRoot, realParent);
-        const parentEscapesRoot = [
-            relativeParent.startsWith(".."),
-            path.isAbsolute(relativeParent),
-        ].includes(true);
-        if (parentEscapesRoot) {
+        parentFd = fs.openSync(
+            parentPath,
+            fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+        );
+        let rootedPath: string;
+        try {
+            const realRoot = fs.realpathSync(path.resolve(rootPath));
+            const procSelfFd = "/proc/self/fd";
+            let realParent: string;
+            if (
+                process.platform === "linux" &&
+                isProcfsAvailable() &&
+                fs.existsSync(procSelfFd) &&
+                fs.statSync(procSelfFd).isDirectory()
+            ) {
+                realParent = fs.realpathSync(path.join(procSelfFd, String(parentFd)));
+                rootedPath = path.join(
+                    procSelfFd,
+                    String(parentFd),
+                    path.basename(safePath)
+                );
+            } else {
+                realParent = fs.realpathSync(parentPath);
+                const openedParentStat = fs.fstatSync(parentFd);
+                const realParentStat = fs.statSync(realParent);
+                if (
+                    openedParentStat.dev !== realParentStat.dev ||
+                    openedParentStat.ino !== realParentStat.ino
+                ) {
+                    throw createAccessDeniedError("Parent path validation failed");
+                }
+                rootedPath = path.join(realParent, path.basename(safePath));
+            }
+            const relativeParent = path.relative(realRoot, realParent);
+            const parentEscapesRoot = [
+                relativeParent.startsWith(".."),
+                path.isAbsolute(relativeParent),
+            ].includes(true);
+            if (parentEscapesRoot) {
+                throw createAccessDeniedError("Parent path validation failed");
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EACCES") {
+                throw error;
+            }
             throw createAccessDeniedError("Parent path validation failed");
         }
 
-        rootedPath = path.join(realParent, path.basename(safePath));
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EACCES") {
-            throw error;
+        return await callback(rootedPath);
+    } finally {
+        if (parentFd !== null) {
+            fs.closeSync(parentFd);
         }
-        throw createAccessDeniedError("Parent path validation failed");
     }
-
-    return await callback(rootedPath);
 }
 
 async function ensureParentDirsForWrite(

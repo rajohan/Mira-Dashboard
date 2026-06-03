@@ -191,6 +191,13 @@ function listDirectory(dirPath: string): FileItem[] | null {
             }
         }
     } catch (error) {
+        if (
+            !dirPath &&
+            (error as NodeJS.ErrnoException).code === "ENOENT" &&
+            path.resolve(WORKSPACE_ROOT) === WORKSPACE_ROOT
+        ) {
+            return [];
+        }
         console.error("[Files] Error listing directory:", (error as Error).message);
         throw error;
     }
@@ -598,7 +605,12 @@ export default function filesRoutes(
                                 existingMode = existingStat.mode & 0o777;
                                 if (existingStat.size > MAX_BACKUP_COPY_BYTES) {
                                     await fs.promises
-                                        .unlink(safeBackupPath)
+                                        .unlink(
+                                            path.join(
+                                                path.dirname(rootedFullPath),
+                                                path.basename(safeBackupPath)
+                                            )
+                                        )
                                         .catch((error) => {
                                             if (
                                                 (error as NodeJS.ErrnoException).code !==

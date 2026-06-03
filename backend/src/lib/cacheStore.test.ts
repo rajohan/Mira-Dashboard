@@ -71,6 +71,11 @@ describe("cacheStore utilities", () => {
                 __testing.buildPostgresUri("n8n"),
                 "postgresql://user%40name:p%3Aa%2Fss%23@192.168.0.1:6543/n8n"
             );
+            process.env.DATABASE_HOST = "::1";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://user%40name:p%3Aa%2Fss%23@[::1]:6543/n8n"
+            );
 
             process.env.DATABASE_HOST = "db$(touch /tmp/nope)";
             assert.throws(() => __testing.buildPostgresUri(), {

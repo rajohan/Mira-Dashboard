@@ -407,6 +407,30 @@ describe("logs routes", () => {
         }
     });
 
+    it("reads enough bytes to return requested tail lines", async () => {
+        const logFile = "openclaw-2099-03-07.log";
+        const logPath = path.join(logsDir, logFile);
+        const lines = Array.from(
+            { length: 160 },
+            (_, index) => `line-${String(index).padStart(3, "0")} ${"x".repeat(1500)}`
+        );
+        await writeFile(logPath, `${lines.join("\n")}\n`, "utf8");
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(logFile)}&lines=120`
+            );
+            assert.equal(response.status, 200);
+            const body = (await response.json()) as { content: string };
+            const returnedLines = body.content.split("\n");
+            assert.equal(returnedLines.length, 120);
+            assert.equal(returnedLines[0]?.startsWith("line-040 "), true);
+            assert.equal(returnedLines.at(-1)?.startsWith("line-159 "), true);
+        } finally {
+            await rm(logPath, { force: true });
+        }
+    });
+
     it("maps log content canonicalization and open failures", async () => {
         const originalRealpathSync = fs.realpathSync;
 
@@ -506,6 +530,40 @@ describe("logs routes", () => {
         } finally {
             fs.promises.open = originalOpen;
             await rm(unreadablePath, { force: true });
+        }
+
+        const zeroReadFile = "openclaw-2099-03-08.log";
+        const zeroReadPath = path.join(logsDir, zeroReadFile);
+        await writeFile(zeroReadPath, "line one\nline two\n", "utf8");
+        try {
+            fs.promises.open = (async (targetPath: fs.PathLike, ...args: unknown[]) => {
+                const file = await Reflect.apply(originalOpen, fs.promises, [
+                    targetPath,
+                    ...args,
+                ]);
+                if (
+                    Buffer.isBuffer(targetPath) &&
+                    targetPath.toString() === zeroReadPath
+                ) {
+                    return {
+                        close: () => file.close(),
+                        read: async () => ({ bytesRead: 0, buffer: Buffer.alloc(0) }),
+                        stat: () => file.stat(),
+                    } as unknown as fs.promises.FileHandle;
+                }
+                return file;
+            }) as typeof fs.promises.open;
+            const zeroRead = await fetch(
+                `${server.baseUrl}/api/logs/content?file=${encodeURIComponent(zeroReadFile)}&lines=1`
+            );
+            assert.equal(zeroRead.status, 200);
+            assert.deepEqual(await zeroRead.json(), {
+                content: "",
+                file: zeroReadFile,
+            });
+        } finally {
+            fs.promises.open = originalOpen;
+            await rm(zeroReadPath, { force: true });
         }
     });
 

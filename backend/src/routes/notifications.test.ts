@@ -116,13 +116,18 @@ describe("notifications routes", () => {
         assert.equal(missingTitle.status, 400);
         assert.equal(missingTitle.body.error, "title is required");
 
-        const missingDescription = await requestJson<{ error: string }>(
+        const missingDescription = await requestJson<{ ok: true; id: number | null }>(
             server,
             "/api/notifications",
             { method: "POST", body: { title: "Title", source } }
         );
-        assert.equal(missingDescription.status, 400);
-        assert.equal(missingDescription.body.error, "description is required");
+        assert.equal(missingDescription.status, 200);
+        assert.equal(typeof missingDescription.body.id, "number");
+        notificationIdToCleanup = missingDescription.body.id;
+        const createdWithoutDescription = db
+            .prepare("SELECT description FROM notifications WHERE id = ?")
+            .get(missingDescription.body.id) as { description: string } | undefined;
+        assert.equal(createdWithoutDescription?.description, "");
 
         const invalidTitle = await requestJson<{ error: string }>(
             server,

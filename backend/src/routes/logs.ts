@@ -14,6 +14,7 @@ let lastLogFile = "";
 const logSubscribers = new Set<WebSocket>();
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
+const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 
 /** Represents log file. */
 interface LogFile {
@@ -49,18 +50,32 @@ async function readLogContent(
         return file.readFile("utf8");
     }
 
-    const windowBytes = Math.min(
+    const minimumWindowBytes = Math.min(
         stat.size,
         Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
     );
-    const buffer = Buffer.alloc(windowBytes);
-    const { bytesRead } = await file.read(
-        buffer,
-        0,
-        windowBytes,
-        Math.max(0, stat.size - windowBytes)
-    );
-    return buffer.toString("utf8", 0, bytesRead);
+    const chunks: Buffer[] = [];
+    let offset = stat.size;
+    let bytesReadTotal = 0;
+    let newlineCount = 0;
+
+    while (offset > 0 && (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)) {
+        const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
+        offset -= chunkBytes;
+        const buffer = Buffer.allocUnsafe(chunkBytes);
+        const { bytesRead } = await file.read(buffer, 0, chunkBytes, offset);
+        if (bytesRead <= 0) {
+            break;
+        }
+        const chunk = buffer.subarray(0, bytesRead);
+        for (const byte of chunk) {
+            if (byte === 10) newlineCount += 1;
+        }
+        chunks.unshift(chunk);
+        bytesReadTotal += bytesRead;
+    }
+
+    return Buffer.concat(chunks, bytesReadTotal).toString("utf8");
 }
 
 async function readLogTailLines(

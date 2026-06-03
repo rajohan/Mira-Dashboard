@@ -1277,6 +1277,30 @@ describe("config files routes", () => {
                 ),
                 openclawConfig
             );
+
+            const originalStatSync = fs.statSync;
+            try {
+                fs.statSync = ((target: fs.PathLike) => {
+                    const stat = originalStatSync(target);
+                    if (String(target) === path.dirname(openclawConfig)) {
+                        return { ...stat, ino: stat.ino + 1 } as fs.Stats;
+                    }
+                    return stat;
+                }) as typeof fs.statSync;
+                await assert.rejects(
+                    () =>
+                        parentPathTesting.withRootedParentPath(
+                            openclawConfig,
+                            openclawRoot,
+                            (rootedPath) => rootedPath
+                        ),
+                    (error: unknown) =>
+                        (error as NodeJS.ErrnoException).code === "EACCES" &&
+                        (error as Error).message === "Parent path validation failed"
+                );
+            } finally {
+                fs.statSync = originalStatSync;
+            }
         } finally {
             parentPathTesting.setProcfsAvailabilityProbeForTest();
         }
