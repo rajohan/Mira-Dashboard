@@ -887,6 +887,7 @@ describe("PullRequests page", () => {
         hooks.approve.mockResolvedValueOnce({ message: "Merged without cleanup" });
         hooks.approve.mockResolvedValueOnce({
             cleanup: undefined,
+            deployError: "Deploy already in progress",
             deployment: undefined,
             message: "Merged and deployed fallback",
         });
@@ -905,7 +906,9 @@ describe("PullRequests page", () => {
             screen.getByTestId("confirm-modal").querySelector("button:last-child")!
         );
         expect(
-            await screen.findByText("Merged and deployed fallback")
+            await screen.findByText(
+                "Merged and deployed fallback: Deploy already in progress"
+            )
         ).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Deploy latest main" }));

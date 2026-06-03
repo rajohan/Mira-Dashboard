@@ -467,12 +467,10 @@ export function PullRequests() {
                         number: action.pr.number,
                         deploy: true,
                     });
-                    setLastResult(
-                        actionResultMessage(
-                            result.deployment?.note || result.message,
-                            result.cleanup
-                        )
-                    );
+                    const message = result.deployError
+                        ? `${result.message}: ${result.deployError}`
+                        : result.deployment?.note || result.message;
+                    setLastResult(actionResultMessage(message, result.cleanup));
                     break;
                 }
 

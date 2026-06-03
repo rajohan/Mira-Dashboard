@@ -87,6 +87,7 @@ interface PullRequestActionResponse {
     ok: boolean;
     message: string;
     deployment?: DeploymentJob;
+    deployError?: string;
     cleanup?: WorktreeCleanupResult;
     pullRequest?: PullRequestSummary;
 }

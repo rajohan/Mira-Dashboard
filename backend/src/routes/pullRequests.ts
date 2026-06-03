@@ -36,11 +36,15 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEFAULT_BASE = "main";
 const DEPLOYMENT_DIR = path.join(DASHBOARD_ROOT, "data", "deployments");
+const DEPLOYMENT_LOCK_PATH = path.join(DEPLOYMENT_DIR, "active.lock");
+const DEPLOYMENT_LOCK_STALE_MS = 30 * 60 * 1000;
+const MAX_STORED_DEPLOYMENT_JOBS = 50;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
+const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 
 function getResolvedRoots() {
     return {
@@ -162,6 +166,99 @@ function deploymentPath(jobId: string): string {
 function writeDeploymentJob(job: DeploymentJob): void {
     ensureDeploymentDir();
     fs.writeFileSync(deploymentPath(job.id), JSON.stringify(job, null, 2));
+    pruneDeploymentJobs();
+}
+
+/** Reads one deployment job. */
+function readDeploymentJob(jobId: string): DeploymentJob | undefined {
+    try {
+        return JSON.parse(
+            fs.readFileSync(deploymentPath(jobId), "utf8")
+        ) as DeploymentJob;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Checks whether a deployment job file currently exists. */
+function deploymentJobFileExists(jobId: string): boolean {
+    try {
+        fs.statSync(deploymentPath(jobId));
+        return true;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return false;
+        }
+        return true;
+    }
+}
+
+/** Checks whether an active deployment lock is stale enough to replace. */
+function isDeploymentJobStale(job: DeploymentJob, now = Date.now()): boolean {
+    const updatedAt = Date.parse(job.updatedAt || job.startedAt);
+    return Number.isFinite(updatedAt) && now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
+}
+
+/** Removes old deployment job files while preserving recent history. */
+function pruneDeploymentJobs(): void {
+    ensureDeploymentDir();
+    const jobs = fs
+        .readdirSync(DEPLOYMENT_DIR)
+        .filter((file) => file.endsWith(".json"))
+        .map((file) => {
+            const filePath = path.join(DEPLOYMENT_DIR, file);
+            return { file, mtimeMs: fs.statSync(filePath).mtimeMs };
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    for (const job of jobs.slice(MAX_STORED_DEPLOYMENT_JOBS)) {
+        fs.unlinkSync(path.join(DEPLOYMENT_DIR, job.file));
+    }
+}
+
+/** Releases the active deploy lock if it still belongs to the given job. */
+function releaseDeploymentLock(jobId: string): void {
+    try {
+        if (fs.readFileSync(DEPLOYMENT_LOCK_PATH, "utf8").trim() === jobId) {
+            fs.unlinkSync(DEPLOYMENT_LOCK_PATH);
+        }
+    } catch {
+        // Best-effort cleanup; stale locks are validated before starting deploys.
+    }
+}
+
+/** Acquires the active deploy lock for a new deployment job. */
+function acquireDeploymentLock(jobId: string): void {
+    ensureDeploymentDir();
+
+    try {
+        const activeJobId = fs.readFileSync(DEPLOYMENT_LOCK_PATH, "utf8").trim();
+        const activeJob = activeJobId ? readDeploymentJob(activeJobId) : undefined;
+        if (
+            activeJob &&
+            ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
+            !isDeploymentJobStale(activeJob)
+        ) {
+            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+        }
+        if (!activeJob && activeJobId && deploymentJobFileExists(activeJobId)) {
+            throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+        }
+        fs.unlinkSync(DEPLOYMENT_LOCK_PATH);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    }
+
+    try {
+        fs.writeFileSync(DEPLOYMENT_LOCK_PATH, jobId, { flag: "wx" });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new Error("Dashboard deploy already in progress", { cause: error });
+        }
+        throw error;
+    }
 }
 
 /** Performs read deployment jobs. */
@@ -896,20 +993,20 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
 
     const script = [
         "restart_status=0",
-        `systemctl restart ${DASHBOARD_SERVICE} || restart_status=$?`,
+        `systemctl --user restart ${DASHBOARD_SERVICE} || restart_status=$?`,
         "sleep 4",
         'if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health >/dev/null; then',
         `  printf %s ${shellQuote(JSON.stringify(okJob, null, 2))} > ${shellQuote(jobPath)}`,
         "else",
         `  printf %s ${shellQuote(JSON.stringify(failedJob, null, 2))} > ${shellQuote(jobPath)}`,
         "fi",
+        `if [ "$(cat ${shellQuote(DEPLOYMENT_LOCK_PATH)} 2>/dev/null)" = ${shellQuote(job.id)} ]; then rm -f ${shellQuote(DEPLOYMENT_LOCK_PATH)}; fi`,
     ].join("\n");
 
     return runCommand(
-        "sudo",
+        "systemd-run",
         [
-            "-n",
-            "systemd-run",
+            "--user",
             `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard deploy restart + health check",
             "/bin/bash",
@@ -920,18 +1017,8 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
     );
 }
 
-/** Performs deploy latest. */
-async function deployLatest(): Promise<DeploymentJob> {
-    const now = new Date().toISOString();
-    const job: DeploymentJob = {
-        id: Date.now().toString(36),
-        status: "building",
-        startedAt: now,
-        updatedAt: now,
-        note: "Deploy started",
-    };
-    writeDeploymentJob(job);
-
+/** Runs deployment work after the API has returned a job to the caller. */
+async function runDeploymentJob(job: DeploymentJob): Promise<void> {
     try {
         await syncMain();
 
@@ -956,7 +1043,6 @@ async function deployLatest(): Promise<DeploymentJob> {
         };
         writeDeploymentJob(restartScheduled);
         await scheduleRestartHealthCheck(restartScheduled);
-        return restartScheduled;
     } catch (error) {
         const failed: DeploymentJob = {
             ...job,
@@ -964,7 +1050,39 @@ async function deployLatest(): Promise<DeploymentJob> {
             updatedAt: new Date().toISOString(),
             note: errorMessage(error, "Deploy failed"),
         };
-        writeDeploymentJob(failed);
+        try {
+            writeDeploymentJob(failed);
+        } finally {
+            releaseDeploymentLock(job.id);
+        }
+    }
+}
+
+/** Reports background deployment failures after the API response has returned. */
+function reportBackgroundDeploymentError(error: unknown): void {
+    console.error(
+        "[pullRequestsRoutes] Background deploy failed:",
+        errorMessage(error, "Deploy failed")
+    );
+}
+
+/** Starts deploy latest in the background. */
+function startDeployLatest(): DeploymentJob {
+    const now = new Date().toISOString();
+    const job: DeploymentJob = {
+        id: Date.now().toString(36),
+        status: "building",
+        startedAt: now,
+        updatedAt: now,
+        note: "Deploy started",
+    };
+    acquireDeploymentLock(job.id);
+    try {
+        writeDeploymentJob(job);
+        void runDeploymentJob(job).catch(reportBackgroundDeploymentError);
+        return job;
+    } catch (error) {
+        releaseDeploymentLock(job.id);
         throw error;
     }
 }
@@ -990,8 +1108,8 @@ async function approvePullRequest(number: number, deploy: boolean) {
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
     let syncError: string | undefined;
-    let deployment: DeploymentJob | undefined;
     let deployError: string | undefined;
+    let deployment: DeploymentJob | undefined;
 
     try {
         await syncMain();
@@ -999,28 +1117,27 @@ async function approvePullRequest(number: number, deploy: boolean) {
         syncError = errorMessage(error, "Failed to sync main after merge");
     }
 
-    if (deploy) {
+    if (deploy && !syncError) {
         try {
-            deployment = await deployLatest();
+            deployment = startDeployLatest();
         } catch (error) {
-            deployError = errorMessage(error, "Deploy failed after merge");
+            deployError = errorMessage(error, "Deploy failed to start");
         }
     }
 
     return {
         ok: true,
-        message:
-            deploy && deployError
-                ? `PR #${number} merged; deploy failed`
-                : syncError
-                  ? `PR #${number} merged; production sync failed`
-                  : deploy
-                    ? `PR #${number} merged; deploy started`
-                    : `PR #${number} merged`,
+        message: syncError
+            ? `PR #${number} merged; production sync failed`
+            : deployError
+              ? `PR #${number} merged; deploy failed to start`
+              : deploy
+                ? `PR #${number} merged; deploy started`
+                : `PR #${number} merged`,
         deployment,
+        deployError,
         cleanup,
         syncError,
-        deployError,
     };
 }
 
@@ -1090,7 +1207,9 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/deploy",
         express.json(),
         asyncRoute(async (_req, res) => {
-            res.json({ ok: true, deployment: await deployLatest() });
+            await ensureProductionCheckout();
+            await ensureProductionReadyForDeploy();
+            res.json({ ok: true, deployment: startDeployLatest() });
         })
     );
 
@@ -1152,11 +1271,19 @@ export default function pullRequestsRoutes(app: express.Application): void {
 }
 
 export const __testing = {
+    acquireDeploymentLock,
     buildCommandEnv,
     buildReviewCommandEnv,
     clearForceKillTimerIfAllowed,
     parseGhJsonLine,
     parseRepoParts,
+    deploymentJobFileExists,
+    isDeploymentJobStale,
+    pruneDeploymentJobs,
+    readDeploymentJob,
+    reportBackgroundDeploymentError,
+    releaseDeploymentLock,
+    runDeploymentJob,
     isPathInsideRoot,
     parseGitWorktrees,
     runCommand,
@@ -1170,6 +1297,7 @@ export const __testing = {
     validateMiraPr,
     validateMiraPrForApproval,
     shellQuote,
+    startDeployLatest,
     trimOutput,
     getResolvedRoots,
 };
