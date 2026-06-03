@@ -49,6 +49,7 @@ const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends ne
 void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 
 const MIRA_AUTHOR = "mira-2026";
+const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
@@ -239,7 +240,14 @@ function githubMergeBlocked(pr: PullRequestSummary): boolean {
 
 /** Returns whether the configured reviewer can approve the pull request review. */
 function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
-    return pr.reviewerCanApprove === true;
+    if (typeof pr.reviewerCanApprove === "boolean") {
+        return pr.reviewerCanApprove;
+    }
+    return (
+        pr.author?.login !== DEFAULT_REVIEWER_AUTHOR &&
+        !pr.isDraft &&
+        !pullRequestReviewApproved(pr)
+    );
 }
 
 /** Performs action label. */
@@ -757,7 +765,11 @@ export function PullRequests() {
                             </section>
                         ) : null}
                     </div>
-                    <div>
+                    <div
+                        className={
+                            miraPullRequests.length > 0 ? "xl:pt-[76px]" : undefined
+                        }
+                    >
                         <RecentDeploysCard deployments={deployments} />
                     </div>
                 </div>
