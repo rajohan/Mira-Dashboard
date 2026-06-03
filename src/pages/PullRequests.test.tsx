@@ -328,11 +328,50 @@ describe("PullRequests page", () => {
         render(<PullRequests />);
 
         expect(screen.getByText("Checks failed")).toBeInTheDocument();
+        expect(
+            screen.getByText("CI checks must pass before merging from the dashboard")
+        ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
-        expect(screen.getByRole("button", { name: "Merge only" })).toHaveAttribute(
-            "title",
+        expect(
+            screen.getByRole("button", { name: "Merge only" })
+        ).toHaveAccessibleDescription(
             "CI checks must pass before merging from the dashboard"
+        );
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("blocks merge actions until review is approved", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        reviewDecision: "REVIEW_REQUIRED",
+                        statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                        title: "Needs review",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Review required")).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                "Review approval is required before merging from the dashboard"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: "Merge only" })
+        ).toHaveAccessibleDescription(
+            "Review approval is required before merging from the dashboard"
         );
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
@@ -428,8 +467,9 @@ describe("PullRequests page", () => {
 
         expect(screen.getByText("Off main")).toBeInTheDocument();
         expect(
-            screen.getByText(/blocked until the production checkout is switched/)
-        ).toBeInTheDocument();
+            screen.getAllByText(/blocked until the production checkout is switched/)
+                .length
+        ).toBeGreaterThan(0);
         expect(screen.getByRole("button", { name: "Deploy latest main" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
@@ -520,7 +560,7 @@ describe("PullRequests page", () => {
         });
         rerender(<PullRequests />);
         expect(screen.getByText("Checking production checkout")).toBeInTheDocument();
-        expect(screen.getByText("Loading checkout status…")).toBeInTheDocument();
+        expect(screen.getAllByText("Loading checkout status…").length).toBeGreaterThan(0);
 
         mockPullRequests({
             checkout: {
@@ -536,14 +576,14 @@ describe("PullRequests page", () => {
         });
         rerender(<PullRequests />);
         expect(screen.getByText("Wrong root")).toBeInTheDocument();
-        expect(screen.getByText(/not operating on/)).toBeInTheDocument();
+        expect(screen.getAllByText(/not operating on/).length).toBeGreaterThan(0);
         expect(screen.getByText("Upstream: none")).toBeInTheDocument();
 
         mockPullRequests({
             checkout: { data: undefined, error: new Error("Checkout unavailable") },
         });
         rerender(<PullRequests />);
-        expect(screen.getByText("Checkout unavailable")).toBeInTheDocument();
+        expect(screen.getAllByText("Checkout unavailable").length).toBeGreaterThan(0);
     });
 
     it("renders external PR author and fallback metadata states", () => {

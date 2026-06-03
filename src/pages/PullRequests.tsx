@@ -555,16 +555,37 @@ export function PullRequests() {
                                     const checksPassed = pullRequestChecksPassed(
                                         pr.statusCheckRollup
                                     );
+                                    const reviewApproved =
+                                        pr.reviewDecision?.toUpperCase() === "APPROVED";
                                     const mergeDisabled =
                                         isActionPending ||
                                         isProductionActionBlocked ||
                                         pr.isDraft ||
-                                        !checksPassed;
-                                    const mergeTitle = pr.isDraft
-                                        ? "Draft pull requests cannot be merged from the dashboard"
-                                        : checksPassed
-                                          ? undefined
-                                          : "CI checks must pass before merging from the dashboard";
+                                        !checksPassed ||
+                                        !reviewApproved;
+                                    let mergeDisabledReason: string | undefined;
+                                    if (pr.isDraft) {
+                                        mergeDisabledReason =
+                                            "Draft pull requests cannot be merged from the dashboard";
+                                    } else if (checksPassed) {
+                                        if (reviewApproved) {
+                                            if (isProductionActionBlocked) {
+                                                mergeDisabledReason = checkoutMessage(
+                                                    productionCheckout,
+                                                    productionCheckoutError
+                                                );
+                                            }
+                                        } else {
+                                            mergeDisabledReason =
+                                                "Review approval is required before merging from the dashboard";
+                                        }
+                                    } else {
+                                        mergeDisabledReason =
+                                            "CI checks must pass before merging from the dashboard";
+                                    }
+                                    const mergeDisabledReasonId = mergeDisabledReason
+                                        ? `pr-${pr.number}-merge-disabled-reason`
+                                        : undefined;
 
                                     return (
                                         <PullRequestCard
@@ -572,6 +593,14 @@ export function PullRequests() {
                                             pr={pr}
                                             actions={
                                                 <>
+                                                    {mergeDisabledReason ? (
+                                                        <p
+                                                            id={mergeDisabledReasonId}
+                                                            className="text-primary-400 text-xs sm:basis-full"
+                                                        >
+                                                            {mergeDisabledReason}
+                                                        </p>
+                                                    ) : null}
                                                     <Button
                                                         variant="primary"
                                                         onClick={() =>
@@ -581,7 +610,9 @@ export function PullRequests() {
                                                             })
                                                         }
                                                         disabled={mergeDisabled}
-                                                        title={mergeTitle}
+                                                        aria-describedby={
+                                                            mergeDisabledReasonId
+                                                        }
                                                     >
                                                         <Rocket className="h-4 w-4" />
                                                         Merge + deploy
@@ -595,7 +626,9 @@ export function PullRequests() {
                                                             })
                                                         }
                                                         disabled={mergeDisabled}
-                                                        title={mergeTitle}
+                                                        aria-describedby={
+                                                            mergeDisabledReasonId
+                                                        }
                                                     >
                                                         <GitMerge className="h-4 w-4" />
                                                         Merge only
