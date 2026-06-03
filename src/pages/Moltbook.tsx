@@ -36,7 +36,7 @@ export function Moltbook() {
     const unreadCount = home?.unreadMessageCount ?? 0;
 
     if (isLoading) {
-        return <LoadingState size="lg" />;
+        return <LoadingState message="Loading Moltbook..." size="lg" />;
     }
 
     if (error) {

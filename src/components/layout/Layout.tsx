@@ -95,7 +95,7 @@ export function Layout({ children }: LayoutProps) {
                             to={item.to}
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
-                                "mb-1 flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 transition-colors",
+                                "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 transition-colors",
                                 isActive
                                     ? "bg-accent-500/90 text-white"
                                     : "text-primary-300 hover:bg-primary-800 hover:text-primary-50"

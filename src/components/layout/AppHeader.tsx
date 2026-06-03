@@ -65,7 +65,7 @@ export function AppHeader({
                     <div className="hidden items-center gap-2 text-xs sm:flex">
                         <span
                             className={[
-                                "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
                                 isConnected
                                     ? "border-green-500/40 bg-green-500/10 text-green-300"
                                     : "border-red-500/40 bg-red-500/10 text-red-300",
@@ -81,7 +81,7 @@ export function AppHeader({
                         </span>
                         <span
                             className={[
-                                "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
                                 isBackendConnected
                                     ? "border-green-500/40 bg-green-500/10 text-green-300"
                                     : "border-red-500/40 bg-red-500/10 text-red-300",

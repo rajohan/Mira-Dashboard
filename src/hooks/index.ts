@@ -71,6 +71,7 @@ export type {
 export {
     pullRequestKeys,
     useApprovePullRequest,
+    useApprovePullRequestReview,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,

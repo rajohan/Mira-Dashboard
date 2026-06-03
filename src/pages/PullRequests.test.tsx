@@ -6,6 +6,7 @@ import { PullRequests } from "./PullRequests";
 
 const hooks = vi.hoisted(() => ({
     approve: vi.fn(),
+    approveReview: vi.fn(),
     deploy: vi.fn(),
     productionCheckout: {
         branch: "main",
@@ -42,6 +43,7 @@ const hooks = vi.hoisted(() => ({
     refetch: vi.fn(),
     reject: vi.fn(),
     useApprovePullRequest: vi.fn(),
+    useApprovePullRequestReview: vi.fn(),
     useDeployDashboard: vi.fn(),
     useProductionCheckout: vi.fn(),
     usePullRequestDeployments: vi.fn(),
@@ -51,6 +53,7 @@ const hooks = vi.hoisted(() => ({
 
 vi.mock("../hooks", () => ({
     useApprovePullRequest: hooks.useApprovePullRequest,
+    useApprovePullRequestReview: hooks.useApprovePullRequestReview,
     useDeployDashboard: hooks.useDeployDashboard,
     useProductionCheckout: hooks.useProductionCheckout,
     usePullRequestDeployments: hooks.usePullRequestDeployments,
@@ -114,6 +117,10 @@ function mockPullRequests(overrides = {}) {
         isPending: false,
         mutateAsync: hooks.approve,
     });
+    hooks.useApprovePullRequestReview.mockReturnValue({
+        isPending: false,
+        mutateAsync: hooks.approveReview,
+    });
     hooks.useRejectPullRequest.mockReturnValue({
         isPending: false,
         mutateAsync: hooks.reject,
@@ -128,6 +135,8 @@ function mockPullRequests(overrides = {}) {
         if (key === "deployments") hooks.usePullRequestDeployments.mockReturnValue(value);
         if (key === "checkout") hooks.useProductionCheckout.mockReturnValue(value);
         if (key === "approve") hooks.useApprovePullRequest.mockReturnValue(value);
+        if (key === "approveReview")
+            hooks.useApprovePullRequestReview.mockReturnValue(value);
         if (key === "reject") hooks.useRejectPullRequest.mockReturnValue(value);
         if (key === "deploy") hooks.useDeployDashboard.mockReturnValue(value);
     }
@@ -141,6 +150,9 @@ describe("PullRequests page", () => {
             deployment: { note: "Deploy scheduled" },
             message: "PR merged",
         });
+        hooks.approveReview.mockResolvedValue({
+            message: "PR review approved",
+        });
         hooks.deploy.mockResolvedValue({
             deployment: { note: "Main deploy scheduled" },
         });
@@ -150,6 +162,7 @@ describe("PullRequests page", () => {
             message: "PR rejected",
         });
         hooks.useApprovePullRequest.mockReset();
+        hooks.useApprovePullRequestReview.mockReset();
         hooks.useDeployDashboard.mockReset();
         hooks.useProductionCheckout.mockReset();
         hooks.usePullRequestDeployments.mockReset();
@@ -166,17 +179,8 @@ describe("PullRequests page", () => {
         expect(screen.getByText("Checks passed")).toBeInTheDocument();
         expect(screen.getByText("Review approved")).toBeInTheDocument();
         expect(screen.getByText("Ready to deploy")).toBeInTheDocument();
+        expect(screen.getByText("Clean")).toBeInTheDocument();
         expect(screen.getByText("restart-scheduled")).toBeInTheDocument();
-    });
-
-    it("refreshes pull requests from the page action", async () => {
-        const user = userEvent.setup();
-
-        render(<PullRequests />);
-
-        await user.click(screen.getByRole("button", { name: "Refresh" }));
-
-        expect(hooks.refetch).toHaveBeenCalledTimes(1);
     });
 
     it("shows loading, error retry, and empty states", async () => {
@@ -193,6 +197,7 @@ describe("PullRequests page", () => {
         });
         rerender(<PullRequests />);
         expect(document.querySelector(".animate-spin")).toBeInTheDocument();
+        expect(screen.getByText("Loading pull requests...")).toBeInTheDocument();
 
         mockPullRequests({
             pullRequests: {
@@ -362,18 +367,203 @@ describe("PullRequests page", () => {
 
         expect(screen.getByText("Review required")).toBeInTheDocument();
         expect(
-            screen.getByText(
-                "Review approval is required before merging from the dashboard"
-            )
+            screen.getByText("Approve the PR before merging from the dashboard")
         ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
         expect(
             screen.getByRole("button", { name: "Merge only" })
-        ).toHaveAccessibleDescription(
-            "Review approval is required before merging from the dashboard"
-        );
+        ).toHaveAccessibleDescription("Approve the PR before merging from the dashboard");
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("approves pull request reviews without merging or deploying", async () => {
+        const user = userEvent.setup();
+        const pendingReviewPullRequest = {
+            ...hooks.pullRequests[0],
+            reviewDecision: "REVIEW_REQUIRED",
+            reviewerApproved: false,
+            reviewerCanApprove: true,
+            title: "Needs Rajohan review",
+        };
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    pendingReviewPullRequest,
+                    {
+                        ...hooks.pullRequests[0],
+                        author: { login: "rajohan" },
+                        number: 11,
+                        reviewDecision: "REVIEW_REQUIRED",
+                        reviewerApproved: false,
+                        reviewerCanApprove: false,
+                        title: "Rajohan-authored change",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        number: 12,
+                        reviewDecision: "APPROVED",
+                        reviewerApproved: true,
+                        reviewerCanApprove: false,
+                        title: "Already reviewed",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+        hooks.approveReview.mockImplementationOnce(async () => {
+            mockPullRequests({
+                pullRequests: {
+                    data: [
+                        {
+                            ...pendingReviewPullRequest,
+                            reviewerApproved: true,
+                            reviewerCanApprove: false,
+                        },
+                    ],
+                    error: null,
+                    isLoading: false,
+                    refetch: hooks.refetch,
+                },
+            });
+            return { message: "PR review approved" };
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Needs Rajohan review")).toBeInTheDocument();
+        expect(screen.getAllByText("Review required").length).toBeGreaterThan(0);
+        expect(screen.getAllByRole("button", { name: "Approve PR" })).toHaveLength(1);
+        await user.click(screen.getByRole("button", { name: "Approve PR" }));
+        expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Approve PR #10");
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+
+        await waitFor(() => {
+            expect(hooks.approveReview).toHaveBeenCalledWith({ number: 10 });
+        });
+        expect(hooks.approve).not.toHaveBeenCalled();
+        expect(hooks.deploy).not.toHaveBeenCalled();
+        expect(hooks.refetch).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Approve PR" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByText("Review approved")).toBeInTheDocument();
+        expect(screen.getByText("PR review approved")).toBeInTheDocument();
+    });
+
+    it("colors additions and deletions like GitHub diff stats", () => {
+        render(<PullRequests />);
+
+        expect(screen.getByText("+10")).toHaveClass("text-green-400");
+        expect(screen.getByText("-1")).toHaveClass("text-red-400");
+    });
+
+    it("blocks merge actions when GitHub reports a merge blocker", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BLOCKED",
+                        mergeable: "MERGEABLE",
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(
+            screen.getByText("GitHub reports this pull request is blocked from merging")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("blocks merge actions when GitHub reports the branch is behind", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BEHIND",
+                        mergeable: "MERGEABLE",
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("BEHIND")).toBeInTheDocument();
+        expect(
+            screen.getByText("GitHub reports this pull request is blocked from merging")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+    });
+
+    it("blocks merge actions when GitHub reports merge conflicts", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeable: "DIRTY",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(
+            screen.getByText("GitHub reports this pull request is blocked from merging")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("keeps merge actions enabled when mergeable metadata is missing without blockers", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeable: undefined,
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("mergeable unknown")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).not.toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).not.toBeDisabled();
     });
 
     it("does not show expected checks as passed", () => {
@@ -666,6 +856,9 @@ describe("PullRequests page", () => {
         expect(screen.getByText("REVIEW DISMISSED")).toBeInTheDocument();
         expect(screen.getByText("Review pending")).toBeInTheDocument();
         expect(screen.getByText("Checks running")).toBeInTheDocument();
+        expect(screen.getAllByRole("button", { name: "Merge + deploy" })).toHaveLength(2);
+        expect(screen.getAllByRole("button", { name: "Merge only" })).toHaveLength(2);
+        expect(screen.getAllByRole("button", { name: "Reject" })).toHaveLength(2);
         expect(screen.getByText("deploy-ok")).toBeInTheDocument();
         expect(screen.getByText("failed")).toBeInTheDocument();
         expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(1);

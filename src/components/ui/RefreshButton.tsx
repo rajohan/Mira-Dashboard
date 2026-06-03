@@ -28,7 +28,6 @@ export function RefreshButton({
             onClick={onClick}
             aria-label={label || "Refresh"}
             disabled={disabled || isLoading}
-            className="gap-2"
         >
             <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             {label ? <span>{label}</span> : null}

@@ -16,7 +16,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             <HeadlessButton
                 ref={ref}
                 className={cn(
-                    "inline-flex items-center justify-center rounded-lg font-medium transition-colors",
+                    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
                     "cursor-pointer outline-none",
                     {
                         "bg-accent-500 hover:bg-accent-600 active:bg-accent-700 data-[active]:bg-accent-700 data-[hover]:bg-accent-600 text-white":

@@ -24,6 +24,8 @@ export interface PullRequestSummary {
     mergeable?: string;
     mergeStateStatus?: string;
     reviewDecision?: string;
+    reviewerApproved?: boolean;
+    reviewerCanApprove?: boolean;
     statusCheckRollup?: unknown[];
     additions?: number;
     deletions?: number;
@@ -86,6 +88,7 @@ interface PullRequestActionResponse {
     message: string;
     deployment?: DeploymentJob;
     cleanup?: WorktreeCleanupResult;
+    pullRequest?: PullRequestSummary;
 }
 
 /** Defines pull request keys. */
@@ -141,6 +144,16 @@ async function rejectPullRequest(
     });
 }
 
+/** Performs approve pull request review. */
+async function approvePullRequestReview(
+    number: number
+): Promise<PullRequestActionResponse> {
+    return apiPostRequired<PullRequestActionResponse>(
+        `/pull-requests/${number}/review-approval`,
+        {}
+    );
+}
+
 /** Performs deploy dashboard. */
 async function deployDashboard(): Promise<{ ok: boolean; deployment: DeploymentJob }> {
     return apiPostRequired<{ ok: boolean; deployment: DeploymentJob }>(
@@ -193,6 +206,29 @@ export function useApprovePullRequest() {
             void queryClient.invalidateQueries({
                 queryKey: pullRequestKeys.productionCheckout(),
             });
+        },
+    });
+}
+
+/** Provides approve pull request review. */
+export function useApprovePullRequestReview() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number }: { number: number }) => approvePullRequestReview(number),
+        onSuccess: (response) => {
+            if (response.pullRequest) {
+                queryClient.setQueryData<PullRequestSummary[]>(
+                    pullRequestKeys.list(),
+                    (current = []) =>
+                        current.map((pullRequest) =>
+                            pullRequest.number === response.pullRequest?.number
+                                ? response.pullRequest
+                                : pullRequest
+                        )
+                );
+            }
+            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
         },
     });
 }
