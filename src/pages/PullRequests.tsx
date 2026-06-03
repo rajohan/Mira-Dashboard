@@ -86,6 +86,21 @@ function statusVariant(value: string | undefined) {
     return "default" as const;
 }
 
+/** Returns display-safe merge state for known stale GitHub list states. */
+function effectiveMergeStateStatus(pr: PullRequestSummary): string | undefined {
+    if (
+        pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
+        pr.mergeable?.toUpperCase() === "MERGEABLE" &&
+        pr.reviewDecision?.toUpperCase() === "APPROVED" &&
+        !pr.isDraft &&
+        pullRequestChecksPassed(pr.statusCheckRollup)
+    ) {
+        return "CLEAN";
+    }
+
+    return pr.mergeStateStatus;
+}
+
 /** Performs review decision variant. */
 function reviewDecisionVariant(value: string | undefined) {
     const normalized = (value || "").toUpperCase();
@@ -292,6 +307,7 @@ function PullRequestCard({
     actions?: ReactNode;
 }) {
     const checks = summarizeChecks(pr.statusCheckRollup);
+    const mergeStateStatus = effectiveMergeStateStatus(pr);
 
     return (
         <Card variant="bordered" className="space-y-3">
@@ -323,8 +339,8 @@ function PullRequestCard({
                     <Badge variant={statusVariant(pr.mergeable)}>
                         {pr.mergeable || "mergeable unknown"}
                     </Badge>
-                    <Badge variant={statusVariant(pr.mergeStateStatus)}>
-                        {pr.mergeStateStatus || "state unknown"}
+                    <Badge variant={statusVariant(mergeStateStatus)}>
+                        {mergeStateStatus || "state unknown"}
                     </Badge>
                     <Badge variant={checks.variant}>{checks.label}</Badge>
                     {pr.isDraft ? <Badge variant="warning">Draft</Badge> : null}
@@ -341,6 +357,48 @@ function PullRequestCard({
                     {actions}
                 </div>
             ) : null}
+        </Card>
+    );
+}
+
+/** Renders recent dashboard deploy jobs. */
+function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
+    return (
+        <Card variant="bordered" className="h-fit space-y-3">
+            <CardTitle className="text-base">Recent deploys</CardTitle>
+            {deployments.length === 0 ? (
+                <p className="text-primary-400 text-sm">
+                    No dashboard deploy jobs recorded yet.
+                </p>
+            ) : (
+                <div className="space-y-2">
+                    {deployments.map((deployment) => (
+                        <div
+                            key={deployment.id}
+                            className="border-primary-700 bg-primary-900/40 rounded border p-3"
+                        >
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="text-primary-300 text-sm font-medium">
+                                        {deployment.commit || deployment.id}
+                                    </div>
+                                    <div className="text-primary-500 text-xs">
+                                        {formatDate(deployment.updatedAt)}
+                                    </div>
+                                </div>
+                                <Badge variant={deploymentVariant(deployment.status)}>
+                                    {deployment.status}
+                                </Badge>
+                            </div>
+                            {deployment.note ? (
+                                <p className="text-primary-400 mt-2 text-xs">
+                                    {deployment.note}
+                                </p>
+                            ) : null}
+                        </div>
+                    ))}
+                </div>
+            )}
         </Card>
     );
 }
@@ -528,193 +586,161 @@ export function PullRequests() {
                     ) : null}
                 </Card>
 
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                    <div className="space-y-4">
-                        {pullRequests.length === 0 ? (
-                            <Card variant="bordered">
-                                <CardTitle>No open PRs waiting</CardTitle>
-                                <p className="text-primary-400 mt-2 text-sm">
-                                    New dashboard and dependency PRs will appear here for
-                                    review.
-                                </p>
-                            </Card>
-                        ) : null}
+                <div className="space-y-4">
+                    {pullRequests.length === 0 ? (
+                        <Card variant="bordered">
+                            <CardTitle>No open PRs waiting</CardTitle>
+                            <p className="text-primary-400 mt-2 text-sm">
+                                New dashboard and dependency PRs will appear here for
+                                review.
+                            </p>
+                        </Card>
+                    ) : null}
 
-                        {miraPullRequests.length > 0 ? (
-                            <section className="space-y-3" aria-label="Mira-authored PRs">
-                                <div>
-                                    <CardTitle className="text-base">
-                                        Mira-authored PRs
-                                    </CardTitle>
-                                    <p className="text-primary-400 mt-1 text-sm">
-                                        These can be merged, rejected, or merged and
-                                        deployed from the dashboard.
-                                    </p>
-                                </div>
-                                {miraPullRequests.map((pr) => {
-                                    const checksPassed = pullRequestChecksPassed(
-                                        pr.statusCheckRollup
-                                    );
-                                    const reviewApproved =
-                                        pr.reviewDecision?.toUpperCase() === "APPROVED";
-                                    const mergeDisabled =
-                                        isActionPending ||
-                                        isProductionActionBlocked ||
-                                        pr.isDraft ||
-                                        !checksPassed ||
-                                        !reviewApproved;
-                                    let mergeDisabledReason: string | undefined;
-                                    if (pr.isDraft) {
-                                        mergeDisabledReason =
-                                            "Draft pull requests cannot be merged from the dashboard";
-                                    } else if (checksPassed) {
-                                        if (reviewApproved) {
-                                            if (isProductionActionBlocked) {
-                                                mergeDisabledReason = checkoutMessage(
-                                                    productionCheckout,
-                                                    productionCheckoutError
-                                                );
+                    {miraPullRequests.length > 0 ? (
+                        <section className="space-y-3" aria-label="Mira-authored PRs">
+                            <div>
+                                <CardTitle className="text-base">
+                                    Mira-authored PRs
+                                </CardTitle>
+                                <p className="text-primary-400 mt-1 text-sm">
+                                    These can be merged, rejected, or merged and deployed
+                                    from the dashboard.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                                <div className="space-y-3">
+                                    {miraPullRequests.map((pr) => {
+                                        const checksPassed = pullRequestChecksPassed(
+                                            pr.statusCheckRollup
+                                        );
+                                        const reviewApproved =
+                                            pr.reviewDecision?.toUpperCase() ===
+                                            "APPROVED";
+                                        const mergeDisabled =
+                                            isActionPending ||
+                                            isProductionActionBlocked ||
+                                            pr.isDraft ||
+                                            !checksPassed ||
+                                            !reviewApproved;
+                                        let mergeDisabledReason: string | undefined;
+                                        if (pr.isDraft) {
+                                            mergeDisabledReason =
+                                                "Draft pull requests cannot be merged from the dashboard";
+                                        } else if (checksPassed) {
+                                            if (reviewApproved) {
+                                                if (isProductionActionBlocked) {
+                                                    mergeDisabledReason = checkoutMessage(
+                                                        productionCheckout,
+                                                        productionCheckoutError
+                                                    );
+                                                }
+                                            } else {
+                                                mergeDisabledReason =
+                                                    "Review approval is required before merging from the dashboard";
                                             }
                                         } else {
                                             mergeDisabledReason =
-                                                "Review approval is required before merging from the dashboard";
+                                                "CI checks must pass before merging from the dashboard";
                                         }
-                                    } else {
-                                        mergeDisabledReason =
-                                            "CI checks must pass before merging from the dashboard";
-                                    }
-                                    const mergeDisabledReasonId = mergeDisabledReason
-                                        ? `pr-${pr.number}-merge-disabled-reason`
-                                        : undefined;
+                                        const mergeDisabledReasonId = mergeDisabledReason
+                                            ? `pr-${pr.number}-merge-disabled-reason`
+                                            : undefined;
 
-                                    return (
-                                        <PullRequestCard
-                                            key={pr.number}
-                                            pr={pr}
-                                            actions={
-                                                <>
-                                                    {mergeDisabledReason ? (
-                                                        <p
-                                                            id={mergeDisabledReasonId}
-                                                            className="text-primary-400 text-xs sm:basis-full"
+                                        return (
+                                            <PullRequestCard
+                                                key={pr.number}
+                                                pr={pr}
+                                                actions={
+                                                    <>
+                                                        {mergeDisabledReason ? (
+                                                            <p
+                                                                id={mergeDisabledReasonId}
+                                                                className="text-primary-400 text-xs sm:basis-full"
+                                                            >
+                                                                {mergeDisabledReason}
+                                                            </p>
+                                                        ) : null}
+                                                        <Button
+                                                            variant="primary"
+                                                            onClick={() =>
+                                                                setPendingAction({
+                                                                    type: "merge-deploy",
+                                                                    pr,
+                                                                })
+                                                            }
+                                                            disabled={mergeDisabled}
+                                                            aria-describedby={
+                                                                mergeDisabledReasonId
+                                                            }
                                                         >
-                                                            {mergeDisabledReason}
-                                                        </p>
-                                                    ) : null}
-                                                    <Button
-                                                        variant="primary"
-                                                        onClick={() =>
-                                                            setPendingAction({
-                                                                type: "merge-deploy",
-                                                                pr,
-                                                            })
-                                                        }
-                                                        disabled={mergeDisabled}
-                                                        aria-describedby={
-                                                            mergeDisabledReasonId
-                                                        }
-                                                    >
-                                                        <Rocket className="h-4 w-4" />
-                                                        Merge + deploy
-                                                    </Button>
-                                                    <Button
-                                                        variant="secondary"
-                                                        onClick={() =>
-                                                            setPendingAction({
-                                                                type: "merge",
-                                                                pr,
-                                                            })
-                                                        }
-                                                        disabled={mergeDisabled}
-                                                        aria-describedby={
-                                                            mergeDisabledReasonId
-                                                        }
-                                                    >
-                                                        <GitMerge className="h-4 w-4" />
-                                                        Merge only
-                                                    </Button>
-                                                    <Button
-                                                        variant="danger"
-                                                        onClick={() =>
-                                                            setPendingAction({
-                                                                type: "reject",
-                                                                pr,
-                                                            })
-                                                        }
-                                                        disabled={isActionPending}
-                                                    >
-                                                        <XCircle className="h-4 w-4" />
-                                                        Reject
-                                                    </Button>
-                                                </>
-                                            }
-                                        />
-                                    );
-                                })}
-                            </section>
-                        ) : null}
-
-                        {externalPullRequests.length > 0 ? (
-                            <section
-                                className="space-y-3"
-                                aria-label="Dependency and external PRs"
-                            >
-                                <div>
-                                    <CardTitle className="text-base">
-                                        Dependency / external PRs
-                                    </CardTitle>
-                                    <p className="text-primary-400 mt-1 text-sm">
-                                        Visible for review status. Manage these on GitHub
-                                        until we add a dedicated safe policy.
-                                    </p>
+                                                            <Rocket className="h-4 w-4" />
+                                                            Merge + deploy
+                                                        </Button>
+                                                        <Button
+                                                            variant="secondary"
+                                                            onClick={() =>
+                                                                setPendingAction({
+                                                                    type: "merge",
+                                                                    pr,
+                                                                })
+                                                            }
+                                                            disabled={mergeDisabled}
+                                                            aria-describedby={
+                                                                mergeDisabledReasonId
+                                                            }
+                                                        >
+                                                            <GitMerge className="h-4 w-4" />
+                                                            Merge only
+                                                        </Button>
+                                                        <Button
+                                                            variant="danger"
+                                                            onClick={() =>
+                                                                setPendingAction({
+                                                                    type: "reject",
+                                                                    pr,
+                                                                })
+                                                            }
+                                                            disabled={isActionPending}
+                                                        >
+                                                            <XCircle className="h-4 w-4" />
+                                                            Reject
+                                                        </Button>
+                                                    </>
+                                                }
+                                            />
+                                        );
+                                    })}
                                 </div>
-                                {externalPullRequests.map((pr) => (
-                                    <PullRequestCard key={pr.number} pr={pr} />
-                                ))}
-                            </section>
-                        ) : null}
-                    </div>
-
-                    <Card variant="bordered" className="h-fit space-y-3">
-                        <CardTitle className="text-base">Recent deploys</CardTitle>
-                        {deployments.length === 0 ? (
-                            <p className="text-primary-400 text-sm">
-                                No dashboard deploy jobs recorded yet.
-                            </p>
-                        ) : (
-                            <div className="space-y-2">
-                                {deployments.map((deployment) => (
-                                    <div
-                                        key={deployment.id}
-                                        className="border-primary-700 bg-primary-900/40 rounded border p-3"
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0">
-                                                <div className="text-primary-300 text-sm font-medium">
-                                                    {deployment.commit || deployment.id}
-                                                </div>
-                                                <div className="text-primary-500 text-xs">
-                                                    {formatDate(deployment.updatedAt)}
-                                                </div>
-                                            </div>
-                                            <Badge
-                                                variant={deploymentVariant(
-                                                    deployment.status
-                                                )}
-                                            >
-                                                {deployment.status}
-                                            </Badge>
-                                        </div>
-                                        {deployment.note ? (
-                                            <p className="text-primary-400 mt-2 text-xs">
-                                                {deployment.note}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                ))}
+                                <RecentDeploysCard deployments={deployments} />
                             </div>
-                        )}
-                    </Card>
+                        </section>
+                    ) : (
+                        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                            <div />
+                            <RecentDeploysCard deployments={deployments} />
+                        </div>
+                    )}
+
+                    {externalPullRequests.length > 0 ? (
+                        <section
+                            className="space-y-3"
+                            aria-label="Dependency and external PRs"
+                        >
+                            <div>
+                                <CardTitle className="text-base">
+                                    Dependency / external PRs
+                                </CardTitle>
+                                <p className="text-primary-400 mt-1 text-sm">
+                                    Visible for review status. Manage these on GitHub
+                                    until we add a dedicated safe policy.
+                                </p>
+                            </div>
+                            {externalPullRequests.map((pr) => (
+                                <PullRequestCard key={pr.number} pr={pr} />
+                            ))}
+                        </section>
+                    ) : null}
                 </div>
 
                 {pendingAction && (

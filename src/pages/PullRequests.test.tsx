@@ -376,6 +376,31 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
 
+    it("shows stale blocked merge states as clean when merge gates pass", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BLOCKED",
+                        mergeable: "MERGEABLE",
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("CLEAN")).toBeInTheDocument();
+        expect(screen.queryByText("BLOCKED")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge only" })).not.toBeDisabled();
+    });
+
     it("does not show expected checks as passed", () => {
         mockPullRequests({
             pullRequests: {
