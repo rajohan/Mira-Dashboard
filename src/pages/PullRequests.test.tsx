@@ -363,6 +363,55 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
 
+    it("shows unknown non-passing check states as pending", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: [{ status: "ACTION_REQUIRED", name: "ci" }],
+                        title: "Needs CI action",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("Checks pending")).toBeInTheDocument();
+        expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
+    it("keeps merge actions disabled when checks have not reported", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        reviewDecision: "APPROVED",
+                        statusCheckRollup: undefined,
+                        title: "No CI reported",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
+    });
+
     it("blocks production actions when checkout is off main", () => {
         mockPullRequests({
             checkout: {

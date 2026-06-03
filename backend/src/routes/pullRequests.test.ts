@@ -709,6 +709,49 @@ describe("pull request routes", () => {
                 } as never),
             { message: "Draft pull requests cannot be approved from the dashboard" }
         );
+        assert.doesNotThrow(() =>
+            __testing.validateMiraPr({
+                author: { login: "mira-2026" },
+                baseRefName: "main",
+                isDraft: false,
+                statusCheckRollup: [{ status: "PENDING", name: "ci" }],
+            } as never)
+        );
+        assert.doesNotThrow(() =>
+            __testing.validateMiraPrForApproval({
+                author: { login: "mira-2026" },
+                baseRefName: "main",
+                isDraft: false,
+                statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+            } as never)
+        );
+        assert.doesNotThrow(() =>
+            __testing.validateMiraPrForApproval({
+                author: { login: "mira-2026" },
+                baseRefName: "main",
+                isDraft: false,
+                statusCheckRollup: [{ name: "ci", state: "SUCCESS" }],
+            } as never)
+        );
+        assert.throws(
+            () =>
+                __testing.validateMiraPrForApproval({
+                    author: { login: "mira-2026" },
+                    baseRefName: "main",
+                    isDraft: false,
+                    statusCheckRollup: [{ status: "PENDING", name: "ci" }],
+                } as never),
+            { message: "Pull request CI checks must pass before approval" }
+        );
+        assert.throws(
+            () =>
+                __testing.validateMiraPrForApproval({
+                    author: { login: "mira-2026" },
+                    baseRefName: "main",
+                    isDraft: false,
+                } as never),
+            { message: "Pull request CI checks must pass before approval" }
+        );
         assert.equal(__testing.shellQuote("can't"), String.raw`'can'\''t'`);
         assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
     });

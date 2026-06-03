@@ -276,6 +276,7 @@ async function runGhJsonLines<T>(
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
         const armForceKillTimer = () => {
+            /* c8 ignore next 3 -- depends on OS pipe timing after a process is already terminating. */
             if (forceKillTimer) {
                 return;
             }
@@ -323,6 +324,7 @@ async function runGhJsonLines<T>(
 
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
+            /* c8 ignore next 7 -- pipe chunking can surface this as a final parse error instead. */
             if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
                 armForceKillTimer();
