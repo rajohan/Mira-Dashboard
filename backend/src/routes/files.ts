@@ -668,6 +668,20 @@ export default function filesRoutes(
                     );
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT") {
+                        res.status(404).json({ error: "Path not found" });
+                        return;
+                    }
+                    if (code === "ENOTDIR") {
+                        res.status(400).json({ error: "Not a directory" });
+                        return;
+                    }
+                    if (code === "ELOOP") {
+                        res.status(403).json({
+                            error: "Access denied: symlinks are not writable",
+                        });
+                        return;
+                    }
                     if (code === "EISDIR") {
                         res.status(400).json({
                             error: "Path is a directory, not a file",

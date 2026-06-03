@@ -15,9 +15,13 @@ interface TestServer {
     testing: {
         isProcfsAvailable: () => boolean;
         setProcfsAvailabilityProbeForTest: (next?: () => boolean) => void;
+        setPrepareConfigWriteTargetForTest: (
+            next?: (fullPath: string, rootDir: string) => string | null
+        ) => void;
         setValidateOpenclawLeafForTest: (
             next?: (openclawRoot: string) => boolean
         ) => void;
+        hasSymlinkedAncestor: (targetPath: string, rootPath: string) => boolean;
         validateOpenclawLeaf: (openclawRoot: string) => boolean;
     };
 }
@@ -495,6 +499,35 @@ describe("config files routes", () => {
             "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts"
         );
         assert.equal(missing.status, 404);
+
+        const transformsDir = path.join(openclawRoot, "hooks", "transforms");
+        const cronDir = path.join(openclawRoot, "cron");
+        await writeFile(path.join(cronDir, "agentmail.ts"), "export default {};\n");
+        await rm(transformsDir, { recursive: true, force: true });
+        try {
+            await symlink(cronDir, transformsDir);
+            const linkedParentRead = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts"
+            );
+            assert.equal(linkedParentRead.status, 404);
+            assert.equal(linkedParentRead.body.error, "File not found");
+
+            const linkedParentWrite = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/hooks%2Ftransforms%2Fagentmail.ts",
+                { method: "PUT", body: { content: "export {};\n" } }
+            );
+            assert.equal(linkedParentWrite.status, 403);
+            assert.equal(
+                linkedParentWrite.body.error,
+                "Access denied: path outside allowed root"
+            );
+        } finally {
+            await rm(transformsDir, { force: true });
+            await mkdir(transformsDir, { recursive: true });
+            await rm(path.join(cronDir, "agentmail.ts"), { force: true });
+        }
 
         const cronJobsPath = path.join(openclawRoot, "cron", "jobs.json");
         const originalCronJobs = await readFile(cronJobsPath, "utf8");
@@ -1372,6 +1405,56 @@ describe("config files routes", () => {
             await rm(transformsDir, { force: true });
             await mkdir(transformsDir, { recursive: true });
             await rm(rejectedParent, { recursive: true, force: true });
+        }
+
+        assert.equal(
+            parentPathTesting.hasSymlinkedAncestor(
+                path.join(path.parse(openclawRoot).root, "elsewhere", "file.txt"),
+                openclawRoot
+            ),
+            true
+        );
+
+        const originalAncestorLstatSync = fs.lstatSync;
+        try {
+            fs.lstatSync = ((target: fs.PathLike) => {
+                if (String(target) === path.join(openclawRoot, "hooks")) {
+                    const error = new Error(
+                        "ancestor unavailable"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalAncestorLstatSync(target);
+            }) as typeof fs.lstatSync;
+            assert.throws(
+                () =>
+                    parentPathTesting.hasSymlinkedAncestor(
+                        path.join(transformsDir, "agentmail.ts"),
+                        openclawRoot
+                    ),
+                /ancestor unavailable/u
+            );
+        } finally {
+            fs.lstatSync = originalAncestorLstatSync;
+        }
+
+        parentPathTesting.setPrepareConfigWriteTargetForTest((target) =>
+            target === path.join(openclawRoot, "hooks") ? null : target
+        );
+        try {
+            await assert.rejects(
+                () =>
+                    parentPathTesting.ensureParentDirsForWrite(
+                        path.join(transformsDir, "agentmail.ts"),
+                        openclawRoot
+                    ),
+                (error: unknown) =>
+                    (error as NodeJS.ErrnoException).code === "EACCES" &&
+                    (error as Error).message === "Parent directory validation failed"
+            );
+        } finally {
+            parentPathTesting.setPrepareConfigWriteTargetForTest();
         }
 
         await assert.rejects(

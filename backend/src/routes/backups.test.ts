@@ -406,6 +406,19 @@ describe("backup routes", () => {
                 assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
             }
         );
+        await withEnv(
+            {
+                DB_POSTGRESDB_USER: undefined,
+                DB_POSTGRESDB_PASSWORD: undefined,
+                DATABASE_USERNAME: " ",
+                DATABASE_PASSWORD: "\t",
+            },
+            async () => {
+                const blankCredentialEnv = backupTesting.createBackupEnv();
+                assert.equal("DB_POSTGRESDB_USER" in blankCredentialEnv, false);
+                assert.equal("DB_POSTGRESDB_PASSWORD" in blankCredentialEnv, false);
+            }
+        );
         assert.equal(backupTesting.getN8nRoot(), tempDir);
         await withEnv({ MIRA_N8N_ROOT: "" }, async () => {
             assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");

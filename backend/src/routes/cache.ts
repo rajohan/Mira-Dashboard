@@ -54,9 +54,12 @@ function buildCacheRefreshCommand(scriptName: string): string[] {
 
 function envFallbackUnlessBlank(name: string, fallbackName: string): string {
     const value = process.env[name];
-    return value === undefined || value.trim() === ""
-        ? envFallback(fallbackName, "")
-        : value;
+    if (value !== undefined && value.trim() !== "") {
+        return value;
+    }
+
+    const fallback = envFallback(fallbackName, "");
+    return fallback.trim() === "" ? "" : fallback.trim();
 }
 
 function getCacheRefreshCommand(key: string): string[] | undefined {

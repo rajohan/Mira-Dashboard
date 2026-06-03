@@ -104,11 +104,43 @@ function validateOpenclawLeaf(openclawRoot: string): boolean {
 let validateOpenclawLeafForWrite = validateOpenclawLeaf;
 let procfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && fs.existsSync("/proc/self/fd");
+let prepareConfigWriteTarget = prepareSafeWriteTargetWithinRoot;
 
 function createAccessDeniedError(message: string): NodeJS.ErrnoException {
     const error = new Error(message) as NodeJS.ErrnoException;
     error.code = "EACCES";
     return error;
+}
+
+function hasSymlinkedAncestor(targetPath: string, rootPath: string): boolean {
+    const resolvedRoot = path.resolve(rootPath);
+    let currentPath = path.dirname(path.resolve(targetPath));
+    const candidates: string[] = [];
+
+    while (currentPath !== resolvedRoot) {
+        const parentPath = path.dirname(currentPath);
+        if (parentPath === currentPath) {
+            return true;
+        }
+        candidates.push(currentPath);
+        currentPath = parentPath;
+    }
+
+    for (const candidate of candidates.reverse()) {
+        try {
+            if (fs.lstatSync(candidate).isSymbolicLink()) {
+                return true;
+            }
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === "ENOENT" || code === "ENOTDIR") {
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    return false;
 }
 
 export function isProcfsAvailable(): boolean {
@@ -209,6 +241,9 @@ async function ensureParentDirsForWrite(
         error.code = "EACCES";
         throw error;
     }
+    if (hasSymlinkedAncestor(safePath, rootPath)) {
+        throw createAccessDeniedError("Parent directory validation failed");
+    }
     if (!relativeParent) {
         return;
     }
@@ -216,10 +251,7 @@ async function ensureParentDirsForWrite(
     let currentPath = canonicalRoot;
     for (const segment of relativeParent.split(path.sep)) {
         currentPath = path.join(currentPath, segment);
-        const safeDirectoryPath = prepareSafeWriteTargetWithinRoot(
-            currentPath,
-            canonicalRoot
-        );
+        const safeDirectoryPath = prepareConfigWriteTarget(currentPath, canonicalRoot);
         if (!safeDirectoryPath) {
             const error = new Error(
                 "Parent directory validation failed"
@@ -341,6 +373,7 @@ export default function configFilesRoutes(
                     return;
                 }
 
+                const fullPathCandidate = path.resolve(openclawRoot, filePath);
                 const fullPath = safePathWithinRoot(filePath, openclawRoot);
 
                 if (!fullPath) {
@@ -360,6 +393,10 @@ export default function configFilesRoutes(
                 }
 
                 try {
+                    if (hasSymlinkedAncestor(fullPathCandidate, openclawRoot)) {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
                     const lexicalStat = fs.lstatSync(fullPath);
                     if (lexicalStat.isSymbolicLink()) {
                         res.status(404).json({ error: "File not found" });
@@ -519,7 +556,13 @@ export default function configFilesRoutes(
                 }
 
                 const fullPathCandidate = path.resolve(openclawRoot, filePath);
-                const safeFullPath = prepareSafeWriteTargetWithinRoot(
+                if (hasSymlinkedAncestor(fullPathCandidate, openclawRoot)) {
+                    res.status(403).json({
+                        error: "Access denied: path outside allowed root",
+                    });
+                    return;
+                }
+                const safeFullPath = prepareConfigWriteTarget(
                     fullPathCandidate,
                     openclawRoot
                 );
@@ -557,7 +600,7 @@ export default function configFilesRoutes(
                 // Create backup
                 try {
                     const backupPath = safeFullPath + ".bak";
-                    const safeBackupPath = prepareSafeWriteTargetWithinRoot(
+                    const safeBackupPath = prepareConfigWriteTarget(
                         backupPath,
                         openclawRoot
                     );
@@ -679,6 +722,13 @@ export const __testing = {
             nextProbe ??
             (() => process.platform === "linux" && fs.existsSync("/proc/self/fd"));
     },
+    setPrepareConfigWriteTargetForTest(
+        nextPrepareConfigWriteTarget?: typeof prepareSafeWriteTargetWithinRoot
+    ): void {
+        prepareConfigWriteTarget =
+            nextPrepareConfigWriteTarget ?? prepareSafeWriteTargetWithinRoot;
+    },
+    hasSymlinkedAncestor,
     validateOpenclawLeaf,
     withRootedParentPath,
 };

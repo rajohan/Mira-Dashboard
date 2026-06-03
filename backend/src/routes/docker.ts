@@ -30,8 +30,9 @@ const MAX_JOBS = 100;
 const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
 const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
-const DOCKER_EXEC_PID_WAIT_TIMEOUT_MS = 300;
-const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 10;
+const DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS = 5_000;
+let dockerExecPidWaitTimeoutMs = DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
+const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 50;
 const N8N_DATABASE = "n8n";
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const DOCKER_UPDATER_TIMEOUT_MS = 120_000;
@@ -1210,7 +1211,7 @@ async function runDockerExecCommand(
 }
 
 async function stopDockerExecInContainer(job: DockerExecJob): Promise<void> {
-    const deadline = Date.now() + DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
+    const deadline = Date.now() + dockerExecPidWaitTimeoutMs;
     while (!job.inContainerPid && Date.now() < deadline) {
         await new Promise((resolve) =>
             setTimeout(resolve, DOCKER_EXEC_PID_WAIT_INTERVAL_MS)
@@ -1357,6 +1358,10 @@ export const __testing = {
         updaterCwd =
             nextUpdaterCwd ||
             nonEmptyEnvFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
+    },
+    setDockerExecPidWaitTimeoutForTests: (nextTimeoutMs?: number) => {
+        dockerExecPidWaitTimeoutMs =
+            nextTimeoutMs ?? DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
     },
     updateDockerExecJobOutput,
     completeDockerExecJob,

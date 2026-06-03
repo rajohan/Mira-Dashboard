@@ -1082,6 +1082,20 @@ describe("gateway state and helper utilities", () => {
         client.responses.set("sessions.list", { sessions: [null, "bad", {}] });
         await __testing.refreshSessions(client as never);
         assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", {
+            sessions: [
+                { key: "agent:invalid-date:main", updatedAt: "not a date" },
+                { key: "agent:invalid-number:main", updatedAt: Number.NaN },
+                { key: "agent:valid-string:main", updatedAt: "2026-05-16T13:00:00.000Z" },
+                { key: "agent:valid-null:main", updatedAt: null },
+            ],
+        });
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(
+            gateway.getSessions().map((session) => session.key),
+            ["agent:valid-string:main", "agent:valid-null:main"]
+        );
     });
 
     it("handles log subscription request aliases", async () => {

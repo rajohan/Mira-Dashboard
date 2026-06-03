@@ -17,11 +17,14 @@ function getDopplerBin(): string {
     return nonEmptyEnvFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
 }
 
-function envFallbackUnlessBlank(name: string, fallbackName: string): string {
+function envFallbackUnlessBlank(name: string, fallbackName: string): string | undefined {
     const value = process.env[name];
-    return value === undefined || value.trim() === ""
-        ? envFallback(fallbackName, "")
-        : value;
+    if (value !== undefined && value.trim() !== "") {
+        return value;
+    }
+
+    const fallback = envFallback(fallbackName, "");
+    return fallback.trim() === "" ? undefined : fallback;
 }
 
 function shellQuote(value: string): string {
@@ -124,8 +127,10 @@ function createBackupEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: postgresUser,
-        DB_POSTGRESDB_PASSWORD: postgresPassword,
+        ...(postgresUser === undefined ? {} : { DB_POSTGRESDB_USER: postgresUser }),
+        ...(postgresPassword === undefined
+            ? {}
+            : { DB_POSTGRESDB_PASSWORD: postgresPassword }),
     };
 }
 

@@ -650,6 +650,12 @@ async function refreshSessions(
                 entry !== null &&
                 (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
                 (entry.key === undefined || typeof entry.key === "string") &&
+                (entry.updatedAt === undefined ||
+                    entry.updatedAt === null ||
+                    (typeof entry.updatedAt === "number" &&
+                        Number.isFinite(entry.updatedAt)) ||
+                    (typeof entry.updatedAt === "string" &&
+                        !Number.isNaN(Date.parse(entry.updatedAt)))) &&
                 (stringFallback(entry.sessionId).trim() ||
                     stringFallback(entry.key).trim()) !== ""
         )

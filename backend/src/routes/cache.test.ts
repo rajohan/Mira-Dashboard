@@ -340,6 +340,26 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
             await withEnv(
                 {
+                    DATABASE_USERNAME: "  ",
+                    DATABASE_PASSWORD: "\t",
+                    DB_POSTGRESDB_USER: undefined,
+                    DB_POSTGRESDB_PASSWORD: undefined,
+                },
+                () => refreshCacheKey("quotas.summary")
+            );
+            const whitespaceLegacyPayload = JSON.parse(
+                await readFile(envPath, "utf8")
+            ) as {
+                user?: string;
+                password?: string;
+            };
+            assert.deepEqual(whitespaceLegacyPayload, {
+                user: "postgres",
+                password: "postgres",
+            });
+
+            await withEnv(
+                {
                     DB_POSTGRESDB_USER: "native-user",
                     DB_POSTGRESDB_PASSWORD: "native-password",
                 },

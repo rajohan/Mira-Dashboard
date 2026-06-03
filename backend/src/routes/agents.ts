@@ -546,7 +546,16 @@ function parseAgentsConfig(): AgentsConfig | null {
             return null;
         }
 
-        const content = FS.readFileSync(realPath, "utf8");
+        const fd = FS.openSync(
+            Buffer.from(realPath),
+            FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
+        );
+        let content: string;
+        try {
+            content = FS.readFileSync(fd, "utf8");
+        } finally {
+            FS.closeSync(fd);
+        }
         const parsed = JSON5.parse(content) as { agents?: AgentsConfig };
 
         if (parsed.agents && Array.isArray(parsed.agents.list)) {

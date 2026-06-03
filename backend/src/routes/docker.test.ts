@@ -425,6 +425,7 @@ async function startServer(updaterCwd: string): Promise<TestServer> {
     const { default: dockerRoutes, __testing } = await import("./docker.js");
     __testing.setUpdaterNodeBinForTests(fakeUpdaterNodeBin);
     __testing.setUpdaterCwdForTests(updaterCwd);
+    __testing.setDockerExecPidWaitTimeoutForTests(100);
     const app = express();
     dockerRoutes(app);
     const server = http.createServer(app);
@@ -571,6 +572,7 @@ describe("docker routes", { concurrency: false }, () => {
         __testing.setDockerBinForTests(originalDockerBin);
         __testing.setUpdaterNodeBinForTests(originalFakeEnv.get("MIRA_UPDATER_NODE_BIN"));
         __testing.setUpdaterCwdForTests(originalFakeEnv.get("MIRA_UPDATER_CWD"));
+        __testing.setDockerExecPidWaitTimeoutForTests();
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }

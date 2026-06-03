@@ -1132,6 +1132,35 @@ describe("files routes", () => {
         } finally {
             guardedOpsTesting.setStatSyncForTest();
         }
+
+        for (const [code, expected] of [
+            ["ENOENT", { status: 404, error: "Path not found" }],
+            ["ENOTDIR", { status: 400, error: "Not a directory" }],
+            [
+                "ELOOP",
+                {
+                    status: 403,
+                    error: "Access denied: symlinks are not writable",
+                },
+            ],
+        ] as const) {
+            const renameMock = mock.method(fs.promises, "rename", async () => {
+                const error = new Error(code) as NodeJS.ErrnoException;
+                error.code = code;
+                throw error;
+            });
+            try {
+                const response = await requestJson<{ error: string }>(
+                    server,
+                    "/api/files/generated%2Fnote.txt",
+                    { method: "PUT", body: { content: `after ${code}` } }
+                );
+                assert.equal(response.status, expected.status);
+                assert.equal(response.body.error, expected.error);
+            } finally {
+                renameMock.mock.restore();
+            }
+        }
     });
 
     it("maps unexpected canonicalization failures to 500 responses", async () => {
