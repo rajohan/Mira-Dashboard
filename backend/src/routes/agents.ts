@@ -58,7 +58,13 @@ function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
     }
 
     if (!isProcfsAvailable()) {
-        const childPath = Path.join(parent, childName);
+        const childPath = Path.resolve(parent, childName);
+        const relativeChildPath = Path.relative(parent, childPath);
+        if (relativeChildPath !== childName) {
+            throw Object.assign(new Error("Invalid child directory path"), {
+                code: "EINVAL",
+            });
+        }
         const parentStat = FS.lstatSync(parent);
         if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
             throw Object.assign(new Error("Invalid parent directory"), {

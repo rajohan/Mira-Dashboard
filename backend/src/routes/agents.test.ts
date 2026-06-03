@@ -1233,6 +1233,7 @@ describe("agents routes", () => {
         const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-dir-"));
         const originalMkdirSync = fs.mkdirSync;
         const originalLstatSync = fs.lstatSync;
+        const originalRelative = path.relative;
         try {
             __testing.setProcfsAvailabilityProbeForTest(() => false);
 
@@ -1245,6 +1246,12 @@ describe("agents routes", () => {
                 () => __testing.mkdirChildFromVerifiedParent(parent, "../child"),
                 /Invalid child directory name/u
             );
+            path.relative = (() => "../child") as typeof path.relative;
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "child-path"),
+                /Invalid child directory path/u
+            );
+            path.relative = originalRelative;
 
             const fileParent = path.join(tempDir, "file-parent");
             await writeFile(fileParent, "not a directory", "utf8");
@@ -1311,6 +1318,7 @@ describe("agents routes", () => {
         } finally {
             fs.mkdirSync = originalMkdirSync;
             fs.lstatSync = originalLstatSync;
+            path.relative = originalRelative;
             __testing.setProcfsAvailabilityProbeForTest();
             await rm(tempDir, { recursive: true, force: true });
         }
