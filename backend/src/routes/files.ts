@@ -259,6 +259,10 @@ async function withRootedParentPath<T>(
     }
 }
 
+function ensureSafeParentDirectoryForWrite(safePath: string, rootPath: string): void {
+    prepareSafeWriteTargetWithinRoot(safePath, rootPath);
+}
+
 async function realpathForOpenedFile(
     file: fs.promises.FileHandle,
     candidatePath: string
@@ -580,6 +584,7 @@ export default function filesRoutes(
                     });
                     return;
                 }
+                ensureSafeParentDirectoryForWrite(safeFullPath, workspaceRoot);
 
                 let stat: fs.Stats | null;
                 try {

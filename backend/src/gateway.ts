@@ -659,7 +659,19 @@ async function refreshSessions(
                 (stringFallback(entry.sessionId).trim() ||
                     stringFallback(entry.key).trim()) !== ""
         )
-        .map((entry) => transformSession(entry as GatewaySession));
+        .map((entry) => {
+            const updatedAt =
+                typeof entry.updatedAt === "string"
+                    ? Date.parse(entry.updatedAt)
+                    : entry.updatedAt;
+            return transformSession({
+                ...(entry as GatewaySession),
+                updatedAt:
+                    typeof updatedAt === "number" && Number.isFinite(updatedAt)
+                        ? updatedAt
+                        : undefined,
+            });
+        });
     broadcast({ type: "sessions", sessions: sessionList });
 }
 

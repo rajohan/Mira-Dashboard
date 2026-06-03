@@ -1093,8 +1093,17 @@ describe("gateway state and helper utilities", () => {
         });
         await __testing.refreshSessions(client as never);
         assert.deepEqual(
-            gateway.getSessions().map((session) => session.key),
-            ["agent:valid-string:main", "agent:valid-null:main"]
+            gateway.getSessions().map((session) => ({
+                key: session.key,
+                updatedAt: session.updatedAt,
+            })),
+            [
+                {
+                    key: "agent:valid-string:main",
+                    updatedAt: Date.parse("2026-05-16T13:00:00.000Z"),
+                },
+                { key: "agent:valid-null:main", updatedAt: undefined },
+            ]
         );
     });
 

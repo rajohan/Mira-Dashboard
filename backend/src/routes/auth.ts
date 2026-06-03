@@ -145,7 +145,8 @@ export default function authRoutes(
     } = {}
 ): void {
     const createAuthSession = dependencies.createSession ?? createSession;
-    const createFirstAuthUser = dependencies.createFirstUser ?? createFirstUser;
+    const createFirstAuthUser =
+        dependencies.createFirstUser ?? dependencies.createUser ?? createFirstUser;
     const initGateway =
         dependencies.initGateway ?? ((token: string) => gateway.init(token));
     const persistAuthGatewayToken =
@@ -250,6 +251,7 @@ export default function authRoutes(
                 try {
                     rollbackCreatedUser(user.id);
                 } catch (rollbackError) {
+                    rollbackFailed = true;
                     console.error("[Auth] First-user cleanup failed:", rollbackError);
                 }
             }

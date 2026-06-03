@@ -322,8 +322,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
             await withEnv(
                 {
-                    DATABASE_USERNAME: "legacy-user",
-                    DATABASE_PASSWORD: "legacy-password",
+                    DATABASE_USERNAME: " legacy-user ",
+                    DATABASE_PASSWORD: "\tlegacy-password ",
                     DB_POSTGRESDB_USER: "  ",
                     DB_POSTGRESDB_PASSWORD: "\t",
                 },
@@ -334,8 +334,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 password?: string;
             };
             assert.deepEqual(whitespacePayload, {
-                user: "legacy-user",
-                password: "legacy-password",
+                user: " legacy-user ",
+                password: "\tlegacy-password ",
             });
 
             await withEnv(

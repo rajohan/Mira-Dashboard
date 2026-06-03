@@ -59,7 +59,7 @@ function envFallbackUnlessBlank(name: string, fallbackName: string): string {
     }
 
     const fallback = envFallback(fallbackName, "");
-    return fallback.trim() === "" ? "" : fallback.trim();
+    return fallback.trim() === "" ? "" : fallback;
 }
 
 function getCacheRefreshCommand(key: string): string[] | undefined {

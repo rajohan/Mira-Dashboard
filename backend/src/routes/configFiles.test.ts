@@ -1008,6 +1008,21 @@ describe("config files routes", () => {
         assert.equal(oversizedContent.status, 400);
         assert.equal(oversizedContent.body.error, "Invalid content");
 
+        await rm(openclawPath, { force: true });
+        await mkdir(openclawPath);
+        try {
+            const directoryTarget = await requestJson<{ error: string }>(
+                server,
+                "/api/config-files/openclaw.json",
+                { method: "PUT", body: { content: "{}\n" } }
+            );
+            assert.equal(directoryTarget.status, 400);
+            assert.equal(directoryTarget.body.error, "Path is a directory, not a file");
+        } finally {
+            await rm(openclawPath, { recursive: true, force: true });
+            await writeFile(openclawPath, openclawBeforeInvalid);
+        }
+
         const denied = await requestJson<{ error: string }>(
             server,
             "/api/config-files/not-allowed.json",

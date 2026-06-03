@@ -180,6 +180,49 @@ describe("auth first-user bootstrap routes", () => {
         );
     });
 
+    it("uses the legacy createUser dependency as a first-user fallback", async () => {
+        cleanupBootstrapRows(username);
+        let createdWith: { username: string; password: string } | null = null;
+        let sessionUserId: number | null = null;
+        const fallbackServer = await startServer({
+            createUser: (newUsername, newPassword) => {
+                createdWith = { username: newUsername, password: newPassword };
+                return { id: 42, username: newUsername };
+            },
+            createSession: (userId) => {
+                sessionUserId = userId;
+                return "fallback-session";
+            },
+        });
+        try {
+            const registered = await requestJson<{
+                authenticated: boolean;
+                user: { id: number; username: string };
+            }>(fallbackServer, "/api/auth/register-first-user", {
+                method: "POST",
+                body: {
+                    username: "bootstrap-fallback-user",
+                    password,
+                    gatewayToken,
+                },
+            });
+
+            assert.equal(registered.status, 201);
+            assert.deepEqual(createdWith, {
+                username: "bootstrap-fallback-user",
+                password,
+            });
+            assert.equal(sessionUserId, 42);
+            assert.deepEqual(registered.body, {
+                authenticated: true,
+                user: { id: 42, username: "bootstrap-fallback-user" },
+            });
+        } finally {
+            await fallbackServer.close();
+            cleanupBootstrapRows(username);
+        }
+    });
+
     it("maps first-user creation failures", async () => {
         cleanupBootstrapRows(username);
         let duplicateServer: TestServer | undefined;
@@ -590,7 +633,10 @@ describe("auth first-user bootstrap routes", () => {
             );
 
             assert.equal(registered.status, 500);
-            assert.equal(registered.body.error, "Failed to complete first-user setup");
+            assert.equal(
+                registered.body.error,
+                "Failed to roll back first-user bootstrap"
+            );
             assert.equal(consoleError.mock.callCount(), 2);
         } finally {
             await cleanupFailureServer.close();

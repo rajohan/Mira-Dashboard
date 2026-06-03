@@ -616,6 +616,13 @@ export default function configFilesRoutes(
                         openclawRoot,
                         async (rootedFullPath) => {
                             const currentStat = statGuarded(guardedPath(rootedFullPath));
+                            if (currentStat.isDirectory()) {
+                                const error = new Error(
+                                    "Path is a directory, not a file"
+                                ) as NodeJS.ErrnoException;
+                                error.code = "EISDIR";
+                                throw error;
+                            }
                             if (currentStat.nlink > 1) {
                                 const error = new Error(
                                     "Hard-linked files are not allowed"
@@ -643,6 +650,12 @@ export default function configFilesRoutes(
                     );
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "EISDIR") {
+                        res.status(400).json({
+                            error: "Path is a directory, not a file",
+                        });
+                        return;
+                    }
                     if (code === "EACCES") {
                         res.status(403).json({ error: "Access denied" });
                         return;

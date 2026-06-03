@@ -39,7 +39,7 @@ function isTransientSqliteLock(error: unknown): boolean {
     const message = error.message;
     return (
         /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message.toUpperCase()}`) ||
-        /database is locked/iu.test(message)
+        /database\b.*\blocked\b/iu.test(message)
     );
 }
 

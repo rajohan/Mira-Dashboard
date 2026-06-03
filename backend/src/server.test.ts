@@ -282,6 +282,23 @@ describe("server bootstrap", () => {
         assert.equal(initialLockedPrepareCalls, 1);
         assert.equal(executedSql.length, 1);
 
+        executedSql.length = 0;
+        let tableLockedPrepareCalls = 0;
+        await ensureTaskAutomationColumn({
+            exec: (sql) => executedSql.push(sql),
+            prepare: () => ({
+                all: () => {
+                    tableLockedPrepareCalls += 1;
+                    if (tableLockedPrepareCalls === 1) {
+                        throw new Error("database table is locked");
+                    }
+                    return [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(tableLockedPrepareCalls, 1);
+        assert.equal(executedSql.length, 1);
+
         const initialPrepareError = new Error("schema unavailable");
         await assert.rejects(
             () =>
