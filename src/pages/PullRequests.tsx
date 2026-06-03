@@ -696,29 +696,29 @@ export function PullRequests() {
                     ) : null}
                 </Card>
 
-                <div className="space-y-4">
-                    {pullRequests.length === 0 ? (
-                        <Card variant="bordered">
-                            <CardTitle>No open PRs waiting</CardTitle>
-                            <p className="text-primary-400 mt-2 text-sm">
-                                New dashboard and dependency PRs will appear here for
-                                review.
-                            </p>
-                        </Card>
-                    ) : null}
-
-                    {miraPullRequests.length > 0 ? (
-                        <section className="space-y-3" aria-label="Mira-authored PRs">
-                            <div>
-                                <CardTitle className="text-base">
-                                    Mira-authored PRs
-                                </CardTitle>
-                                <p className="text-primary-400 mt-1 text-sm">
-                                    These can be merged, rejected, or merged and deployed
-                                    from the dashboard.
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                    <div className="space-y-4">
+                        {pullRequests.length === 0 ? (
+                            <Card variant="bordered">
+                                <CardTitle>No open PRs waiting</CardTitle>
+                                <p className="text-primary-400 mt-2 text-sm">
+                                    New dashboard and dependency PRs will appear here for
+                                    review.
                                 </p>
-                            </div>
-                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                            </Card>
+                        ) : null}
+
+                        {miraPullRequests.length > 0 ? (
+                            <section className="space-y-3" aria-label="Mira-authored PRs">
+                                <div>
+                                    <CardTitle className="text-base">
+                                        Mira-authored PRs
+                                    </CardTitle>
+                                    <p className="text-primary-400 mt-1 text-sm">
+                                        These can be merged, rejected, or merged and
+                                        deployed from the dashboard.
+                                    </p>
+                                </div>
                                 <div className="space-y-3">
                                     {miraPullRequests.map((pr) => (
                                         <PullRequestCard
@@ -728,31 +728,23 @@ export function PullRequests() {
                                         />
                                     ))}
                                 </div>
-                                <RecentDeploysCard deployments={deployments} />
-                            </div>
-                        </section>
-                    ) : (
-                        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                            <div />
-                            <RecentDeploysCard deployments={deployments} />
-                        </div>
-                    )}
+                            </section>
+                        ) : null}
 
-                    {externalPullRequests.length > 0 ? (
-                        <section
-                            className="space-y-3"
-                            aria-label="Dependency and external PRs"
-                        >
-                            <div>
-                                <CardTitle className="text-base">
-                                    Dependency / external PRs
-                                </CardTitle>
-                                <p className="text-primary-400 mt-1 text-sm">
-                                    These can be merged after the same review, CI, and
-                                    checkout gates as Mira-authored PRs.
-                                </p>
-                            </div>
-                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                        {externalPullRequests.length > 0 ? (
+                            <section
+                                className="space-y-3"
+                                aria-label="Dependency and external PRs"
+                            >
+                                <div>
+                                    <CardTitle className="text-base">
+                                        Dependency / external PRs
+                                    </CardTitle>
+                                    <p className="text-primary-400 mt-1 text-sm">
+                                        These can be merged after the same review, CI, and
+                                        checkout gates as Mira-authored PRs.
+                                    </p>
+                                </div>
                                 <div className="space-y-3">
                                     {externalPullRequests.map((pr) => (
                                         <PullRequestCard
@@ -762,10 +754,12 @@ export function PullRequests() {
                                         />
                                     ))}
                                 </div>
-                                <div />
-                            </div>
-                        </section>
-                    ) : null}
+                            </section>
+                        ) : null}
+                    </div>
+                    <div>
+                        <RecentDeploysCard deployments={deployments} />
+                    </div>
                 </div>
 
                 {pendingAction && (
