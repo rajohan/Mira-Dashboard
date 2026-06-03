@@ -1284,6 +1284,15 @@ describe("pull request routes", () => {
             }),
             new RegExp(`MIRA_DEPLOYMENT_DB='${process.env.MIRA_DASHBOARD_DB_PATH}'`)
         );
+        assert.match(
+            __testing.deploymentJobUpdateCommand({
+                id: "busy-timeout-check",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+            }),
+            /PRAGMA busy_timeout = 5000/
+        );
         assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
     });
 
