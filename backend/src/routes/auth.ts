@@ -235,11 +235,12 @@ export default function authRoutes(
             response.status(201).json({ authenticated: true, user });
         } catch (bootstrapError) {
             console.error("[Auth] First-user bootstrap failed:", bootstrapError);
+            let rollbackMessage: string | null = null;
             if (attemptedGatewaySwitch) {
                 try {
                     rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
                 } catch (rollbackError) {
-                    const rollbackMessage =
+                    rollbackMessage =
                         rollbackError instanceof Error
                             ? rollbackError.message
                             : String(rollbackError);
@@ -247,10 +248,6 @@ export default function authRoutes(
                         "[Auth] First-user bootstrap rollback failed:",
                         rollbackError
                     );
-                    response.status(500).json({
-                        error: `Failed to roll back first-user bootstrap: ${rollbackMessage}`,
-                    });
-                    return;
                 }
             } else {
                 try {
@@ -273,7 +270,11 @@ export default function authRoutes(
                     }
                 }
             }
-            response.status(500).json({ error: "Failed to complete first-user setup" });
+            response.status(500).json({
+                error: rollbackMessage
+                    ? `Failed to roll back first-user bootstrap: ${rollbackMessage}`
+                    : "Failed to complete first-user setup",
+            });
         }
     });
 

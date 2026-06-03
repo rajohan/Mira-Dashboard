@@ -35,6 +35,7 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_PARTIAL_EXEC_STDOUT",
     "MIRA_FAKE_DOCKER_LONG_PARTIAL_EXEC_STDOUT",
     "MIRA_FAKE_DOCKER_MARKER_WITHOUT_NEWLINE",
+    "MIRA_FAKE_DOCKER_EXEC_SIGNAL",
     "MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL",
     "MIRA_FAKE_DOCKER_SPLIT_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
@@ -286,6 +287,10 @@ if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.inclu
   if (process.env.MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER === "1") {
     process.stdout.write("x__MIRA_DOCKER_EXEC_PID__=4321\nexec stdout\n");
     process.exit(0);
+  }
+  if (process.env.MIRA_FAKE_DOCKER_EXEC_SIGNAL === "1") {
+    process.kill(process.pid, "SIGTERM");
+    return;
   }
   process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\n");
 }
@@ -864,6 +869,7 @@ describe("docker routes", { concurrency: false }, () => {
                 stderr: "",
                 startedAt: Date.now(),
                 endedAt: null,
+                inContainerPid: null as number | null,
                 process: createMockChildProcess({
                     pid: 9_999_999,
                     killed: false,
@@ -874,13 +880,13 @@ describe("docker routes", { concurrency: false }, () => {
                     },
                 }),
             });
-            const alreadyExited = await requestJson<{ success: boolean }>(
+            const alreadyExited = await requestJson<{ error: string }>(
                 server,
                 "/api/docker/exec/already-exited/stop",
                 { method: "POST", body: {} }
             );
-            assert.equal(alreadyExited.status, 200);
-            assert.equal(alreadyExited.body.success, true);
+            assert.equal(alreadyExited.status, 500);
+            assert.match(alreadyExited.body.error, /Timed out waiting/u);
             assert.equal(alreadyExitedKilled, true);
 
             let fallbackKilled = false;
@@ -988,6 +994,7 @@ describe("docker routes", { concurrency: false }, () => {
                 stderr: "",
                 startedAt: Date.now(),
                 endedAt: null,
+                inContainerPid: null as number | null,
                 process: createMockChildProcess({
                     pid: 124,
                     killed: false,
@@ -1037,8 +1044,40 @@ describe("docker routes", { concurrency: false }, () => {
                 "/api/docker/exec/missing-pid/stop",
                 { method: "POST", body: {} }
             );
-            assert.equal(missingPid.status, 200);
+            assert.equal(missingPid.status, 500);
             assert.equal(missingPidKilled, true);
+
+            let delayedPidKilled = false;
+            const delayedPidJob = {
+                id: "delayed-pid",
+                containerId: "app",
+                status: "running" as const,
+                code: null,
+                stdout: "",
+                stderr: "",
+                inContainerPid: null as number | null,
+                startedAt: Date.now(),
+                endedAt: null,
+                process: createMockChildProcess({
+                    killed: false,
+                    kill(signal?: NodeJS.Signals | number) {
+                        assert.equal(signal, "SIGTERM");
+                        delayedPidKilled = true;
+                        return true;
+                    },
+                }),
+            };
+            __testing.dockerExecJobs.set("delayed-pid", delayedPidJob);
+            setTimeout(() => {
+                delayedPidJob.inContainerPid = 4321;
+            }, 20);
+            const delayedPid = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/exec/delayed-pid/stop",
+                { method: "POST", body: {} }
+            );
+            assert.equal(delayedPid.status, 200);
+            assert.equal(delayedPidKilled, true);
 
             let pidOneKilled = false;
             __testing.dockerExecJobs.set("pid-one", {
@@ -1048,6 +1087,7 @@ describe("docker routes", { concurrency: false }, () => {
                 code: null,
                 stdout: "",
                 stderr: "",
+                inContainerPid: 4321,
                 startedAt: Date.now(),
                 endedAt: null,
                 process: createMockChildProcess({
@@ -1237,6 +1277,14 @@ describe("docker routes", { concurrency: false }, () => {
                     __testing.dockerExecJobs.delete("marker-no-newline");
                 }
             );
+            await withEnvValue("MIRA_FAKE_DOCKER_EXEC_SIGNAL", "1", async () => {
+                const signaledRun = await __testing.runDockerExecCommand(
+                    "app",
+                    "echo hi",
+                    "missing-job"
+                );
+                assert.equal(signaledRun.code, 130);
+            });
         } finally {
             __testing.dockerExecJobs.clear();
         }

@@ -10,7 +10,7 @@ import {
     parseJsonField,
 } from "../lib/cacheStore.js";
 import { errorMessage } from "../lib/errors.js";
-import { stringFallback } from "../lib/values.js";
+import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const N8N_ROOT = "/home/ubuntu/projects/n8n";
@@ -38,8 +38,9 @@ const CACHE_REFRESH_SCRIPTS: Record<string, string> = {
 };
 
 function buildCacheRefreshCommand(scriptName: string): string[] {
+    const dopplerBin = nonEmptyEnvFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
     return [
-        "/usr/local/bin/doppler",
+        dopplerBin,
         "run",
         "--project",
         "rajohan",
@@ -49,6 +50,13 @@ function buildCacheRefreshCommand(scriptName: string): string[] {
         "node",
         `${cacheRefreshCwd}/scripts/${scriptName}`,
     ];
+}
+
+function envFallbackUnlessBlank(name: string, fallbackName: string): string {
+    const value = process.env[name];
+    return value === undefined || value.trim() === ""
+        ? envFallback(fallbackName, "")
+        : value;
 }
 
 function getCacheRefreshCommand(key: string): string[] | undefined {
@@ -126,13 +134,11 @@ export async function refreshCacheKey(key: string) {
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
         DB_POSTGRESDB_USER:
-            process.env.DB_POSTGRESDB_USER === undefined
-                ? (process.env.DATABASE_USERNAME ?? "postgres")
-                : process.env.DB_POSTGRESDB_USER,
+            envFallbackUnlessBlank("DB_POSTGRESDB_USER", "DATABASE_USERNAME") ||
+            "postgres",
         DB_POSTGRESDB_PASSWORD:
-            process.env.DB_POSTGRESDB_PASSWORD === undefined
-                ? (process.env.DATABASE_PASSWORD ?? "postgres")
-                : process.env.DB_POSTGRESDB_PASSWORD,
+            envFallbackUnlessBlank("DB_POSTGRESDB_PASSWORD", "DATABASE_PASSWORD") ||
+            "postgres",
     };
 
     const [file, ...args] = command;

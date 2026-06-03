@@ -892,6 +892,7 @@ describe("exec routes", () => {
         const jobId = "running-with-force-kill";
         const noPidJobId = "running-without-force-kill-pid";
         const directGoneJobId = "running-direct-gone";
+        const directErrorJobId = "running-direct-error";
         const signals: Array<NodeJS.Signals | number | undefined> = [];
         const fakeProcess = {
             killed: false,
@@ -916,6 +917,15 @@ describe("exec routes", () => {
             kill(signal: NodeJS.Signals): boolean {
                 assert.equal(signal, "SIGTERM");
                 directGoneProcess.killed = true;
+                return true;
+            },
+        };
+        const directErrorProcess = {
+            killed: false,
+            pid: 456_789,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                directErrorProcess.killed = true;
                 return true;
             },
         };
@@ -949,10 +959,20 @@ describe("exec routes", () => {
             endedAt: null,
             process: directGoneProcess as never,
         });
+        __testing.jobs.set(directErrorJobId, {
+            id: directErrorJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: directErrorProcess as never,
+        });
 
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
             signals.push(signal);
-            if (signal === "SIGTERM" && pid !== -345_678) {
+            if (signal === "SIGTERM" && pid !== -345_678 && pid !== -456_789) {
                 if (Number.isNaN(pid)) {
                     throw new TypeError("missing pid");
                 }
@@ -967,6 +987,12 @@ describe("exec routes", () => {
                 const error = new Error("process gone") as NodeJS.ErrnoException;
                 error.code = "ESRCH";
                 throw error;
+            } else if (pid === -456_789 && signal === "SIGTERM") {
+                return true;
+            } else if (pid === -456_789 && signal === "SIGKILL") {
+                throw new Error("group kill failed");
+            } else if (pid === 456_789 && signal === "SIGKILL") {
+                throw new Error("process kill failed");
             } else {
                 assert.equal(pid, 234_567);
                 assert.equal(signal, "SIGKILL");
@@ -996,12 +1022,22 @@ describe("exec routes", () => {
                 { method: "POST" }
             );
             assert.equal(directGoneStop.status, 200);
+            const directErrorStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${directErrorJobId}/stop`,
+                { method: "POST" }
+            );
+            assert.equal(directErrorStop.status, 200);
             assert.equal(noPidProcess.killed, true);
             assert.equal(directGoneProcess.killed, false);
+            assert.equal(directErrorProcess.killed, false);
             mock.timers.tick(3_050);
             assert.deepEqual(signals, [
                 "SIGTERM",
                 "SIGTERM",
+                "SIGTERM",
+                "SIGKILL",
+                "SIGKILL",
                 "SIGKILL",
                 "SIGKILL",
                 "SIGKILL",
@@ -1022,15 +1058,21 @@ describe("exec routes", () => {
             assert.equal(noPidJob?.endedAt, null);
 
             const directGoneJob = __testing.jobs.get(directGoneJobId);
-            assert.equal(directGoneJob?.status, "done");
-            assert.equal(directGoneJob?.code, 137);
-            assert.equal(directGoneJob?.closePending, true);
+            assert.equal(directGoneJob?.status, "signaled");
+            assert.equal(directGoneJob?.code, null);
+            assert.equal(directGoneJob?.closePending, undefined);
+
+            const directErrorJob = __testing.jobs.get(directErrorJobId);
+            assert.equal(directErrorJob?.status, "done");
+            assert.equal(directErrorJob?.code, 137);
+            assert.equal(directErrorJob?.closePending, true);
         } finally {
             mock.timers.reset();
             process.kill = originalKill;
             __testing.jobs.delete(jobId);
             __testing.jobs.delete(noPidJobId);
             __testing.jobs.delete(directGoneJobId);
+            __testing.jobs.delete(directErrorJobId);
         }
     });
 });

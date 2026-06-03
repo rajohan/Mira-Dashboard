@@ -156,7 +156,7 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
     if (
-        !/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/u.test(
+        !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
             host
         ) &&
         !validIpv6 &&

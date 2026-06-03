@@ -29,22 +29,22 @@ const command = args.at(-1) || "";
 if (process.env.FAKE_BACKUP_SIGNAL === "1") {
     process.kill(process.pid, "SIGTERM");
     setInterval(() => {}, 1000);
-	} else {
-	    process.stdout.write("started backup\n" + command + "\n");
-	    process.stderr.write("backup warning\n");
-	    if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
-	        const fs = require("node:fs");
-	        const timer = setInterval(() => {
-	            if (fs.existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL)) {
-	                clearInterval(timer);
-	                process.exit(0);
-	            }
-	        }, 10);
-	        return;
-	    }
-	    setTimeout(() => process.exit(0), 10);
-	}
-	`,
+} else {
+    process.stdout.write("started backup\n" + command + "\n");
+    process.stderr.write("backup warning\n");
+    if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
+        const fs = require("node:fs");
+        const timer = setInterval(() => {
+            if (fs.existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL)) {
+                clearInterval(timer);
+                process.exit(0);
+            }
+        }, 10);
+        return;
+    }
+    setTimeout(() => process.exit(0), 10);
+}
+`,
         "utf8"
     );
     await chmod(dopplerPath, 0o755);

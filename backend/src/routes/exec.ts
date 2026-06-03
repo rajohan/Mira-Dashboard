@@ -557,7 +557,6 @@ export default function execRoutes(
                         }
                     } catch (groupKillError) {
                         if (isProcessGoneError(groupKillError)) {
-                            markExecJobForcedKilled(job);
                             return;
                         }
                         if (typeof processId === "number") {
@@ -566,8 +565,9 @@ export default function execRoutes(
                                 markExecJobForcedKilled(job);
                             } catch (processKillError) {
                                 if (isProcessGoneError(processKillError)) {
-                                    markExecJobForcedKilled(job);
+                                    return;
                                 }
+                                markExecJobForcedKilled(job);
                             }
                         }
                     }

@@ -441,7 +441,7 @@ describe("auth first-user bootstrap routes", () => {
         }
     });
 
-    it("stops first-user cleanup when bootstrap rollback throws", async () => {
+    it("reports first-user rollback errors while restoring the gateway", async () => {
         cleanupBootstrapRows(username);
         let rollbackCalled = false;
         let shutdown = false;
@@ -473,7 +473,7 @@ describe("auth first-user bootstrap routes", () => {
                 "Failed to roll back first-user bootstrap: rollback unavailable"
             );
             assert.equal(rollbackCalled, true);
-            assert.equal(shutdown, false);
+            assert.equal(shutdown, true);
         } finally {
             await throwingRollbackServer.close();
             cleanupUser("bootstrap-side-effect");
@@ -488,7 +488,7 @@ describe("auth first-user bootstrap routes", () => {
                 throw new Error("session unavailable");
             },
             rollbackBootstrap: () => {
-                throw new Object("primitive rollback unavailable");
+                throw "primitive rollback unavailable";
             },
         });
         try {

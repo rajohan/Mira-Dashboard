@@ -282,6 +282,13 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
 
+            await withEnv({ DOPPLER_BIN: "/tmp/custom-doppler" }, async () => {
+                assert.equal(
+                    __testing.getCacheRefreshCommand("quotas.summary")?.[0],
+                    "/tmp/custom-doppler"
+                );
+            });
+
             await withEnv(
                 {
                     DATABASE_USERNAME: undefined,
@@ -311,7 +318,25 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 user?: string;
                 password?: string;
             };
-            assert.deepEqual(blankPayload, { user: "", password: "" });
+            assert.deepEqual(blankPayload, { user: "postgres", password: "postgres" });
+
+            await withEnv(
+                {
+                    DATABASE_USERNAME: "legacy-user",
+                    DATABASE_PASSWORD: "legacy-password",
+                    DB_POSTGRESDB_USER: "  ",
+                    DB_POSTGRESDB_PASSWORD: "\t",
+                },
+                () => refreshCacheKey("quotas.summary")
+            );
+            const whitespacePayload = JSON.parse(await readFile(envPath, "utf8")) as {
+                user?: string;
+                password?: string;
+            };
+            assert.deepEqual(whitespacePayload, {
+                user: "legacy-user",
+                password: "legacy-password",
+            });
 
             await withEnv(
                 {
