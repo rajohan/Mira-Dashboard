@@ -149,6 +149,25 @@ CREATE TABLE IF NOT EXISTS app_config (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS deployment_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    commit_sha TEXT,
+    note TEXT,
+    stdout TEXT,
+    stderr TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployment_jobs_updated_at ON deployment_jobs(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS deployment_lock (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    job_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 `);
 
 /** Ensures older task databases have the automation column. */

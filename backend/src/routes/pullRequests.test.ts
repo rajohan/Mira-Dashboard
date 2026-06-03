@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, before, describe, it, mock } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -45,19 +45,18 @@ async function waitForDeploymentStatus(
     status: string,
     tempDir: string
 ): Promise<Record<string, unknown>> {
-    const jobPath = path.join(tempDir, "data", "deployments", `${jobId}.json`);
     let lastJob = {} as Record<string, unknown>;
     for (let attempt = 0; attempt < 40; attempt += 1) {
         try {
-            const raw = await readFile(jobPath, "utf8");
-            if (raw.trim()) {
-                lastJob = JSON.parse(raw) as Record<string, unknown>;
+            const job = readDeploymentJobFromDb(jobId, tempDir);
+            if (job) {
+                lastJob = job;
                 if (lastJob.status === status) {
                     return lastJob;
                 }
             }
         } catch {
-            // Deployment files are rewritten in-place; retry transient reads/parses.
+            // Deployment status can be updated by the detached restart worker.
         }
         await delay(25);
     }
@@ -66,16 +65,70 @@ async function waitForDeploymentStatus(
 }
 
 async function waitForDeploymentLockReleased(tempDir: string): Promise<void> {
-    const lockPath = path.join(tempDir, "data", "deployments", "active.lock");
     for (let attempt = 0; attempt < 40; attempt += 1) {
         try {
-            await stat(lockPath);
+            if (!readDeploymentLockFromDb(tempDir)) {
+                return;
+            }
         } catch {
-            return;
+            // The detached restart worker may briefly hold the SQLite write lock.
         }
         await delay(25);
     }
-    await assert.rejects(() => stat(lockPath));
+    assert.equal(readDeploymentLockFromDb(tempDir), undefined);
+}
+
+function withDeploymentDb<T>(tempDir: string, action: (db: DatabaseSync) => T): T {
+    const deploymentDb = new DatabaseSync(
+        path.join(tempDir, "data", "mira-dashboard.db")
+    );
+    try {
+        deploymentDb.exec("PRAGMA busy_timeout = 1000");
+        return action(deploymentDb);
+    } finally {
+        deploymentDb.close();
+    }
+}
+
+function readDeploymentJobFromDb(
+    jobId: string,
+    tempDir: string
+): Record<string, unknown> | undefined {
+    return withDeploymentDb(tempDir, (deploymentDb) =>
+        deploymentDb
+            .prepare(
+                `
+                SELECT
+                    id,
+                    status,
+                    started_at AS startedAt,
+                    updated_at AS updatedAt,
+                    commit_sha AS "commit",
+                    note,
+                    stdout,
+                    stderr
+                FROM deployment_jobs
+                WHERE id = ?
+                `
+            )
+            .get(jobId)
+    ) as Record<string, unknown> | undefined;
+}
+
+function readDeploymentLockFromDb(tempDir: string): string | undefined {
+    return withDeploymentDb(tempDir, (deploymentDb) => {
+        const row = deploymentDb
+            .prepare("SELECT job_id FROM deployment_lock WHERE id = 1")
+            .get() as { job_id: string } | undefined;
+        return row?.job_id;
+    });
+}
+
+function clearDeploymentState(tempDir: string): void {
+    withDeploymentDb(tempDir, (deploymentDb) => {
+        deploymentDb.prepare("DELETE FROM deployment_lock").run();
+        deploymentDb.prepare("DELETE FROM deployment_jobs").run();
+    });
 }
 
 async function waitForFile(filePath: string): Promise<void> {
@@ -573,7 +626,10 @@ if (!args.includes("--user") || !script.includes("systemctl --user restart mira-
   process.stderr.write("deploy restart should use user systemd service");
   process.exit(1);
 }
-require("node:fs").rmSync("data/deployments/active.lock", { force: true });
+const { DatabaseSync } = require("node:sqlite");
+const deploymentDb = new DatabaseSync("data/mira-dashboard.db");
+deploymentDb.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+deploymentDb.close();
 process.stdout.write("systemd-run " + args.join(" ") + "\n");
 `
     );
@@ -674,22 +730,18 @@ describe("pull request routes", () => {
         process.env.FAKE_GH_REVIEW_STATE_FILE = path.join(tempDir, "review-state");
         await installFakeCommands(tempDir);
         process.env.RAJOHAN_GITHUB_TOKEN = "rajohan-review-token";
-        await mkdir(path.join(tempDir, "data", "deployments"), { recursive: true });
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
         });
-        await writeFile(
-            path.join(tempDir, "data", "deployments", "job-1.json"),
-            JSON.stringify({
-                id: "job-1",
-                status: "ok",
-                startedAt: "2026-05-11T00:00:00.000Z",
-                updatedAt: "2026-05-11T00:01:00.000Z",
-                commit: "abc1234",
-            }),
-            "utf8"
-        );
         server = await startServer(tempDir);
+        const { __testing } = await import(`./pullRequests.js?seed=${randomUUID()}`);
+        __testing.writeDeploymentJob({
+            id: "job-1",
+            status: "ok",
+            startedAt: "2026-05-11T00:00:00.000Z",
+            updatedAt: "2026-05-11T00:01:00.000Z",
+            commit: "abc1234",
+        });
     });
 
     after(async () => {
@@ -865,7 +917,7 @@ describe("pull request routes", () => {
         ]);
     });
 
-    it("returns recent deployment jobs from the local deployment directory", async () => {
+    it("returns recent deployment jobs from the dashboard database", async () => {
         const response = await requestJson<{
             deployments: Array<{ id: string; status: string; commit: string }>;
         }>(server, "/api/pull-requests/deployments");
@@ -1210,67 +1262,41 @@ describe("pull request routes", () => {
 
     it("covers deployment lock lifecycle helper edge cases", async () => {
         const { __testing } = await import(`./pullRequests.js?locks=${randomUUID()}`);
-        const deploymentDir = path.join(tempDir, "data", "deployments");
-        const lockPath = path.join(deploymentDir, "active.lock");
+        const { db: deploymentDb } = await import("../db.js");
         const freshTimestamp = new Date().toISOString();
-        await mkdir(deploymentDir, { recursive: true });
-        await rm(lockPath, { force: true });
+        clearDeploymentState(tempDir);
 
         try {
-            await writeFile(path.join(deploymentDir, "broken.json"), "{", "utf8");
             assert.equal(__testing.readDeploymentJob("broken"), undefined);
 
-            await writeFile(
-                path.join(deploymentDir, "finished.json"),
-                JSON.stringify({
-                    id: "finished",
-                    status: "ok",
-                    startedAt: "2026-06-03T19:41:52.233Z",
-                    updatedAt: "2026-06-03T19:41:52.233Z",
-                    note: "done",
-                }),
-                "utf8"
-            );
-            await writeFile(lockPath, "finished", "utf8");
+            __testing.writeDeploymentJob({
+                id: "finished",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+                note: "done",
+            });
+            __testing.acquireDeploymentLock("finished");
             __testing.acquireDeploymentLock("next");
-            const nextLock = await readFile(lockPath, "utf8");
-            assert.equal(nextLock.trim(), "next");
+            assert.equal(__testing.readDeploymentLock(), "next");
 
             __testing.releaseDeploymentLock("other");
-            const retainedLock = await readFile(lockPath, "utf8");
-            assert.equal(retainedLock.trim(), "next");
+            assert.equal(__testing.readDeploymentLock(), "next");
             __testing.releaseDeploymentLock("next");
-            await assert.rejects(() => stat(lockPath), {
-                code: "ENOENT",
+            assert.equal(__testing.readDeploymentLock(), undefined);
+
+            __testing.writeDeploymentJob({
+                id: "active",
+                status: "restart-scheduled",
+                startedAt: freshTimestamp,
+                updatedAt: freshTimestamp,
+                note: "restart pending",
             });
-
-            await writeFile(lockPath, "   ", "utf8");
-            __testing.acquireDeploymentLock("empty-lock");
-            const emptyLockReplacement = await readFile(lockPath, "utf8");
-            assert.equal(emptyLockReplacement.trim(), "empty-lock");
-            __testing.releaseDeploymentLock("empty-lock");
-
-            await writeFile(
-                path.join(deploymentDir, "active.json"),
-                JSON.stringify({
-                    id: "active",
-                    status: "restart-scheduled",
-                    startedAt: freshTimestamp,
-                    updatedAt: freshTimestamp,
-                    note: "restart pending",
-                }),
-                "utf8"
-            );
-            await writeFile(lockPath, "active", "utf8");
+            __testing.acquireDeploymentLock("active");
             assert.throws(() => __testing.acquireDeploymentLock("blocked"), {
                 message: "Dashboard deploy already in progress (active)",
             });
-            await writeFile(path.join(deploymentDir, "corrupt-active.json"), "{", "utf8");
-            await writeFile(lockPath, "corrupt-active", "utf8");
-            assert.throws(() => __testing.acquireDeploymentLock("corrupt-blocked"), {
-                message: "Dashboard deploy already in progress (corrupt-active)",
-            });
-            await rm(lockPath, { force: true });
+            __testing.releaseDeploymentLock("active");
 
             const staleJob = {
                 id: "stale",
@@ -1287,73 +1313,86 @@ describe("pull request routes", () => {
                 }),
                 true
             );
-            await writeFile(
-                path.join(deploymentDir, `${staleJob.id}.json`),
-                JSON.stringify(staleJob),
-                "utf8"
-            );
-            await writeFile(lockPath, staleJob.id, "utf8");
+            __testing.writeDeploymentJob(staleJob);
+            __testing.acquireDeploymentLock(staleJob.id);
             __testing.acquireDeploymentLock("after-stale");
-            const afterStaleLock = await readFile(lockPath, "utf8");
-            assert.equal(afterStaleLock.trim(), "after-stale");
+            assert.equal(__testing.readDeploymentLock(), "after-stale");
             __testing.releaseDeploymentLock("after-stale");
 
             __testing.releaseDeploymentLock("missing");
-            assert.equal(__testing.deploymentJobFileExists("missing"), false);
 
-            const realWriteFileSync = fs.writeFileSync;
-            const realStatSync = fs.statSync;
-            const writeMock = mock.method(fs, "writeFileSync", (...args: unknown[]) => {
-                if (String(args[0]).endsWith("active.lock")) {
-                    const error = new Error("lock race") as NodeJS.ErrnoException;
-                    error.code = "EEXIST";
-                    throw error;
+            const realPrepare = deploymentDb.prepare.bind(deploymentDb);
+            const releasePrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("DELETE FROM deployment_lock WHERE id = 1")) {
+                        throw new Error("release unavailable");
+                    }
+                    return realPrepare(sql);
                 }
-                return Reflect.apply(realWriteFileSync, fs, args) as void;
-            });
+            );
+            try {
+                assert.doesNotThrow(() => __testing.releaseDeploymentLock("missing"));
+            } finally {
+                releasePrepareMock.mock.restore();
+            }
+
+            const constraintPrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_lock")) {
+                        return {
+                            run: () => {
+                                throw new Error("constraint failed");
+                            },
+                        };
+                    }
+                    return realPrepare(sql);
+                }
+            );
             try {
                 assert.throws(() => __testing.acquireDeploymentLock("raced"), {
                     message: "Dashboard deploy already in progress",
                 });
             } finally {
-                writeMock.mock.restore();
+                constraintPrepareMock.mock.restore();
             }
 
-            const writeFailureMock = mock.method(
-                fs,
-                "writeFileSync",
-                (...args: unknown[]) => {
-                    if (String(args[0]).endsWith("active.lock")) {
-                        const error = new Error(
-                            "disk unavailable"
-                        ) as NodeJS.ErrnoException;
-                        error.code = "EIO";
-                        throw error;
+            const failedLockPrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_lock")) {
+                        return {
+                            run: () => {
+                                throw new Error("lock write unavailable");
+                            },
+                        };
                     }
-                    return Reflect.apply(realWriteFileSync, fs, args) as void;
+                    return realPrepare(sql);
                 }
             );
             try {
-                assert.throws(() => __testing.acquireDeploymentLock("failed"), {
-                    message: "disk unavailable",
+                assert.throws(() => __testing.acquireDeploymentLock("failed-lock"), {
+                    message: "lock write unavailable",
                 });
             } finally {
-                writeFailureMock.mock.restore();
+                failedLockPrepareMock.mock.restore();
             }
 
-            const statFailureMock = mock.method(fs, "statSync", (...args: unknown[]) => {
-                if (String(args[0]).endsWith("stat-fails.json")) {
-                    const error = new Error("stat unavailable") as NodeJS.ErrnoException;
-                    error.code = "EACCES";
-                    throw error;
-                }
-                return Reflect.apply(realStatSync, fs, args) as fs.Stats;
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("missing-active", freshTimestamp);
             });
-            try {
-                assert.equal(__testing.deploymentJobFileExists("stat-fails"), true);
-            } finally {
-                statFailureMock.mock.restore();
-            }
+            assert.throws(() => __testing.acquireDeploymentLock("missing-blocked"), {
+                message: "Dashboard deploy already in progress (missing-active)",
+            });
+            __testing.releaseDeploymentLock("missing-active");
 
             const job = {
                 id: "background-failed",
@@ -1362,7 +1401,8 @@ describe("pull request routes", () => {
                 updatedAt: "2026-06-03T19:41:52.233Z",
                 note: "Deploy started",
             };
-            await writeFile(lockPath, job.id, "utf8");
+            __testing.writeDeploymentJob(job);
+            __testing.acquireDeploymentLock(job.id);
             const restoreGitEnv = saveEnv(["FAKE_GIT_PULL_FAIL"]);
             process.env.FAKE_GIT_PULL_FAIL = "1";
             try {
@@ -1370,67 +1410,37 @@ describe("pull request routes", () => {
             } finally {
                 restoreGitEnv();
             }
-            const failedJob = JSON.parse(
-                await readFile(path.join(deploymentDir, `${job.id}.json`), "utf8")
-            ) as { status: string; note: string };
+            const failedJob = __testing.readDeploymentJob(job.id) as {
+                status: string;
+                note: string;
+            };
             assert.equal(failedJob.status, "failed");
             assert.match(failedJob.note, /pull failed/u);
-            await assert.rejects(() => stat(lockPath), {
-                code: "ENOENT",
-            });
+            assert.equal(__testing.readDeploymentLock(), undefined);
 
-            const failedWriteJob = {
-                id: "background-write-failed",
-                status: "building",
-                startedAt: "2026-06-03T19:41:52.233Z",
-                updatedAt: "2026-06-03T19:41:52.233Z",
-                note: "Deploy started",
-            };
-            await writeFile(lockPath, failedWriteJob.id, "utf8");
-            const failureWriteMock = mock.method(
-                fs,
-                "writeFileSync",
-                (...args: unknown[]) => {
-                    if (String(args[0]).endsWith(`${failedWriteJob.id}.json`)) {
-                        throw new Error("failed job write unavailable");
-                    }
-                    return Reflect.apply(realWriteFileSync, fs, args) as void;
-                }
-            );
-            const restoreFailedWriteEnv = saveEnv(["FAKE_GIT_PULL_FAIL"]);
-            process.env.FAKE_GIT_PULL_FAIL = "1";
-            try {
-                await assert.rejects(() => __testing.runDeploymentJob(failedWriteJob), {
-                    message: "failed job write unavailable",
-                });
-            } finally {
-                restoreFailedWriteEnv();
-                failureWriteMock.mock.restore();
-            }
-            await assert.rejects(() => stat(lockPath), {
-                code: "ENOENT",
-            });
+            const startJob = __testing.startDeployLatest();
+            assert.equal(startJob.status, "building");
+            assert.equal(__testing.readDeploymentLock(), startJob.id);
+            __testing.releaseDeploymentLock(startJob.id);
 
-            const startWriteMock = mock.method(
-                fs,
-                "writeFileSync",
-                (...args: unknown[]) => {
-                    if (String(args[0]).endsWith(".json")) {
+            const failedJobWriteMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_jobs")) {
                         throw new Error("job write failed");
                     }
-                    return Reflect.apply(realWriteFileSync, fs, args) as void;
+                    return realPrepare(sql);
                 }
             );
             try {
                 assert.throws(() => __testing.startDeployLatest(), {
                     message: "job write failed",
                 });
+                assert.equal(__testing.readDeploymentLock(), undefined);
             } finally {
-                startWriteMock.mock.restore();
+                failedJobWriteMock.mock.restore();
             }
-            await assert.rejects(() => stat(lockPath), {
-                code: "ENOENT",
-            });
 
             const originalConsoleError = console.error;
             const backgroundErrors: unknown[][] = [];
@@ -1452,26 +1462,22 @@ describe("pull request routes", () => {
             ]);
 
             for (let index = 0; index < 52; index += 1) {
-                await writeFile(
-                    path.join(deploymentDir, `prune-${index}.json`),
-                    JSON.stringify({
-                        id: `prune-${index}`,
-                        status: "ok",
-                        startedAt: "2026-06-03T19:41:52.233Z",
-                        updatedAt: "2026-06-03T19:41:52.233Z",
-                        note: "done",
-                    }),
-                    "utf8"
-                );
+                __testing.writeDeploymentJob({
+                    id: `history-${index}`,
+                    status: "ok",
+                    startedAt: `2026-06-03T19:41:${String(index).padStart(2, "0")}.233Z`,
+                    updatedAt: `2026-06-03T19:41:${String(index).padStart(2, "0")}.233Z`,
+                    note: "done",
+                });
             }
-            __testing.pruneDeploymentJobs();
-            const deploymentFiles = fs
-                .readdirSync(deploymentDir)
-                .filter((file) => file.endsWith(".json"));
-            assert.equal(deploymentFiles.length, 50);
+            const response = await requestJson<{ deployments: unknown[] }>(
+                server,
+                "/api/pull-requests/deployments"
+            );
+            assert.equal(response.body.deployments.length, 10);
         } finally {
             mock.restoreAll();
-            await rm(lockPath, { force: true });
+            clearDeploymentState(tempDir);
         }
     });
 
@@ -2014,29 +2020,18 @@ describe("pull request routes", () => {
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
         });
-        const activeJobPath = path.join(
-            tempDir,
-            "data",
-            "deployments",
-            "merge-active-job.json"
+        const { __testing } = await import(
+            `./pullRequests.js?merge-active=${randomUUID()}`
         );
         const activeUpdatedAt = new Date().toISOString();
-        await writeFile(
-            activeJobPath,
-            JSON.stringify({
-                id: "merge-active-job",
-                status: "building",
-                startedAt: activeUpdatedAt,
-                updatedAt: activeUpdatedAt,
-                note: "Deploy started",
-            }),
-            "utf8"
-        );
-        await writeFile(
-            path.join(tempDir, "data", "deployments", "active.lock"),
-            "merge-active-job",
-            "utf8"
-        );
+        __testing.writeDeploymentJob({
+            id: "merge-active-job",
+            status: "building",
+            startedAt: activeUpdatedAt,
+            updatedAt: activeUpdatedAt,
+            note: "Deploy started",
+        });
+        __testing.acquireDeploymentLock("merge-active-job");
         try {
             const deployStartFailure = await requestJson<{
                 ok: boolean;
@@ -2061,9 +2056,7 @@ describe("pull request routes", () => {
                 "Dashboard deploy already in progress (merge-active-job)"
             );
         } finally {
-            await rm(path.join(tempDir, "data", "deployments", "active.lock"), {
-                force: true,
-            });
+            __testing.releaseDeploymentLock("merge-active-job");
         }
     });
 
@@ -2291,29 +2284,18 @@ describe("pull request routes", () => {
             );
             delete process.env.FAKE_GIT_BRANCH;
 
-            const activeJobPath = path.join(
-                tempDir,
-                "data",
-                "deployments",
-                "active-job.json"
+            const { __testing } = await import(
+                `./pullRequests.js?active-deploy=${randomUUID()}`
             );
             const activeUpdatedAt = new Date().toISOString();
-            await writeFile(
-                activeJobPath,
-                JSON.stringify({
-                    id: "active-job",
-                    status: "building",
-                    startedAt: activeUpdatedAt,
-                    updatedAt: activeUpdatedAt,
-                    note: "Deploy started",
-                }),
-                "utf8"
-            );
-            await writeFile(
-                path.join(tempDir, "data", "deployments", "active.lock"),
-                "active-job",
-                "utf8"
-            );
+            __testing.writeDeploymentJob({
+                id: "active-job",
+                status: "building",
+                startedAt: activeUpdatedAt,
+                updatedAt: activeUpdatedAt,
+                note: "Deploy started",
+            });
+            __testing.acquireDeploymentLock("active-job");
             const activeDeploy = await requestJson<{ error: string }>(
                 server,
                 "/api/pull-requests/deploy",
@@ -2326,9 +2308,10 @@ describe("pull request routes", () => {
             );
         } finally {
             restoreGitEnv();
-            await rm(path.join(tempDir, "data", "deployments", "active.lock"), {
-                force: true,
-            });
+            const { __testing } = await import(
+                `./pullRequests.js?active-deploy-cleanup=${randomUUID()}`
+            );
+            __testing.releaseDeploymentLock("active-job");
             console.error = originalConsoleError;
         }
     });
