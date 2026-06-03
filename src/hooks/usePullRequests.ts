@@ -25,6 +25,7 @@ export interface PullRequestSummary {
     mergeStateStatus?: string;
     reviewDecision?: string;
     reviewerApproved?: boolean;
+    reviewerCanApprove?: boolean;
     statusCheckRollup?: unknown[];
     additions?: number;
     deletions?: number;

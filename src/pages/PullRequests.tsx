@@ -49,7 +49,6 @@ const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends ne
 void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 
 const MIRA_AUTHOR = "mira-2026";
-const RAYMOND_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
@@ -238,13 +237,9 @@ function githubMergeBlocked(pr: PullRequestSummary): boolean {
     );
 }
 
-/** Returns whether Raymond can approve the pull request review. */
-function canRaymondApproveReview(pr: PullRequestSummary): boolean {
-    return (
-        pr.author?.login !== RAYMOND_AUTHOR &&
-        !pr.isDraft &&
-        !pullRequestReviewApproved(pr)
-    );
+/** Returns whether the configured reviewer can approve the pull request review. */
+function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
+    return pr.reviewerCanApprove === true;
 }
 
 /** Performs action label. */
@@ -479,7 +474,6 @@ export function PullRequests() {
                     });
                     setLastResult(result.message);
                     setPendingAction(null);
-                    void refetchPullRequests();
                     return;
                 }
 
@@ -551,7 +545,7 @@ export function PullRequests() {
                         {mergeDisabledReason}
                     </p>
                 ) : null}
-                {canRaymondApproveReview(pr) ? (
+                {canConfiguredReviewerApproveReview(pr) ? (
                     <Button
                         variant="secondary"
                         onClick={() => setPendingAction({ type: "review-approve", pr })}

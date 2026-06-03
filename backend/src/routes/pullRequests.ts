@@ -76,6 +76,7 @@ interface PullRequestSummary {
     mergeStateStatus?: string;
     reviewDecision?: string;
     reviewerApproved?: boolean;
+    reviewerCanApprove?: boolean;
     latestOpinionatedReviews?: PullRequestReviewConnection;
     reviews?: PullRequestReview[];
     statusCheckRollup?: unknown[];
@@ -216,7 +217,10 @@ function buildGithubCommandEnv(githubToken: string): NodeJS.ProcessEnv {
 /** Builds command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
     const githubToken =
-        process.env.MIRA_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+        process.env.MIRA_GITHUB_TOKEN?.trim() ||
+        process.env.GH_TOKEN?.trim() ||
+        process.env.GITHUB_TOKEN?.trim() ||
+        "";
     return buildGithubCommandEnv(githubToken);
 }
 
@@ -231,7 +235,7 @@ function buildReviewCommandEnv(): NodeJS.ProcessEnv {
 
 /** Returns the configured reviewer author. */
 function reviewerAuthor(): string {
-    return process.env.RAYMOND_GITHUB_USERNAME?.trim() || DEFAULT_REVIEWER_AUTHOR;
+    return process.env.RAJOHAN_GITHUB_USERNAME?.trim() || DEFAULT_REVIEWER_AUTHOR;
 }
 
 /** Returns whether the configured reviewer has approved the pull request. */
@@ -248,6 +252,24 @@ function hasReviewerApproval(pr: PullRequestSummary): boolean {
     return latestReview?.state?.toUpperCase() === "APPROVED";
 }
 
+/** Returns whether the pull request has a dashboard-accepted review approval. */
+function pullRequestReviewApproved(pr: PullRequestSummary): boolean {
+    return (
+        pr.reviewDecision?.toUpperCase() === "APPROVED" ||
+        pr.reviewerApproved === true ||
+        hasReviewerApproval(pr)
+    );
+}
+
+/** Returns whether the configured reviewer can approve the pull request. */
+function reviewerCanApprove(pr: PullRequestSummary): boolean {
+    return (
+        pr.author?.login !== reviewerAuthor() &&
+        !pr.isDraft &&
+        !pullRequestReviewApproved(pr)
+    );
+}
+
 /** Normalizes pull request metadata for the dashboard API. */
 function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
@@ -256,10 +278,8 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
 
     return {
         ...rest,
-        reviewerApproved:
-            pr.reviewerApproved === true ||
-            pr.reviewDecision?.toUpperCase() === "APPROVED" ||
-            hasReviewerApproval(pr),
+        reviewerApproved: pullRequestReviewApproved(pr),
+        reviewerCanApprove: reviewerCanApprove(pr),
     };
 }
 
@@ -341,12 +361,10 @@ async function runGhJsonLines<T>(
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
         const armForceKillTimer = () => {
-            /* c8 ignore next 3 -- depends on OS pipe timing after a process is already terminating. */
-            if (forceKillTimer) {
-                return;
+            if (!forceKillTimer) {
+                forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+                forceKillTimer.unref();
             }
-            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
-            forceKillTimer.unref();
         };
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
@@ -389,26 +407,24 @@ async function runGhJsonLines<T>(
 
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
-            /* c8 ignore next 7 -- pipe chunking can surface this as a final parse error instead. */
             if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
                 armForceKillTimer();
                 settle(() => reject(new Error("GitHub CLI JSON line was too large")), {
                     keepForceKillTimer: true,
                 });
-                return;
-            }
-
-            try {
-                for (const line of lines) {
-                    parseGhJsonLine(line, rows);
+            } else {
+                try {
+                    for (const line of lines) {
+                        parseGhJsonLine(line, rows);
+                    }
+                } catch (error) {
+                    child.kill("SIGTERM");
+                    armForceKillTimer();
+                    settle(() => reject(toGhJsonParseError(error)), {
+                        keepForceKillTimer: true,
+                    });
                 }
-            } catch (error) {
-                child.kill("SIGTERM");
-                armForceKillTimer();
-                settle(() => reject(toGhJsonParseError(error)), {
-                    keepForceKillTimer: true,
-                });
             }
         });
 
@@ -535,9 +551,7 @@ function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
     return (
         pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
         (mergeable === "MERGEABLE" || mergeable === "DIRTY") &&
-        (pr.reviewDecision?.toUpperCase() === "APPROVED" ||
-            pr.reviewerApproved === true ||
-            hasReviewerApproval(pr)) &&
+        pullRequestReviewApproved(pr) &&
         !pr.isDraft &&
         pullRequestChecksPassed(pr.statusCheckRollup)
     );
@@ -719,19 +733,18 @@ function validateDashboardPrForApproval(pr: PullRequestSummary): void {
     if (!pullRequestChecksPassed(pr.statusCheckRollup)) {
         throw new Error("Pull request CI checks must pass before approval");
     }
+    if (!pullRequestReviewApproved(pr)) {
+        throw new Error("Pull request review approval is required before merging");
+    }
 }
 
-/** Validates a pull request can receive Raymond's review approval. */
+/** Validates a pull request can receive Rajohan's review approval. */
 function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     validateDashboardPr(pr);
     if (pr.author?.login === reviewerAuthor()) {
-        throw new Error("Raymond cannot approve his own pull request");
+        throw new Error("Rajohan cannot approve his own pull request");
     }
-    if (
-        pr.reviewDecision?.toUpperCase() === "APPROVED" ||
-        pr.reviewerApproved === true ||
-        hasReviewerApproval(pr)
-    ) {
+    if (pullRequestReviewApproved(pr)) {
         throw new Error("Pull request is already approved");
     }
 }
@@ -1029,7 +1042,7 @@ async function approvePullRequestReview(number: number) {
 /** Performs reject pull request. */
 async function rejectPullRequest(number: number, comment: string) {
     const pr = await getPullRequest(number);
-    validateMiraPr(pr);
+    validateDashboardPr(pr);
 
     await runCommand(
         "gh",
@@ -1127,7 +1140,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
             const comment =
                 typeof req.body?.comment === "string" && req.body.comment.trim()
                     ? req.body.comment.trim()
-                    : "Closed from Mira Dashboard after Raymond rejected it.";
+                    : "Closed from Mira Dashboard after Rajohan rejected it.";
             res.json(await rejectPullRequest(number, comment));
         })
     );

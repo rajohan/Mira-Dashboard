@@ -17,7 +17,7 @@ const originalCwd = process.cwd();
 const originalPath = process.env.PATH;
 const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
 const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
-const originalRaymondToken = process.env.RAJOHAN_GITHUB_TOKEN;
+const originalRajohanToken = process.env.RAJOHAN_GITHUB_TOKEN;
 const originalFakeReviewStateFile = process.env.FAKE_GH_REVIEW_STATE_FILE;
 
 function saveEnv(names: string[]): () => void {
@@ -303,6 +303,19 @@ if (args[0] === "api" && args[1] === "graphql") {
 }
 if (args[0] === "pr" && args[1] === "view") {
   const requested = Number(args[2]);
+  const jsonIndex = args.indexOf("--json");
+  const requestedFields =
+    jsonIndex !== -1 && typeof args[jsonIndex + 1] === "string"
+      ? args[jsonIndex + 1].split(",")
+      : [];
+  if (
+    jsonIndex === -1 ||
+    !requestedFields.includes("reviews") ||
+    !requestedFields.includes("mergeStateStatus")
+  ) {
+    process.stderr.write("pr view should request reviews and mergeStateStatus JSON fields");
+    process.exit(1);
+  }
   if (requested === 10) {
     process.stdout.write(JSON.stringify({
       ...pullRequests[0],
@@ -355,6 +368,28 @@ if (args[0] === "pr" && args[1] === "view") {
     }));
     process.exit(0);
   }
+  if (requested === 18) {
+    process.stdout.write(JSON.stringify({
+      number: 18,
+      title: "External without review",
+      body: "Passing CI but not reviewed",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/18",
+      headRefName: "external-without-review",
+      baseRefName: "main",
+      author: { login: "dependabot[bot]" },
+      createdAt: "2026-05-10T01:57:00Z",
+      updatedAt: "2026-05-11T06:20:00Z",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "REVIEW_REQUIRED",
+      statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+      additions: 1,
+      deletions: 1,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
   const pr = pullRequests.find((candidate) => candidate.number === requested);
   if (!pr) {
     process.stderr.write("pull request not found");
@@ -364,8 +399,17 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "review") {
-  if (process.env.GH_TOKEN !== "raymond-review-token") {
-    process.stderr.write("review should use Raymond token");
+  if (process.env.GH_TOKEN !== "rajohan-review-token") {
+    process.stderr.write("review should use Rajohan token");
+    process.exit(1);
+  }
+  const repoIndex = args.indexOf("--repo");
+  if (
+    !args.includes("--approve") ||
+    repoIndex === -1 ||
+    args[repoIndex + 1] !== "rajohan/Mira-Dashboard"
+  ) {
+    process.stderr.write("review should approve the configured dashboard repo");
     process.exit(1);
   }
   if (process.env.FAKE_GH_REVIEW_STATE_FILE) {
@@ -582,7 +626,7 @@ describe("pull request routes", () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-pull-requests-"));
         process.env.FAKE_GH_REVIEW_STATE_FILE = path.join(tempDir, "review-state");
         await installFakeCommands(tempDir);
-        process.env.RAJOHAN_GITHUB_TOKEN = "raymond-review-token";
+        process.env.RAJOHAN_GITHUB_TOKEN = "rajohan-review-token";
         await mkdir(path.join(tempDir, "data", "deployments"), { recursive: true });
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
@@ -619,10 +663,10 @@ describe("pull request routes", () => {
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
         }
-        if (originalRaymondToken === undefined) {
+        if (originalRajohanToken === undefined) {
             delete process.env.RAJOHAN_GITHUB_TOKEN;
         } else {
-            process.env.RAJOHAN_GITHUB_TOKEN = originalRaymondToken;
+            process.env.RAJOHAN_GITHUB_TOKEN = originalRajohanToken;
         }
         if (originalFakeReviewStateFile === undefined) {
             delete process.env.FAKE_GH_REVIEW_STATE_FILE;
@@ -660,6 +704,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "CLEAN",
                 reviewDecision: "APPROVED",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 20,
                 deletions: 5,
@@ -680,6 +725,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "BLOCKED",
                 reviewDecision: "APPROVED",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 3,
                 deletions: 1,
@@ -700,6 +746,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "BLOCKED",
                 reviewDecision: "APPROVED",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 4,
                 deletions: 2,
@@ -720,6 +767,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "CLEAN",
                 reviewDecision: "",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 5,
                 deletions: 2,
@@ -740,6 +788,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "BLOCKED",
                 reviewDecision: "APPROVED",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 2,
                 deletions: 0,
@@ -760,6 +809,7 @@ describe("pull request routes", () => {
                 mergeStateStatus: "CLEAN",
                 reviewDecision: "APPROVED",
                 reviewerApproved: true,
+                reviewerCanApprove: false,
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                 additions: 12,
                 deletions: 3,
@@ -952,6 +1002,7 @@ describe("pull request routes", () => {
                 author: { login: "rajohan" },
                 baseRefName: "main",
                 isDraft: false,
+                reviewDecision: "APPROVED",
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
             } as never)
         );
@@ -960,6 +1011,7 @@ describe("pull request routes", () => {
                 author: { login: "mira-2026" },
                 baseRefName: "main",
                 isDraft: false,
+                reviewDecision: "APPROVED",
                 statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
             } as never)
         );
@@ -968,8 +1020,20 @@ describe("pull request routes", () => {
                 author: { login: "mira-2026" },
                 baseRefName: "main",
                 isDraft: false,
+                reviewDecision: "APPROVED",
                 statusCheckRollup: [{ name: "ci", state: "SUCCESS" }],
             } as never)
+        );
+        assert.throws(
+            () =>
+                __testing.validateDashboardPrForApproval({
+                    author: { login: "dependabot[bot]" },
+                    baseRefName: "main",
+                    isDraft: false,
+                    reviewDecision: "REVIEW_REQUIRED",
+                    statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                } as never),
+            { message: "Pull request review approval is required before merging" }
         );
         assert.doesNotThrow(() =>
             __testing.validateDashboardPrForReviewApproval({
@@ -987,7 +1051,7 @@ describe("pull request routes", () => {
                     isDraft: false,
                     reviewDecision: "REVIEW_REQUIRED",
                 } as never),
-            { message: "Raymond cannot approve his own pull request" }
+            { message: "Rajohan cannot approve his own pull request" }
         );
         assert.throws(
             () =>
@@ -1018,9 +1082,9 @@ describe("pull request routes", () => {
                 ],
             } as never)
         );
-        const restoreReviewerEnv = saveEnv(["RAYMOND_GITHUB_USERNAME"]);
+        const restoreReviewerEnv = saveEnv(["RAJOHAN_GITHUB_USERNAME"]);
         try {
-            process.env.RAYMOND_GITHUB_USERNAME = "custom-reviewer";
+            process.env.RAJOHAN_GITHUB_USERNAME = "custom-reviewer";
             assert.throws(
                 () =>
                     __testing.validateDashboardPrForReviewApproval({
@@ -1205,8 +1269,8 @@ describe("pull request routes", () => {
         const originalDashboardWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         const originalMiraToken = process.env.MIRA_GITHUB_TOKEN;
         const originalMiraBackupToken = process.env.MIRA_GITHUB_TOKEN_BACKUP;
-        const originalRaymondToken = process.env.RAJOHAN_GITHUB_TOKEN;
-        const originalRaymondBackupToken = process.env.RAJOHAN_GITHUB_TOKEN_BACKUP;
+        const originalRajohanToken = process.env.RAJOHAN_GITHUB_TOKEN;
+        const originalRajohanBackupToken = process.env.RAJOHAN_GITHUB_TOKEN_BACKUP;
         const originalGhToken = process.env.GH_TOKEN;
         try {
             process.env.MIRA_DASHBOARD_ROOT = "";
@@ -1235,13 +1299,13 @@ describe("pull request routes", () => {
 
             process.env.GH_TOKEN = "   ";
             process.env.GITHUB_TOKEN = "stale-token";
-            assert.equal(__testing.buildCommandEnv().GH_TOKEN, undefined);
+            assert.equal(__testing.buildCommandEnv().GH_TOKEN, "stale-token");
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, undefined);
 
             process.env.MIRA_GITHUB_TOKEN = "mira-token";
             process.env.MIRA_GITHUB_TOKEN_BACKUP = "backup-token";
-            process.env.RAJOHAN_GITHUB_TOKEN = "raymond-token";
-            process.env.RAJOHAN_GITHUB_TOKEN_BACKUP = "raymond-backup-token";
+            process.env.RAJOHAN_GITHUB_TOKEN = "rajohan-token";
+            process.env.RAJOHAN_GITHUB_TOKEN_BACKUP = "rajohan-backup-token";
             const miraEnv = __testing.buildCommandEnv();
             assert.equal(miraEnv.GH_TOKEN, "mira-token");
             assert.equal(miraEnv.GITHUB_TOKEN, undefined);
@@ -1251,7 +1315,7 @@ describe("pull request routes", () => {
             assert.equal(miraEnv.RAJOHAN_GITHUB_TOKEN_BACKUP, undefined);
 
             const reviewEnv = __testing.buildReviewCommandEnv();
-            assert.equal(reviewEnv.GH_TOKEN, "raymond-token");
+            assert.equal(reviewEnv.GH_TOKEN, "rajohan-token");
             assert.equal(reviewEnv.GITHUB_TOKEN, undefined);
             assert.equal(reviewEnv.MIRA_GITHUB_TOKEN, undefined);
             assert.equal(reviewEnv.RAJOHAN_GITHUB_TOKEN, undefined);
@@ -1260,15 +1324,30 @@ describe("pull request routes", () => {
             assert.throws(() => __testing.buildReviewCommandEnv(), {
                 message: "Rajohan GitHub review token is not configured",
             });
-            process.env.RAJOHAN_GITHUB_TOKEN = "raymond-token";
+            process.env.RAJOHAN_GITHUB_TOKEN = "rajohan-token";
 
-            const pullRequest = await __testing.runGhJson(["pr", "view", "10"]);
+            const pullRequest = await __testing.runGhJson([
+                "pr",
+                "view",
+                "10",
+                "--json",
+                "number,reviews,mergeStateStatus",
+            ]);
             assert.equal(pullRequest.number, 10);
 
             const oldFakeGhJsonLines = process.env.FAKE_GH_JSON_LINES;
             try {
                 process.env.FAKE_GH_JSON_LINES = "empty-json";
-                assert.equal(await __testing.runGhJson(["pr", "view", "10"]), null);
+                assert.equal(
+                    await __testing.runGhJson([
+                        "pr",
+                        "view",
+                        "10",
+                        "--json",
+                        "number,reviews,mergeStateStatus",
+                    ]),
+                    null
+                );
             } finally {
                 if (oldFakeGhJsonLines === undefined) {
                     delete process.env.FAKE_GH_JSON_LINES;
@@ -1305,15 +1384,15 @@ describe("pull request routes", () => {
             } else {
                 process.env.MIRA_GITHUB_TOKEN_BACKUP = originalMiraBackupToken;
             }
-            if (originalRaymondToken === undefined) {
+            if (originalRajohanToken === undefined) {
                 delete process.env.RAJOHAN_GITHUB_TOKEN;
             } else {
-                process.env.RAJOHAN_GITHUB_TOKEN = originalRaymondToken;
+                process.env.RAJOHAN_GITHUB_TOKEN = originalRajohanToken;
             }
-            if (originalRaymondBackupToken === undefined) {
+            if (originalRajohanBackupToken === undefined) {
                 delete process.env.RAJOHAN_GITHUB_TOKEN_BACKUP;
             } else {
-                process.env.RAJOHAN_GITHUB_TOKEN_BACKUP = originalRaymondBackupToken;
+                process.env.RAJOHAN_GITHUB_TOKEN_BACKUP = originalRajohanBackupToken;
             }
             if (originalGhToken === undefined) {
                 delete process.env.GH_TOKEN;
@@ -1389,7 +1468,7 @@ describe("pull request routes", () => {
         }
     });
 
-    it("approves pull request reviews with the rajohan GitHub token", async () => {
+    it("approves pull request reviews with the Rajohan GitHub token", async () => {
         if (process.env.FAKE_GH_REVIEW_STATE_FILE) {
             await rm(process.env.FAKE_GH_REVIEW_STATE_FILE, { force: true });
         }
@@ -1408,7 +1487,7 @@ describe("pull request routes", () => {
         assert.equal(response.body.pullRequest?.reviewDecision, "APPROVED");
     });
 
-    it("blocks review approval for Raymond-authored pull requests or missing token", async () => {
+    it("blocks review approval for Rajohan-authored pull requests or missing token", async () => {
         const originalConsoleError = console.error;
         console.error = () => {
             // Suppress expected route errors for this negative-path assertion.
@@ -1427,7 +1506,7 @@ describe("pull request routes", () => {
             assert.equal(ownPullRequest.status, 500);
             assert.equal(
                 ownPullRequest.body.error,
-                "Raymond cannot approve his own pull request"
+                "Rajohan cannot approve his own pull request"
             );
 
             delete process.env.RAJOHAN_GITHUB_TOKEN;
@@ -1589,7 +1668,24 @@ describe("pull request routes", () => {
         assert.equal(response.body.cleanup.branch, "chore/coverage-to-100-followup");
     });
 
-    it("keeps rejection restricted to Mira-authored pull requests", async () => {
+    it("allows non-Mira pull requests to be rejected from the dashboard", async () => {
+        const response = await requestJson<{
+            ok: boolean;
+            message: string;
+            cleanup: { status: string; branch: string };
+        }>(server, "/api/pull-requests/11/reject", {
+            method: "POST",
+            body: { comment: "Closing this external PR" },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.ok, true);
+        assert.equal(response.body.message, "PR #11 closed");
+        assert.equal(response.body.cleanup.status, "skipped");
+        assert.equal(response.body.cleanup.branch, "chore/coverage-to-100-followup");
+    });
+
+    it("blocks merging non-Mira pull requests without review approval", async () => {
         const originalConsoleError = console.error;
         console.error = () => {
             // Suppress the expected route error for this negative-path assertion.
@@ -1597,14 +1693,14 @@ describe("pull request routes", () => {
         try {
             const response = await requestJson<{ error: string }>(
                 server,
-                "/api/pull-requests/11/reject",
-                { method: "POST", body: {} }
+                "/api/pull-requests/18/approve",
+                { method: "POST", body: { deploy: false } }
             );
 
             assert.equal(response.status, 500);
             assert.equal(
                 response.body.error,
-                "Only Mira-authored pull requests can be managed here"
+                "Pull request review approval is required before merging"
             );
         } finally {
             console.error = originalConsoleError;

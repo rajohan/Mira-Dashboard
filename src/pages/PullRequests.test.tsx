@@ -379,25 +379,32 @@ describe("PullRequests page", () => {
 
     it("approves pull request reviews without merging or deploying", async () => {
         const user = userEvent.setup();
+        const pendingReviewPullRequest = {
+            ...hooks.pullRequests[0],
+            reviewDecision: "REVIEW_REQUIRED",
+            reviewerApproved: false,
+            reviewerCanApprove: true,
+            title: "Needs Rajohan review",
+        };
         mockPullRequests({
             pullRequests: {
                 data: [
-                    {
-                        ...hooks.pullRequests[0],
-                        reviewDecision: "REVIEW_REQUIRED",
-                        title: "Needs Raymond review",
-                    },
+                    pendingReviewPullRequest,
                     {
                         ...hooks.pullRequests[0],
                         author: { login: "rajohan" },
                         number: 11,
                         reviewDecision: "REVIEW_REQUIRED",
-                        title: "Raymond-authored change",
+                        reviewerApproved: false,
+                        reviewerCanApprove: false,
+                        title: "Rajohan-authored change",
                     },
                     {
                         ...hooks.pullRequests[0],
                         number: 12,
                         reviewDecision: "APPROVED",
+                        reviewerApproved: true,
+                        reviewerCanApprove: false,
                         title: "Already reviewed",
                     },
                 ],
@@ -406,10 +413,28 @@ describe("PullRequests page", () => {
                 refetch: hooks.refetch,
             },
         });
+        hooks.approveReview.mockImplementationOnce(async () => {
+            mockPullRequests({
+                pullRequests: {
+                    data: [
+                        {
+                            ...pendingReviewPullRequest,
+                            reviewerApproved: true,
+                            reviewerCanApprove: false,
+                        },
+                    ],
+                    error: null,
+                    isLoading: false,
+                    refetch: hooks.refetch,
+                },
+            });
+            return { message: "PR review approved" };
+        });
 
         render(<PullRequests />);
 
-        expect(screen.getByText("Needs Raymond review")).toBeInTheDocument();
+        expect(screen.getByText("Needs Rajohan review")).toBeInTheDocument();
+        expect(screen.getAllByText("Review required").length).toBeGreaterThan(0);
         expect(screen.getAllByRole("button", { name: "Approve PR" })).toHaveLength(1);
         await user.click(screen.getByRole("button", { name: "Approve PR" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Approve PR #10");
@@ -422,8 +447,12 @@ describe("PullRequests page", () => {
         });
         expect(hooks.approve).not.toHaveBeenCalled();
         expect(hooks.deploy).not.toHaveBeenCalled();
-        expect(hooks.refetch).toHaveBeenCalled();
+        expect(hooks.refetch).not.toHaveBeenCalled();
         expect(screen.queryByTestId("confirm-modal")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Approve PR" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByText("Review approved")).toBeInTheDocument();
         expect(screen.getByText("PR review approved")).toBeInTheDocument();
     });
 
