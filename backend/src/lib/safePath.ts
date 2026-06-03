@@ -56,6 +56,13 @@ function createChildDirectoryFromVerifiedParent(
         ) {
             return null;
         }
+        try {
+            fs.mkdirSync(Buffer.from(nextParent));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
         const realNextParent = fs.realpathSync(Buffer.from(nextParent));
         if (
             realNextParent !== nextParent ||

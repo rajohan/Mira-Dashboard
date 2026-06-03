@@ -376,7 +376,7 @@ export default function logsRoutes(app: express.Application): void {
                 }
                 console.error("[Logs] Failed to open log file:", error);
                 res.status(500).json({
-                    detail: errorMessage(error, "Unknown error"),
+                    detail: "Internal server error",
                     error: "Failed to open log file",
                 });
                 return;

@@ -568,7 +568,7 @@ describe("safe path helpers", () => {
         }
     });
 
-    it("rejects missing children with path-based checks on non-Linux platforms", async () => {
+    it("creates missing children with path-based checks on non-Linux platforms", async () => {
         const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
         const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
         try {
@@ -577,7 +577,9 @@ describe("safe path helpers", () => {
                 value: "darwin",
             });
             const target = path.join(baseDir, "root", "nested", "file.txt");
-            assert.equal(prepareSafeWriteTargetWithinRoot(target, baseDir), null);
+            assert.equal(prepareSafeWriteTargetWithinRoot(target, baseDir), target);
+            await writeFile(target, "created", "utf8");
+            assert.equal(await readFile(target, "utf8"), "created");
         } finally {
             if (originalPlatform) {
                 Object.defineProperty(process, "platform", originalPlatform);
@@ -850,7 +852,7 @@ describe("safe path helpers", () => {
         }
     });
 
-    it("refuses to create missing non-Linux child directories", async () => {
+    it("returns null when non-Linux child directory creation fails", async () => {
         const baseDir = await mkdtemp(path.join(os.tmpdir(), "mira-safe-path-"));
         const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
         const originalMkdirSync = fs.mkdirSync;
@@ -874,7 +876,7 @@ describe("safe path helpers", () => {
                 ),
                 null
             );
-            assert.equal(mkdirCalled, false);
+            assert.equal(mkdirCalled, true);
         } finally {
             fs.mkdirSync = originalMkdirSync;
             if (originalPlatform) {

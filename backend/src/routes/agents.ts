@@ -52,12 +52,42 @@ export function isProcfsAvailable(): boolean {
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
     if (!isProcfsAvailable()) {
-        throw Object.assign(
-            new Error(
-                "Verified child directory creation is unsupported on this platform"
-            ),
-            { code: "ENOTSUP" }
-        );
+        const childPath = Path.join(parent, childName);
+        const parentStat = FS.lstatSync(parent);
+        if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+            throw Object.assign(new Error("Invalid parent directory"), {
+                code: "ENOTDIR",
+            });
+        }
+        const childStat = (() => {
+            try {
+                return FS.lstatSync(childPath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    return null;
+                }
+                throw error;
+            }
+        })();
+        if (childStat?.isSymbolicLink()) {
+            throw Object.assign(new Error("Invalid child directory"), {
+                code: "ELOOP",
+            });
+        }
+        try {
+            FS.mkdirSync(Buffer.from(childPath));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
+        const createdStat = FS.lstatSync(childPath);
+        if (!createdStat.isDirectory() || createdStat.isSymbolicLink()) {
+            throw Object.assign(new Error("Invalid child directory"), {
+                code: "ENOTDIR",
+            });
+        }
+        return;
     }
 
     const parentFd = FS.openSync(
@@ -1412,6 +1442,7 @@ export const __testing = {
     buildAgentStatuses,
     buildSingleAgentStatus,
     isProcfsAvailable,
+    mkdirChildFromVerifiedParent,
     setPrepareAgentMetadataDirForTest(
         nextPrepare?: typeof prepareSafeWriteTargetWithinRoot
     ): void {
@@ -1584,15 +1615,7 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
                 const expectedSessionsParent = Path.dirname(safeSessionsDir);
-                try {
-                    mkdirChildFromVerifiedParent(realAgentsDir, agentId);
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        res.status(501).json({ error: "unsupported-platform" });
-                        return;
-                    }
-                    throw error;
-                }
+                mkdirChildFromVerifiedParent(realAgentsDir, agentId);
                 const realExpectedSessionsParent =
                     FS.realpathSync(expectedSessionsParent);
                 if (

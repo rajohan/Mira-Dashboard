@@ -502,7 +502,7 @@ describe("logs routes", () => {
                 error: string;
             };
             assert.equal(permissionFailureBody.error, "Failed to open log file");
-            assert.match(permissionFailureBody.detail, /EACCES|EPERM/u);
+            assert.equal(permissionFailureBody.detail, "Internal server error");
         } finally {
             fs.promises.open = originalOpen;
             await rm(unreadablePath, { force: true });

@@ -33,9 +33,26 @@ const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
 const N8N_DATABASE = "n8n";
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const DOCKER_UPDATER_TIMEOUT_MS = 120_000;
+const SENSITIVE_ENV_KEY_PATTERN =
+    /(?:SECRET|TOKEN|KEY|PASSWORD|API[_-]?KEY|ACCESS[_-]?TOKEN)/iu;
 
 function updaterScriptPath(fileName: string): string {
     return path.resolve(updaterCwd, "scripts", fileName);
+}
+
+function redactEnvValue(value: unknown): string {
+    const envValue = String(value);
+    const separatorIndex = envValue.indexOf("=");
+    if (separatorIndex === -1) {
+        return SENSITIVE_ENV_KEY_PATTERN.test(envValue) ? `${envValue}=***` : envValue;
+    }
+
+    const key = envValue.slice(0, separatorIndex);
+    if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) {
+        return envValue;
+    }
+
+    return `${key}=***`;
 }
 
 /** Represents one docker updater service row. */
@@ -691,7 +708,7 @@ async function getContainerDetails(
 
     return {
         ...summary,
-        env: arrayFallback(inspect.Config?.Env).map(String),
+        env: arrayFallback(inspect.Config?.Env).map(redactEnvValue),
         labels,
         networks,
     };

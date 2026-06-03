@@ -66,6 +66,7 @@ async function startServer(homeDir?: string): Promise<TestServer> {
         const app = express();
         app.use(express.json({ limit: "3mb" }));
         configFilesRoutes(app, express);
+        void __testing.isProcfsAvailable();
         const server = http.createServer(app);
 
         await new Promise<void>((resolve, reject) => {
@@ -1268,10 +1269,27 @@ describe("config files routes", () => {
         try {
             parentPathTesting.setProcfsAvailabilityProbeForTest(() => false);
             assert.equal(parentPathTesting.isProcfsAvailable(), false);
+            assert.equal(
+                await parentPathTesting.withRootedParentPath(
+                    openclawConfig,
+                    openclawRoot,
+                    (rootedPath) => rootedPath
+                ),
+                openclawConfig
+            );
+        } finally {
+            parentPathTesting.setProcfsAvailabilityProbeForTest();
+        }
+        assert.equal(typeof parentPathTesting.isProcfsAvailable(), "boolean");
+
+        const escapedParent = await mkdtemp(
+            path.join(os.tmpdir(), "mira-config-escaped-parent-")
+        );
+        try {
             await assert.rejects(
                 () =>
                     parentPathTesting.withRootedParentPath(
-                        openclawConfig,
+                        path.join(escapedParent, "openclaw.json"),
                         openclawRoot,
                         (rootedPath) => rootedPath
                     ),
@@ -1280,15 +1298,15 @@ describe("config files routes", () => {
                     (error as Error).message === "Parent path validation failed"
             );
         } finally {
-            parentPathTesting.setProcfsAvailabilityProbeForTest();
+            await rm(escapedParent, { recursive: true, force: true });
         }
 
         const originalRealpathSync = fs.realpathSync;
         try {
             fs.realpathSync = ((target: fs.PathLike) => {
-                if (String(target).startsWith("/proc/self/fd/")) {
+                if (String(target) === path.dirname(openclawConfig)) {
                     const error = new Error(
-                        "procfs unavailable"
+                        "parent canonicalization unavailable"
                     ) as NodeJS.ErrnoException;
                     error.code = "ENOENT";
                     throw error;
@@ -1401,11 +1419,14 @@ describe("config files routes", () => {
         }
 
         const originalRealpathSync = fs.realpathSync;
+        const outsideParent = await mkdtemp(
+            path.join(os.tmpdir(), "mira-config-outside-parent-")
+        );
         try {
             fs.realpathSync = ((targetPath: fs.PathLike) => {
                 const value = targetPath.toString();
-                if (value.startsWith("/proc/self/fd/")) {
-                    return path.join(os.tmpdir(), "mira-config-outside-parent");
+                if (value === path.dirname(target)) {
+                    return outsideParent;
                 }
                 return originalRealpathSync(targetPath);
             }) as typeof fs.realpathSync;
@@ -1421,6 +1442,7 @@ describe("config files routes", () => {
             );
         } finally {
             fs.realpathSync = originalRealpathSync;
+            await rm(outsideParent, { recursive: true, force: true });
         }
     });
 });

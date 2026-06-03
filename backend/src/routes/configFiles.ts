@@ -128,35 +128,28 @@ async function withRootedParentPath<T>(
     rootPath: string,
     callback: (rootedPath: string) => Promise<T> | T
 ): Promise<T> {
-    if (!isProcfsAvailable()) {
+    let rootedPath: string;
+    try {
+        const realRoot = fs.realpathSync(path.resolve(rootPath));
+        const realParent = fs.realpathSync(path.resolve(path.dirname(safePath)));
+        const relativeParent = path.relative(realRoot, realParent);
+        const parentEscapesRoot = [
+            relativeParent.startsWith(".."),
+            path.isAbsolute(relativeParent),
+        ].includes(true);
+        if (parentEscapesRoot) {
+            throw createAccessDeniedError("Parent path validation failed");
+        }
+
+        rootedPath = path.join(realParent, path.basename(safePath));
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EACCES") {
+            throw error;
+        }
         throw createAccessDeniedError("Parent path validation failed");
     }
 
-    const parentPath = path.dirname(safePath);
-    const parentFd = fs.openSync(
-        parentPath,
-        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
-    );
-    try {
-        let realRoot: string;
-        let realParent: string;
-        let rootedPath: string;
-        try {
-            realRoot = fs.realpathSync(rootPath);
-            const fdPath = `/proc/self/fd/${parentFd}`;
-            realParent = fs.realpathSync(fdPath);
-            rootedPath = path.join(fdPath, path.basename(safePath));
-        } catch {
-            throw createAccessDeniedError("Parent path validation failed");
-        }
-        if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
-            throw createAccessDeniedError("Parent path validation failed");
-        }
-
-        return await callback(rootedPath);
-    } finally {
-        fs.closeSync(parentFd);
-    }
+    return await callback(rootedPath);
 }
 
 async function ensureParentDirsForWrite(

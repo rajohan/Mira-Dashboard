@@ -1216,15 +1216,99 @@ describe("agents routes", () => {
         try {
             __testing.setProcfsAvailabilityProbeForTest(() => false);
             assert.equal(__testing.isProcfsAvailable(), false);
-            const unsupported = await requestJson<{ error: string }>(
+            const fallbackResponse = await requestJson<{ currentTask: string }>(
                 server,
                 "/api/agents/unsupported-platform/metadata",
                 { method: "PUT", body: { currentTask: "Nope" } }
             );
-            assert.equal(unsupported.status, 501);
-            assert.equal(unsupported.body.error, "unsupported-platform");
+            assert.equal(fallbackResponse.status, 200);
+            assert.equal(fallbackResponse.body.currentTask, "Nope");
         } finally {
             __testing.setProcfsAvailabilityProbeForTest();
+        }
+    });
+
+    it("covers non-Linux agent directory fallback validation branches", async () => {
+        const { __testing } = await import("./agents.js");
+        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-dir-"));
+        const originalMkdirSync = fs.mkdirSync;
+        const originalLstatSync = fs.lstatSync;
+        try {
+            __testing.setProcfsAvailabilityProbeForTest(() => false);
+
+            const parent = path.join(tempDir, "parent");
+            await mkdir(parent);
+            __testing.mkdirChildFromVerifiedParent(parent, "child");
+            const childStat = await lstat(path.join(parent, "child"));
+            assert.equal(childStat.isDirectory(), true);
+
+            const fileParent = path.join(tempDir, "file-parent");
+            await writeFile(fileParent, "not a directory", "utf8");
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(fileParent, "child"),
+                /Invalid parent directory/u
+            );
+
+            fs.lstatSync = ((target: fs.PathLike, options?: fs.StatOptions) => {
+                if (String(target) === parent) {
+                    return {
+                        isDirectory: () => true,
+                        isSymbolicLink: () => true,
+                    } as fs.Stats;
+                }
+                return originalLstatSync(target, options as never);
+            }) as typeof fs.lstatSync;
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "parent-link"),
+                /Invalid parent directory/u
+            );
+            fs.lstatSync = originalLstatSync;
+
+            const childSymlink = path.join(parent, "child-link");
+            await symlink(tempDir, childSymlink);
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "child-link"),
+                /Invalid child directory/u
+            );
+
+            const childFile = path.join(parent, "child-file");
+            await writeFile(childFile, "not a directory", "utf8");
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "child-file"),
+                /Invalid child directory/u
+            );
+
+            fs.lstatSync = ((target: fs.PathLike, options?: fs.StatOptions) => {
+                if (String(target) === path.join(parent, "lstat-denied")) {
+                    const error = new Error("lstat denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalLstatSync(target, options as never);
+            }) as typeof fs.lstatSync;
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "lstat-denied"),
+                /lstat denied/u
+            );
+            fs.lstatSync = originalLstatSync;
+
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                if (String(target) === path.join(parent, "mkdir-denied")) {
+                    const error = new Error("mkdir denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "mkdir-denied"),
+                /mkdir denied/u
+            );
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+            fs.lstatSync = originalLstatSync;
+            __testing.setProcfsAvailabilityProbeForTest();
+            await rm(tempDir, { recursive: true, force: true });
         }
     });
 

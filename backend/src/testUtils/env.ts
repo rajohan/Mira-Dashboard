@@ -1,7 +1,16 @@
+let envLock: Promise<void> = Promise.resolve();
+
 export async function withEnv<T>(
     vars: Record<string, string | undefined>,
     callback: () => T | Promise<T>
 ): Promise<T> {
+    const previousLock = envLock;
+    let releaseLock!: () => void;
+    envLock = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+    });
+    await previousLock;
+
     const previous = new Map(
         Object.keys(vars).map((key) => [key, process.env[key]] as const)
     );
@@ -22,5 +31,6 @@ export async function withEnv<T>(
                 process.env[key] = value;
             }
         }
+        releaseLock();
     }
 }

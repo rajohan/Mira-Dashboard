@@ -713,7 +713,14 @@ describe("gateway state and helper utilities", () => {
             __testing.getTranscriptPath("agent:my.agent:main", "session-1") || "",
             /agents\/my\.agent\/sessions\/session-1\.jsonl$/u
         );
-        const aliasAgentDir = path.join(home, "agents", "alias-agent", "sessions");
+        const casedAgentDir = path.join(home, "agents", "Coder", "sessions");
+        await mkdir(casedAgentDir, { recursive: true });
+        await writeFile(path.join(casedAgentDir, "session-3.jsonl"), "", "utf8");
+        assert.match(
+            __testing.getTranscriptPath("agent:Coder:main", "session-3") || "",
+            /agents\/Coder\/sessions\/session-3\.jsonl$/u
+        );
+        const aliasAgentDir = path.join(home, "agents", "Alias-Agent", "sessions");
         await mkdir(aliasAgentDir, { recursive: true });
         await writeFile(path.join(aliasAgentDir, "session-2.jsonl"), "", "utf8");
         __testing.setSessionListForTest([
@@ -724,7 +731,7 @@ describe("gateway state and helper utilities", () => {
         ]);
         assert.match(
             __testing.getTranscriptPath("Agent:Alias-Agent:Main") || "",
-            /agents\/alias-agent\/sessions\/session-2\.jsonl$/u
+            /agents\/Alias-Agent\/sessions\/session-2\.jsonl$/u
         );
         assert.equal(
             __testing.getTranscriptPath("agent:../main:main", "session-1"),

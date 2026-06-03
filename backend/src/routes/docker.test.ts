@@ -137,7 +137,14 @@ const inspect = [{
   Created: "2026-05-10T12:00:00Z",
   RestartCount: 2,
   Config: {
-    Env: ["NODE_ENV=production", "SECRET_TOKEN=hidden"],
+    Env: [
+        "NODE_ENV=production",
+        "SECRET_TOKEN=hidden",
+        "api-key=visible-no-more",
+        "ACCESS-TOKEN=also-hidden",
+        "NO_EQUALS_TOKEN",
+        "PLAIN_FLAG",
+    ],
     Labels: {
       "com.docker.compose.service": "web",
       "com.docker.compose.project": "mira"
@@ -658,6 +665,8 @@ describe("docker routes", { concurrency: false }, () => {
             DATABASE_PORT: process.env.DATABASE_PORT,
             DB_POSTGRESDB_USER: process.env.DB_POSTGRESDB_USER,
             DB_POSTGRESDB_PASSWORD: process.env.DB_POSTGRESDB_PASSWORD,
+            DB_POSTGRESDB_HOST: process.env.DB_POSTGRESDB_HOST,
+            DB_POSTGRESDB_PORT: process.env.DB_POSTGRESDB_PORT,
         };
         delete process.env.DB_POSTGRESDB_USER;
         delete process.env.DB_POSTGRESDB_PASSWORD;
@@ -1415,7 +1424,11 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(details.status, 200);
         assert.deepEqual(details.body.env, [
             "NODE_ENV=production",
-            "SECRET_TOKEN=hidden",
+            "SECRET_TOKEN=***",
+            "api-key=***",
+            "ACCESS-TOKEN=***",
+            "NO_EQUALS_TOKEN=***",
+            "PLAIN_FLAG",
         ]);
         assert.deepEqual(details.body.labels, {
             "com.docker.compose.service": "web",

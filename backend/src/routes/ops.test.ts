@@ -22,6 +22,8 @@ const postgresEnvKeys = [
     "DB_POSTGRESDB_PASSWORD",
     "DATABASE_HOST",
     "DATABASE_PORT",
+    "DB_POSTGRESDB_HOST",
+    "DB_POSTGRESDB_PORT",
 ] as const;
 
 function snapshotEnv(keys: readonly string[]): Record<string, string | undefined> {
