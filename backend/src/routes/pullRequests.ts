@@ -40,6 +40,7 @@ const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
+const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 
 function getResolvedRoots() {
     return {
@@ -245,7 +246,11 @@ function hasReviewerApproval(pr: PullRequestSummary): boolean {
         pr.latestOpinionatedReviews?.nodes?.length
             ? pr.latestOpinionatedReviews.nodes
             : pr.reviews || []
-    ).filter((review) => review.author?.login === author);
+    ).filter(
+        (review) =>
+            review.author?.login === author &&
+            OPINIONATED_REVIEW_STATES.has(review.state?.toUpperCase() || "")
+    );
     const latestReview = reviews.sort((a, b) =>
         String(b.submittedAt || "").localeCompare(String(a.submittedAt || ""))
     )[0];

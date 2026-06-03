@@ -1082,6 +1082,27 @@ describe("pull request routes", () => {
                 ],
             } as never)
         );
+        assert.throws(
+            () =>
+                __testing.validateDashboardPrForReviewApproval({
+                    author: { login: "mira-2026" },
+                    baseRefName: "main",
+                    isDraft: false,
+                    reviews: [
+                        {
+                            author: { login: "rajohan" },
+                            state: "APPROVED",
+                            submittedAt: "2026-06-03T15:51:12Z",
+                        },
+                        {
+                            author: { login: "rajohan" },
+                            state: "COMMENTED",
+                            submittedAt: "2026-06-03T16:13:20Z",
+                        },
+                    ],
+                } as never),
+            { message: "Pull request is already approved" }
+        );
         const restoreReviewerEnv = saveEnv(["RAJOHAN_GITHUB_USERNAME"]);
         try {
             process.env.RAJOHAN_GITHUB_USERNAME = "custom-reviewer";
