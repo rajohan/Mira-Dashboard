@@ -121,9 +121,12 @@ function createBackupEnv() {
         "DB_POSTGRESDB_PASSWORD",
         "DATABASE_PASSWORD"
     );
+    const baseEnv = { ...process.env };
+    delete baseEnv.DB_POSTGRESDB_PASSWORD;
+    delete baseEnv.DB_POSTGRESDB_USER;
 
     return {
-        ...process.env,
+        ...baseEnv,
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,

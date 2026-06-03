@@ -567,7 +567,7 @@ export default function execRoutes(
                                 if (isProcessGoneError(processKillError)) {
                                     return;
                                 }
-                                markExecJobForcedKilled(job);
+                                return;
                             }
                         }
                     }

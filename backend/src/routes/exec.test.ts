@@ -1063,9 +1063,9 @@ describe("exec routes", () => {
             assert.equal(directGoneJob?.closePending, undefined);
 
             const directErrorJob = __testing.jobs.get(directErrorJobId);
-            assert.equal(directErrorJob?.status, "done");
-            assert.equal(directErrorJob?.code, 137);
-            assert.equal(directErrorJob?.closePending, true);
+            assert.equal(directErrorJob?.status, "signaled");
+            assert.equal(directErrorJob?.code, null);
+            assert.equal(directErrorJob?.closePending, undefined);
         } finally {
             mock.timers.reset();
             process.kill = originalKill;

@@ -58,48 +58,10 @@ function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
     }
 
     if (!isProcfsAvailable()) {
-        const childPath = Path.resolve(parent, childName);
-        const relativeChildPath = Path.relative(parent, childPath);
-        if (relativeChildPath !== childName) {
-            throw Object.assign(new Error("Invalid child directory path"), {
-                code: "EINVAL",
-            });
-        }
-        const parentStat = FS.lstatSync(parent);
-        if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-            throw Object.assign(new Error("Invalid parent directory"), {
-                code: "ENOTDIR",
-            });
-        }
-        const childStat = (() => {
-            try {
-                return FS.lstatSync(childPath);
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                    return null;
-                }
-                throw error;
-            }
-        })();
-        if (childStat?.isSymbolicLink()) {
-            throw Object.assign(new Error("Invalid child directory"), {
-                code: "ELOOP",
-            });
-        }
-        try {
-            FS.mkdirSync(Buffer.from(childPath));
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-                throw error;
-            }
-        }
-        const createdStat = FS.lstatSync(childPath);
-        if (!createdStat.isDirectory() || createdStat.isSymbolicLink()) {
-            throw Object.assign(new Error("Invalid child directory"), {
-                code: "ENOTDIR",
-            });
-        }
-        return;
+        throw Object.assign(
+            new Error("Verified child directory creation is not supported"),
+            { code: "ENOTSUP" }
+        );
     }
 
     const parentFd = FS.openSync(
@@ -1636,8 +1598,17 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
                 const expectedSessionsParent = Path.dirname(safeSessionsDir);
-                const realExpectedSessionsParent =
-                    FS.realpathSync(expectedSessionsParent);
+                let realExpectedSessionsParent: string;
+                try {
+                    mkdirChildFromVerifiedParent(realAgentsDir, agentId);
+                    realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
+                        res.status(501).json({ error: "unsupported-platform" });
+                        return;
+                    }
+                    throw error;
+                }
                 if (
                     realExpectedSessionsParent !==
                         Path.dirname(canonicalExpectedSessionsDir) ||
