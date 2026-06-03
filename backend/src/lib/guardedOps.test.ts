@@ -94,6 +94,11 @@ describe("guarded filesystem helpers", () => {
 
             await writeTextNoFollowGuarded(copied, "no-follow");
             assert.equal(await readFile(copied, "utf8"), "no-follow");
+            await chmod(copied, 0o600);
+            await writeTextNoFollowGuarded(copied, "preserved");
+            assert.equal(await readFile(copied, "utf8"), "preserved");
+            const preservedStat = await stat(copied);
+            assert.equal(preservedStat.mode & 0o777, 0o600);
             await writeTextNoFollowGuarded(copied, "private", 0o600);
             assert.equal(await readFile(copied, "utf8"), "private");
             const privateStat = await stat(copied);

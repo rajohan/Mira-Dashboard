@@ -273,7 +273,8 @@ export async function writeTextNoFollowGuarded(
     content: string,
     mode?: number
 ): Promise<void> {
-    const fileMode = (mode ?? 0o666) & 0o777;
+    let fileMode = (mode ?? 0o666) & 0o777;
+    let shouldApplyMode = mode !== undefined;
     const destinationPath = path as string;
     const destinationDir = Path.dirname(destinationPath);
     const tempPath = Path.join(
@@ -297,6 +298,10 @@ export async function writeTextNoFollowGuarded(
                 code: "EMLINK",
             });
         }
+        if (mode === undefined) {
+            fileMode = destinationStat.mode & 0o777;
+            shouldApplyMode = true;
+        }
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
             throw error;
@@ -317,7 +322,7 @@ export async function writeTextNoFollowGuarded(
     try {
         tempCreated = true;
         try {
-            if (mode !== undefined) {
+            if (shouldApplyMode) {
                 await tempFile.chmod(fileMode);
             }
             await tempFile.writeFile(content, "utf8");
