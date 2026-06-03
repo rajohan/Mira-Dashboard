@@ -1,0 +1,120 @@
+import { pathToFileURL } from "node:url";
+
+import { getPersistedGatewayToken } from "./auth.js";
+import gateway from "./gateway.js";
+import { resolveListenPort, server } from "./server.js";
+import {
+    startOpenClawNotificationMonitor,
+    stopOpenClawNotificationMonitor,
+} from "./services/openclawNotifications.js";
+import {
+    startQuotaNotificationMonitor,
+    stopQuotaNotificationMonitor,
+} from "./services/quotaNotifications.js";
+
+let isStarting = false;
+let afterBackgroundServicesStartedForTest: (() => void) | undefined;
+
+/** Starts Gateway and notification monitors after the HTTP server is listening. */
+export function handleServerListening(): void {
+    let gatewayStarted = false;
+    let quotaMonitorStarted = false;
+    let openClawMonitorStarted = false;
+    try {
+        const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
+        if (token) {
+            gateway.init(token);
+            gatewayStarted = true;
+        } else {
+            console.warn(
+                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
+            );
+        }
+
+        startQuotaNotificationMonitor();
+        quotaMonitorStarted = true;
+        startOpenClawNotificationMonitor();
+        openClawMonitorStarted = true;
+        afterBackgroundServicesStartedForTest?.();
+    } catch (error) {
+        console.error("[Backend] Failed to start background services:", error);
+        const rollback = (fn: () => void, label: string): void => {
+            try {
+                fn();
+            } catch (cleanupError) {
+                console.error(label, cleanupError);
+            }
+        };
+        if (openClawMonitorStarted) {
+            rollback(
+                stopOpenClawNotificationMonitor,
+                "[Backend] Failed to stop OpenClaw notification monitor:"
+            );
+        }
+        if (quotaMonitorStarted) {
+            rollback(
+                stopQuotaNotificationMonitor,
+                "[Backend] Failed to stop quota notification monitor:"
+            );
+        }
+        if (gatewayStarted) {
+            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+        }
+        rollback(() => server.close(), "[Backend] Failed to close server:");
+        throw error;
+    }
+}
+
+/** Binds the HTTP server and starts runtime-only background services. */
+export function startBackendServer(port = resolveListenPort()): void {
+    if (server.listening || server.address() !== null || isStarting) {
+        return;
+    }
+    isStarting = true;
+    const onListening = () => {
+        server.removeListener("error", onError);
+        isStarting = false;
+    };
+    const onError = (error: Error) => {
+        server.removeListener("listening", onListening);
+        server.removeListener("error", onError);
+        isStarting = false;
+        console.error("[Backend] Failed to start server:", error);
+        process.exitCode = 1;
+        server.close();
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+    try {
+        server.listen(port, handleServerListening);
+    } catch (error) {
+        server.removeListener("listening", onListening);
+        server.removeListener("error", onError);
+        isStarting = false;
+        throw error;
+    }
+}
+
+export function isDirectEntrypoint(
+    argvPath = process.argv[1],
+    moduleUrl = import.meta.url
+): boolean {
+    return Boolean(argvPath && moduleUrl === pathToFileURL(argvPath).href);
+}
+
+export function shouldStartOnImport(
+    startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
+    directEntrypoint = isDirectEntrypoint()
+): boolean {
+    return startOnImport === "1" || directEntrypoint;
+}
+
+if (shouldStartOnImport()) {
+    startBackendServer();
+}
+
+export const __testing = {
+    setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
+        afterBackgroundServicesStartedForTest = callback;
+    },
+};

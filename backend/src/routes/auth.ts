@@ -3,6 +3,7 @@ import type express from "express";
 import {
     bootstrapRequired,
     clearSessionCookie,
+    createFirstUser,
     createSession,
     createUser,
     deleteSession,
@@ -13,6 +14,7 @@ import {
     setSessionCookie,
     verifyPassword,
 } from "../auth.js";
+import { db } from "../db.js";
 import gateway from "../gateway.js";
 
 /** Performs read session ID. */
@@ -58,12 +60,115 @@ function validatePassword(password: unknown): string | null {
     return password;
 }
 
+function rollbackFirstUserBootstrap(
+    userId: number,
+    gatewayToken: string,
+    previousGatewayToken: string | null = null,
+    persistToken: typeof persistGatewayToken = persistGatewayToken
+): void {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        if (previousGatewayToken) {
+            persistToken(previousGatewayToken);
+        } else {
+            db.prepare(
+                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+            ).run(gatewayToken);
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "[Auth] First-user rollback transaction rollback failed:",
+                rollbackError
+            );
+            throw new AggregateError(
+                [error, rollbackError],
+                "First-user rollback transaction and rollback failed",
+                { cause: rollbackError }
+            );
+        }
+        throw error;
+    }
+}
+
+function rollbackCreatedFirstUser(userId: number): void {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        db.exec("COMMIT");
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "[Auth] First-user cleanup transaction rollback failed:",
+                rollbackError
+            );
+            throw new AggregateError(
+                [error, rollbackError],
+                "First-user cleanup transaction and rollback failed",
+                { cause: rollbackError }
+            );
+        }
+        throw error;
+    }
+}
+
+export const __testing = {
+    readSessionId,
+    rollbackCreatedFirstUser,
+    rollbackFirstUserBootstrap,
+    validateUsername,
+    validatePassword,
+};
+
 /** Registers auth API routes. */
-export default function authRoutes(app: express.Application): void {
+export default function authRoutes(
+    app: express.Application,
+    dependencies: {
+        createSession?: typeof createSession;
+        createFirstUser?: typeof createFirstUser;
+        getPersistedGatewayToken?: typeof getPersistedGatewayToken;
+        initGateway?: typeof gateway.init;
+        persistGatewayToken?: typeof persistGatewayToken;
+        rollbackBootstrap?: typeof rollbackFirstUserBootstrap;
+        rollbackCreatedFirstUser?: typeof rollbackCreatedFirstUser;
+        setSessionCookie?: typeof setSessionCookie;
+        shutdownGateway?: typeof gateway.shutdown;
+    } = {}
+): void {
+    const createAuthSession = dependencies.createSession ?? createSession;
+    const createFirstAuthUser = dependencies.createFirstUser ?? createFirstUser;
+    const initGateway =
+        dependencies.initGateway ?? ((token: string) => gateway.init(token));
+    const persistAuthGatewayToken =
+        dependencies.persistGatewayToken ?? persistGatewayToken;
+    const getPersistedAuthGatewayToken =
+        dependencies.getPersistedGatewayToken ?? getPersistedGatewayToken;
+    const rollbackBootstrap =
+        dependencies.rollbackBootstrap ??
+        ((userId: number, token: string, previousToken: string | null = null): void =>
+            rollbackFirstUserBootstrap(
+                userId,
+                token,
+                previousToken,
+                persistAuthGatewayToken
+            ));
+    const setAuthSessionCookie = dependencies.setSessionCookie ?? setSessionCookie;
+    const rollbackCreatedUser =
+        dependencies.rollbackCreatedFirstUser ?? rollbackCreatedFirstUser;
+    const shutdownGateway = dependencies.shutdownGateway ?? (() => gateway.shutdown());
+
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
             bootstrapRequired: bootstrapRequired(),
-            hasGatewayToken: Boolean(getPersistedGatewayToken()),
+            hasGatewayToken: Boolean(getPersistedAuthGatewayToken()),
         });
     });
 
@@ -77,54 +182,96 @@ export default function authRoutes(app: express.Application): void {
     });
 
     app.post("/api/auth/register-first-user", (request, response) => {
-        if (!bootstrapRequired()) {
-            response
-                .status(409)
-                .json({ error: "Bootstrap registration is no longer available" });
-            return;
-        }
-
         const username = validateUsername(request.body?.username);
         const password = validatePassword(request.body?.password);
-        const gatewayToken =
-            typeof request.body?.gatewayToken === "string"
-                ? request.body.gatewayToken.trim()
-                : "";
-
+        const rawGatewayToken = request.body?.gatewayToken;
         if (!username) {
             response.status(400).json({
                 error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
             });
             return;
         }
-
         if (!password) {
             response.status(400).json({ error: "Password must be 8-256 characters" });
             return;
         }
-
-        if (!gatewayToken) {
+        if (typeof rawGatewayToken !== "string" || !rawGatewayToken.trim()) {
             response
                 .status(400)
                 .json({ error: "Gateway token is required for first-user setup" });
             return;
         }
-
+        const gatewayToken = rawGatewayToken.trim();
+        let user: ReturnType<typeof createUser>;
         try {
-            const user = createUser(username, password);
-            persistGatewayToken(gatewayToken);
-            gateway.init(gatewayToken);
-            const sessionId = createSession(user.id);
-            setSessionCookie(response, sessionId, request);
-            response.status(201).json({ authenticated: true, user });
+            const createdUser = createFirstAuthUser(username, password);
+            if (!createdUser) {
+                response.status(409).json({
+                    error: "Bootstrap registration is no longer available",
+                });
+                return;
+            }
+            user = createdUser;
         } catch (error_) {
             const message = error_ instanceof Error ? error_.message : String(error_);
             if (message.includes("UNIQUE")) {
                 response.status(409).json({ error: "Username already exists" });
                 return;
             }
-
             response.status(500).json({ error: "Failed to create first user" });
+            return;
+        }
+
+        let previousGatewayToken: string | null = null;
+        let attemptedGatewaySwitch = false;
+        try {
+            previousGatewayToken = getPersistedAuthGatewayToken();
+            persistAuthGatewayToken(gatewayToken);
+            attemptedGatewaySwitch = true;
+            initGateway(gatewayToken);
+            const sessionId = createAuthSession(user.id);
+            setAuthSessionCookie(response, sessionId, request);
+            response.status(201).json({ authenticated: true, user });
+        } catch (bootstrapError) {
+            console.error("[Auth] First-user bootstrap failed:", bootstrapError);
+            let rollbackFailed = false;
+            if (attemptedGatewaySwitch) {
+                try {
+                    rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
+                } catch (rollbackError) {
+                    rollbackFailed = true;
+                    console.error(
+                        "[Auth] First-user bootstrap rollback failed:",
+                        rollbackError
+                    );
+                }
+            } else {
+                try {
+                    rollbackCreatedUser(user.id);
+                } catch (rollbackError) {
+                    rollbackFailed = true;
+                    console.error("[Auth] First-user cleanup failed:", rollbackError);
+                }
+            }
+            if (attemptedGatewaySwitch) {
+                try {
+                    shutdownGateway();
+                } catch {
+                    // Preserve the original bootstrap failure response.
+                }
+                if (previousGatewayToken) {
+                    try {
+                        initGateway(previousGatewayToken);
+                    } catch {
+                        // Preserve the original bootstrap failure response.
+                    }
+                }
+            }
+            response.status(500).json({
+                error: rollbackFailed
+                    ? "Failed to roll back first-user bootstrap"
+                    : "Failed to complete first-user setup",
+            });
         }
     });
 
@@ -150,8 +297,8 @@ export default function authRoutes(app: express.Application): void {
             return;
         }
 
-        const sessionId = createSession(user.id);
-        setSessionCookie(response, sessionId, request);
+        const sessionId = createAuthSession(user.id);
+        setAuthSessionCookie(response, sessionId, request);
         response.json({
             authenticated: true,
             user: { id: user.id, username: user.username },

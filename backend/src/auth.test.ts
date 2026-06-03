@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, it } from "node:test";
+import { beforeEach, describe, it, mock } from "node:test";
 
 import {
     bootstrapRequired,
     clearSessionCookie,
+    createFirstUser,
     createSession,
     createUser,
+    findUserByUsername,
     getAuthUserFromRequest,
     getAuthUserFromSessionId,
     getPersistedGatewayToken,
@@ -61,6 +63,8 @@ describe("auth helpers", () => {
 
     it("creates users, sessions, and persisted gateway tokens", () => {
         assert.equal(bootstrapRequired(), true);
+        assert.equal(findUserByUsername("nobody"), null);
+        assert.equal(getAuthUserFromSessionId("missing-session"), null);
 
         const user = createUser("  Raymond  ", "secret");
         assert.equal(user.username, "raymond");
@@ -79,6 +83,54 @@ describe("auth helpers", () => {
             sessionId
         );
         assert.equal(getAuthUserFromSessionId(sessionId), null);
+    });
+
+    it("rolls back atomic first-user creation failures", () => {
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO users")) {
+                return {
+                    run() {
+                        throw new Error("insert failed");
+                    },
+                } as never;
+            }
+            return originalPrepare(sql);
+        });
+        try {
+            assert.throws(() => createFirstUser("first", "secret"), /insert failed/u);
+            assert.equal(bootstrapRequired(), true);
+        } finally {
+            prepareMock.mock.restore();
+        }
+    });
+
+    it("surfaces first-user rollback cleanup failures", () => {
+        const originalPrepare = db.prepare.bind(db);
+        const originalExec = db.exec.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO users")) {
+                return { run: () => ({ changes: 0 }) } as never;
+            }
+            return originalPrepare(sql);
+        });
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "ROLLBACK") {
+                throw new Error("rollback failed");
+            }
+            return originalExec(sql);
+        });
+        try {
+            assert.throws(() => createFirstUser("first", "secret"), /rollback failed/u);
+        } finally {
+            execMock.mock.restore();
+            prepareMock.mock.restore();
+            try {
+                originalExec("ROLLBACK");
+            } catch {
+                // No transaction remains when rollback succeeded unexpectedly.
+            }
+        }
     });
 
     it("reads auth users from loopback and session cookies", () => {

@@ -24,13 +24,7 @@ export default function staticRoutes(
         );
 
         // SPA fallback - serve index.html for all non-API routes
-        app.get(/^(?!\/api\/).*/, (req, res, next) => {
-            // Skip API routes
-            if (req.path.startsWith("/api/")) {
-                next();
-                return;
-            }
-
+        app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
             const indexPath = path.join(frontendPath, "index.html");
             res.setHeader("Cache-Control", "no-store");
             res.sendFile(indexPath, (err) => {
@@ -42,12 +36,7 @@ export default function staticRoutes(
         });
     } else {
         // Frontend not built - serve a placeholder
-        app.get(/^(?!\/api\/).*/, (req, res, next) => {
-            if (req.path.startsWith("/api/")) {
-                next();
-                return;
-            }
-
+        app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
             res.status(503).send(`
                 <html>
                 <head><title>Mira Dashboard - Not Built</title></head>

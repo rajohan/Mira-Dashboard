@@ -47,6 +47,7 @@ export interface MoltbookCacheResponse<T> {
     source: string;
     status: string;
     updatedAt: string | null;
+    lastAttemptAt: string | null;
     expiresAt: string | null;
     errorCode: string | null;
     errorMessage: string | null;
@@ -73,6 +74,7 @@ async function fetchCachedMoltbookEntry<T>(
         source: row.source,
         status: row.status,
         updatedAt: row.updated_at || null,
+        lastAttemptAt: row.last_attempt_at || null,
         expiresAt: row.expires_at || null,
         errorCode: row.error_code || null,
         errorMessage: row.error_message || null,

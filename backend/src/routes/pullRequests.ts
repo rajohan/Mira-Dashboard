@@ -5,21 +5,46 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
+import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
+import { nonEmptyEnvFallback } from "../lib/values.js";
+
 const execFileAsync = promisify(execFile);
 
+function resolveConfiguredRoot(envName: string, fallback: string): string {
+    const rawValue = nonEmptyEnvFallback(envName, fallback).trim();
+    if (!path.isAbsolute(rawValue)) {
+        throw new Error(`${envName} must be an absolute non-root path`);
+    }
+    const value = path.resolve(rawValue);
+    if (value === path.parse(value).root) {
+        throw new Error(`${envName} must be an absolute non-root path`);
+    }
+    return value;
+}
+
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
-const DASHBOARD_ROOT =
-    process.env.MIRA_DASHBOARD_ROOT || "/home/ubuntu/projects/mira-dashboard";
-const DASHBOARD_WORKTREE_ROOT =
-    process.env.MIRA_DASHBOARD_WORKTREE_ROOT ||
-    "/home/ubuntu/projects/mira-dashboard-worktrees";
+const DASHBOARD_ROOT = resolveConfiguredRoot(
+    "MIRA_DASHBOARD_ROOT",
+    "/home/ubuntu/projects/mira-dashboard"
+);
+const DASHBOARD_WORKTREE_ROOT = resolveConfiguredRoot(
+    "MIRA_DASHBOARD_WORKTREE_ROOT",
+    "/home/ubuntu/projects/mira-dashboard-worktrees"
+);
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_BASE = "main";
-const DEPLOYMENT_DIR = path.join(process.cwd(), "data", "deployments");
+const DEPLOYMENT_DIR = path.join(DASHBOARD_ROOT, "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+
+function getResolvedRoots() {
+    return {
+        dashboardRoot: DASHBOARD_ROOT,
+        dashboardWorktreeRoot: DASHBOARD_WORKTREE_ROOT,
+    };
+}
 
 /** Represents command result. */
 interface CommandResult {
@@ -98,19 +123,10 @@ interface WorktreeCleanupResult {
 
 /** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch((error) => {
-            console.error("[pullRequestsRoutes]", error);
-            if (res.headersSent) {
-                next(error);
-                return;
-            }
-            res.status(500).json({
-                error:
-                    error instanceof Error ? error.message : "Pull request route failed",
-            });
-        });
-    };
+    return baseAsyncRoute(handler, {
+        fallback: "Pull request route failed",
+        logLabel: "[pullRequestsRoutes]",
+    });
 }
 
 /** Performs ensure deployment dir. */
@@ -150,8 +166,9 @@ function trimOutput(value: string): string {
 
 /** Splits an owner/name GitHub repository identifier. */
 function parseRepoParts(repo: string): { owner: string; name: string } {
-    const [owner, name] = repo.split("/");
-    if (!owner || !name) {
+    const parts = repo.split("/");
+    const [owner, name] = parts;
+    if (parts.length !== 2 || !owner || !name) {
         throw new Error("Dashboard repository must be configured as owner/name");
     }
     return { owner, name };
@@ -159,16 +176,25 @@ function parseRepoParts(repo: string): { owner: string; name: string } {
 
 /** Builds command env. */
 function buildCommandEnv(): NodeJS.ProcessEnv {
-    const githubToken = process.env.MIRA_GITHUB_TOKEN || process.env.GH_TOKEN;
-    return {
-        ...process.env,
-        ...(githubToken
-            ? {
-                  GH_TOKEN: githubToken,
-                  GITHUB_TOKEN: githubToken,
-              }
-            : {}),
-    };
+    const githubToken =
+        process.env.MIRA_GITHUB_TOKEN?.trim() ||
+        process.env.GH_TOKEN?.trim() ||
+        process.env.GITHUB_TOKEN?.trim() ||
+        "";
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+        if (key === "MIRA_GITHUB_TOKEN" || key.startsWith("MIRA_GITHUB_TOKEN_")) {
+            delete env[key];
+        }
+    }
+    if (githubToken) {
+        env.GH_TOKEN = githubToken;
+        env.GITHUB_TOKEN = githubToken;
+    } else {
+        delete env.GH_TOKEN;
+        delete env.GITHUB_TOKEN;
+    }
+    return env;
 }
 
 /** Performs run command. */
@@ -198,8 +224,37 @@ async function runGhJson<T>(args: string[]): Promise<T> {
         maxBuffer: MAX_BUFFER,
         timeout: 60_000,
     });
-
     return JSON.parse(String(stdout || "null")) as T;
+}
+
+/** Appends one GitHub JSON-lines output row after size and blank-line validation. */
+function parseGhJsonLine<T>(line: string, rows: T[]): void {
+    if (!line.trim()) {
+        return;
+    }
+    if (Buffer.byteLength(String(line), "utf8") > MAX_JSON_LINE_LENGTH) {
+        throw new Error("GitHub CLI JSON line was too large");
+    }
+    rows.push(JSON.parse(line) as T);
+}
+
+function toGhJsonParseError(error: unknown): Error {
+    return error instanceof Error
+        ? error
+        : new Error(errorMessage(error, "Failed to parse GitHub CLI output"));
+}
+
+function clearForceKillTimerIfAllowed(
+    forceKillTimer: NodeJS.Timeout | null,
+    options: { keepForceKillTimer?: boolean },
+    preserveForceKillTimer: boolean,
+    clearTimer: (timer: NodeJS.Timeout) => void = clearTimeout
+): NodeJS.Timeout | null {
+    if (!forceKillTimer || options.keepForceKillTimer || preserveForceKillTimer) {
+        return forceKillTimer;
+    }
+    clearTimer(forceKillTimer);
+    return null;
 }
 
 /** Streams newline-delimited JSON values from a GitHub CLI command. */
@@ -217,28 +272,48 @@ async function runGhJsonLines<T>(
         let stdoutBuffer = "";
         let stderr = "";
         let settled = false;
+        let forceKillTimer: NodeJS.Timeout | null = null;
+        let preserveForceKillTimer = false;
+        const armForceKillTimer = () => {
+            if (forceKillTimer) {
+                return;
+            }
+            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceKillTimer.unref();
+        };
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
-            setTimeout(() => {
-                child.kill("SIGKILL");
-            }, 5_000).unref();
-            settle(() => reject(new Error("GitHub CLI command timed out")));
+            armForceKillTimer();
+            preserveForceKillTimer = true;
+            settle(() => reject(new Error("GitHub CLI command timed out")), {
+                keepForceKillTimer: true,
+            });
         }, options.timeoutMs || 60_000);
 
-        const settle = (callback: () => void) => {
+        const settle = (
+            callback: () => void,
+            options: { keepForceKillTimer?: boolean } = {}
+        ) => {
             if (settled) {
+                preserveForceKillTimer =
+                    preserveForceKillTimer || Boolean(options.keepForceKillTimer);
+                forceKillTimer = clearForceKillTimerIfAllowed(
+                    forceKillTimer,
+                    options,
+                    preserveForceKillTimer
+                );
                 return;
             }
             settled = true;
             clearTimeout(timeout);
+            preserveForceKillTimer =
+                preserveForceKillTimer || Boolean(options.keepForceKillTimer);
+            forceKillTimer = clearForceKillTimerIfAllowed(
+                forceKillTimer,
+                options,
+                preserveForceKillTimer
+            );
             callback();
-        };
-
-        const parseLine = (line: string) => {
-            if (!line.trim()) {
-                return;
-            }
-            rows.push(JSON.parse(line) as T);
         };
 
         child.stdout.setEncoding("utf8");
@@ -247,28 +322,25 @@ async function runGhJsonLines<T>(
 
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
-            if (stdoutBuffer.length > MAX_JSON_LINE_LENGTH) {
+            if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                 child.kill("SIGTERM");
-                settle(() => reject(new Error("GitHub CLI JSON line was too large")));
+                armForceKillTimer();
+                settle(() => reject(new Error("GitHub CLI JSON line was too large")), {
+                    keepForceKillTimer: true,
+                });
                 return;
             }
 
             try {
                 for (const line of lines) {
-                    if (line.length > MAX_JSON_LINE_LENGTH) {
-                        throw new Error("GitHub CLI JSON line was too large");
-                    }
-                    parseLine(line);
+                    parseGhJsonLine(line, rows);
                 }
             } catch (error) {
                 child.kill("SIGTERM");
-                settle(() =>
-                    reject(
-                        error instanceof Error
-                            ? error
-                            : new Error("Failed to parse GitHub CLI output")
-                    )
-                );
+                armForceKillTimer();
+                settle(() => reject(toGhJsonParseError(error)), {
+                    keepForceKillTimer: true,
+                });
             }
         });
 
@@ -278,20 +350,24 @@ async function runGhJsonLines<T>(
         });
 
         child.on("error", (error) => {
+            preserveForceKillTimer = false;
+            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => reject(error));
         });
 
         child.on("close", (code) => {
+            preserveForceKillTimer = false;
+            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => {
                 if (code !== 0) {
                     reject(new Error(stderr || `GitHub CLI exited with code ${code}`));
                     return;
                 }
                 try {
-                    parseLine(stdoutBuffer);
+                    parseGhJsonLine(stdoutBuffer, rows);
                     resolve(rows);
                 } catch (error) {
-                    reject(error);
+                    reject(toGhJsonParseError(error));
                 }
             });
         });
@@ -395,6 +471,9 @@ async function getPullRequest(number: number): Promise<PullRequestSummary> {
 
 /** Validates pr number. */
 function validatePrNumber(value: unknown): number {
+    if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+        throw new Error("Invalid pull request number");
+    }
     const number = Number(value);
     if (!Number.isInteger(number) || number <= 0) {
         throw new Error("Invalid pull request number");
@@ -499,10 +578,7 @@ async function cleanupPullRequestWorktree(
         return {
             status: "warning",
             branch,
-            message:
-                error instanceof Error
-                    ? `Worktree cleanup warning for ${branch}: ${error.message}`
-                    : `Worktree cleanup warning for ${branch}`,
+            message: `Worktree cleanup warning for ${branch}: ${errorMessage(error, branch)}`,
         };
     }
 }
@@ -700,7 +776,7 @@ async function deployLatest(): Promise<DeploymentJob> {
             ...job,
             status: "failed",
             updatedAt: new Date().toISOString(),
-            note: error instanceof Error ? error.message : "Deploy failed",
+            note: errorMessage(error, "Deploy failed"),
         };
         writeDeploymentJob(failed);
         throw error;
@@ -727,13 +803,38 @@ async function approvePullRequest(number: number, deploy: boolean) {
         { timeoutMs: 120_000 }
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
-    await syncMain();
+    let syncError: string | undefined;
+    let deployment: DeploymentJob | undefined;
+    let deployError: string | undefined;
+
+    try {
+        await syncMain();
+    } catch (error) {
+        syncError = errorMessage(error, "Failed to sync main after merge");
+    }
+
+    if (deploy) {
+        try {
+            deployment = await deployLatest();
+        } catch (error) {
+            deployError = errorMessage(error, "Deploy failed after merge");
+        }
+    }
 
     return {
         ok: true,
-        message: deploy ? `PR #${number} merged; deploy started` : `PR #${number} merged`,
-        deployment: deploy ? await deployLatest() : undefined,
+        message:
+            deploy && deployError
+                ? `PR #${number} merged; deploy failed`
+                : syncError
+                  ? `PR #${number} merged; production sync failed`
+                  : deploy
+                    ? `PR #${number} merged; deploy started`
+                    : `PR #${number} merged`,
+        deployment,
         cleanup,
+        syncError,
+        deployError,
     };
 }
 
@@ -791,7 +892,15 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/:number/approve",
         express.json(),
         asyncRoute(async (req, res) => {
-            const number = validatePrNumber(req.params.number);
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
             const deploy = req.body?.deploy === true;
             res.json(await approvePullRequest(number, deploy));
         })
@@ -801,7 +910,15 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/:number/reject",
         express.json(),
         asyncRoute(async (req, res) => {
-            const number = validatePrNumber(req.params.number);
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
             const comment =
                 typeof req.body?.comment === "string" && req.body.comment.trim()
                     ? req.body.comment.trim()
@@ -810,3 +927,21 @@ export default function pullRequestsRoutes(app: express.Application): void {
         })
     );
 }
+
+export const __testing = {
+    buildCommandEnv,
+    clearForceKillTimerIfAllowed,
+    parseGhJsonLine,
+    parseRepoParts,
+    isPathInsideRoot,
+    parseGitWorktrees,
+    runCommand,
+    runGhJson,
+    runGhJsonLines,
+    toGhJsonParseError,
+    validatePrNumber,
+    validateMiraPr,
+    shellQuote,
+    trimOutput,
+    getResolvedRoots,
+};

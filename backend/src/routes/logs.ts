@@ -3,15 +3,18 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
+import { errorMessage } from "../lib/errors.js";
 import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 
-const LOGS_DIR = "/tmp/openclaw";
-const REAL_LOGS_DIR = path.resolve(LOGS_DIR);
+let logsDir = "/tmp/openclaw";
 let logWatcher: NodeJS.Timeout | null = null;
 let logPollInFlight = false;
 let lastLogSize = 0;
 let lastLogFile = "";
 const logSubscribers = new Set<WebSocket>();
+const MIN_LOG_TAIL_BYTES = 64 * 1024;
+const LOG_BYTES_PER_REQUESTED_LINE = 1024;
+const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 
 /** Represents log file. */
 interface LogFile {
@@ -20,15 +23,86 @@ interface LogFile {
     modified: Date;
 }
 
+function resolveRealLogsDir(): string {
+    return fs.realpathSync(logsDir);
+}
+
 /** Returns today log file. */
-function getTodayLogFile(): string {
+function getTodayLogFile(root = resolveRealLogsDir()): string {
     const today = new Date().toISOString().split("T")[0];
-    return path.join(LOGS_DIR, "openclaw-" + today + ".log");
+    return path.join(root, "openclaw-" + today + ".log");
+}
+
+function parsePositiveLineCount(value: unknown): number | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!/^\d+$/u.test(trimmed)) {
+        return null;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function readLogContent(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lines: number | null
+): Promise<string> {
+    if (!lines) {
+        return file.readFile("utf8");
+    }
+
+    const minimumWindowBytes = Math.min(
+        stat.size,
+        Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
+    );
+    const chunks: Buffer[] = [];
+    let offset = stat.size;
+    let bytesReadTotal = 0;
+    let newlineCount = 0;
+
+    while (offset > 0 && (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)) {
+        const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
+        offset -= chunkBytes;
+        const buffer = Buffer.allocUnsafe(chunkBytes);
+        const { bytesRead } = await file.read(buffer, 0, chunkBytes, offset);
+        if (bytesRead <= 0) {
+            break;
+        }
+        const chunk = buffer.subarray(0, bytesRead);
+        for (const byte of chunk) {
+            if (byte === 10) newlineCount += 1;
+        }
+        chunks.unshift(chunk);
+        bytesReadTotal += bytesRead;
+    }
+
+    return Buffer.concat(chunks, bytesReadTotal).toString("utf8");
+}
+
+async function readLogTailLines(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lineCount: number
+): Promise<string[]> {
+    const content = await readLogContent(file, stat, lineCount);
+    return content
+        .split("\n")
+        .filter((line) => line.trim())
+        .slice(-lineCount);
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
 async function pollLogFile(): Promise<void> {
-    const logFile = getTodayLogFile();
+    let logFile: string;
+    try {
+        logFile = getTodayLogFile();
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
 
     let file: fs.promises.FileHandle | undefined;
     try {
@@ -77,56 +151,78 @@ async function pollLogFile(): Promise<void> {
     }
 }
 
+/** Performs a single tick of the log watcher. */
+function runLogWatcherTick(): void {
+    if (logPollInFlight) return;
+    logPollInFlight = true;
+    void pollLogFile()
+        .catch((error: unknown) => {
+            console.error("[LogWatcher] Error:", errorMessage(error, String(error)));
+        })
+        .finally(() => {
+            logPollInFlight = false;
+        });
+}
+
 /** Performs start log watcher. */
 function startLogWatcher(): void {
     if (logWatcher) return;
 
-    logWatcher = setInterval(() => {
-        if (logPollInFlight) return;
-        logPollInFlight = true;
-
-        void pollLogFile()
-            .catch((error: unknown) => {
-                console.error("[LogWatcher] Error:", (error as Error).message);
-            })
-            .finally(() => {
-                logPollInFlight = false;
-            });
-    }, 1000);
+    logWatcher = setInterval(runLogWatcherTick, 1000);
 }
 
 /** Performs send log history. */
-function sendLogHistory(ws: WebSocket): void {
+async function sendLogHistory(ws: WebSocket): Promise<void> {
+    const send = (payload: unknown) => {
+        if (!logSubscribers.has(ws)) {
+            return;
+        }
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (error) {
+            console.error("[Logs] Error sending history:", (error as Error).message);
+        }
+    };
+
     try {
         const logFile = getTodayLogFile();
         const fileName = path.basename(logFile);
 
         // Send file name
-        ws.send(JSON.stringify({ type: "log_file", file: fileName }));
+        send({ type: "log_file", file: fileName });
 
-        if (!fs.existsSync(logFile)) {
-            // No log file yet
-            ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+        let file: fs.promises.FileHandle;
+        try {
+            file = await openReadNoFollowGuarded(guardedPath(logFile));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+            send({ type: "log_history_complete", count: 0 });
             return;
         }
 
-        // Read last 100 lines
-        const content = fs.readFileSync(logFile, "utf8");
-        const lines = content
-            .split("\n")
-            .filter((l) => l.trim())
-            .slice(-100);
+        let lines: string[];
+        try {
+            const stat = await file.stat();
+            lines = await readLogTailLines(file, stat, 100);
+        } finally {
+            await file.close();
+        }
 
         // Send each line
         for (const line of lines) {
-            ws.send(JSON.stringify({ type: "log", line }));
+            if (!logSubscribers.has(ws)) {
+                return;
+            }
+            send({ type: "log", line });
         }
 
         // Send completion
-        ws.send(JSON.stringify({ type: "log_history_complete", count: lines.length }));
+        send({ type: "log_history_complete", count: lines.length });
     } catch (error) {
         console.error("[Logs] Error sending history:", (error as Error).message);
-        ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+        send({ type: "log_history_complete", count: 0 });
     }
 }
 
@@ -135,7 +231,7 @@ export function subscribeToLogs(ws: WebSocket): void {
     logSubscribers.add(ws);
 
     // Send log history first
-    sendLogHistory(ws);
+    void sendLogHistory(ws);
 
     // Start watching for new logs
     startLogWatcher();
@@ -148,6 +244,9 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 
 /** Defines testing. */
 export const __testing = {
+    sendLogHistoryForTest: sendLogHistory,
+    pollLogFileForTest: pollLogFile,
+    runLogWatcherTickForTest: runLogWatcherTick,
     resetLogWatcherForTest(): void {
         if (logWatcher) {
             clearInterval(logWatcher);
@@ -161,6 +260,11 @@ export const __testing = {
     subscriberCount(): number {
         return logSubscribers.size;
     },
+    setLogsDirForTest(nextLogsDir: string): void {
+        this.resetLogWatcherForTest();
+        const resolvedLogsDir = path.resolve(nextLogsDir);
+        logsDir = resolvedLogsDir;
+    },
 };
 
 /** Registers logs API routes. */
@@ -168,17 +272,47 @@ export default function logsRoutes(app: express.Application): void {
     // Get log files info
     app.get("/api/logs/info", (async (_req, res) => {
         try {
-            if (!fs.existsSync(LOGS_DIR)) {
-                res.json({ logs: [] });
-                return;
+            let realRoot: string;
+            try {
+                realRoot = resolveRealLogsDir();
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    res.json({ logs: [] });
+                    return;
+                }
+                throw error;
             }
 
-            const files: LogFile[] = fs
-                .readdirSync(LOGS_DIR)
+            let names: string[];
+            try {
+                names = fs.readdirSync(realRoot);
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    res.json({ logs: [] });
+                    return;
+                }
+                throw error;
+            }
+
+            const files: LogFile[] = names
                 .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
-                .map((f) => {
-                    const stat = fs.statSync(path.join(LOGS_DIR, f));
-                    return { name: f, size: stat.size, modified: stat.mtime };
+                .flatMap((f) => {
+                    let stat: fs.Stats;
+                    try {
+                        stat = fs.lstatSync(path.join(realRoot, f));
+                    } catch (error) {
+                        const code = (error as NodeJS.ErrnoException).code;
+                        if (code === "ENOENT" || code === "ENOTDIR") {
+                            return [];
+                        }
+                        throw error;
+                    }
+                    if (!stat.isFile() || stat.isSymbolicLink()) {
+                        return [];
+                    }
+                    return [{ name: f, size: stat.size, modified: stat.mtime }];
                 })
                 .sort((a, b) => b.modified.getTime() - a.modified.getTime());
 
@@ -191,9 +325,11 @@ export default function logsRoutes(app: express.Application): void {
     // Get log file content
     app.get("/api/logs/content", (async (req, res) => {
         let logFile = req.query.file as string | undefined;
-        const lines = req.query.lines
-            ? Number.parseInt(req.query.lines as string, 10)
-            : null;
+        const lines = parsePositiveLineCount(req.query.lines);
+        if (req.query.lines !== undefined && lines === null) {
+            res.status(400).json({ error: "Invalid lines" });
+            return;
+        }
 
         // If no file specified, use today's log
         if (!logFile) {
@@ -204,9 +340,10 @@ export default function logsRoutes(app: express.Application): void {
         try {
             let realRoot: string;
             try {
-                realRoot = fs.realpathSync(REAL_LOGS_DIR);
+                realRoot = resolveRealLogsDir();
             } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }
@@ -241,7 +378,6 @@ export default function logsRoutes(app: express.Application): void {
                 }
                 throw error;
             }
-
             if (filePath === realRoot) {
                 res.status(404).json({ error: "Log file not found" });
                 return;
@@ -255,21 +391,38 @@ export default function logsRoutes(app: express.Application): void {
             let file: fs.promises.FileHandle;
             try {
                 file = await openReadNoFollowGuarded(guardedPath(filePath));
-            } catch {
-                res.status(404).json({ error: "Log file not found" });
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                console.error("[Logs] Failed to open log file:", error);
+                res.status(500).json({
+                    detail: "Internal server error",
+                    error: "Failed to open log file",
+                });
                 return;
             }
 
             let content: string;
             try {
-                content = await file.readFile("utf8");
+                const stat = await file.stat();
+                if (!stat.isFile()) {
+                    res.status(404).json({ error: "Log file not found" });
+                    return;
+                }
+                content = await readLogContent(file, stat, lines);
             } finally {
                 await file.close();
             }
 
             if (lines) {
-                const allLines = content.split("\n").filter((l) => l.trim());
-                content = allLines.slice(-lines).join("\n");
+                content = content
+                    .split("\n")
+                    .filter((line) => line.trim())
+                    .slice(-lines)
+                    .join("\n");
             }
 
             res.json({ content: content, file: logFile });

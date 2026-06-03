@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
+import { nullableString, objectFallback, stringFallback } from "../lib/values.js";
 import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 
 /** Defines notification type. */
@@ -37,9 +38,11 @@ function listNotifications(limit: number): NotificationRow[] {
 function toResponse(row: NotificationRow) {
     let metadata: Record<string, unknown> = {};
     try {
-        metadata = row.metadata_json
-            ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
-            : {};
+        const parsed = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+        metadata =
+            parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : {};
     } catch {
         // Keep the default empty metadata for malformed historical rows.
     }
@@ -93,26 +96,64 @@ export default function notificationsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/notifications", express.json(), ((req, res) => {
-        const title = (req.body?.title || "").toString().trim();
-        const description = (req.body?.description || "").toString().trim();
-        const type = (req.body?.type || "info").toString() as NotificationType;
-        const source = req.body?.source ? String(req.body.source) : null;
-        const dedupeKey = req.body?.dedupeKey ? String(req.body.dedupeKey) : null;
+        const rawTitle = req.body?.title;
+        const rawDescription = req.body?.description;
+        const rawType = req.body?.type;
+        const type = rawType === undefined ? "info" : rawType;
+        const rawSource = req.body?.source;
+        const rawDedupeKey = req.body?.dedupeKey;
+        const rawOccurredAt = req.body?.occurredAt;
+        if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
+            res.status(400).json({ error: "title must be a string" });
+            return;
+        }
+        if (
+            rawDescription !== undefined &&
+            rawDescription !== null &&
+            typeof rawDescription !== "string"
+        ) {
+            res.status(400).json({ error: "description must be a string" });
+            return;
+        }
+        if (
+            rawSource !== undefined &&
+            rawSource !== null &&
+            typeof rawSource !== "string"
+        ) {
+            res.status(400).json({ error: "source must be a string" });
+            return;
+        }
+        if (
+            rawDedupeKey !== undefined &&
+            rawDedupeKey !== null &&
+            typeof rawDedupeKey !== "string"
+        ) {
+            res.status(400).json({ error: "dedupeKey must be a string" });
+            return;
+        }
+        const title = nullableString((rawTitle ?? "").trim());
+        const description = stringFallback(rawDescription).trim();
+        const source = nullableString((rawSource ?? "").trim());
+        const dedupeKey = nullableString((rawDedupeKey ?? "").trim());
         const metadata =
-            req.body?.metadata && typeof req.body.metadata === "object"
-                ? req.body.metadata
+            req.body?.metadata &&
+            typeof req.body.metadata === "object" &&
+            !Array.isArray(req.body.metadata)
+                ? objectFallback(req.body.metadata)
                 : {};
-        const occurredAt = req.body?.occurredAt
-            ? String(req.body.occurredAt)
-            : new Date().toISOString();
-
-        if (!title) {
-            res.status(400).json({ error: "title is required" });
+        if (rawType !== undefined && typeof rawType !== "string") {
+            res.status(400).json({ error: "invalid notification type" });
+            return;
+        }
+        const occurredAt =
+            rawOccurredAt === undefined ? new Date().toISOString() : rawOccurredAt;
+        if (typeof occurredAt !== "string" || Number.isNaN(Date.parse(occurredAt))) {
+            res.status(400).json({ error: "invalid occurredAt" });
             return;
         }
 
-        if (!description) {
-            res.status(400).json({ error: "description is required" });
+        if (!title) {
+            res.status(400).json({ error: "title is required" });
             return;
         }
 
@@ -135,9 +176,10 @@ export default function notificationsRoutes(app: express.Application): void {
                 metadata_json = excluded.metadata_json,
                 updated_at = excluded.updated_at,
                 occurred_at = excluded.occurred_at
+            RETURNING id
         `);
 
-        const result = insert.run(
+        const row = insert.get(
             title,
             description,
             type,
@@ -148,9 +190,18 @@ export default function notificationsRoutes(app: express.Application): void {
             now,
             occurredAt
         );
+        const id = (row as { id?: unknown } | null | undefined)?.id;
+        if (typeof id !== "number") {
+            console.error("[Notifications] Failed to create notification:", row);
+            res.status(500).json({
+                ok: false,
+                error: "Failed to create notification",
+            });
+            return;
+        }
 
         pruneReadNotifications();
-        res.json({ ok: true, id: result.lastInsertRowid ?? null });
+        res.json({ ok: true, id });
     }) as RequestHandler);
 
     app.post("/api/notifications/mark-all-read", ((_, res) => {
@@ -160,9 +211,23 @@ export default function notificationsRoutes(app: express.Application): void {
         res.json({ ok: true });
     }) as RequestHandler);
 
-    app.post("/api/notifications/clear-read", ((_, res) => {
-        const result = db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
-        res.json({ ok: true, deleted: result.changes ?? 0 });
+    app.post("/api/notifications/clear-read", express.json(), ((req, res) => {
+        const rawSource = req.body?.source ?? req.query.source;
+        if (
+            rawSource !== undefined &&
+            rawSource !== null &&
+            typeof rawSource !== "string"
+        ) {
+            res.status(400).json({ error: "source must be a string" });
+            return;
+        }
+        const source = nullableString(stringFallback(rawSource).trim());
+        const result = source
+            ? db
+                  .prepare("DELETE FROM notifications WHERE is_read = 1 AND source = ?")
+                  .run(source)
+            : db.prepare("DELETE FROM notifications WHERE is_read = 1").run();
+        res.json({ ok: true, deleted: result.changes });
     }) as RequestHandler);
 
     app.post("/api/notifications/:id/read", ((req, res) => {
@@ -187,6 +252,6 @@ export default function notificationsRoutes(app: express.Application): void {
         }
 
         const result = db.prepare("DELETE FROM notifications WHERE id = ?").run(id);
-        res.json({ ok: true, deleted: result.changes ?? 0 });
+        res.json({ ok: true, deleted: result.changes || 0 });
     }) as RequestHandler);
 }

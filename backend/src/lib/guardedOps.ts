@@ -1,5 +1,9 @@
 import * as ChildProcess from "node:child_process";
+import * as Crypto from "node:crypto";
 import * as Fs from "node:fs";
+import Path from "node:path";
+
+import JSON5 from "json5";
 
 export type GuardedPath = string & { readonly __guardedPath: unique symbol };
 
@@ -13,8 +17,22 @@ const fsOps = Fs as unknown as {
     readdirSync: typeof Fs.readdirSync;
     readFileSync: typeof Fs.readFileSync;
     copyFileSync: typeof Fs.copyFileSync;
+    lstatSync: typeof Fs.lstatSync;
     statSync: typeof Fs.statSync;
 };
+
+type ReadChunk = (
+    file: Fs.promises.FileHandle,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number
+) => Promise<{ bytesRead: number }>;
+
+let readChunk: ReadChunk = (file, buffer, offset, length, position) =>
+    file.read(buffer, offset, length, position);
+let lstatSync = (path: Fs.PathLike) => fsOps.lstatSync(path);
+let statSync = (path: Fs.PathLike) => fsOps.statSync(path);
 
 const fsPromiseOps = Fs.promises as unknown as {
     open: typeof Fs.promises.open;
@@ -37,8 +55,8 @@ export function mkdirGuarded(path: GuardedPath, options: { recursive: true }): v
 }
 
 /** Reads a JSON5 text file from a validated path. */
-export function readJson5Guarded(path: GuardedPath): string {
-    return fsOps.readFileSync(guardedPathBuffer(path), "utf8");
+export function readJson5Guarded(path: GuardedPath): unknown {
+    return JSON5.parse(fsOps.readFileSync(guardedPathBuffer(path), "utf8"));
 }
 
 /** Lists directory entries from a validated path. */
@@ -92,13 +110,129 @@ export function readFromOpenFile(fd: number, byteLength: number): Buffer {
         if (bytesRead === 0) break;
         offset += bytesRead;
     }
-
     return offset === byteLength ? buffer : buffer.subarray(0, offset);
 }
 
 /** Copies a file between two validated paths. */
 export function copyGuarded(source: GuardedPath, destination: GuardedPath): void {
     fsOps.copyFileSync(guardedPathBuffer(source), guardedPathBuffer(destination));
+}
+
+/** Copies bytes while atomically refusing final-component symlinks on both paths. */
+export async function copyNoFollowGuarded(
+    source: GuardedPath,
+    destination: GuardedPath
+): Promise<void> {
+    const sourceFile = await openReadNoFollowGuarded(source);
+    try {
+        const sourceStat = await sourceFile.stat();
+        if (!sourceStat.isFile()) {
+            throw Object.assign(new Error("Source must be a regular file"), {
+                code: "EINVAL",
+            });
+        }
+        const sourceMode = sourceStat.mode & 0o777;
+        const destinationPath = destination as string;
+        const destinationDir = Path.dirname(destinationPath);
+        const tempPath = Path.join(
+            destinationDir,
+            `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
+        );
+        let destinationFile: Fs.promises.FileHandle | undefined;
+        try {
+            destinationFile = await Fs.promises.open(
+                guardedPathBuffer(destination),
+                Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+            );
+            const destinationStat = await destinationFile.stat();
+            if (!destinationStat.isFile()) {
+                throw Object.assign(new Error("Destination must be a regular file"), {
+                    code: "EINVAL",
+                });
+            }
+            if (
+                sourceStat.dev === destinationStat.dev &&
+                sourceStat.ino === destinationStat.ino
+            ) {
+                throw Object.assign(new Error("Source and destination must differ"), {
+                    code: "EINVAL",
+                });
+            }
+            if (destinationStat.nlink > 1) {
+                throw Object.assign(new Error("Destination must not be hard-linked"), {
+                    code: "EMLINK",
+                });
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        } finally {
+            await destinationFile?.close();
+        }
+        let tempCreated = false;
+        const tempFile = await Fs.promises.open(
+            Buffer.from(tempPath),
+            Fs.constants.O_WRONLY |
+                Fs.constants.O_CREAT |
+                Fs.constants.O_EXCL |
+                Fs.constants.O_NOFOLLOW,
+            sourceMode
+        );
+        try {
+            tempCreated = true;
+            try {
+                await tempFile.chmod(sourceMode);
+                const buffer = Buffer.allocUnsafe(64 * 1024);
+                let position = 0;
+                while (true) {
+                    const remaining = sourceStat.size - position;
+                    if (remaining <= 0) {
+                        break;
+                    }
+                    const { bytesRead } = await readChunk(
+                        sourceFile,
+                        buffer,
+                        0,
+                        Math.min(buffer.length, remaining),
+                        position
+                    );
+                    if (bytesRead === 0) {
+                        throw Object.assign(new Error("Source changed during copy"), {
+                            code: "EIO",
+                        });
+                    }
+                    let written = 0;
+                    while (written < bytesRead) {
+                        const { bytesWritten } = await tempFile.write(
+                            buffer,
+                            written,
+                            bytesRead - written
+                        );
+                        written += bytesWritten;
+                    }
+                    position += bytesRead;
+                }
+                await tempFile.sync();
+            } finally {
+                await tempFile.close();
+            }
+            await Fs.promises.rename(tempPath, destinationPath);
+            tempCreated = false;
+            const parentDir = await Fs.promises.open(Buffer.from(destinationDir), "r");
+            try {
+                await parentDir.sync();
+            } finally {
+                await parentDir.close();
+            }
+        } finally {
+            if (tempCreated) {
+                await Fs.promises.rm(tempPath, { force: true });
+            }
+        }
+    } finally {
+        await sourceFile.close();
+    }
 }
 
 /** Opens a validated path for reading while refusing a final-component symlink. */
@@ -124,20 +258,107 @@ export async function writeTextGuarded(
     }
 }
 
+async function syncParentDirectory(filePath: string): Promise<void> {
+    const parentDir = await Fs.promises.open(Buffer.from(Path.dirname(filePath)), "r");
+    try {
+        await parentDir.sync();
+    } finally {
+        await parentDir.close();
+    }
+}
+
 /** Writes UTF-8 text while atomically refusing a symlink at the final path. */
 export async function writeTextNoFollowGuarded(
     path: GuardedPath,
-    content: string
+    content: string,
+    mode?: number
 ): Promise<void> {
+    let fileMode = (mode ?? 0o666) & 0o777;
+    let shouldApplyMode = mode !== undefined;
+    const destinationPath = path as string;
+    const destinationDir = Path.dirname(destinationPath);
+    const tempPath = Path.join(
+        destinationDir,
+        `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
+    );
+    let file: Fs.promises.FileHandle | undefined;
+    try {
+        file = await Fs.promises.open(
+            guardedPathBuffer(path),
+            Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+        );
+        const destinationStat = await file.stat();
+        if (!destinationStat.isFile()) {
+            throw Object.assign(new Error("Destination must be a regular file"), {
+                code: "EINVAL",
+            });
+        }
+        if (destinationStat.nlink > 1) {
+            throw Object.assign(new Error("Destination must not be hard-linked"), {
+                code: "EMLINK",
+            });
+        }
+        if (mode === undefined) {
+            fileMode = destinationStat.mode & 0o777;
+            shouldApplyMode = true;
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    } finally {
+        await file?.close();
+    }
+
+    let tempCreated = false;
+    const tempFile = await Fs.promises.open(
+        Buffer.from(tempPath),
+        Fs.constants.O_WRONLY |
+            Fs.constants.O_CREAT |
+            Fs.constants.O_EXCL |
+            Fs.constants.O_NOFOLLOW,
+        fileMode
+    );
+    try {
+        tempCreated = true;
+        try {
+            if (shouldApplyMode) {
+                await tempFile.chmod(fileMode);
+            }
+            await tempFile.writeFile(content, "utf8");
+            await tempFile.sync();
+        } finally {
+            await tempFile.close();
+        }
+        await Fs.promises.rename(Buffer.from(tempPath), guardedPathBuffer(path));
+        tempCreated = false;
+        await syncParentDirectory(destinationPath);
+    } finally {
+        if (tempCreated) {
+            await Fs.promises.rm(tempPath, { force: true });
+        }
+    }
+}
+
+/** Writes UTF-8 text while refusing symlinks and existing final paths. */
+export async function writeTextNoFollowExclusiveGuarded(
+    path: GuardedPath,
+    content: string,
+    mode?: number
+): Promise<void> {
+    const fileMode = (mode ?? 0o666) & 0o777;
     const file = await Fs.promises.open(
         guardedPathBuffer(path),
         Fs.constants.O_WRONLY |
             Fs.constants.O_CREAT |
-            Fs.constants.O_TRUNC |
+            Fs.constants.O_EXCL |
             Fs.constants.O_NOFOLLOW,
-        0o666
+        fileMode
     );
     try {
+        if (mode !== undefined) {
+            await file.chmod(fileMode);
+        }
         await file.writeFile(content, "utf8");
     } finally {
         await file.close();
@@ -146,8 +367,28 @@ export async function writeTextNoFollowGuarded(
 
 /** Stats a validated path. */
 export function statGuarded(path: GuardedPath): Fs.Stats {
-    return fsOps.statSync(guardedPathBuffer(path));
+    return statSync(guardedPathBuffer(path));
 }
+
+/** Stats a validated path without following the final component. */
+export function lstatGuarded(path: GuardedPath): Fs.Stats {
+    return lstatSync(guardedPathBuffer(path));
+}
+
+export const __testing = {
+    setReadChunkForTest(nextReadChunk?: ReadChunk): void {
+        readChunk =
+            nextReadChunk ??
+            ((file, buffer, offset, length, position) =>
+                file.read(buffer, offset, length, position));
+    },
+    setLstatSyncForTest(nextLstatSync?: typeof Fs.lstatSync): void {
+        lstatSync = nextLstatSync ?? ((path) => fsOps.lstatSync(path));
+    },
+    setStatSyncForTest(nextStatSync?: typeof Fs.statSync): void {
+        statSync = nextStatSync ?? ((path) => fsOps.statSync(path));
+    },
+};
 
 /** Spawns a validated executable with explicit argument vector semantics. */
 export function spawnGuarded(

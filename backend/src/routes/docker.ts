@@ -1,20 +1,62 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
 import { parseTable } from "../lib/cacheStore.js";
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
+import {
+    arrayFallback,
+    nonEmptyEnvFallback,
+    nullableString,
+    objectFallback,
+    stringFallback,
+} from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
-
-const DOCKER_ROOT = process.env.MIRA_DOCKER_ROOT || "/opt/docker";
-const DOCKER_COMPOSE_WRAPPER =
-    process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
-    `${DOCKER_ROOT}/bin/docker-compose-doppler`;
+const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+let updaterNodeBin = nonEmptyEnvFallback("MIRA_UPDATER_NODE_BIN", "node");
+let updaterCwd = nonEmptyEnvFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
+const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
+    "MIRA_DOCKER_COMPOSE_WRAPPER",
+    `${DOCKER_ROOT}/bin/docker-compose-doppler`
+);
 const MAX_OUTPUT_CHARS = 100_000;
+const MAX_STDOUT_PENDING_CHARS = 16_384;
 const MAX_JOBS = 100;
+const MIN_LOG_TAIL = 50;
+const MAX_LOG_TAIL = 5_000;
+const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
+const DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS = 5_000;
+let dockerExecPidWaitTimeoutMs = DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
+const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 50;
 const N8N_DATABASE = "n8n";
+const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
+const DOCKER_UPDATER_TIMEOUT_MS = 120_000;
+const SENSITIVE_ENV_KEY_PATTERN =
+    /(?:SECRET|TOKEN|KEY|PASSWORD|API[_-]?KEY|ACCESS[_-]?TOKEN)/iu;
+
+function updaterScriptPath(fileName: string): string {
+    return path.resolve(updaterCwd, "scripts", fileName);
+}
+
+function redactEnvValue(value: unknown): string {
+    const envValue = String(value);
+    const separatorIndex = envValue.indexOf("=");
+    if (separatorIndex === -1) {
+        return SENSITIVE_ENV_KEY_PATTERN.test(envValue) ? `${envValue}=***` : envValue;
+    }
+
+    const key = envValue.slice(0, separatorIndex);
+    if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) {
+        return envValue;
+    }
+
+    return `${key}=***`;
+}
 
 /** Represents one docker updater service row. */
 interface DockerUpdaterServiceRow {
@@ -249,24 +291,23 @@ interface DockerExecJob {
     startedAt: number;
     endedAt: number | null;
     process?: ChildProcess;
+    inContainerPid?: number | null;
 }
+
+type DockerExecResult = {
+    code: number | null;
+    stdout: string;
+    stderr: string;
+};
 
 const dockerExecJobs = new Map<string, DockerExecJob>();
 
-/** Performs async route. */
+/** Wraps docker routes with consistent route logging. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch((error) => {
-            console.error("[dockerRoutes]", error);
-            if (res.headersSent) {
-                next(error);
-                return;
-            }
-            res.status(500).json({
-                error: error instanceof Error ? error.message : "Docker route failed",
-            });
-        });
-    };
+    return baseAsyncRoute(handler, {
+        fallback: "Docker route failed",
+        logLabel: "[dockerRoutes]",
+    });
 }
 
 /** Performs trim output. */
@@ -274,8 +315,23 @@ function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
     }
-
     return text.slice(-MAX_OUTPUT_CHARS);
+}
+
+function dockerIdentifierFallback(value: unknown): string | null {
+    const identifier = stringFallback(value).trim();
+    if (!identifier || identifier.startsWith("-")) {
+        return null;
+    }
+    return identifier;
+}
+
+function sendInvalidDockerIdentifier(res: express.Response, label: string): void {
+    res.status(400).json({ error: `Invalid ${label}` });
+}
+
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 /** Parses JSON lines. */
@@ -300,19 +356,48 @@ function parseJsonField<T>(value: string | undefined): T | null {
     }
 }
 
+function nonEmptyEnvValueOrFallback(
+    value: string | undefined,
+    fallbackName: string,
+    fallback: string
+): string {
+    const trimmed = value?.trim();
+    return trimmed || nonEmptyEnvFallback(fallbackName, fallback);
+}
+
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const username = encodeURIComponent(
+        nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_USER,
+            "DATABASE_USERNAME",
+            "postgres"
+        )
+    );
+    const password = encodeURIComponent(
+        nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_PASSWORD,
+            "DATABASE_PASSWORD",
+            "postgres"
+        )
+    );
+    const host = nonEmptyEnvValueOrFallback(
+        process.env.DB_POSTGRESDB_HOST,
+        "DATABASE_HOST",
+        "postgres"
+    );
+    const port = nonEmptyEnvValueOrFallback(
+        process.env.DB_POSTGRESDB_PORT,
+        "DATABASE_PORT",
+        "5432"
+    );
+    return `postgresql://${username}:${password}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
 /** Performs query n8n. */
 async function queryN8n(sql: string): Promise<string> {
     const { stdout } = await execFileAsync(
-        "docker",
+        dockerBin,
         [
             "exec",
             "postgres",
@@ -330,6 +415,7 @@ async function queryN8n(sql: string): Promise<string> {
             cwd: DOCKER_ROOT,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            timeout: DOCKER_REQUEST_TIMEOUT_MS,
         }
     );
 
@@ -342,27 +428,29 @@ async function queryN8nTsvRows<T extends object>(
     columns: string[]
 ): Promise<T[]> {
     // Simple approach: use tab-separated output without header
-    const tempFile = `/tmp/updater-events-${Date.now()}.tsv`;
+    const tempFile = `/tmp/updater-events-${process.pid}-${randomUUID()}.tsv`;
     const copySql = String.raw`COPY (${sql}) TO '${tempFile}' WITH (FORMAT text, DELIMITER E'\t', NULL '');`;
 
     await execFileAsync(
-        "docker",
+        dockerBin,
         ["exec", "postgres", "psql", buildPostgresUri(), "-qAt", "-c", copySql],
         {
             cwd: DOCKER_ROOT,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            timeout: DOCKER_REQUEST_TIMEOUT_MS,
         }
     );
 
     try {
         const { stdout } = await execFileAsync(
-            "docker",
+            dockerBin,
             ["exec", "postgres", "cat", tempFile],
             {
                 cwd: DOCKER_ROOT,
                 env: process.env,
                 maxBuffer: 10 * 1024 * 1024,
+                timeout: DOCKER_REQUEST_TIMEOUT_MS,
             }
         );
 
@@ -376,9 +464,10 @@ async function queryN8nTsvRows<T extends object>(
         });
     } finally {
         try {
-            await execFileAsync("docker", ["exec", "postgres", "rm", "-f", tempFile], {
+            await execFileAsync(dockerBin, ["exec", "postgres", "rm", "-f", tempFile], {
                 cwd: DOCKER_ROOT,
                 env: process.env,
+                timeout: DOCKER_REQUEST_TIMEOUT_MS,
             });
         } catch {
             // ignore cleanup errors
@@ -451,13 +540,12 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         return 0;
     }
 
-    const match = sizeRaw.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?B)$/i);
+    const match = sizeRaw.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([A-Z]*B)$/iu);
     if (!match) {
         return 0;
     }
-
-    const value = Number.parseFloat(match[1] || "0");
-    const unit = (match[2] || "B").toUpperCase();
+    const value = Number.parseFloat(stringFallback(match[1], "0"));
+    const unit = stringFallback(match[2], "B").toUpperCase();
     const multipliers: Record<string, number> = {
         B: 1,
         KB: 1024,
@@ -466,16 +554,20 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         TB: 1024 ** 4,
         PB: 1024 ** 5,
     };
-
-    return Math.round(value * (multipliers[unit] || 1));
+    const multiplier = multipliers[unit];
+    if (!multiplier) {
+        return 0;
+    }
+    return Math.round(value * multiplier);
 }
 
 /** Performs run docker. */
 async function runDocker(args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync("docker", args, {
+    const { stdout } = await execFileAsync(dockerBin, args, {
         cwd: DOCKER_ROOT,
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
+        timeout: DOCKER_REQUEST_TIMEOUT_MS,
     });
 
     return String(stdout);
@@ -487,6 +579,7 @@ async function runCompose(args: string[]): Promise<{ stdout: string; stderr: str
         cwd: DOCKER_ROOT,
         env: process.env,
         maxBuffer: 20 * 1024 * 1024,
+        timeout: DOCKER_REQUEST_TIMEOUT_MS,
     });
 
     return {
@@ -509,7 +602,7 @@ async function getContainerInspectMap(containerIds: string[]) {
     const map = new Map<string, DockerInspectRow>();
 
     for (const row of inspectRows) {
-        const fullId = String(row.Id || "");
+        const fullId = stringFallback(row.Id);
         if (!fullId) {
             continue;
         }
@@ -535,24 +628,24 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
 
     return psRows.map((row) => {
         const inspect = inspectMap.get(row.ID);
-        const labels = inspect?.Config?.Labels || {};
-        const networks = inspect?.NetworkSettings?.Networks || {};
+        const labels = objectFallback(inspect?.Config?.Labels);
+        const networks = objectFallback(inspect?.NetworkSettings?.Networks);
         const stats = statsById.get(row.ID);
 
         const ipAddresses = Object.fromEntries(
-            Object.entries(networks).map(([name, value]) => [
-                name,
-                String((value as { IPAddress?: string }).IPAddress || ""),
-            ])
+            Object.entries(networks).map(([name, value]) => {
+                const network = objectFallback(value);
+                return [name, stringFallback(network.IPAddress)];
+            })
         );
 
         return {
             id: row.ID,
             name: row.Names,
             image: row.Image,
-            imageId: String(inspect?.Image || ""),
+            imageId: stringFallback(inspect?.Image),
             command: row.Command,
-            createdAt: String(inspect?.Created || row.CreatedAt),
+            createdAt: stringFallback(inspect?.Created ?? row.CreatedAt),
             startedAt: inspect?.State?.StartedAt || null,
             finishedAt: inspect?.State?.FinishedAt || null,
             runningFor: row.RunningFor,
@@ -566,10 +659,10 @@ async function getContainers(): Promise<DockerContainerSummary[]> {
             ipAddresses,
             mounts: Array.isArray(inspect?.Mounts)
                 ? inspect.Mounts.map((mount) => ({
-                      type: String(mount.Type || ""),
-                      source: String(mount.Source || ""),
-                      destination: String(mount.Destination || ""),
-                      mode: String(mount.Mode || ""),
+                      type: stringFallback(mount.Type),
+                      source: stringFallback(mount.Source),
+                      destination: stringFallback(mount.Destination),
+                      mode: stringFallback(mount.Mode),
                       readOnly: Boolean(mount.RW === false),
                       name: mount.Name ? String(mount.Name) : undefined,
                   }))
@@ -594,31 +687,31 @@ async function getContainerDetails(
 ): Promise<DockerContainerDetails | null> {
     const containers = await getContainers();
     const summary = containers.find((container) => container.id.startsWith(containerId));
-
     if (!summary) {
         return null;
     }
 
     const inspectMap = await getContainerInspectMap([summary.id]);
     const inspect = inspectMap.get(summary.id);
-
     if (!inspect) {
         return null;
     }
-
-    const labels = (inspect.Config?.Labels || {}) as Record<string, string>;
-    const networks = Object.entries(inspect.NetworkSettings?.Networks || {}).map(
-        ([name, value]) => ({
+    const labels = objectFallback(inspect.Config?.Labels) as Record<string, string>;
+    const networks = Object.entries(
+        objectFallback(inspect.NetworkSettings?.Networks)
+    ).map(([name, value]) => {
+        const network = objectFallback(value);
+        return {
             name,
-            ipAddress: String(value.IPAddress || ""),
-            gateway: String(value.Gateway || ""),
-            macAddress: String(value.MacAddress || ""),
-        })
-    );
+            ipAddress: stringFallback(network.IPAddress),
+            gateway: stringFallback(network.Gateway),
+            macAddress: stringFallback(network.MacAddress),
+        };
+    });
 
     return {
         ...summary,
-        env: Array.isArray(inspect.Config?.Env) ? inspect.Config.Env.map(String) : [],
+        env: arrayFallback(inspect.Config?.Env).map(redactEnvValue),
         labels,
         networks,
     };
@@ -716,18 +809,18 @@ async function getDockerUpdaterServices() {
         id: Number(row.id),
         appSlug: row.app_slug,
         serviceName: row.service_name,
-        composeImageRef: row.compose_image_ref || null,
+        composeImageRef: nullableString(row.compose_image_ref),
         imageRepo: row.image_repo,
-        currentTag: row.current_tag || null,
-        currentDigest: row.current_digest || null,
-        latestTag: row.latest_tag || null,
-        latestDigest: row.latest_digest || null,
+        currentTag: nullableString(row.current_tag),
+        currentDigest: nullableString(row.current_digest),
+        latestTag: nullableString(row.latest_tag),
+        latestDigest: nullableString(row.latest_digest),
         policy: row.policy,
         pinMode: row.pin_mode,
         enabled: row.enabled === "true",
-        lastCheckedAt: row.last_checked_at || null,
-        lastUpdatedAt: row.last_updated_at || null,
-        lastStatus: row.last_status || null,
+        lastCheckedAt: nullableString(row.last_checked_at),
+        lastUpdatedAt: nullableString(row.last_updated_at),
+        lastStatus: nullableString(row.last_status),
         updateAvailable: hasUpdaterCandidate(row),
         metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
     }));
@@ -769,18 +862,18 @@ async function getDockerUpdaterServiceById(serviceId: number) {
         id: Number(row.id),
         appSlug: row.app_slug,
         serviceName: row.service_name,
-        composeImageRef: row.compose_image_ref || null,
+        composeImageRef: nullableString(row.compose_image_ref),
         imageRepo: row.image_repo,
-        currentTag: row.current_tag || null,
-        currentDigest: row.current_digest || null,
-        latestTag: row.latest_tag || null,
-        latestDigest: row.latest_digest || null,
+        currentTag: nullableString(row.current_tag),
+        currentDigest: nullableString(row.current_digest),
+        latestTag: nullableString(row.latest_tag),
+        latestDigest: nullableString(row.latest_digest),
         policy: row.policy,
         pinMode: row.pin_mode,
         enabled: row.enabled === "true",
-        lastCheckedAt: row.last_checked_at || null,
-        lastUpdatedAt: row.last_updated_at || null,
-        lastStatus: row.last_status || null,
+        lastCheckedAt: nullableString(row.last_checked_at),
+        lastUpdatedAt: nullableString(row.last_updated_at),
+        lastStatus: nullableString(row.last_status),
         updateAvailable: hasUpdaterCandidate(row),
         metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
     };
@@ -789,7 +882,7 @@ async function getDockerUpdaterServiceById(serviceId: number) {
 /** Performs run manual updater for service. */
 async function runManualUpdaterForService(serviceId: number) {
     const manual = await runUpdaterCommand("manual-update", [
-        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        updaterScriptPath("docker-auto-update.mjs"),
         "--mode",
         "manual",
         "--service-id",
@@ -797,33 +890,53 @@ async function runManualUpdaterForService(serviceId: number) {
     ]);
 
     const steps: DockerUpdaterRunResult[] = [manual];
+    let parsedOutput: unknown;
+    try {
+        parsedOutput = extractTrailingJson(manual.stdout);
+    } catch (error) {
+        if (manual.ok) {
+            return {
+                success: false,
+                output: {},
+                stderr: [manual.stderr, `Invalid manual updater output: ${String(error)}`]
+                    .filter(Boolean)
+                    .join("\n"),
+                steps,
+            };
+        }
+        parsedOutput = {};
+    }
+
     if (!manual.ok) {
         return {
-            output: extractTrailingJson(String(manual.stdout || "{}")),
-            stderr: String(manual.stderr || ""),
+            success: false,
+            output: parsedOutput,
+            stderr: stringFallback(manual.stderr),
             steps,
         };
     }
 
     const notify = await runUpdaterCommand("notify", [
-        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+        updaterScriptPath("docker-notify-updates.mjs"),
     ]);
     steps.push(notify);
     if (!notify.ok) {
         return {
-            output: extractTrailingJson(String(manual.stdout || "{}")),
+            success: false,
+            output: parsedOutput,
             stderr: [manual.stderr, notify.stderr].filter(Boolean).join("\n"),
             steps,
         };
     }
 
     const discord = await runUpdaterCommand("discord", [
-        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+        updaterScriptPath("docker-send-discord-newversion.mjs"),
     ]);
     steps.push(discord);
 
     return {
-        output: extractTrailingJson(String(manual.stdout || "{}")),
+        success: manual.ok && notify.ok && discord.ok,
+        output: parsedOutput,
         stderr: [manual.stderr, notify.stderr, discord.stderr].filter(Boolean).join("\n"),
         steps,
     };
@@ -839,30 +952,39 @@ async function runUpdaterCommand(
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER: nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_USER,
+            "DATABASE_USERNAME",
+            "postgres"
+        ),
+        DB_POSTGRESDB_PASSWORD: nonEmptyEnvValueOrFallback(
+            process.env.DB_POSTGRESDB_PASSWORD,
+            "DATABASE_PASSWORD",
+            "postgres"
+        ),
     };
 
     try {
-        const { stdout, stderr } = await execFileAsync("node", args, {
-            cwd: "/home/ubuntu/projects/n8n",
+        const { stdout, stderr } = await execFileAsync(updaterNodeBin, args, {
+            cwd: updaterCwd,
             env,
             maxBuffer: 20 * 1024 * 1024,
+            timeout: DOCKER_UPDATER_TIMEOUT_MS,
         });
 
         return {
             step,
             ok: true,
-            stdout: String(stdout || ""),
-            stderr: String(stderr || ""),
+            stdout: stringFallback(stdout),
+            stderr: stringFallback(stderr),
         };
     } catch (error) {
         const execError = error as Error & { stdout?: string; stderr?: string };
         return {
             step,
             ok: false,
-            stdout: String(execError.stdout || ""),
-            stderr: String(execError.stderr || execError.message || ""),
+            stdout: stringFallback(execError.stdout),
+            stderr: stringFallback(execError.stderr) || execError.message,
         };
     }
 }
@@ -870,27 +992,27 @@ async function runUpdaterCommand(
 /** Performs run docker updater now. */
 async function runDockerUpdaterNow() {
     const register = await runUpdaterCommand("register", [
-        "/home/ubuntu/projects/n8n/scripts/docker-register-services.mjs",
+        updaterScriptPath("docker-register-services.mjs"),
     ]);
     if (!register.ok) return [register];
 
     const poll = await runUpdaterCommand("poll", [
-        "/home/ubuntu/projects/n8n/scripts/docker-registry-poll.mjs",
+        updaterScriptPath("docker-registry-poll.mjs"),
     ]);
     if (!poll.ok) return [register, poll];
 
     const autoUpdate = await runUpdaterCommand("auto-update", [
-        "/home/ubuntu/projects/n8n/scripts/docker-auto-update.mjs",
+        updaterScriptPath("docker-auto-update.mjs"),
     ]);
     if (!autoUpdate.ok) return [register, poll, autoUpdate];
 
     const notify = await runUpdaterCommand("notify", [
-        "/home/ubuntu/projects/n8n/scripts/docker-notify-updates.mjs",
+        updaterScriptPath("docker-notify-updates.mjs"),
     ]);
     if (!notify.ok) return [register, poll, autoUpdate, notify];
 
     const discord = await runUpdaterCommand("discord", [
-        "/home/ubuntu/projects/n8n/scripts/docker-send-discord-newversion.mjs",
+        updaterScriptPath("docker-send-discord-newversion.mjs"),
     ]);
 
     return [register, poll, autoUpdate, notify, discord];
@@ -952,10 +1074,10 @@ async function getDockerUpdaterEvents(limit: number) {
         appSlug: row.app_slug,
         serviceName: row.service_name,
         eventType: row.event_type,
-        fromTag: row.from_tag || null,
-        toTag: row.to_tag || null,
-        fromDigest: row.from_digest || null,
-        toDigest: row.to_digest || null,
+        fromTag: nullableString(row.from_tag),
+        toTag: nullableString(row.to_tag),
+        fromDigest: nullableString(row.from_digest),
+        toDigest: nullableString(row.to_digest),
         message: null, // Message excluded from list view due to newlines
         createdAt: row.created_at,
     }));
@@ -967,7 +1089,6 @@ async function runContainerAction(
     action: DockerActionRequest["action"]
 ) {
     const details = await getContainerDetails(containerId);
-
     if (!details) {
         throw new Error("Container not found");
     }
@@ -994,24 +1115,78 @@ async function runDockerExecCommand(
     command: string,
     jobId: string,
     onUpdate?: (stdout: string, stderr: string) => void
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<DockerExecResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn("docker", ["exec", containerId, "sh", "-lc", command], {
-            cwd: DOCKER_ROOT,
-            env: process.env,
-            detached: true,
-        });
+        const wrappedCommand = [
+            `if command -v setsid >/dev/null 2>&1; then setsid sh -lc ${shellQuote(command)} & command_pid=$!; else sh -lc ${shellQuote(command)} & command_pid=$!; fi`,
+            String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$command_pid"`,
+            String.raw`wait "$command_pid"`,
+        ].join("; ");
+        const child = spawn(
+            dockerBin,
+            ["exec", containerId, "sh", "-lc", wrappedCommand],
+            {
+                cwd: DOCKER_ROOT,
+                env: process.env,
+                detached: true,
+            }
+        );
 
         const job = dockerExecJobs.get(jobId);
         if (job) {
             job.process = child;
+            job.inContainerPid = null;
         }
 
         let stdout = "";
         let stderr = "";
+        let stdoutPending = "";
+
+        const processStdoutLine = (line: string, trailingNewline = false): void => {
+            const markerIndex = line.indexOf(DOCKER_EXEC_PID_MARKER);
+            if (markerIndex === -1) {
+                stdout = trimOutput(stdout + line + (trailingNewline ? "\n" : ""));
+                return;
+            }
+            if (markerIndex > 0) {
+                stdout = trimOutput(stdout + line.slice(0, markerIndex));
+            }
+            const parsedPid = Number.parseInt(
+                line.slice(markerIndex + DOCKER_EXEC_PID_MARKER.length),
+                10
+            );
+            const currentJob = dockerExecJobs.get(jobId);
+            if (
+                currentJob &&
+                currentJob.inContainerPid == null &&
+                Number.isSafeInteger(parsedPid) &&
+                parsedPid > 1
+            ) {
+                currentJob.inContainerPid = parsedPid;
+            }
+        };
+
+        const flushNonMarkerPendingStdout = (): void => {
+            if (
+                stdoutPending.length <= MAX_STDOUT_PENDING_CHARS ||
+                DOCKER_EXEC_PID_MARKER.startsWith(stdoutPending)
+            ) {
+                return;
+            }
+            stdout = trimOutput(stdout + stdoutPending);
+            stdoutPending = "";
+        };
 
         child.stdout?.on("data", (data) => {
-            stdout = trimOutput(stdout + String(data));
+            stdoutPending += String(data);
+            let newlineIndex = stdoutPending.indexOf("\n");
+            while (newlineIndex !== -1) {
+                const line = stdoutPending.slice(0, newlineIndex);
+                stdoutPending = stdoutPending.slice(newlineIndex + 1);
+                processStdoutLine(line, true);
+                newlineIndex = stdoutPending.indexOf("\n");
+            }
+            flushNonMarkerPendingStdout();
             onUpdate?.(stdout, stderr);
         });
 
@@ -1021,6 +1196,11 @@ async function runDockerExecCommand(
         });
 
         child.on("close", (code, signal) => {
+            if (stdoutPending) {
+                processStdoutLine(stdoutPending);
+                stdoutPending = "";
+                onUpdate?.(stdout, stderr);
+            }
             resolve({
                 code: signal ? 130 : code,
                 stdout,
@@ -1034,25 +1214,168 @@ async function runDockerExecCommand(
     });
 }
 
+async function stopDockerExecInContainer(job: DockerExecJob): Promise<void> {
+    const deadline = Date.now() + dockerExecPidWaitTimeoutMs;
+    while (!job.inContainerPid && Date.now() < deadline) {
+        await new Promise((resolve) =>
+            setTimeout(resolve, DOCKER_EXEC_PID_WAIT_INTERVAL_MS)
+        );
+    }
+    if (!job.inContainerPid) {
+        throw new Error("Timed out waiting for Docker exec in-container PID");
+    }
+    await execFileAsync(
+        dockerBin,
+        [
+            "exec",
+            job.containerId,
+            "sh",
+            "-lc",
+            `kill -TERM -- -${job.inContainerPid} 2>/dev/null || kill -TERM ${job.inContainerPid}`,
+        ],
+        {
+            cwd: DOCKER_ROOT,
+            env: process.env,
+            timeout: 10_000,
+            killSignal: "SIGTERM",
+        }
+    );
+}
+
+function stopDockerExecHostProcess(childProcess: ChildProcess): void {
+    const { pid } = childProcess;
+    try {
+        if (typeof pid === "number" && !Number.isNaN(pid) && pid > 1) {
+            process.kill(-pid, "SIGTERM");
+        } else {
+            childProcess.kill("SIGTERM");
+        }
+    } catch {
+        try {
+            childProcess.kill("SIGTERM");
+        } catch (fallbackError) {
+            if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+                throw fallbackError;
+            }
+        }
+    }
+}
+
 /** Performs cleanup docker exec jobs. */
 function cleanupDockerExecJobs() {
     if (dockerExecJobs.size <= MAX_JOBS) {
         return;
     }
-
-    const entries = [...dockerExecJobs.values()].sort(
-        (a, b) => a.startedAt - b.startedAt
-    );
-    const overflow = entries.length - MAX_JOBS;
-
+    const entries = [...dockerExecJobs.values()]
+        .filter((job) => job.status === "done")
+        .sort((a, b) => a.startedAt - b.startedAt);
+    const overflow = Math.min(entries.length, dockerExecJobs.size - MAX_JOBS);
     for (let index = 0; index < overflow; index += 1) {
         const job = entries[index];
-        if (job.process && !job.process.killed) {
-            job.process.kill("SIGTERM");
-        }
         dockerExecJobs.delete(job.id);
     }
 }
+
+function activeDockerExecJobCount(): number {
+    return [...dockerExecJobs.values()].filter((job) => job.status !== "done").length;
+}
+
+function updateDockerExecJobOutput(jobId: string, stdout: string, stderr: string): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.stdout = stdout;
+    current.stderr = stderr;
+}
+
+function completeDockerExecJob(jobId: string, result: DockerExecResult): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    current.code = result.code;
+    current.stdout = result.stdout;
+    current.stderr = result.stderr;
+    current.endedAt = Date.now();
+    current.process = undefined;
+    cleanupDockerExecJobs();
+}
+
+function failDockerExecJob(jobId: string, error: unknown): void {
+    const current = dockerExecJobs.get(jobId);
+    if (!current) {
+        return;
+    }
+    const errMsg = error instanceof Error ? error.message : String(error);
+    current.status = "done";
+    current.code = 1;
+    current.stderr = trimOutput(`${current.stderr}\n${errMsg}`.trim());
+    current.endedAt = Date.now();
+    current.process = undefined;
+    cleanupDockerExecJobs();
+}
+
+function resolveManualUpdateServiceId(
+    routeServiceIdParam: string,
+    payload: DockerManualUpdateRequest
+): number | null {
+    if (routeServiceIdParam) {
+        if (!/^\d+$/u.test(routeServiceIdParam)) {
+            return null;
+        }
+        const routeServiceId = Number(routeServiceIdParam);
+        return Number.isSafeInteger(routeServiceId) && routeServiceId > 0
+            ? routeServiceId
+            : null;
+    }
+
+    const serviceId = Number(payload.serviceId || 0);
+    return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : null;
+}
+
+export const __testing = {
+    asyncRoute,
+    buildPostgresUri,
+    trimOutput,
+    parseJsonLines,
+    parseJsonField,
+    hasUpdaterCandidate,
+    extractTrailingJson,
+    dockerExecJobs,
+    cleanupDockerExecJobs,
+    activeDockerExecJobCount,
+    dockerIdentifierFallback,
+    runUpdaterCommand,
+    runDockerExecCommand,
+    setDockerBinForTests: (nextDockerBin: string | undefined) => {
+        dockerBin = nextDockerBin || nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+    },
+    setUpdaterNodeBinForTests: (nextUpdaterNodeBin: string | undefined) => {
+        updaterNodeBin =
+            nextUpdaterNodeBin || nonEmptyEnvFallback("MIRA_UPDATER_NODE_BIN", "node");
+    },
+    setUpdaterCwdForTests: (nextUpdaterCwd: string | undefined) => {
+        updaterCwd =
+            nextUpdaterCwd ||
+            nonEmptyEnvFallback("MIRA_UPDATER_CWD", "/home/ubuntu/projects/n8n");
+    },
+    setDockerExecPidWaitTimeoutForTests: (nextTimeoutMs?: number) => {
+        dockerExecPidWaitTimeoutMs =
+            nextTimeoutMs ?? DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
+    },
+    updateDockerExecJobOutput,
+    completeDockerExecJob,
+    failDockerExecJob,
+    parseLabels,
+    parsePorts,
+    parseDockerSizeToBytes,
+    getContainerInspectMap,
+    resolveManualUpdateServiceId,
+};
 
 /** Registers docker API routes. */
 export default function dockerRoutes(app: express.Application): void {
@@ -1104,15 +1427,10 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerManualUpdateRequest;
-            const routeServiceId = Number.parseInt(
-                String(req.params.serviceId || ""),
-                10
-            );
-            const serviceId = Number.isFinite(routeServiceId)
-                ? routeServiceId
-                : Number(payload.serviceId || 0);
+            const routeServiceIdParam = stringFallback(req.params.serviceId);
+            const serviceId = resolveManualUpdateServiceId(routeServiceIdParam, payload);
 
-            if (!Number.isFinite(serviceId) || serviceId <= 0) {
+            if (serviceId === null) {
                 res.status(400).json({ error: "Invalid service id" });
                 return;
             }
@@ -1135,7 +1453,7 @@ export default function dockerRoutes(app: express.Application): void {
 
             const result = await runManualUpdaterForService(serviceId);
             res.json({
-                success: true,
+                success: result.success,
                 service,
                 result: result.output,
                 stderr: result.stderr,
@@ -1154,9 +1472,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/containers/:containerId",
         asyncRoute(async (req, res) => {
-            const details = await getContainerDetails(
-                String(req.params.containerId || "")
-            );
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            const details = await getContainerDetails(containerId);
             if (!details) {
                 res.status(404).json({ error: "Container not found" });
                 return;
@@ -1169,18 +1491,26 @@ export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/containers/:containerId/logs",
         asyncRoute(async (req, res) => {
-            const containerId = String(req.params.containerId || "");
-            const tail = Math.max(
-                50,
-                Number.parseInt(String(req.query.tail || "200"), 10) || 200
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+            const tail = Math.min(
+                MAX_LOG_TAIL,
+                Math.max(
+                    MIN_LOG_TAIL,
+                    Number.parseInt(stringFallback(req.query.tail, "200"), 10) || 200
+                )
             );
             const { stdout, stderr } = await execFileAsync(
-                "docker",
+                dockerBin,
                 ["logs", "--tail", String(tail), containerId],
                 {
                     cwd: DOCKER_ROOT,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
+                    timeout: DOCKER_REQUEST_TIMEOUT_MS,
                 }
             );
             const content = [String(stdout), String(stderr)]
@@ -1193,13 +1523,35 @@ export default function dockerRoutes(app: express.Application): void {
 
     app.post(
         "/api/docker/containers/:containerId/action",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
-            const payload = req.body as DockerActionRequest;
-            const result = await runContainerAction(
-                String(req.params.containerId || ""),
-                payload.action
-            );
+            const payload = req.body as Partial<DockerActionRequest> | null;
+            const containerId = dockerIdentifierFallback(req.params.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            if (!payload || typeof payload !== "object") {
+                res.status(400).json({ error: "Invalid container action" });
+                return;
+            }
+            const { action } = payload;
+            if (action !== "start" && action !== "stop" && action !== "restart") {
+                res.status(400).json({ error: "Invalid container action" });
+                return;
+            }
+
+            let result: Awaited<ReturnType<typeof runContainerAction>>;
+            try {
+                result = await runContainerAction(containerId, action);
+            } catch (error) {
+                if ((error as Error).message.includes("Container not found")) {
+                    res.status(404).json({ error: (error as Error).message });
+                    return;
+                }
+                throw error;
+            }
             res.json(result);
         })
     );
@@ -1225,7 +1577,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/images/:imageId",
         asyncRoute(async (req, res) => {
-            await runDocker(["image", "rm", String(req.params.imageId || "")]);
+            const imageId = dockerIdentifierFallback(req.params.imageId);
+            if (!imageId) {
+                sendInvalidDockerIdentifier(res, "imageId");
+                return;
+            }
+
+            await runDocker(["image", "rm", imageId]);
             res.json({ success: true });
         })
     );
@@ -1241,7 +1599,13 @@ export default function dockerRoutes(app: express.Application): void {
     app.delete(
         "/api/docker/volumes/:volumeName",
         asyncRoute(async (req, res) => {
-            await runDocker(["volume", "rm", String(req.params.volumeName || "")]);
+            const volumeName = dockerIdentifierFallback(req.params.volumeName);
+            if (!volumeName) {
+                sendInvalidDockerIdentifier(res, "volumeName");
+                return;
+            }
+
+            await runDocker(["volume", "rm", volumeName]);
             res.json({ success: true });
         })
     );
@@ -1270,19 +1634,46 @@ export default function dockerRoutes(app: express.Application): void {
 
     app.post(
         "/api/docker/exec/start",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
             const payload = req.body as DockerExecStartRequest;
 
-            if (!payload.containerId || !payload.command) {
+            if (!payload || typeof payload !== "object") {
                 res.status(400).json({ error: "Missing containerId or command" });
+                return;
+            }
+
+            if (payload.containerId === undefined || payload.command === undefined) {
+                res.status(400).json({ error: "Missing containerId or command" });
+                return;
+            }
+
+            if (typeof payload.containerId !== "string") {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            const containerId = dockerIdentifierFallback(payload.containerId);
+            if (!containerId) {
+                sendInvalidDockerIdentifier(res, "containerId");
+                return;
+            }
+
+            if (typeof payload.command !== "string" || !payload.command.trim()) {
+                res.status(400).json({ error: "Invalid command" });
+                return;
+            }
+
+            cleanupDockerExecJobs();
+            if (activeDockerExecJobCount() >= MAX_JOBS) {
+                res.status(429).json({ error: "Too many active Docker exec jobs" });
                 return;
             }
 
             const jobId = randomUUID();
             dockerExecJobs.set(jobId, {
                 id: jobId,
-                containerId: payload.containerId,
+                containerId,
                 status: "running",
                 code: null,
                 stdout: "",
@@ -1292,53 +1683,20 @@ export default function dockerRoutes(app: express.Application): void {
             });
 
             void runDockerExecCommand(
-                payload.containerId,
+                containerId,
                 payload.command,
                 jobId,
-                (stdout, stderr) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.stdout = stdout;
-                    current.stderr = stderr;
-                }
+                (stdout, stderr) => updateDockerExecJobOutput(jobId, stdout, stderr)
             )
-                .then((result) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.status = "done";
-                    current.code = result.code;
-                    current.stdout = result.stdout;
-                    current.stderr = result.stderr;
-                    current.endedAt = Date.now();
-                    cleanupDockerExecJobs();
-                })
-                .catch((error) => {
-                    const current = dockerExecJobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.status = "done";
-                    current.code = 1;
-                    current.stderr = trimOutput(
-                        `${current.stderr}\n${(error as Error).message}`.trim()
-                    );
-                    current.endedAt = Date.now();
-                    cleanupDockerExecJobs();
-                });
+                .then((result) => completeDockerExecJob(jobId, result))
+                .catch((error) => failDockerExecJob(jobId, error));
 
             res.json({ jobId });
         })
     );
 
     app.get("/api/docker/exec/:jobId", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = stringFallback(req.params.jobId);
         const job = dockerExecJobs.get(jobId);
 
         if (!job) {
@@ -1358,31 +1716,37 @@ export default function dockerRoutes(app: express.Application): void {
         });
     }) as RequestHandler);
 
-    app.post("/api/docker/exec/:jobId/stop", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
-        const job = dockerExecJobs.get(jobId);
+    app.post(
+        "/api/docker/exec/:jobId/stop",
+        asyncRoute(async (req, res) => {
+            const jobId = stringFallback(req.params.jobId);
+            const job = dockerExecJobs.get(jobId);
+            if (!job) {
+                res.status(404).json({ error: "Docker exec job not found" });
+                return;
+            }
 
-        if (!job) {
-            res.status(404).json({ error: "Docker exec job not found" });
-            return;
-        }
-
-        if (job.status !== "running") {
-            res.status(400).json({ error: "Job is not running" });
-            return;
-        }
-
-        if (!job.process || job.process.killed) {
-            res.status(400).json({ error: "Process not available" });
-            return;
-        }
-
-        try {
-            process.kill(-job.process.pid!, "SIGTERM");
-        } catch {
-            job.process.kill("SIGTERM");
-        }
-
-        res.json({ success: true });
-    }) as RequestHandler);
+            if (job.status !== "running") {
+                res.status(400).json({ error: "Job is not running" });
+                return;
+            }
+            if (!job.process || job.process.killed) {
+                res.status(400).json({ error: "Process not available" });
+                return;
+            }
+            const hostProcess = job.process;
+            let stopError: unknown;
+            try {
+                await stopDockerExecInContainer(job);
+            } catch (error) {
+                stopError = error;
+            } finally {
+                stopDockerExecHostProcess(hostProcess);
+            }
+            if (stopError) {
+                throw stopError;
+            }
+            res.json({ success: true });
+        })
+    );
 }

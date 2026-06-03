@@ -1,9 +1,13 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
+import { stringFallback } from "../lib/values.js";
+
 const execFileAsync = promisify(execFile);
+const DOCKER_EXEC_TIMEOUT_MS = 30_000;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -93,57 +97,148 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
-/** Runs a shell command inside a Docker container and returns raw stdout. */
-async function runDockerExec(container: string, command: string) {
+export const __testing = {
+    buildPgBouncerUri,
+    buildPostgresUri,
+    normalizePostgresHost,
+    normalizePostgresPort,
+    numberFrom,
+    parseTable,
+    stringWithDefault,
+};
+
+/** Returns a string value or a fallback using the route's existing falsy-value behavior. */
+function stringWithDefault(value: string | null | undefined, fallback: string): string {
+    return value || fallback;
+}
+
+/** Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior. */
+function numberFrom(value: string | null | undefined): number {
+    return Number(value || 0);
+}
+
+/** Runs a command inside a Docker container and returns raw stdout. */
+async function runDockerExec(container: string, command: string[]) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
+        timeout: DOCKER_EXEC_TIMEOUT_MS,
     };
     const { stdout } = await execFileAsync(
         "docker",
-        ["exec", container, "bash", "-lc", command],
+        ["exec", container, ...command],
         options
     );
     return stdout;
 }
 
+/** Returns trimmed environment overrides while treating whitespace-only values as missing. */
+function trimmedEnvValue(value: string | undefined): string | undefined {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? undefined : trimmed;
+}
+
+/** Returns a fallback only when the value is absent, preserving intentional blanks. */
+function envValueOrDefault(value: string | undefined, fallback: string): string {
+    return value === undefined ? fallback : value;
+}
+
+/** Returns a safe PostgreSQL hostname for URI construction. */
+function normalizePostgresHost(value: string | undefined, fallback: string): string {
+    const host = trimmedEnvValue(value) ?? fallback;
+    const validIpv4 =
+        /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
+    const validIpv6 =
+        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    const rawIpv6 = isIP(host) === 6;
+    if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
+        throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
+    }
+    if (
+        !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
+            host
+        ) &&
+        !validIpv6 &&
+        !validIpv4 &&
+        !rawIpv6
+    ) {
+        throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
+    }
+    return rawIpv6 ? `[${host}]` : host;
+}
+
+/** Returns a safe PostgreSQL port for URI construction. */
+function normalizePostgresPort(value: string | undefined): string {
+    const port = trimmedEnvValue(value) ?? "5432";
+    if (!/^\d+$/u.test(port)) {
+        throw Object.assign(new Error("Invalid PostgreSQL port"), { code: "EINVAL" });
+    }
+    const portNumber = Number(port);
+    if (!Number.isSafeInteger(portNumber) || portNumber < 1 || portNumber > 65_535) {
+        throw Object.assign(new Error("Invalid PostgreSQL port"), { code: "EINVAL" });
+    }
+    return String(portNumber);
+}
+
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const username = encodeURIComponent(
+        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
+    );
+    const password = encodeURIComponent(
+        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
+    );
+    const host = normalizePostgresHost(process.env.DATABASE_HOST, "postgres");
+    const port = normalizePostgresPort(process.env.DATABASE_PORT);
+    const db = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
 
 /** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.PGBOUNCER_HOST || "pgbouncer";
-    const port = process.env.PGBOUNCER_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const username = encodeURIComponent(
+        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
+    );
+    const password = encodeURIComponent(
+        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
+    );
+    const host = normalizePostgresHost(process.env.PGBOUNCER_HOST, "pgbouncer");
+    const port = normalizePostgresPort(process.env.PGBOUNCER_PORT);
+    const db = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
 }
 
 /** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
 async function queryPostgres(sql: string, database = "postgres") {
     const uri = buildPostgresUri(database);
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
 async function queryPgBouncer(sql: string) {
     const uri = buildPgBouncerUri();
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Sums numeric values selected from a row collection. */
@@ -191,20 +286,24 @@ async function getTorrentCounts() {
         return torrentCountCache.data;
     }
 
-    const cometCount =
+    const cometCount = stringFallback(
         parseTable<{ count: string }>(
             await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet")
-        )[0]?.count ?? "0";
+        )[0]?.count,
+        "0"
+    );
 
-    const bitmagnetCount =
+    const bitmagnetCount = stringFallback(
         parseTable<{ count: string }>(
             await queryPostgres(
                 "SELECT count(*)::text AS count FROM torrents;",
                 "bitmagnet"
             )
-        )[0]?.count ?? "0";
+        )[0]?.count,
+        "0"
+    );
 
-    const data = { comet: Number(cometCount), bitmagnet: Number(bitmagnetCount) };
+    const data = { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
     torrentCountCache = { data, timestamp: Date.now() };
     return data;
 }
@@ -267,14 +366,13 @@ async function getDatabaseOverview() {
         LIMIT 25;
     `);
     const deadTupleRows = allDeadTupleRows
-        .sort((a, b) => Number(b.n_dead_tup || 0) - Number(a.n_dead_tup || 0))
+        .sort((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
         .slice(0, 25);
 
     const pgStatStatementsResult = await queryPostgres(`
         SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
     `);
     const pgStatStatementsEnabled = pgStatStatementsResult.includes("pg_stat_statements");
-
     const topQueries = pgStatStatementsEnabled
         ? (parseTable<TopQueryRow>(
               await queryPostgres(String.raw`
@@ -301,42 +399,42 @@ async function getDatabaseOverview() {
     );
 
     const connections = Object.fromEntries(
-        connectionRows.map((row) => [row.state || "unknown", Number(row.count || 0)])
+        connectionRows.map((row) => [
+            stringWithDefault(row.state, "unknown"),
+            numberFrom(row.count),
+        ])
     );
     const totalDatabaseSizeBytes = sumBy(databaseRows, (row) =>
-        Number(row.size_bytes || 0)
+        numberFrom(row.size_bytes)
     );
-    const totalBackends = sumBy(databaseRows, (row) => Number(row.numbackends || 0));
+    const totalBackends = sumBy(databaseRows, (row) => numberFrom(row.numbackends));
     const averageCacheHitRatio =
         databaseRows.length > 0
-            ? sumBy(databaseRows, (row) => Number(row.cache_hit_ratio || 0)) /
+            ? sumBy(databaseRows, (row) => numberFrom(row.cache_hit_ratio)) /
               databaseRows.length
             : 0;
-
-    const waitingClients = sumBy(pgBouncerPools, (row) => Number(row.cl_waiting || 0));
+    const waitingClients = sumBy(pgBouncerPools, (row) => numberFrom(row.cl_waiting));
     const clientConnections = sumBy(
         pgBouncerPools,
-        (row) => Number(row.cl_active || 0) + Number(row.cl_waiting || 0)
+        (row) => numberFrom(row.cl_active) + numberFrom(row.cl_waiting)
     );
     const serverConnections = sumBy(
         pgBouncerPools,
         (row) =>
-            Number(row.sv_active || 0) +
-            Number(row.sv_idle || 0) +
-            Number(row.sv_used || 0)
+            numberFrom(row.sv_active) + numberFrom(row.sv_idle) + numberFrom(row.sv_used)
     );
     let maxWait = 0;
     for (const row of pgBouncerPools) {
-        maxWait = Math.max(maxWait, Number(row.maxwait || 0));
+        maxWait = Math.max(maxWait, numberFrom(row.maxwait));
     }
     const avgQueryTime =
         pgBouncerStats.length > 0
-            ? sumBy(pgBouncerStats, (row) => Number(row.avg_query_time || 0)) /
+            ? sumBy(pgBouncerStats, (row) => numberFrom(row.avg_query_time)) /
               pgBouncerStats.length
             : 0;
     const avgTransactionTime =
         pgBouncerStats.length > 0
-            ? sumBy(pgBouncerStats, (row) => Number(row.avg_xact_time || 0)) /
+            ? sumBy(pgBouncerStats, (row) => numberFrom(row.avg_xact_time)) /
               pgBouncerStats.length
             : 0;
 
@@ -372,8 +470,13 @@ export default function databaseRoutes(app: express.Application): void {
             const data = await getDatabaseOverview();
             res.json(data);
         } catch (error) {
+            const safeError = {
+                code: (error as NodeJS.ErrnoException).code,
+                name: (error as Error).name,
+            };
+            console.error("[databaseRoutes] Failed to load database overview", safeError);
             res.status(500).json({
-                error: error instanceof Error ? error.message : String(error),
+                error: "Failed to load database overview",
             });
         }
     }) as RequestHandler);

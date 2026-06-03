@@ -8,7 +8,7 @@ import tsEslint from "typescript-eslint";
 
 const eslintConfig = defineConfig(
     {
-        ignores: ["node_modules/**", "dist/**", "eslint.config.js"],
+        ignores: ["node_modules/**", "coverage/**", "dist/**", "eslint.config.js"],
     },
     eslintConfigs.configs.recommended,
     tsEslint.configs.recommended,

@@ -8,7 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { getAuthUserFromRequest, getPersistedGatewayToken, requireAuth } from "./auth.js";
+import { getAuthUserFromRequest, requireAuth } from "./auth.js";
 import gateway from "./gateway.js";
 import agentsRoutes from "./routes/agents.js";
 import authRoutes from "./routes/auth.js";
@@ -35,18 +35,18 @@ import sttRoutes from "./routes/stt.js";
 import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
 import ttsRoutes from "./routes/tts.js";
-import { startOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
-import { startQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+export const app = express();
+const GLOBAL_JSON_LIMIT = "2097152b";
+const globalJsonParser = express.json({ limit: GLOBAL_JSON_LIMIT });
 
 /** Parses Express trust-proxy config from environment strings. */
-function parseTrustProxy(value: string | undefined): boolean | number | string {
+export function parseTrustProxy(value?: string): boolean | number | string {
     if (value === undefined || value.trim() === "") {
         return "loopback";
     }
@@ -55,25 +55,48 @@ function parseTrustProxy(value: string | undefined): boolean | number | string {
     if (normalized === "true") return true;
     if (normalized === "false") return false;
 
-    const numeric = Number(normalized);
-    if (Number.isInteger(numeric) && numeric >= 0) {
-        return numeric;
+    if (/^\d+$/u.test(normalized)) {
+        const parsed = Number.parseInt(normalized, 10);
+        if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 255) {
+            return parsed;
+        }
+        return "loopback";
     }
 
-    return value;
+    return normalized;
 }
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
-app.use(express.json());
-const server = http.createServer(app);
+app.use((request, response, next) => {
+    if (request.method === "PUT" && request.path.startsWith("/api/config-files/")) {
+        next();
+        return;
+    }
+    if (request.method === "PUT" && request.path.startsWith("/api/files/")) {
+        next();
+        return;
+    }
+
+    globalJsonParser(request, response, next);
+});
+export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const frontendPath = path.join(__dirname, "..", "..", "dist");
 
-const backendCommit = (() => {
+type ExecSyncCommand = (
+    command: string,
+    options: Parameters<typeof execSync>[1]
+) => Buffer | string;
+
+/** Resolves the current backend git commit for health responses. */
+export function resolveBackendCommit(
+    repoRoot = path.join(__dirname, "..", ".."),
+    execCommand: ExecSyncCommand = execSync
+): string {
     try {
-        return execSync("git rev-parse --short HEAD", {
-            cwd: path.join(__dirname, "..", ".."),
+        return execCommand("git rev-parse --short HEAD", {
+            cwd: repoRoot,
             stdio: ["ignore", "pipe", "ignore"],
         })
             .toString()
@@ -81,7 +104,20 @@ const backendCommit = (() => {
     } catch {
         return "unknown";
     }
-})();
+}
+
+const backendCommit = resolveBackendCommit();
+
+/** Resolves the port the backend should listen on. */
+export function resolveListenPort(value = process.env.PORT): number {
+    const trimmed = value?.trim() ?? "";
+    if (!/^\d+$/u.test(trimmed)) {
+        return 3100;
+    }
+
+    const port = Number(trimmed);
+    return port <= 65_535 ? port : 3100;
+}
 
 // =====================
 // API Routes
@@ -97,6 +133,11 @@ const healthHandler: express.RequestHandler = (_req, res) => {
     });
 };
 
+/** Returns whether an API-relative path belongs to the auth route tree. */
+export function isAuthRoute(pathname: string): boolean {
+    return pathname === "/auth" || pathname.startsWith("/auth/");
+}
+
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
@@ -108,7 +149,7 @@ const apiLimiter = rateLimit({
     max: 600,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (request) => request.path.startsWith("/auth"),
+    skip: (request) => isAuthRoute(request.path),
     message: { error: "Too many requests, please try again later" },
 });
 
@@ -125,7 +166,8 @@ const authLimiter = rateLimit({
 app.use("/api/auth", authLimiter);
 app.use("/api", apiLimiter);
 
-app.get("/api/sessions", (request, response) => {
+/** Returns dashboard sessions for authenticated requests. */
+export const sessionsHandler: express.RequestHandler = (request, response) => {
     const user = getAuthUserFromRequest(request);
     if (!user) {
         response.status(401).json({ error: "Unauthorized" });
@@ -133,17 +175,21 @@ app.get("/api/sessions", (request, response) => {
     }
 
     response.json(gateway.getSessions());
-});
+};
+
+app.get("/api/sessions", sessionsHandler);
 
 authRoutes(app);
-app.use("/api", (request, response, next) => {
-    if (request.path.startsWith("/auth")) {
+/** Applies API auth while leaving auth bootstrap/login routes public. */
+export const apiAuthMiddleware: express.RequestHandler = (request, response, next) => {
+    if (isAuthRoute(request.path)) {
         next();
         return;
     }
-
     requireAuth(request, response, next);
-});
+};
+
+app.use("/api", apiAuthMiddleware);
 
 // Route modules
 filesRoutes(app, express);
@@ -176,7 +222,11 @@ staticRoutes(app, frontendPath);
 // =====================
 // WebSocket
 // =====================
-wss.on("connection", (ws: WebSocket, request) => {
+/** Handles one dashboard WebSocket connection after authenticating the request. */
+export function handleWebSocketConnection(
+    ws: WebSocket,
+    request: http.IncomingMessage
+): void {
     const user = getAuthUserFromRequest(request);
     if (!user) {
         ws.close(4401, "Unauthorized");
@@ -184,22 +234,6 @@ wss.on("connection", (ws: WebSocket, request) => {
     }
 
     gateway.handleClient(ws);
-});
+}
 
-// =====================
-// Start Server
-// =====================
-const PORT = process.env.PORT || 3100;
-server.listen(PORT, () => {
-    const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
-    if (token) {
-        gateway.init(token);
-    } else {
-        console.warn(
-            "[Backend] No gateway token configured yet; waiting for bootstrap registration"
-        );
-    }
-
-    startQuotaNotificationMonitor();
-    startOpenClawNotificationMonitor();
-});
+wss.on("connection", handleWebSocketConnection);

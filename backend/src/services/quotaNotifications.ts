@@ -12,6 +12,8 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
+const MAX_TIMER_MS = 2_147_483_647;
+const quotaMonitorIntervals = new Set<NodeJS.Timeout>();
 
 /** Formats the Synthetic.new weekly remaining quota. */
 function formatSyntheticWeeklyRemaining(
@@ -82,8 +84,23 @@ function getNotificationPayload(
             description: `${quotas.openai.percentUsed}% used (5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left)`,
         };
     }
-
     return null;
+}
+
+/** Returns a notification payload or skips inconsistent quota snapshots. */
+function getProviderNotificationPayload(
+    provider: ProviderKey,
+    bucket: number,
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+) {
+    const payload = getNotificationPayload(provider, bucket, quotas);
+    if (!payload) {
+        console.warn(
+            `[QuotaNotifications] Missing notification payload for ${provider} ${bucket}%`
+        );
+        return null;
+    }
+    return payload;
 }
 
 /** Performs ensure state row. */
@@ -152,6 +169,40 @@ function insertNotification(
     pruneReadNotifications();
 }
 
+/** Handles one quota threshold bucket. */
+function handleQuotaBucket(
+    provider: ProviderKey,
+    bucket: number,
+    percent: number,
+    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>,
+    occurredAt: string
+): void {
+    const payload = getProviderNotificationPayload(provider, bucket, quotas);
+    if (!payload) {
+        return;
+    }
+    ensureStateRow(provider, bucket);
+    const state = getState(provider, bucket);
+
+    let isArmed = state.is_armed;
+
+    if (isArmed === 1 && percent >= bucket) {
+        insertNotification(
+            provider,
+            bucket,
+            percent,
+            occurredAt,
+            payload.title,
+            payload.description
+        );
+        isArmed = 0;
+    } else if (percent < bucket - HYSTERESIS) {
+        isArmed = 1;
+    }
+
+    setState(provider, bucket, isArmed);
+}
+
 let running = false;
 
 /** Performs run quota notification check. */
@@ -179,31 +230,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
             }
 
             for (const bucket of THRESHOLDS) {
-                const payload = getNotificationPayload(provider, bucket, quotas);
-                if (!payload) {
-                    continue;
-                }
-
-                ensureStateRow(provider, bucket);
-                const state = getState(provider, bucket);
-
-                let isArmed = state.is_armed;
-
-                if (isArmed === 1 && percent >= bucket) {
-                    insertNotification(
-                        provider,
-                        bucket,
-                        percent,
-                        occurredAt,
-                        payload.title,
-                        payload.description
-                    );
-                    isArmed = 0;
-                } else if (percent < bucket - HYSTERESIS) {
-                    isArmed = 1;
-                }
-
-                setState(provider, bucket, isArmed);
+                handleQuotaBucket(provider, bucket, percent, quotas, occurredAt);
             }
         }
     } catch (error) {
@@ -215,13 +242,35 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 
 /** Performs start quota notification monitor. */
 export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
+    if (quotaMonitorIntervals.size > 0) {
+        return;
+    }
+
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000
-            ? intervalMs
+            ? Math.min(Math.trunc(intervalMs), MAX_TIMER_MS)
             : DEFAULT_INTERVAL_MS;
 
     void runQuotaNotificationCheck();
-    setInterval(() => {
+    const monitor = setInterval(() => {
         void runQuotaNotificationCheck();
-    }, safeInterval).unref();
+    }, safeInterval);
+    quotaMonitorIntervals.add(monitor);
+    monitor.unref();
 }
+
+/** Stops quota notification monitors. */
+export function stopQuotaNotificationMonitor(): void {
+    for (const monitor of quotaMonitorIntervals) {
+        clearInterval(monitor);
+    }
+    quotaMonitorIntervals.clear();
+}
+
+export const __testing = {
+    getNotificationPayload,
+    getProviderNotificationPayload,
+    getProviderPercent,
+    getState,
+    handleQuotaBucket,
+};

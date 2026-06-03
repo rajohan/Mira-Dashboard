@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -70,6 +70,32 @@ describe("static routes", () => {
 
         const api = await fetch(`${server.baseUrl}/api/health`);
         assert.equal(api.status, 404);
+    });
+
+    it("reports an error when the SPA index disappears before send", async () => {
+        const frontendPath = await mkdtemp(path.join(os.tmpdir(), "mira-static-gone-"));
+        tempDirs.push(frontendPath);
+        const indexPath = path.join(frontendPath, "index.html");
+        await writeFile(indexPath, "<main>Mira Dashboard</main>");
+
+        const server = await startServer(frontendPath);
+        servers.push(server);
+        await unlink(indexPath);
+
+        const originalError = console.error;
+        const errors: unknown[][] = [];
+        console.error = (...args: unknown[]) => {
+            errors.push(args);
+        };
+        try {
+            const response = await fetch(`${server.baseUrl}/missing-route`);
+            assert.equal(response.status, 500);
+            assert.equal(await response.text(), "Error loading application");
+            assert.equal(errors.length, 1);
+            assert.equal(errors[0]?.[0], "[Static] Error serving index.html:");
+        } finally {
+            console.error = originalError;
+        }
     });
 
     it("serves a clear placeholder when the frontend has not been built", async () => {

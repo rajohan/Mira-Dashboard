@@ -19,7 +19,23 @@ async function startServer(): Promise<TestServer> {
     terminalRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("error", onError);
+            server.off("listening", onListening);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            server.close(() => reject(error));
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -39,25 +55,48 @@ async function requestJson<T>(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
     });
+    const contentType = response.headers.get("content-type") || "";
 
     return {
         status: response.status,
-        body: (await response.json()) as T,
+        body: contentType.includes("application/json")
+            ? ((await response.json()) as T)
+            : ((await response.text()) as T),
+    };
+}
+
+async function requestWithoutJsonBody<T>(
+    server: TestServer,
+    pathName: string
+): Promise<{ status: number; body: T }> {
+    const response = await fetch(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json")
+        ? ((await response.json()) as T)
+        : ((await response.text()) as T);
+
+    return {
+        status: response.status,
+        body,
     };
 }
 
 describe("terminal routes", () => {
     let server: TestServer;
     let tempDir: string;
+    let appDirName: string;
 
     before(async () => {
         server = await startServer();
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-terminal-test-"));
         await writeFile(path.join(tempDir, "alpha.txt"), "alpha");
+        await writeFile(path.join(tempDir, "alpine.txt"), "alpine");
         await writeFile(path.join(tempDir, ".hidden"), "hidden");
         await writeFile(path.join(tempDir, "run-me"), "#!/bin/sh\n");
         await chmod(path.join(tempDir, "run-me"), 0o755);
-        await mkdtemp(path.join(tempDir, "app-"));
+        appDirName = `${path.basename(await mkdtemp(path.join(tempDir, "app-")))}/`;
         await mkdir(path.join(tempDir, "nested"));
         await writeFile(path.join(tempDir, "nested", "inside.txt"), "inside");
         await writeFile(path.join(tempDir, "nested", "install.sh"), "#!/bin/sh\n");
@@ -78,6 +117,16 @@ describe("terminal routes", () => {
         assert.equal(status, 400);
         assert.equal("error" in body, true);
 
+        const blankPartial = await requestJson<{
+            completions: Array<{ completion: string; display: string; type: string }>;
+            commonPrefix: string;
+        }>(server, "/api/terminal/complete", { partial: "   ", cwd: tempDir });
+        assert.equal(blankPartial.status, 200);
+        assert.equal(
+            blankPartial.body.completions.some((item) => item.display === appDirName),
+            true
+        );
+
         const completionResponse = await requestJson<{
             completions: Array<{ completion: string; display: string; type: string }>;
             commonPrefix: string;
@@ -86,8 +135,9 @@ describe("terminal routes", () => {
         assert.equal(completionResponse.status, 200);
         assert.deepEqual(
             completionResponse.body.completions.map((item) => item.display),
-            [completionResponse.body.completions[0]!.display, "alpha.txt"]
+            [appDirName, "alpha.txt", "alpine.txt"]
         );
+        assert.equal(completionResponse.body.completions[0]?.display, appDirName);
         assert.equal(completionResponse.body.completions[0]?.type, "directory");
         assert.equal(completionResponse.body.commonPrefix, "");
 
@@ -104,6 +154,14 @@ describe("terminal routes", () => {
         );
         assert.equal(executableResponse.body.completions[0]?.display, "run-me");
         assert.equal(executableResponse.body.completions[0]?.type, "executable");
+
+        const sameTypeSort = await requestJson<{
+            completions: Array<{ display: string; type: string }>;
+        }>(server, "/api/terminal/complete", { partial: "al", cwd: tempDir });
+        assert.deepEqual(
+            sameTypeSort.body.completions.map((item) => item.display),
+            ["alpha.txt", "alpine.txt"]
+        );
     });
 
     it("completes nested and absolute paths with command prefixes", async () => {
@@ -143,6 +201,18 @@ describe("terminal routes", () => {
             [`${tempDir}/nested/install.sh`, `${tempDir}/nested/inside.txt`]
         );
 
+        const trimmedCwdCompletion = await requestJson<{
+            completions: Array<{ completion: string }>;
+        }>(server, "/api/terminal/complete", {
+            partial: "nested/i",
+            cwd: ` ${tempDir} `,
+        });
+        assert.equal(trimmedCwdCompletion.status, 200);
+        assert.deepEqual(
+            trimmedCwdCompletion.body.completions.map((item) => item.completion),
+            ["nested/install.sh", "nested/inside.txt"]
+        );
+
         const missingDir = await requestJson<{
             completions: unknown[];
             commonPrefix: string;
@@ -153,6 +223,65 @@ describe("terminal routes", () => {
 
         assert.equal(missingDir.status, 200);
         assert.deepEqual(missingDir.body, { completions: [], commonPrefix: "" });
+
+        const defaultCwdCompletion = await requestJson<{
+            completions: unknown[];
+            commonPrefix: string;
+        }>(server, "/api/terminal/complete", { partial: "definitely-missing" });
+        assert.equal(defaultCwdCompletion.status, 200);
+        assert.deepEqual(defaultCwdCompletion.body, {
+            completions: [],
+            commonPrefix: "",
+        });
+
+        const invalidCwd = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "definitely-missing", cwd: false }
+        );
+        assert.equal(invalidCwd.status, 400);
+        assert.equal(invalidCwd.body.error, "Missing or invalid cwd");
+
+        const emptyCwd = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "definitely-missing", cwd: "   " }
+        );
+        assert.equal(emptyCwd.status, 400);
+        assert.equal(emptyCwd.body.error, "Missing or invalid cwd");
+
+        const nulCwd = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            { partial: "definitely-missing", cwd: `${tempDir}\0nested` }
+        );
+        assert.equal(nulCwd.status, 400);
+        assert.equal(nulCwd.body.error, "Missing or invalid cwd");
+
+        const missingBody = await requestWithoutJsonBody<{ error: string }>(
+            server,
+            "/api/terminal/complete"
+        );
+        assert.equal(missingBody.status, 400);
+        assert.equal(missingBody.body.error, "Missing or invalid body");
+
+        const primitiveBody = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            null
+        );
+        assert.equal(primitiveBody.status, 400);
+
+        const nullByte = await requestJson<{ error: string }>(
+            server,
+            "/api/terminal/complete",
+            {
+                partial: "bad\0path",
+                cwd: tempDir,
+            }
+        );
+        assert.equal(nullByte.status, 400);
+        assert.equal(nullByte.body.error, "Missing or invalid partial");
     });
 
     it("changes directories and reports invalid targets", async () => {
@@ -176,6 +305,16 @@ describe("terminal routes", () => {
 
         assert.equal(parent.status, 200);
         assert.equal(parent.body.newCwd, tempDir);
+
+        const absoluteWithParentSegment = await requestJson<{
+            success: boolean;
+            newCwd: string;
+        }>(server, "/api/terminal/cd", {
+            path: `${tempDir}/nested/../nested`,
+            cwd: "/",
+        });
+        assert.equal(absoluteWithParentSegment.status, 200);
+        assert.equal(absoluteWithParentSegment.body.newCwd, path.join(tempDir, "nested"));
 
         const invalid = await requestJson<{
             success: boolean;
@@ -209,6 +348,14 @@ describe("terminal routes", () => {
             error: "Missing or invalid path",
         });
 
+        const defaultCwdMissingInput = await requestJson<{
+            success: boolean;
+            newCwd: string;
+            error: string;
+        }>(server, "/api/terminal/cd", { path: "" });
+        assert.equal(defaultCwdMissingInput.status, 400);
+        assert.equal(defaultCwdMissingInput.body.newCwd, os.homedir());
+
         const home = await requestJson<{ success: boolean; newCwd: string }>(
             server,
             "/api/terminal/cd",
@@ -224,5 +371,53 @@ describe("terminal routes", () => {
         );
         assert.equal(absolute.status, 200);
         assert.equal(absolute.body.newCwd, nestedDir);
+
+        const homeRelative = await requestJson<{ success: boolean; newCwd: string }>(
+            server,
+            "/api/terminal/cd",
+            { path: "~/", cwd: tempDir }
+        );
+        assert.equal(homeRelative.status, 200);
+        assert.equal(homeRelative.body.newCwd, os.homedir());
+
+        const dotted = await requestJson<{ success: boolean; newCwd: string }>(
+            server,
+            "/api/terminal/cd",
+            { path: "./nested/.", cwd: tempDir }
+        );
+        assert.equal(dotted.status, 200);
+        assert.equal(dotted.body.newCwd, path.join(tempDir, "nested"));
+
+        const invalidNullByte = await requestJson<{
+            success: boolean;
+            newCwd: string;
+            error: string;
+        }>(server, "/api/terminal/cd", { path: "bad\0path", cwd: tempDir });
+        assert.equal(invalidNullByte.status, 400);
+        assert.deepEqual(invalidNullByte.body, {
+            success: false,
+            newCwd: tempDir,
+            error: "Missing or invalid path",
+        });
+    });
+
+    it("covers terminal helper edge cases directly", async () => {
+        const { __testing } = await import("./terminal.js");
+
+        assert.equal(__testing.expandPath("bad\0path", tempDir), tempDir);
+        assert.equal(
+            __testing.expandPath("~/example", tempDir),
+            path.join(os.homedir(), "example")
+        );
+        assert.equal(__testing.expandPath("~", tempDir), os.homedir());
+
+        const noMatches = await __testing.getCompletions("zzz", tempDir);
+        assert.deepEqual(noMatches, { completions: [], commonPrefix: "" });
+
+        const statFailure = await __testing.getCompletions("alpha", tempDir, async () => {
+            throw new Error("stat race");
+        });
+        assert.equal(statFailure.completions[0]?.display, "alpha.txt");
+        assert.equal(statFailure.completions[0]?.type, "file");
     });
 });

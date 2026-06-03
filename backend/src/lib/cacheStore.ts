@@ -1,13 +1,17 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-let testDockerBin: string | undefined;
+const cacheStoreTestState: { dockerBin?: string } = {};
 
-/** Performs set cache store docker bin for tests. */
-export function setCacheStoreDockerBinForTests(dockerBin: string | undefined) {
-    testDockerBin = dockerBin;
+function setDockerBinForTests(value: string | undefined): void {
+    cacheStoreTestState.dockerBin = value;
+}
+
+function getDockerBinForTests(): string | undefined {
+    return cacheStoreTestState.dockerBin;
 }
 
 /** Represents one cache entry row. */
@@ -47,38 +51,92 @@ export function parseTable<T extends object>(output: string): T[] {
 }
 
 /** Performs run docker exec. */
-async function runDockerExec(container: string, command: string) {
+async function runDockerExec(container: string, command: string[]) {
     const options: ExecFileOptionsWithStringEncoding = {
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
         env: process.env,
+        timeout: 30_000,
+        killSignal: "SIGTERM",
     };
-    const dockerBin = testDockerBin || "docker";
+    const dockerBin = getDockerBinForTests() || "docker";
     const { stdout } = await execFileAsync(
         dockerBin,
-        ["exec", container, "bash", "-lc", command],
+        ["exec", container, ...command],
         options
     );
     return stdout;
 }
 
+/** Returns a safe PostgreSQL hostname for URI construction. */
+function normalizePostgresHost(value: string | undefined): string {
+    const host = value?.trim() || "postgres";
+    const validIpv4 =
+        /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
+    const validIpv6 =
+        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    const rawIpv6 = isIP(host) === 6;
+    if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
+        throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
+    }
+    if (
+        !/^(?:[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?))*$/u.test(
+            host
+        ) &&
+        !validIpv6 &&
+        !validIpv4 &&
+        !rawIpv6
+    ) {
+        throw Object.assign(new Error("Invalid DATABASE_HOST"), { code: "EINVAL" });
+    }
+    return rawIpv6 ? `[${host}]` : host;
+}
+
+/** Returns a safe PostgreSQL port for URI construction. */
+function normalizePostgresPort(value: string | undefined): string {
+    const port = value?.trim() || "5432";
+    if (!/^\d+$/u.test(port)) {
+        throw Object.assign(new Error("Invalid DATABASE_PORT"), { code: "EINVAL" });
+    }
+    const portNumber = Number(port);
+    if (!Number.isSafeInteger(portNumber) || portNumber < 1 || portNumber > 65_535) {
+        throw Object.assign(new Error("Invalid DATABASE_PORT"), { code: "EINVAL" });
+    }
+    return String(portNumber);
+}
+
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = "n8n") {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const username = process.env.DATABASE_USERNAME ?? "postgres";
+    const password = process.env.DATABASE_PASSWORD ?? "postgres";
+    const encodedUsername = encodeURIComponent(username);
+    const encodedPassword = encodeURIComponent(password);
+    const encodedDatabase = encodeURIComponent(database);
+    const host = normalizePostgresHost(process.env.DATABASE_HOST);
+    const port = normalizePostgresPort(process.env.DATABASE_PORT);
+    return `postgresql://${encodedUsername}:${encodedPassword}@${host}:${port}/${encodedDatabase}`;
 }
+
+export const __testing = {
+    buildPostgresUri,
+    getDockerBinForTests,
+    setDockerBinForTests,
+};
 
 /** Performs query n8n cache. */
 async function queryN8nCache(sql: string) {
     const uri = buildPostgresUri("n8n");
-    const escapedSql = sql.replaceAll('"', String.raw`\"`);
-    return runDockerExec(
-        "postgres",
-        String.raw`psql "${uri}" -P footer=off -F $'\t' --no-align -c "${escapedSql}"`
-    );
+    return runDockerExec("postgres", [
+        "psql",
+        uri,
+        "-P",
+        "footer=off",
+        "-F",
+        "\t",
+        "--no-align",
+        "-c",
+        sql,
+    ]);
 }
 
 /** Parses JSON field. */

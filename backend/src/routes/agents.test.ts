@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
     chmod,
+    link,
+    lstat,
     mkdir,
     mkdtemp,
     readFile,
@@ -12,7 +15,7 @@ import {
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -72,14 +75,16 @@ async function requestJson<T>(
 describe("agents routes", () => {
     let server: TestServer;
     let homeDir: string;
+    let configPath: string;
     let metadataPath: string;
 
     before(async () => {
         homeDir = await mkdtemp(path.join(os.tmpdir(), "mira-agents-route-"));
         const openclawRoot = path.join(homeDir, ".openclaw");
         await mkdir(openclawRoot, { recursive: true });
+        configPath = path.join(openclawRoot, "openclaw.json");
         await writeFile(
-            path.join(openclawRoot, "openclaw.json"),
+            configPath,
             JSON.stringify(
                 {
                     agents: {
@@ -170,10 +175,690 @@ describe("agents routes", () => {
         const testAgent = status.body.agents.find((agent) => agent.id === agentId);
         const researcher = status.body.agents.find((agent) => agent.id === "researcher");
         assert.equal(testAgent?.status, "idle");
-        assert.equal(testAgent?.model, "openai-codex/gpt-5.5");
+        assert.equal(testAgent?.model, "gpt-5.5");
         assert.equal(testAgent?.currentTask, null);
         assert.equal(researcher?.model, "hf:moonshotai/Kimi-K2.5");
         assert.equal(typeof status.body.timestamp, "number");
+    });
+
+    it("normalizes agent helper edge cases", async () => {
+        const { __testing } = await import("./agents.js");
+        const config = {
+            defaults: {
+                models: {
+                    "openai/gpt-5.5": { alias: "codex" },
+                },
+            },
+            list: [],
+        };
+
+        assert.equal(__testing.toDisplayModelName(""), "unknown");
+        assert.equal(__testing.toDisplayModelName("openai/gpt-5.5"), "gpt-5.5");
+        assert.equal(__testing.getRouteParam("main"), "main");
+        assert.equal(__testing.getRouteParam(["main", "ignored"]), "main");
+        assert.equal(__testing.getRouteParam([]), "");
+        const missingRouteParam: string | string[] | undefined = undefined;
+        assert.equal(__testing.getRouteParam(missingRouteParam), "");
+        assert.equal(
+            __testing.toDisplayModelName("synthetic/hf:vendor/model"),
+            "hf:vendor/model"
+        );
+        assert.equal(__testing.resolveConfiguredModelName(undefined, config), "unknown");
+        assert.equal(__testing.resolveConfiguredModelName("  ", config), "unknown");
+        assert.equal(__testing.resolveConfiguredModelName("codex", config), "gpt-5.5");
+        assert.equal(
+            __testing.resolveConfiguredModelName("synthetic/model", config),
+            "model"
+        );
+        assert.equal(__testing.toTimestamp(1_700_000_000_000), 1_700_000_000_000);
+        assert.equal(
+            __testing.toTimestamp("2023-11-14T22:13:20.000Z"),
+            1_700_000_000_000
+        );
+        assert.equal(__testing.toTimestamp("not-a-date"), null);
+        assert.equal(__testing.toTimestamp({}), null);
+        assert.equal(
+            __testing.cleanTaskText(
+                'Sender: noisy\nConversation info x\n```json\n{"a":1}\n```\nShip it [media attached: image]'
+            ),
+            "Ship it"
+        );
+        assert.equal(
+            __testing.normalizeToolName("functions.exec_command"),
+            "exec_command"
+        );
+        assert.equal(__testing.normalizeToolName("mcp__github__message"), "message");
+        assert.equal(__testing.isVisibleActivityTool("message"), false);
+        assert.equal(__testing.isVisibleActivityTool("mcp__github__message"), false);
+        assert.equal(__testing.getSafeAgentSessionsDir("../main"), null);
+        assert.deepEqual(__testing.getSafeAgentActivityRoots("../main"), []);
+        assert.equal(__testing.determineStatus(null), "idle");
+        assert.equal(__testing.determineStatus(Date.now()), "active");
+        assert.equal(__testing.determineStatus(Date.now() - 30_000), "thinking");
+        assert.equal(__testing.determineStatus(Date.now() - 120_000), "idle");
+        assert.equal(
+            __testing.getChannelFromSessionKey("channel:discord:123"),
+            "discord"
+        );
+        assert.equal(__testing.getChannelFromSessionKey("agent:main:main"), null);
+
+        const originalRealpathSync = fs.realpathSync;
+        fs.realpathSync = ((target: fs.PathLike) => {
+            if (String(target).endsWith(".openclaw/agents")) {
+                throw new Error("agents dir unavailable");
+            }
+            return originalRealpathSync(target);
+        }) as typeof fs.realpathSync;
+        try {
+            assert.equal(__testing.getSafeAgentSessionsDir(agentId), null);
+            assert.deepEqual(__testing.getSafeAgentActivityRoots(agentId), []);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        const originalStatSync = fs.statSync;
+        fs.statSync = ((target: fs.PathLike) => {
+            if (String(target).endsWith(".openclaw/agents")) {
+                const error = new Error("agents dir denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return originalStatSync(target);
+        }) as typeof fs.statSync;
+        try {
+            assert.equal(
+                __testing.ensureRealAgentsDir()?.endsWith(".openclaw/agents"),
+                true
+            );
+        } finally {
+            fs.statSync = originalStatSync;
+        }
+
+        const agentsRoot = path.join(homeDir, ".openclaw", "agents");
+        fs.statSync = ((target: fs.PathLike) => {
+            if (String(target) === agentsRoot) {
+                return {
+                    isDirectory: () => false,
+                } as fs.Stats;
+            }
+            return originalStatSync(target);
+        }) as typeof fs.statSync;
+        try {
+            assert.equal(__testing.ensureRealAgentsDir(), null);
+        } finally {
+            fs.statSync = originalStatSync;
+        }
+    });
+
+    it("rejects linked or escaped agent config files", async () => {
+        const { __testing } = await import("./agents.js");
+        const originalRealpathSync = fs.realpathSync;
+        const hardLinkPath = path.join(homeDir, ".openclaw", "openclaw-hardlink.json");
+        try {
+            await link(configPath, hardLinkPath);
+            assert.equal(__testing.parseAgentsConfig(), null);
+            await rm(hardLinkPath, { force: true });
+
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (String(target).endsWith(`${path.sep}openclaw.json`)) {
+                    return path.join(os.tmpdir(), "escaped-openclaw.json");
+                }
+                return originalRealpathSync.call(fs, target);
+            }) as typeof fs.realpathSync;
+            assert.equal(__testing.parseAgentsConfig(), null);
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+            await rm(hardLinkPath, { force: true });
+        }
+    });
+
+    it("summarizes tool activity from varied argument shapes", async () => {
+        const { __testing } = await import("./agents.js");
+
+        assert.equal(
+            __testing.summarizeToolActivity("read", { arguments: { path: "README.md" } }),
+            "read README.md"
+        );
+        assert.equal(__testing.summarizeToolActivity("exec", "not-json"), "exec");
+        assert.equal(
+            __testing.summarizeToolActivity("write", {
+                parameters: { filePath: "src/file.ts" },
+            }),
+            "write src/file.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("exec_command", {
+                arguments: { cmd: "npm run test -- --coverage" },
+            }),
+            "exec npm run test -- --coverage"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("browser", {
+                arguments: { action: "open", url: "https://example.test" },
+            }),
+            "browser open https://example.test"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom.tool", {
+                partialJson: '{"path":"src/fallback.ts"}',
+            }),
+            "tool src/fallback.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", {
+                partialJson: '"path": "src/loose.ts"',
+            }),
+            "custom src/loose.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("task", { action: "run" }),
+            "task run"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("read", JSON.stringify({ path: "a.ts" })),
+            "read a.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("browser", {
+                arguments: { action: "open", url: "https://example.test/long" },
+            }),
+            "browser open https://example.test/long"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", {
+                input: { path: "nested/input.ts" },
+            }),
+            "custom nested/input.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", { raw: "not-json" }),
+            "custom"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("message", {
+                arguments: { text: "  hello   from dashboard  " },
+            }),
+            "message hello from dashboard"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("memory_search", {
+                arguments: { query: "  coverage   gaps  " },
+            }),
+            "memory_search coverage gaps"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("read", {
+                partialJson: '{"paths":["src/from-array.ts"]}',
+            }),
+            "read src/from-array.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("read", {
+                partialJson: '{"path":',
+            }),
+            "read"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("browser", {
+                arguments: { action: "reload" },
+            }),
+            "browser reload"
+        );
+    });
+
+    it("extracts Codex response-item and trajectory activity variants", async () => {
+        const { __testing } = await import("./agents.js");
+
+        assert.equal(__testing.getCodexResponseItemActivity(null), null);
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "exec",
+                    input: 'await tools.exec_command({ "cmd": "npm run build" });',
+                },
+            }),
+            "exec npm run build"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "apply_patch",
+                    input: "await tools.apply_patch(...)",
+                },
+            }),
+            "edit files"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "browser",
+                    input: "await tools.openclaw_browser(...)",
+                },
+            }),
+            "browser activity"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "session_status",
+                    input: "await tools.openclaw_session_status(...)",
+                },
+            }),
+            "session_status"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "exec",
+                    input: "await tools.write_stdin({ session_id: 1 });",
+                },
+            }),
+            "terminal output"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "read",
+                    input: "await tools.read({ path: 'src/index.ts' });",
+                },
+            }),
+            "read"
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    name: "message",
+                    input: "await tools.mcp__codex_apps__message(...)",
+                },
+            }),
+            null
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "prompt.submitted",
+                data: { prompt: "Investigate status" },
+            }),
+            { task: "Investigate status" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "exec", args: { command: "npm test" } },
+            }),
+            { activity: "exec npm test" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "read", input: { path: "src/index.ts" } },
+            }),
+            { activity: "read src/index.ts" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "message", input: { text: "hidden" } },
+            }),
+            {}
+        );
+        assert.deepEqual(__testing.getTrajectoryActivity(null), {});
+        assert.deepEqual(__testing.getTrajectoryActivity({ type: "noop", data: {} }), {});
+    });
+
+    it("covers direct agent activity file edge cases", async () => {
+        const { __testing } = await import("./agents.js");
+        assert.equal(await __testing.getLatestActivityFromFile("bad!"), null);
+        assert.equal(__testing.getSessionFileModTime("bad!"), null);
+        await mkdir(path.join(homeDir, ".openclaw", "agents"), { recursive: true });
+        assert.deepEqual(__testing.getSafeAgentActivityRoots("bad\0agent"), []);
+        const externalSessionsRoot = path.join(homeDir, "external-sessions-root");
+        const escapedActivityAgentDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "escaped-activity-agent"
+        );
+        await mkdir(externalSessionsRoot, { recursive: true });
+        await symlink(externalSessionsRoot, escapedActivityAgentDir);
+        try {
+            assert.deepEqual(
+                __testing.getSafeAgentActivityRoots("escaped-activity-agent"),
+                []
+            );
+        } finally {
+            await rm(escapedActivityAgentDir, { force: true });
+        }
+
+        const escapedSessionsAgentDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "escaped-sessions-agent"
+        );
+        await mkdir(escapedSessionsAgentDir, { recursive: true });
+        await symlink(
+            externalSessionsRoot,
+            path.join(escapedSessionsAgentDir, "sessions")
+        );
+        try {
+            assert.equal(
+                __testing.getSafeAgentSessionsDir("escaped-sessions-agent"),
+                null
+            );
+        } finally {
+            await rm(escapedSessionsAgentDir, { recursive: true, force: true });
+        }
+
+        const staleSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "stale-agent",
+            "sessions"
+        );
+        await mkdir(staleSessionsDir, { recursive: true });
+        const stalePath = path.join(staleSessionsDir, "old.jsonl");
+        await writeFile(
+            stalePath,
+            JSON.stringify({ message: { role: "user", content: "old" } })
+        );
+        const staleDate = new Date(Date.now() - 10 * 60_000);
+        await utimes(stalePath, staleDate, staleDate);
+        const staleActivity = await __testing.getLatestActivityFromFile("stale-agent");
+        assert.equal(staleActivity?.task, null);
+        assert.equal(staleActivity?.activity, null);
+        assert.equal(typeof __testing.getSessionFileModTime("stale-agent"), "number");
+
+        const arraySessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "array-agent",
+            "sessions"
+        );
+        await mkdir(arraySessionsDir, { recursive: true });
+        await writeFile(
+            path.join(arraySessionsDir, "array.jsonl"),
+            [
+                JSON.stringify({
+                    __openclaw: { mirrorIdentity: "turn-array:source" },
+                    message: {
+                        role: "user",
+                        content: [
+                            { type: "text", text: "Array" },
+                            { type: "image", text: "ignored" },
+                            { type: "text", text: "task" },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    __openclaw: { mirrorIdentity: "turn-array:source" },
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "functions.exec_command",
+                                arguments: { command: "npm run lint" },
+                            },
+                        ],
+                    },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+        const activity = await __testing.getLatestActivityFromFile("array-agent");
+        assert.equal(activity?.task, "Array task");
+        assert.equal(activity?.activity, "exec npm run lint");
+
+        const mixedSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "mixed-agent",
+            "sessions"
+        );
+        await mkdir(mixedSessionsDir, { recursive: true });
+        const oldMixedPath = path.join(mixedSessionsDir, "old.jsonl");
+        await writeFile(
+            oldMixedPath,
+            JSON.stringify({ message: { role: "user", content: "stale task" } }),
+            "utf8"
+        );
+        await utimes(oldMixedPath, staleDate, staleDate);
+        await writeFile(
+            path.join(mixedSessionsDir, "recent.jsonl"),
+            [
+                JSON.stringify({
+                    runId: "old-run",
+                    message: { role: "user", content: "ignored old run" },
+                }),
+                JSON.stringify({
+                    message: { role: "user", content: "ignored missing run" },
+                }),
+                JSON.stringify({
+                    runId: "other-run",
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "functions.exec_command",
+                                arguments: { command: "ignored" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    runId: "new-run",
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "toolCall",
+                                name: "functions.exec_command",
+                                arguments: { command: "npm test" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    runId: "new-run",
+                    message: {
+                        role: "user",
+                        content: { value: "object task" },
+                    },
+                }),
+                "{bad",
+            ].join("\n"),
+            "utf8"
+        );
+        const mixedActivity = await __testing.getLatestActivityFromFile("mixed-agent");
+        assert.equal(mixedActivity?.task, "[object Object]");
+        assert.equal(mixedActivity?.activity, "exec npm test");
+    });
+
+    it("covers agent session selection and status helper branches", async () => {
+        const { __testing } = await import("./agents.js");
+        const status = {
+            id: "alias-agent",
+            status: "idle" as const,
+            model: "unknown",
+            currentTask: null,
+            currentActivity: null as string | null,
+            lastActivity: null as string | null,
+            sessionKey: null as string | null,
+            channel: null as string | null,
+        };
+
+        assert.equal(
+            __testing.getChannelFromSessionKey("channel:discord:team"),
+            "discord"
+        );
+        assert.equal(__testing.getChannelFromSessionKey("agent:main:main"), null);
+        assert.equal(__testing.determineStatus(null), "idle");
+        assert.equal(__testing.determineStatus(Date.now() - 1_000), "active");
+        assert.equal(__testing.determineStatus(Date.now() - 30_000), "thinking");
+        assert.equal(__testing.determineStatus(Date.now() - 90_000), "idle");
+        assert.equal(__testing.findBestSessionForAgent("missing", []), undefined);
+
+        const sessions = [
+            {
+                key: "agent:alias-agent:scratch",
+                model: "scratch",
+                updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
+            },
+            {
+                key: "agent:alias-agent:main",
+                model: "main",
+                updatedAt: Date.parse("2026-05-16T15:00:00.000Z"),
+                activeRunId: "run-1",
+            },
+        ];
+        assert.equal(
+            __testing.findBestSessionForAgent("alias-agent", sessions)?.model,
+            "main"
+        );
+        assert.equal(
+            __testing.findSessionByKey(sessions, "AGENT:ALIAS-AGENT:MAIN")?.model,
+            "main"
+        );
+        const missingSession = undefined as never;
+        assert.equal(__testing.isGatewaySessionRunning(missingSession), false);
+        assert.equal(
+            __testing.isGatewaySessionRunning({
+                key: "agent:alias-agent:main",
+                model: "main",
+                endedAt: "2026-05-16T15:00:00.000Z",
+                status: "running",
+            }),
+            false
+        );
+        assert.equal(__testing.isGatewaySessionRunning(sessions[1]), true);
+
+        __testing.applyGatewaySessionStatus(status, sessions[1]);
+        assert.equal(status.sessionKey, "agent:alias-agent:main");
+        assert.equal(status.channel, null);
+        assert.equal(status.status, "thinking");
+        assert.equal(status.lastActivity, "2026-05-16T15:00:00.000Z");
+
+        status.currentActivity = "exec npm test";
+        __testing.applyGatewaySessionStatus(status, {
+            key: "channel:discord:team",
+            model: "main",
+            status: "running",
+            updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
+        });
+        assert.equal(status.channel, "discord");
+        assert.equal(status.status, "active");
+        assert.equal(status.lastActivity, "2026-05-16T16:00:00.000Z");
+    });
+
+    it("builds configured agent statuses with existing session keys", async () => {
+        const { __testing } = await import("./agents.js");
+        const previousGatewayRequest = gateway.request;
+        const sessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "session-key-agent",
+            "sessions"
+        );
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+            path.join(sessionsDir, "sessions.json"),
+            JSON.stringify([
+                {
+                    key: "agent:session-key-agent:main",
+                    updatedAt: Date.parse("2026-05-16T15:00:00.000Z"),
+                },
+            ]),
+            "utf8"
+        );
+
+        try {
+            gateway.request = async () => ({
+                sessions: [
+                    {
+                        key: "agent:session-key-agent:main",
+                        model: "live-model",
+                        status: "running",
+                        updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
+                    },
+                ],
+            });
+            const config = {
+                defaults: { model: { primary: "codex" }, models: {} },
+                list: [
+                    { id: "session-key-agent", model: { primary: "configured-model" } },
+                ],
+            };
+
+            const [status] = await __testing.buildAgentStatuses(config);
+            assert.equal(status.sessionKey, "agent:session-key-agent:main");
+            assert.equal(status.model, "live-model");
+            assert.equal(status.status, "thinking");
+            assert.equal(status.lastActivity, "2026-05-16T16:00:00.000Z");
+
+            const single = await __testing.buildSingleAgentStatus(
+                "session-key-agent",
+                config
+            );
+            assert.equal(single?.model, "live-model");
+            assert.equal(await __testing.buildSingleAgentStatus("missing", config), null);
+
+            gateway.request = async () => ({
+                sessions: [
+                    {
+                        key: "agent:session-key-agent:main",
+                        model: "unknown",
+                        status: "running",
+                        updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
+                    },
+                ],
+            });
+            const [unknownStatus] = await __testing.buildAgentStatuses(config);
+            assert.equal(unknownStatus.model, "configured-model");
+            const unknownSingle = await __testing.buildSingleAgentStatus(
+                "session-key-agent",
+                config
+            );
+            assert.equal(unknownSingle?.model, "configured-model");
+
+            gateway.request = async () => ({
+                sessions: [
+                    {
+                        key: "agent:session-key-agent:main",
+                        model: "openai-codex/gpt-5.5",
+                        status: "running",
+                        updatedAt: Date.parse("2026-05-16T18:00:00.000Z"),
+                    },
+                ],
+            });
+            const [displayStatus] = await __testing.buildAgentStatuses(config);
+            assert.equal(displayStatus.model, "gpt-5.5");
+            const displaySingle = await __testing.buildSingleAgentStatus(
+                "session-key-agent",
+                config
+            );
+            assert.equal(displaySingle?.model, "gpt-5.5");
+        } finally {
+            gateway.request = previousGatewayRequest;
+        }
     });
 
     it("validates, stores, and rotates current task metadata into history", async () => {
@@ -189,6 +874,26 @@ describe("agents routes", () => {
         assert.equal(invalid.status, 400);
         assert.equal(invalid.body.error, "Provide currentTask");
 
+        const nonString = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: { task: "Write backend tests" } } }
+        );
+        assert.equal(nonString.status, 400);
+        assert.equal(nonString.body.error, "Provide currentTask");
+
+        const nullBody = await requestJson<{ error: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT" }
+        );
+        assert.equal(nullBody.status, 400);
+        assert.equal(nullBody.body.error, "Provide currentTask");
+
+        await rm(path.join(homeDir, ".openclaw", "agents"), {
+            recursive: true,
+            force: true,
+        });
         const firstTask = await requestJson<{ currentTask: string; updatedAt: string }>(
             server,
             `/api/agents/${agentId}/metadata`,
@@ -211,6 +916,14 @@ describe("agents routes", () => {
         assert.equal(secondTask.status, 200);
         assert.equal(secondTask.body.currentTask, "Verify local batch");
 
+        const repeatedTask = await requestJson<{ currentTask: string }>(
+            server,
+            `/api/agents/${agentId}/metadata`,
+            { method: "PUT", body: { currentTask: "Verify local batch" } }
+        );
+        assert.equal(repeatedTask.status, 200);
+        assert.equal(repeatedTask.body.currentTask, "Verify local batch");
+
         const active = db
             .prepare(
                 "SELECT task FROM agent_task_history WHERE agent_id = ? AND status = 'active'"
@@ -231,6 +944,74 @@ describe("agents routes", () => {
             ["Write backend tests"]
         );
 
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (statement: string) => {
+            if (statement.includes("agent_task_history")) {
+                throw new Error("history database unavailable");
+            }
+            return originalPrepare(statement);
+        });
+        const errorMock = mock.method(console, "error", () => {});
+        try {
+            const bestEffortHistoryFailure = await requestJson<{
+                currentTask: string;
+            }>(server, `/api/agents/${agentId}/metadata`, {
+                method: "PUT",
+                body: { currentTask: "Persist despite history failure" },
+            });
+            assert.equal(bestEffortHistoryFailure.status, 200);
+            assert.equal(
+                bestEffortHistoryFailure.body.currentTask,
+                "Persist despite history failure"
+            );
+            assert.equal(errorMock.mock.callCount(), 1);
+        } finally {
+            prepareMock.mock.restore();
+            errorMock.mock.restore();
+        }
+
+        const originalMetadataStats = await lstat(metadataPath).catch(() => null);
+        const originalMetadataContent =
+            originalMetadataStats?.isFile() === true
+                ? await readFile(metadataPath, "utf8")
+                : null;
+        try {
+            await writeFile(metadataPath, "null", "utf8");
+            const nullMetadata = await requestJson<{ currentTask: string }>(
+                server,
+                `/api/agents/${agentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Recover null metadata" } }
+            );
+            assert.equal(nullMetadata.status, 200);
+            assert.equal(nullMetadata.body.currentTask, "Recover null metadata");
+
+            await writeFile(metadataPath, "{ malformed", "utf8");
+            const malformedMetadata = await requestJson<{ currentTask: string }>(
+                server,
+                `/api/agents/${agentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Repair malformed metadata" } }
+            );
+            assert.equal(malformedMetadata.status, 200);
+            assert.equal(malformedMetadata.body.currentTask, "Repair malformed metadata");
+
+            await rm(metadataPath, { force: true, recursive: true });
+            await mkdir(metadataPath);
+            const unreadableMetadata = await requestJson<{ error: string }>(
+                server,
+                `/api/agents/${agentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Unreadable metadata" } }
+            );
+            assert.equal(unreadableMetadata.status, 500);
+            assert.match(unreadableMetadata.body.error, /directory|EISDIR/u);
+        } finally {
+            await rm(metadataPath, { force: true, recursive: true });
+            if (originalMetadataStats?.isDirectory() === true) {
+                await mkdir(metadataPath);
+            } else if (originalMetadataStats?.isFile() === true) {
+                await writeFile(metadataPath, originalMetadataContent ?? "", "utf8");
+            }
+        }
+
         const history = await requestJson<{
             tasks: Array<{ agentId: string; task: string; status: string }>;
         }>(server, "/api/agents/tasks/history?limit=5");
@@ -244,6 +1025,388 @@ describe("agents routes", () => {
             ),
             true
         );
+    });
+
+    it("accepts a symlinked agents root after canonical validation", async () => {
+        const symlinkHome = await mkdtemp(path.join(os.tmpdir(), "mira-agents-link-"));
+        const outsideAgents = await mkdtemp(
+            path.join(os.tmpdir(), "mira-agents-link-target-")
+        );
+        const openclawRoot = path.join(symlinkHome, ".openclaw");
+        let symlinkServer: http.Server | undefined;
+        const previousHome = process.env.HOME;
+        try {
+            await mkdir(openclawRoot, { recursive: true });
+            await symlink(outsideAgents, path.join(openclawRoot, "agents"));
+            await mkdir(path.join(outsideAgents, "main", "sessions"), {
+                recursive: true,
+            });
+            process.env.HOME = symlinkHome;
+            const { default: agentsRoutes, __testing } = await import(
+                `./agents.js?symlink-root=${Date.now()}`
+            );
+
+            assert.equal(
+                __testing.getSafeAgentSessionsDir("main"),
+                path.join(outsideAgents, "main", "sessions")
+            );
+            assert.deepEqual(__testing.getSafeAgentActivityRoots("main"), [
+                { dir: path.join(outsideAgents, "main", "sessions"), recursive: false },
+            ]);
+
+            const app = express();
+            agentsRoutes(app);
+            symlinkServer = http.createServer(app);
+            await new Promise<void>((resolve) => symlinkServer?.listen(0, resolve));
+            const address = symlinkServer.address();
+            assert.ok(address && typeof address === "object");
+
+            const response = await fetch(
+                `http://127.0.0.1:${address.port}/api/agents/main/metadata`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ currentTask: "blocked" }),
+                }
+            );
+            assert.equal(response.status, 200);
+            const responseBody = (await response.json()) as {
+                currentTask?: unknown;
+                updatedAt?: unknown;
+            };
+            assert.equal(responseBody.currentTask, "blocked");
+            assert.equal(typeof responseBody.updatedAt, "string");
+            assert.equal(
+                await readFile(
+                    path.join(outsideAgents, "main", "sessions", "metadata.json"),
+                    "utf8"
+                ).then((content) => JSON.parse(content).currentTask),
+                "blocked"
+            );
+        } finally {
+            if (symlinkServer) {
+                await new Promise<void>((resolve, reject) =>
+                    symlinkServer?.close((error) => (error ? reject(error) : resolve()))
+                );
+            }
+            if (previousHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = previousHome;
+            }
+            await rm(symlinkHome, { recursive: true, force: true });
+            await rm(outsideAgents, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects invalid agent ids before touching metadata paths", async () => {
+        const invalidStatus = await requestJson<{ error: string }>(
+            server,
+            "/api/agents/bad!/status"
+        );
+        assert.equal(invalidStatus.status, 400);
+        assert.equal(invalidStatus.body.error, "Invalid agent ID");
+
+        const invalidMetadata = await requestJson<{ error: string }>(
+            server,
+            "/api/agents/bad!/metadata",
+            { method: "PUT", body: { currentTask: "Nope" } }
+        );
+        assert.equal(invalidMetadata.status, 400);
+        assert.equal(invalidMetadata.body.error, "Invalid agent ID");
+
+        const outsideDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-outside-"));
+        const symlinkAgentId = "escaped-agent";
+        const symlinkPath = path.join(homeDir, ".openclaw", "agents", symlinkAgentId);
+        await symlink(outsideDir, symlinkPath);
+        try {
+            const escapedMetadata = await requestJson<{ error: string }>(
+                server,
+                `/api/agents/${symlinkAgentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(escapedMetadata.status, 400);
+            assert.equal(escapedMetadata.body.error, "Invalid agent ID");
+        } finally {
+            await rm(symlinkPath, { force: true });
+            await rm(outsideDir, { recursive: true, force: true });
+        }
+
+        const originalMkdirSync = fs.mkdirSync;
+        try {
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (
+                    targetPath.startsWith("/proc/self/fd/") &&
+                    targetPath.endsWith(`${path.sep}sessions`)
+                ) {
+                    const error = new Error(
+                        "sessions mkdir failed"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const mkdirFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/mkdir-fails/metadata",
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(mkdirFailure.status, 500);
+            assert.equal(mkdirFailure.body.error, "sessions mkdir failed");
+
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (
+                    targetPath.startsWith("/proc/self/fd/") &&
+                    targetPath.endsWith(`${path.sep}${agentId}`)
+                ) {
+                    const error = new Error(
+                        "agent parent mkdir failed"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const parentMkdirFailure = await requestJson<{ error: string }>(
+                server,
+                `/api/agents/${agentId}/metadata`,
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(parentMkdirFailure.status, 500);
+            assert.equal(parentMkdirFailure.body.error, "agent parent mkdir failed");
+
+            fs.mkdirSync = ((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (
+                    targetPath.startsWith("/proc/self/fd/") &&
+                    targetPath.endsWith(`${path.sep}sessions`)
+                ) {
+                    const error = new Error(
+                        "sessions mkdir unsupported"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "ENOTSUP";
+                    throw error;
+                }
+                return originalMkdirSync(target, options);
+            }) as typeof fs.mkdirSync;
+
+            const secondUnsupported = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/researcher/metadata",
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(secondUnsupported.status, 501);
+            assert.equal(secondUnsupported.body.error, "unsupported-platform");
+        } finally {
+            fs.mkdirSync = originalMkdirSync;
+        }
+
+        const { __testing } = await import("./agents.js");
+        try {
+            __testing.setProcfsAvailabilityProbeForTest(() => false);
+            assert.equal(__testing.isProcfsAvailable(), false);
+            const fallbackResponse = await requestJson<{ currentTask: string }>(
+                server,
+                "/api/agents/unsupported-platform/metadata",
+                { method: "PUT", body: { currentTask: "Nope" } }
+            );
+            assert.equal(fallbackResponse.status, 501);
+        } finally {
+            __testing.setProcfsAvailabilityProbeForTest();
+        }
+    });
+
+    it("fails closed when verified child directory creation is unsupported", async () => {
+        const { __testing } = await import("./agents.js");
+        const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-agent-dir-"));
+        try {
+            __testing.setProcfsAvailabilityProbeForTest(() => false);
+
+            const parent = path.join(tempDir, "parent");
+            await mkdir(parent);
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "../child"),
+                /Invalid child directory name/u
+            );
+            assert.throws(
+                () => __testing.mkdirChildFromVerifiedParent(parent, "child"),
+                (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOTSUP"
+            );
+        } finally {
+            __testing.setProcfsAvailabilityProbeForTest();
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    it("covers agent status route fallbacks for missing agents and default models", async () => {
+        const originalConfig = await readFile(configPath, "utf8");
+        const previousGatewayRequest = gateway.request;
+
+        try {
+            const missingAgent = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/not-configured/status"
+            );
+            assert.equal(missingAgent.status, 404);
+            assert.equal(missingAgent.body.error, "Agent 'not-configured' not found");
+
+            await writeFile(
+                configPath,
+                JSON.stringify({
+                    agents: {
+                        list: [{ id: "bare-agent" }],
+                    },
+                }),
+                "utf8"
+            );
+            gateway.request = async () => ({ sessions: [] });
+
+            const allStatus = await requestJson<{
+                agents: Array<{ id: string; model: string }>;
+            }>(server, "/api/agents/status");
+            assert.equal(allStatus.status, 200);
+            assert.deepEqual(allStatus.body.agents, [
+                {
+                    id: "bare-agent",
+                    status: "idle",
+                    model: "unknown",
+                    currentTask: null,
+                    currentActivity: null,
+                    lastActivity: null,
+                    sessionKey: null,
+                    channel: null,
+                },
+            ]);
+
+            const singleStatus = await requestJson<{ id: string; model: string }>(
+                server,
+                "/api/agents/bare-agent/status"
+            );
+            assert.equal(singleStatus.status, 200);
+            assert.equal(singleStatus.body.model, "unknown");
+
+            const history = await requestJson<{ tasks: unknown[] }>(
+                server,
+                "/api/agents/tasks/history?limit=not-a-number"
+            );
+            assert.equal(history.status, 200);
+            assert.ok(Array.isArray(history.body.tasks));
+        } finally {
+            gateway.request = previousGatewayRequest;
+            await writeFile(configPath, originalConfig, "utf8");
+        }
+    });
+
+    it("returns 404s when the agent config file is missing or malformed", async () => {
+        const originalConfig = await readFile(configPath, "utf8");
+
+        try {
+            await rm(configPath, { force: true });
+            const missingConfig = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/config"
+            );
+            assert.equal(missingConfig.status, 404);
+            assert.equal(missingConfig.body.error, "Agent configuration not found");
+
+            const missingStatus = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/status"
+            );
+            assert.equal(missingStatus.status, 404);
+            assert.equal(missingStatus.body.error, "Agent configuration not found");
+
+            const missingSingleStatus = await requestJson<{ error: string }>(
+                server,
+                `/api/agents/${agentId}/status`
+            );
+            assert.equal(missingSingleStatus.status, 404);
+            assert.equal(missingSingleStatus.body.error, "Agent configuration not found");
+
+            await writeFile(configPath, "{ agents: { list: 'not-array' }", "utf8");
+            const malformed = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/config"
+            );
+            assert.equal(malformed.status, 404);
+            assert.equal(malformed.body.error, "Agent configuration not found");
+        } finally {
+            await writeFile(configPath, originalConfig, "utf8");
+        }
+    });
+
+    it("falls back to cached Gateway sessions when live listing fails", async () => {
+        const previousGatewaySessions = gateway.getSessions;
+        const previousGatewayRequest = gateway.request;
+
+        try {
+            gateway.getSessions = () => [
+                {
+                    id: "cached-session",
+                    key: "agent:alias-agent:main",
+                    type: "MAIN",
+                    agentType: "alias-agent",
+                    hookName: "",
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "running",
+                    model: "   ",
+                    updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
+                },
+                {
+                    id: "blank-key",
+                    key: "",
+                    type: "MAIN",
+                    agentType: "alias-agent",
+                    hookName: "",
+                    model: "ignored",
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "running",
+                    updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
+                },
+            ];
+            gateway.request = async () => {
+                throw new Error("Gateway unavailable");
+            };
+
+            const response = await requestJson<{
+                status: string;
+                sessionKey: string;
+                model: string;
+                lastActivity: string;
+            }>(server, "/api/agents/alias-agent/status");
+
+            assert.equal(response.status, 200);
+            assert.equal(response.body.status, "thinking");
+            assert.equal(response.body.sessionKey, "agent:alias-agent:main");
+            assert.equal(response.body.model, "gpt-5.5");
+            assert.equal(response.body.lastActivity, "2026-05-16T16:00:00.000Z");
+        } finally {
+            gateway.getSessions = previousGatewaySessions;
+            gateway.request = previousGatewayRequest;
+        }
     });
 
     it("infers active task, tool activity, session key, and channel from files", async () => {
@@ -1368,5 +2531,1097 @@ describe("agents routes", () => {
         );
         assert.equal(missingAgent.status, 404);
         assert.equal(missingAgent.body.error, "Agent 'missing' not found");
+    });
+
+    it("covers filesystem and parser fallback branches in agent helpers", async () => {
+        const { __testing } = await import("./agents.js");
+        const fsModule = await import("node:fs");
+        const originalRealpathSync = fsModule.default.realpathSync;
+
+        try {
+            let realpathCalls = 0;
+            fsModule.default.realpathSync = ((target: string | URL | Buffer) => {
+                realpathCalls += 1;
+                if (realpathCalls === 1) {
+                    throw new Error("realpath unavailable");
+                }
+                return originalRealpathSync(target);
+            }) as typeof fsModule.default.realpathSync;
+            assert.equal(__testing.getSafeAgentSessionsDir(agentId), null);
+
+            fsModule.default.realpathSync = ((target: string | URL | Buffer) => {
+                const value = originalRealpathSync(target).toString();
+                return value.endsWith(`${path.sep}${agentId}${path.sep}sessions`)
+                    ? `${value}-mismatch`
+                    : value;
+            }) as typeof fsModule.default.realpathSync;
+            assert.equal(__testing.getSafeAgentSessionsDir(agentId), null);
+
+            fsModule.default.realpathSync = originalRealpathSync;
+            const unreadableRoot = {
+                dir: path.join(homeDir, ".openclaw", "agents", "missing-root"),
+                recursive: false,
+            };
+            assert.deepEqual(__testing.listActivityLogFiles(unreadableRoot), []);
+
+            const scanRoot = path.join(
+                homeDir,
+                ".openclaw",
+                "agents",
+                "scan-agent",
+                "sessions"
+            );
+            await rm(scanRoot, { recursive: true, force: true });
+            await mkdir(path.join(scanRoot, "nested"), { recursive: true });
+            await writeFile(path.join(scanRoot, "active.jsonl"), "{}", "utf8");
+            await writeFile(path.join(scanRoot, "nested", "deep.jsonl"), "{}", "utf8");
+            await writeFile(path.join(scanRoot, "ignore.txt"), "{}", "utf8");
+
+            const flatFiles = __testing.listActivityLogFiles({
+                dir: scanRoot,
+                recursive: false,
+            });
+            assert.deepEqual(
+                flatFiles.map((file: { name: string }) => file.name),
+                ["active.jsonl"]
+            );
+            const recursiveFiles = __testing.listActivityLogFiles({
+                dir: scanRoot,
+                recursive: true,
+            });
+            assert.equal(
+                recursiveFiles.some(
+                    (file: { name: string }) =>
+                        file.name === path.join("nested", "deep.jsonl")
+                ),
+                true
+            );
+
+            const brokenStatRoot = path.join(
+                homeDir,
+                ".openclaw",
+                "agents",
+                "broken-stat-agent",
+                "sessions"
+            );
+            await mkdir(brokenStatRoot, { recursive: true });
+            await symlink("missing.jsonl", path.join(brokenStatRoot, "broken.jsonl"));
+            assert.deepEqual(
+                __testing
+                    .listActivityLogFiles({ dir: brokenStatRoot, recursive: false })
+                    .map((file: { name: string }) => file.name),
+                []
+            );
+
+            await writeFile(
+                path.join(
+                    homeDir,
+                    ".openclaw",
+                    "agents",
+                    agentId,
+                    "sessions",
+                    "sessions.json"
+                ),
+                "{bad",
+                "utf8"
+            );
+            assert.deepEqual(await __testing.getAgentSessionsFromFiles(agentId), []);
+
+            assert.equal(__testing.parseAgentsConfig()?.list.length, 3);
+            await writeFile(configPath, JSON.stringify({ agents: { list: [] } }), "utf8");
+            assert.equal(__testing.parseAgentsConfig()?.defaults?.model, undefined);
+        } finally {
+            fsModule.default.realpathSync = originalRealpathSync;
+            await writeFile(
+                configPath,
+                JSON.stringify(
+                    {
+                        agents: {
+                            defaults: {
+                                model: { primary: "codex" },
+                                models: {
+                                    "openai-codex/gpt-5.5": { alias: "codex" },
+                                },
+                            },
+                            list: [
+                                { id: agentId, default: true },
+                                {
+                                    id: "researcher",
+                                    model: {
+                                        primary: "synthetic/hf:moonshotai/Kimi-K2.5",
+                                    },
+                                },
+                                { id: "alias-agent" },
+                            ],
+                        },
+                    },
+                    null,
+                    2
+                )
+            );
+        }
+    });
+
+    it("covers remaining agent activity and Gateway helper branches", async () => {
+        const { __testing } = await import("./agents.js");
+
+        const savedHome = process.env.HOME;
+        const savedDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const savedOpenclawHome = process.env.OPENCLAW_HOME;
+        const originalHomedir = os.homedir;
+        let blankHomeServer: http.Server | null = null;
+        try {
+            process.env.HOME = "";
+            os.homedir = (() => "") as typeof os.homedir;
+            const { default: blankHomeAgentsRoutes, __testing: blankHomeTesting } =
+                await import(`./agents.js?empty-home=${Date.now()}`);
+            assert.equal(blankHomeTesting.parseAgentsConfig(), null);
+            const blankHomeApp = express();
+            blankHomeApp.use(express.json());
+            blankHomeAgentsRoutes(blankHomeApp);
+            blankHomeServer = http.createServer(blankHomeApp);
+            await new Promise<void>((resolve, reject) => {
+                blankHomeServer?.once("error", reject);
+                blankHomeServer?.listen(0, resolve);
+            });
+            const blankHomeAddress = blankHomeServer.address();
+            assert.ok(blankHomeAddress && typeof blankHomeAddress === "object");
+            const blankHomeResponse = await fetch(
+                `http://127.0.0.1:${blankHomeAddress.port}/api/agents/blank-home/metadata`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ currentTask: "blocked" }),
+                }
+            );
+            assert.equal(blankHomeResponse.status, 200);
+            assert.equal(
+                ((await blankHomeResponse.json()) as { currentTask: string }).currentTask,
+                "blocked"
+            );
+            for (const pathName of [
+                "/api/agents/config",
+                "/api/agents/status",
+                "/api/agents/blank-home/status",
+            ]) {
+                const response = await fetch(
+                    `http://127.0.0.1:${blankHomeAddress.port}${pathName}`
+                );
+                assert.equal(response.status, 404);
+                assert.deepEqual(await response.json(), {
+                    error: "Agent configuration not found",
+                });
+            }
+
+            const envOpenclawRoot = await mkdtemp(
+                path.join(os.tmpdir(), "mira-agents-env-root-")
+            );
+            try {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = envOpenclawRoot;
+                delete process.env.OPENCLAW_HOME;
+                const envAgentId = "env-root-agent";
+                const envSessionsDir = path.join(
+                    envOpenclawRoot,
+                    "agents",
+                    envAgentId,
+                    "sessions"
+                );
+                await mkdir(envSessionsDir, { recursive: true });
+                const { __testing: envRootTesting } = await import(
+                    `./agents.js?env-root=${Date.now()}`
+                );
+                assert.equal(
+                    envRootTesting.getSafeAgentSessionsDir(envAgentId),
+                    envSessionsDir
+                );
+            } finally {
+                await rm(envOpenclawRoot, { recursive: true, force: true });
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            }
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "relative-home";
+            delete process.env.OPENCLAW_HOME;
+            const { __testing: invalidEnvTesting } = await import(
+                `./agents.js?invalid-env-root=${Date.now()}`
+            );
+            assert.equal(invalidEnvTesting.getSafeAgentSessionsDir("main"), null);
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+
+            process.env.HOME = "relative-home";
+            os.homedir = (() => "relative-home") as typeof os.homedir;
+            await import(`./agents.js?relative-home=${Date.now()}`);
+
+            delete process.env.HOME;
+            os.homedir = (() => originalHomedir()) as typeof os.homedir;
+            await import(`./agents.js?homedir-home=${Date.now()}`);
+        } finally {
+            if (blankHomeServer) {
+                await new Promise<void>((resolve, reject) =>
+                    blankHomeServer?.close((error) => (error ? reject(error) : resolve()))
+                );
+            }
+            os.homedir = originalHomedir;
+            process.env.HOME = savedHome;
+            if (savedDashboardOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = savedDashboardOpenclawHome;
+            }
+            if (savedOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = savedOpenclawHome;
+            }
+        }
+
+        assert.equal(__testing.toDisplayModelName("plain-model"), "plain-model");
+        assert.equal(
+            __testing.resolveConfiguredModelName("plain-model", {
+                defaults: {},
+                list: [],
+            }),
+            "plain-model"
+        );
+        assert.equal(__testing.toTimestamp(""), null);
+
+        assert.equal(
+            __testing.summarizeToolActivity("custom", { arguments: null }),
+            "custom"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", { parameters: null }),
+            "custom"
+        );
+        assert.equal(__testing.summarizeToolActivity("custom", 7), "custom");
+        assert.equal(
+            __testing
+                .summarizeToolActivity("browser", { action: "open" })
+                .startsWith("browser open"),
+            true
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", { arguments: { paths: [] } }),
+            "custom"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", { parameters: { paths: [] } }),
+            "custom"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", {
+                partialJson: '{"paths":[]}',
+            }),
+            "custom"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", {
+                partialJson: '{"paths":["partial-array.ts"]}',
+            }),
+            "custom partial-array.ts"
+        );
+        assert.equal(
+            __testing.summarizeToolActivity("custom", {
+                partialJson: '{"paths":"not-array"}',
+            }),
+            "custom"
+        );
+        assert.equal(__testing.normalizeToolName("plain"), "plain");
+
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "exec", arguments: { cmd: "npm test" } },
+            }),
+            { activity: "exec npm test" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", parameters: { cmd: "npm run build" } },
+            }),
+            { activity: "exec npm run build" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", input: { cmd: "npm run lint" } },
+            }),
+            { activity: "exec npm run lint" }
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: { type: "custom_tool_call", name: 7, input: "" },
+            }),
+            null
+        );
+        assert.equal(
+            __testing.getCodexResponseItemActivity({
+                type: "response_item",
+                payload: { type: "custom_tool_call", name: "exec", input: 7 },
+            }),
+            "exec"
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "exec" },
+            }),
+            { activity: "exec" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "exec", cmd: "npm run flat" },
+            }),
+            { activity: "exec npm run flat" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "exec", parameters: { cmd: "npm run typecheck" } },
+            }),
+            { activity: "exec npm run typecheck" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: "message", args: { message: "hidden" } },
+            }),
+            {}
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.call",
+                data: { name: 7, args: { command: "hidden" } },
+            }),
+            {}
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", arguments: { cmd: "npm run result:args" } },
+            }),
+            { activity: "exec npm run result:args" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", args: { cmd: "npm run result" } },
+            }),
+            { activity: "exec npm run result" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec" },
+            }),
+            { activity: "exec" }
+        );
+        assert.deepEqual(
+            __testing.getTrajectoryActivity({
+                type: "tool.result",
+                data: { name: "exec", cmd: "npm run result:flat" },
+            }),
+            { activity: "exec npm run result:flat" }
+        );
+
+        const sessions = [
+            {
+                key: "agent:alias-agent:side",
+                model: "",
+                updatedAt: null,
+            },
+            {
+                key: "agent:alias-agent:latest",
+                model: "latest",
+                updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
+            },
+        ];
+        assert.equal(
+            __testing.findBestSessionForAgent("alias-agent", sessions)?.key,
+            "agent:alias-agent:latest"
+        );
+        assert.equal(
+            __testing.findBestSessionForAgent("alias-agent", [
+                {
+                    key: "agent:alias-agent:worker",
+                    model: "worker",
+                    updatedAt: Date.parse("2026-05-16T17:00:00.000Z"),
+                },
+                {
+                    key: "agent:alias-agent:side",
+                    model: "side",
+                    updatedAt: Date.parse("2026-05-16T17:00:01.000Z"),
+                },
+            ])?.key,
+            "agent:alias-agent:side"
+        );
+        assert.equal(
+            __testing.findBestSessionForAgent("alias-agent", [
+                {
+                    key: "agent:alias-agent:side",
+                    model: "side",
+                    updatedAt: Number.NaN,
+                },
+                {
+                    key: "agent:alias-agent:main",
+                    model: "main",
+                    updatedAt: Number.NaN,
+                },
+            ])?.key,
+            "agent:alias-agent:main"
+        );
+        assert.equal(__testing.findBestSessionForAgent("missing", sessions), undefined);
+        assert.equal(
+            __testing.findSessionByKey(sessions, "agent:alias-agent:missing"),
+            undefined
+        );
+        assert.equal(__testing.getChannelFromSessionKey("channel:"), null);
+        assert.equal(__testing.determineStatus(Date.now() - 20_000), "thinking");
+        assert.equal(
+            __testing.isGatewaySessionRunning({
+                key: "agent:alias-agent:main",
+                model: "main",
+                running: true,
+            }),
+            true
+        );
+        assert.equal(
+            __testing.isGatewaySessionRunning({
+                key: "agent:alias-agent:main",
+                model: "main",
+                isRunning: true,
+            }),
+            true
+        );
+        assert.equal(
+            __testing.isGatewaySessionRunning({
+                key: "agent:alias-agent:main",
+                model: "main",
+                currentRunId: "run-2",
+            }),
+            true
+        );
+        assert.equal(
+            __testing.isGatewaySessionRunning({
+                key: "agent:alias-agent:main",
+                model: "main",
+                endedAt: Date.now(),
+                running: true,
+            }),
+            false
+        );
+        const statusWithActivity = {
+            id: "alias-agent",
+            status: "idle" as const,
+            model: "unknown",
+            currentTask: null,
+            currentActivity: "exec npm test",
+            lastActivity: null,
+            sessionKey: null,
+            channel: null,
+        };
+        __testing.applyGatewaySessionStatus(statusWithActivity, {
+            key: "agent:alias-agent:main",
+            model: "main",
+            status: "running",
+        });
+        assert.equal(statusWithActivity.status, "active");
+
+        const emptySessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "empty-agent",
+            "sessions"
+        );
+        await mkdir(emptySessionsDir, { recursive: true });
+        assert.equal(
+            __testing.toActivityLogFile(
+                { dir: emptySessionsDir, recursive: false },
+                "missing.jsonl",
+                path.join(emptySessionsDir, "missing.jsonl"),
+                () => {
+                    throw new Error("stat failed");
+                }
+            ),
+            null
+        );
+        assert.equal(await __testing.getLatestActivityFromFile("empty-agent"), null);
+        assert.equal(__testing.getSessionFileModTime("empty-agent"), null);
+
+        const staleDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "stale-agent",
+            "sessions"
+        );
+        await mkdir(staleDir, { recursive: true });
+        const staleFile = path.join(staleDir, "old.jsonl");
+        await writeFile(staleFile, JSON.stringify({ role: "user", content: "old" }));
+        const staleDate = new Date(Date.now() - 10 * 60_000);
+        await utimes(staleFile, staleDate, staleDate);
+        const staleStats = await fs.promises.stat(staleFile);
+        assert.deepEqual(await __testing.getLatestActivityFromFile("stale-agent"), {
+            task: null,
+            activity: null,
+            modTime: staleStats.mtimeMs,
+        });
+
+        const primitiveDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "primitive-agent",
+            "sessions"
+        );
+        await mkdir(primitiveDir, { recursive: true });
+        const primitiveFile = path.join(primitiveDir, "primitive.jsonl");
+        await writeFile(
+            primitiveFile,
+            [
+                JSON.stringify("primitive"),
+                JSON.stringify({ role: "user", content: "primitive task" }),
+            ].join("\n"),
+            "utf8"
+        );
+        const primitiveActivity =
+            await __testing.getLatestActivityFromFile("primitive-agent");
+        assert.equal(primitiveActivity?.task, "primitive task");
+
+        await writeFile(configPath, JSON.stringify({}), "utf8");
+        assert.equal(__testing.parseAgentsConfig(), null);
+        await writeFile(
+            configPath,
+            JSON.stringify(
+                {
+                    agents: {
+                        defaults: {
+                            model: { primary: "codex" },
+                            models: {
+                                "openai-codex/gpt-5.5": { alias: "codex" },
+                            },
+                        },
+                        list: [
+                            { id: agentId, default: true },
+                            {
+                                id: "researcher",
+                                model: {
+                                    primary: "synthetic/hf:moonshotai/Kimi-K2.5",
+                                },
+                            },
+                            { id: "alias-agent" },
+                        ],
+                    },
+                },
+                null,
+                2
+            )
+        );
+
+        const objectAgentDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "object-agent",
+            "sessions"
+        );
+        await mkdir(objectAgentDir, { recursive: true });
+        await writeFile(
+            path.join(objectAgentDir, "sessions.json"),
+            JSON.stringify({ not: "an array" }),
+            "utf8"
+        );
+        await writeFile(
+            path.join(objectAgentDir, "metadata.json"),
+            JSON.stringify({ currentTask: "from metadata" }),
+            "utf8"
+        );
+        assert.deepEqual(await __testing.getAgentSessionsFromFiles("object-agent"), []);
+        assert.deepEqual(await __testing.getAgentMetadata("object-agent"), {
+            currentTask: "from metadata",
+        });
+
+        const branchDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "branch-agent",
+            "sessions"
+        );
+        await mkdir(branchDir, { recursive: true });
+        const branchFile = path.join(branchDir, "run.jsonl");
+        await writeFile(
+            branchFile,
+            [
+                "null",
+                JSON.stringify({ runId: "old", role: "user", content: "ignored" }),
+                JSON.stringify({ runId: "new", role: "assistant", content: [] }),
+                JSON.stringify({ role: "user", content: "runless ignored" }),
+                JSON.stringify({
+                    runId: "other",
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "exec",
+                            arguments: { cmd: "ignored" },
+                        },
+                    ],
+                }),
+                JSON.stringify({
+                    runId: "new",
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "exec",
+                            arguments: { cmd: "npm run active" },
+                        },
+                    ],
+                    __openclaw: { mirrorIdentity: "turn-1:assistant" },
+                }),
+                JSON.stringify({
+                    runId: "new",
+                    role: "user",
+                    content: [{ type: "image" }],
+                    __openclaw: { mirrorIdentity: "turn-1:user" },
+                }),
+                JSON.stringify({
+                    runId: "new",
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "message",
+                            arguments: { text: "ignored" },
+                        },
+                    ],
+                    __openclaw: { mirrorIdentity: ":assistant" },
+                }),
+            ].join("\n"),
+            "utf8"
+        );
+        const branchStats = await fs.promises.stat(branchFile);
+        assert.deepEqual(await __testing.getLatestActivityFromFile("branch-agent"), {
+            task: null,
+            activity: "exec npm run active",
+            modTime: branchStats.mtimeMs,
+        });
+
+        const oldGroupFile = path.join(branchDir, "older.jsonl");
+        await writeFile(oldGroupFile, JSON.stringify({ role: "user", content: "old" }));
+        await utimes(oldGroupFile, staleDate, staleDate);
+        const activeBranchActivity =
+            await __testing.getLatestActivityFromFile("branch-agent");
+        assert.equal(activeBranchActivity?.activity, "exec npm run active");
+
+        const mixedGroupFresh = path.join(branchDir, "paired.jsonl");
+        const mixedGroupStale = path.join(branchDir, "paired.trajectory.jsonl");
+        await writeFile(
+            mixedGroupFresh,
+            JSON.stringify({ role: "user", content: "fresh paired" }),
+            "utf8"
+        );
+        await writeFile(
+            mixedGroupStale,
+            JSON.stringify({
+                type: "tool.call",
+                data: { name: "exec", args: { cmd: "stale paired" } },
+            }),
+            "utf8"
+        );
+        await utimes(mixedGroupStale, staleDate, staleDate);
+        const pairedBranchActivity =
+            await __testing.getLatestActivityFromFile("branch-agent");
+        assert.equal(pairedBranchActivity?.task, "fresh paired");
+
+        const originalPop = Array.prototype.pop;
+        try {
+            Array.prototype.pop = function patchedPop<T>(this: T[]): T | undefined {
+                if (
+                    this.length === 1 &&
+                    (this[0] as { dir?: unknown })?.dir === emptySessionsDir
+                ) {
+                    originalPop.call(this);
+                    return undefined;
+                }
+                return originalPop.call(this);
+            };
+            assert.deepEqual(
+                __testing.listActivityLogFiles({
+                    dir: emptySessionsDir,
+                    recursive: false,
+                }),
+                []
+            );
+        } finally {
+            Array.prototype.pop = originalPop;
+        }
+
+        const originalStatSync = fs.statSync;
+        try {
+            fs.statSync = ((target: fs.PathLike) => {
+                const targetPath = Buffer.isBuffer(target)
+                    ? target.toString("utf8")
+                    : String(target);
+                if (targetPath.endsWith("run.jsonl")) {
+                    throw new Error("stat failed");
+                }
+                return originalStatSync(target);
+            }) as typeof fs.statSync;
+            assert.equal(
+                __testing
+                    .listActivityLogFiles({ dir: branchDir, recursive: false })
+                    .some((file: { name: string }) => file.name === "run.jsonl"),
+                true
+            );
+        } finally {
+            fs.statSync = originalStatSync;
+        }
+
+        const originalSort = Array.prototype.sort;
+        try {
+            Array.prototype.sort = function patchedSort<T>(
+                this: T[],
+                compareFn?: (a: T, b: T) => number
+            ): T[] {
+                if (
+                    this.some(
+                        (item) =>
+                            typeof item === "object" &&
+                            item !== null &&
+                            (item as { group?: unknown }).group === `${branchDir}:run`
+                    )
+                ) {
+                    throw new Error("sort failed");
+                }
+                return originalSort.call(this, compareFn);
+            };
+            assert.equal(await __testing.getLatestActivityFromFile("branch-agent"), null);
+        } finally {
+            Array.prototype.sort = originalSort;
+        }
+
+        const originalMathMax = Math.max;
+        const latestBranchStats = await fs.promises.stat(branchFile);
+        const branchMtime = latestBranchStats.mtimeMs;
+        try {
+            Math.max = (...values: number[]) => {
+                if (values.includes(branchMtime)) {
+                    throw new Error("max failed");
+                }
+                return originalMathMax(...values);
+            };
+            assert.equal(__testing.getSessionFileModTime("branch-agent"), null);
+        } finally {
+            Math.max = originalMathMax;
+        }
+
+        await writeFile(
+            path.join(objectAgentDir, "sessions.json"),
+            JSON.stringify([{ key: "agent:object-agent:main" }]),
+            "utf8"
+        );
+        const objectStatus = await __testing.getAgentStatus("object-agent");
+        assert.equal(objectStatus.currentTask, "from metadata");
+
+        const fallbackHistory = await requestJson<{
+            tasks: unknown[];
+            timestamp: number;
+        }>(server, "/api/agents/tasks/history?limit=not-a-number");
+        assert.equal(fallbackHistory.status, 200);
+        assert.equal(Array.isArray(fallbackHistory.body.tasks), true);
+
+        const aliasSessionsDir = path.join(
+            homeDir,
+            ".openclaw",
+            "agents",
+            "alias-agent",
+            "sessions"
+        );
+        await mkdir(aliasSessionsDir, { recursive: true });
+        await writeFile(
+            path.join(aliasSessionsDir, "sessions.json"),
+            JSON.stringify([
+                {
+                    key: "agent:alias-agent:main",
+                    updatedAt: Date.now(),
+                },
+            ]),
+            "utf8"
+        );
+        const allStatus = await requestJson<{ agents: Array<{ id: string }> }>(
+            server,
+            "/api/agents/status"
+        );
+        assert.equal(allStatus.status, 200);
+
+        await writeFile(
+            configPath,
+            JSON.stringify({ agents: { defaults: {}, list: [] } }),
+            "utf8"
+        );
+        const noDefaultStatus = await requestJson<{ agents: [] }>(
+            server,
+            "/api/agents/status"
+        );
+        assert.equal(noDefaultStatus.status, 200);
+        await writeFile(
+            configPath,
+            JSON.stringify(
+                {
+                    agents: {
+                        defaults: {
+                            model: { primary: "codex" },
+                            models: {
+                                "openai-codex/gpt-5.5": { alias: "codex" },
+                            },
+                        },
+                        list: [
+                            { id: agentId, default: true },
+                            {
+                                id: "researcher",
+                                model: {
+                                    primary: "synthetic/hf:moonshotai/Kimi-K2.5",
+                                },
+                            },
+                            { id: "alias-agent" },
+                        ],
+                    },
+                },
+                null,
+                2
+            )
+        );
+
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            const { __testing } = await import("./agents.js");
+            __testing.setPrepareAgentMetadataDirForTest(() => null);
+            const unsafePrepared = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/unsafe-prepared/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(unsafePrepared.status, 400);
+            assert.equal(unsafePrepared.body.error, "Invalid agent metadata path");
+            __testing.setPrepareAgentMetadataDirForTest();
+
+            let safeMismatchCalls = 0;
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const value = originalRealpathSync(target).toString();
+                if (
+                    value.endsWith(`${path.sep}safe-mismatch${path.sep}sessions`) &&
+                    safeMismatchCalls++ === 0
+                ) {
+                    return path.join(
+                        homeDir,
+                        ".openclaw",
+                        "agents",
+                        "different",
+                        "sessions"
+                    );
+                }
+                if (value.endsWith(`${path.sep}realpath-agent${path.sep}sessions`)) {
+                    return homeDir;
+                }
+                return value;
+            }) as typeof fs.realpathSync;
+            const safeMismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/safe-mismatch/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(safeMismatch.status, 400);
+            assert.equal(safeMismatch.body.error, "Invalid agent metadata path");
+
+            let parentMismatchCalls = 0;
+            const parentMismatchAgentDir = path.join(
+                homeDir,
+                ".openclaw",
+                "agents",
+                "parent-mismatch"
+            );
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const value = originalRealpathSync(target).toString();
+                if (value === parentMismatchAgentDir && ++parentMismatchCalls === 2) {
+                    return path.join(homeDir, ".openclaw", "agents", "different");
+                }
+                if (value.endsWith(`${path.sep}realpath-agent${path.sep}sessions`)) {
+                    return homeDir;
+                }
+                return value;
+            }) as typeof fs.realpathSync;
+            const parentMismatch = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/parent-mismatch/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(parentMismatch.status, 400);
+            assert.equal(parentMismatch.body.error, "Invalid agent metadata path");
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/realpath-agent/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(response.status, 400);
+            assert.equal(response.body.error, "Invalid agent metadata path");
+
+            __testing.setPrepareAgentMetadataDirForTest(() =>
+                path.join(homeDir, ".openclaw", "agents", "unavailable-root", "sessions")
+            );
+            let agentsRootRealpathCalls = 0;
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (
+                    String(target) === path.join(homeDir, ".openclaw", "agents") &&
+                    ++agentsRootRealpathCalls > 2
+                ) {
+                    const error = new Error("agents dir denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+            const unavailableRoot = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/unavailable-root/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(unavailableRoot.status, 400);
+            assert.equal(unavailableRoot.body.error, "Invalid agent metadata path");
+        } finally {
+            const { __testing } = await import("./agents.js");
+            __testing.setPrepareAgentMetadataDirForTest();
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        try {
+            let metadataDirCalls = 0;
+            fs.realpathSync = ((target: fs.PathLike) => {
+                const value = originalRealpathSync(target).toString();
+                if (
+                    value.endsWith(`${path.sep}swap-agent${path.sep}sessions`) &&
+                    ++metadataDirCalls === 3
+                ) {
+                    return path.join(homeDir, ".openclaw", "agents");
+                }
+                return value;
+            }) as typeof fs.realpathSync;
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/agents/swap-agent/metadata",
+                { method: "PUT", body: { currentTask: "blocked" } }
+            );
+            assert.equal(response.status, 400);
+            assert.equal(response.body.error, "Invalid agent metadata path");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+
+        const previousGatewaySessions = gateway.getSessions;
+        const previousGatewayRequest = gateway.request;
+        try {
+            gateway.getSessions = () => [
+                {
+                    id: "cached",
+                    key: "agent:cached:main",
+                    type: "MAIN",
+                    agentType: "cached",
+                    hookName: "",
+                    model: "cached-model",
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "idle",
+                    updatedAt: 0,
+                },
+                {
+                    id: "non-string-model",
+                    key: "agent:cached-worker:main",
+                    type: "MAIN",
+                    agentType: "cached",
+                    hookName: "",
+                    model: 42 as unknown as string,
+                    tokenCount: 0,
+                    maxTokens: 200000,
+                    createdAt: null,
+                    displayName: "",
+                    label: "",
+                    displayLabel: "",
+                    channel: "unknown",
+                    status: "idle",
+                    updatedAt: 1,
+                },
+            ];
+            gateway.request = async () => ({
+                sessions: [
+                    { key: "" },
+                    { key: "agent:x:main", model: "   " },
+                    {
+                        key: "agent:y:main",
+                        model: { primary: "codex" } as unknown as string,
+                    },
+                ],
+            });
+            assert.deepEqual(await __testing.getGatewaySessionsForAgents(), [
+                {
+                    key: "agent:x:main",
+                    model: undefined,
+                    status: undefined,
+                    updatedAt: undefined,
+                    startedAt: undefined,
+                    endedAt: undefined,
+                    runId: undefined,
+                    activeRunId: undefined,
+                    currentRunId: undefined,
+                    isRunning: undefined,
+                    running: undefined,
+                },
+                {
+                    key: "agent:y:main",
+                    model: undefined,
+                    status: undefined,
+                    updatedAt: undefined,
+                    startedAt: undefined,
+                    endedAt: undefined,
+                    runId: undefined,
+                    activeRunId: undefined,
+                    currentRunId: undefined,
+                    isRunning: undefined,
+                    running: undefined,
+                },
+            ]);
+
+            gateway.request = async () => ({ sessions: [] });
+            const sessions = await __testing.getGatewaySessionsForAgents();
+            assert.deepEqual(sessions, []);
+
+            gateway.request = async () => ({ sessions: [{ key: "" }] });
+            const emptyFilteredSessions = await __testing.getGatewaySessionsForAgents();
+            assert.deepEqual(emptyFilteredSessions, []);
+
+            gateway.request = async () => {
+                throw new Error("gateway unavailable");
+            };
+            const cachedSessions = await __testing.getGatewaySessionsForAgents();
+            assert.equal(cachedSessions[1]?.model, undefined);
+
+            gateway.getSessions = () => {
+                throw new Error("cache unavailable");
+            };
+            const unavailableSessions = await __testing.getGatewaySessionsForAgents();
+            assert.deepEqual(unavailableSessions, []);
+        } finally {
+            gateway.getSessions = previousGatewaySessions;
+            gateway.request = previousGatewayRequest;
+        }
     });
 });

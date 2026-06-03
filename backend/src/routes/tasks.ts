@@ -7,6 +7,7 @@ import {
 } from "../constants/taskActors.js";
 import { db } from "../db.js";
 import gateway from "../gateway.js";
+import { objectFallback } from "../lib/values.js";
 
 /** Defines status. */
 type Status = "todo" | "in-progress" | "blocked" | "done";
@@ -173,7 +174,6 @@ function normalizeCronJobs(payload: unknown): CronJob[] {
     if (Array.isArray(value.items)) {
         return value.items;
     }
-
     return [];
 }
 
@@ -219,13 +219,16 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
 
     if (schedule.kind === "every") {
         const everyMs = numberFromRecord(schedule, "everyMs");
-        if (everyMs) {
+        if (everyMs && everyMs > 0) {
+            if (everyMs % 3_600_000 === 0) return `Every ${everyMs / 3_600_000}h`;
+            if (everyMs < 60_000) {
+                const seconds = Math.max(1, Math.round(everyMs / 1000));
+                return `Every ${seconds}s`;
+            }
             const minutes = Math.round(everyMs / 60_000);
-            if (minutes >= 60 && minutes % 60 === 0) return `Every ${minutes / 60}h`;
             return `Every ${minutes}m`;
         }
     }
-
     if (schedule.kind === "at") {
         return stringFromRecord(schedule, "at");
     }
@@ -319,13 +322,42 @@ function toFrontendTaskUpdate(update: DbTaskUpdate) {
     };
 }
 
+/** Serializes task event payloads without dropping primitive values. */
+function serializeTaskEventPayload(payload: unknown): string {
+    return (
+        JSON.stringify(
+            typeof payload === "object"
+                ? objectFallback(payload as object | null | undefined)
+                : payload
+        ) ?? "null"
+    );
+}
+
 /** Performs record event. */
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
     db.prepare(
         `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
          VALUES (?, ?, ?, ?)`
-    ).run(taskId, eventType, JSON.stringify(payload || {}), new Date().toISOString());
+    ).run(
+        taskId,
+        eventType,
+        serializeTaskEventPayload(payload),
+        new Date().toISOString()
+    );
 }
+
+/** Defines testing. */
+export const __testing = {
+    derivePriority,
+    formatScheduleSummary,
+    labelsFromTask,
+    normalizeAutomationInput,
+    normalizeCronJobs,
+    normalizeStatus,
+    parseRecordJson,
+    serializeTaskEventPayload,
+    toFrontendTask,
+};
 
 /** Registers tasks API routes. */
 export default function tasksRoutes(
@@ -464,7 +496,6 @@ export default function tasksRoutes(
             labels?: string[];
             automation?: TaskAutomationInput | null;
         };
-
         const labels = updates.labels ?? labelsFromTask(existing);
         const nextStatus = normalizeStatus(
             labels.includes("done")
@@ -523,9 +554,8 @@ export default function tasksRoutes(
     app.post("/api/tasks/:id/assign", express.json(), (async (req, res) => {
         const id = Number(req.params.id);
         const { assignee } = req.body as { assignee?: string | null };
-
         if (!Number.isInteger(id)) {
-            res.status(400).json({ error: "Invalid request" });
+            res.status(400).json({ error: "Invalid id" });
             return;
         }
 

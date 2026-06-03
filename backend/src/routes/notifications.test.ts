@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -30,7 +30,23 @@ async function startServer(): Promise<TestServer> {
     notificationsRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("listening", onListening);
+            server.off("error", onError);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -65,17 +81,30 @@ function cleanupNotifications(source: string): void {
 }
 
 describe("notifications routes", () => {
-    const source = `backend-notifications-${Date.now()}`;
+    let source: string;
     let server: TestServer;
+    let notificationIdToCleanup: number | null = null;
 
     before(async () => {
-        cleanupNotifications(source);
         server = await startServer();
+    });
+
+    beforeEach(() => {
+        source = `backend-notifications-${Date.now()}-${Math.random()}`;
+    });
+
+    afterEach(() => {
+        if (notificationIdToCleanup !== null) {
+            db.prepare("DELETE FROM notifications WHERE id = ?").run(
+                notificationIdToCleanup
+            );
+            notificationIdToCleanup = null;
+        }
+        cleanupNotifications(source);
     });
 
     after(async () => {
         await server.close();
-        cleanupNotifications(source);
     });
 
     it("validates required fields and notification type", async () => {
@@ -87,13 +116,37 @@ describe("notifications routes", () => {
         assert.equal(missingTitle.status, 400);
         assert.equal(missingTitle.body.error, "title is required");
 
-        const missingDescription = await requestJson<{ error: string }>(
+        const missingDescription = await requestJson<{ ok: true; id: number | null }>(
             server,
             "/api/notifications",
             { method: "POST", body: { title: "Title", source } }
         );
-        assert.equal(missingDescription.status, 400);
-        assert.equal(missingDescription.body.error, "description is required");
+        assert.equal(missingDescription.status, 200);
+        assert.equal(typeof missingDescription.body.id, "number");
+        notificationIdToCleanup = missingDescription.body.id;
+        const createdWithoutDescription = db
+            .prepare("SELECT description FROM notifications WHERE id = ?")
+            .get(missingDescription.body.id) as { description: string } | undefined;
+        assert.equal(createdWithoutDescription?.description, "");
+
+        const invalidTitle = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            { method: "POST", body: { title: { nested: true }, description: "body" } }
+        );
+        assert.equal(invalidTitle.status, 400);
+        assert.equal(invalidTitle.body.error, "title must be a string");
+
+        const invalidDescription = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Title", description: ["body"] },
+            }
+        );
+        assert.equal(invalidDescription.status, 400);
+        assert.equal(invalidDescription.body.error, "description must be a string");
 
         const invalidType = await requestJson<{ error: string }>(
             server,
@@ -105,6 +158,123 @@ describe("notifications routes", () => {
         );
         assert.equal(invalidType.status, 400);
         assert.equal(invalidType.body.error, "invalid notification type");
+
+        const numericType = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Title", description: "body", type: 0, source },
+            }
+        );
+        assert.equal(numericType.status, 400);
+        assert.equal(numericType.body.error, "invalid notification type");
+
+        const invalidOccurredAt = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    occurredAt: false,
+                    source,
+                },
+            }
+        );
+        assert.equal(invalidOccurredAt.status, 400);
+        assert.equal(invalidOccurredAt.body.error, "invalid occurredAt");
+
+        const invalidSource = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    source: { nested: true },
+                },
+            }
+        );
+        assert.equal(invalidSource.status, 400);
+        assert.equal(invalidSource.body.error, "source must be a string");
+
+        const invalidDedupeKey = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Title",
+                    description: "body",
+                    source,
+                    dedupeKey: ["bad"],
+                },
+            }
+        );
+        assert.equal(invalidDedupeKey.status, 400);
+        assert.equal(invalidDedupeKey.body.error, "dedupeKey must be a string");
+
+        const defaultType = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "Default type", description: "body", source },
+            }
+        );
+        assert.equal(defaultType.status, 200);
+        assert.equal(typeof defaultType.body.id, "number");
+        const createdDefaultType = db
+            .prepare("SELECT type FROM notifications WHERE id = ?")
+            .get(defaultType.body.id) as { type: string } | undefined;
+        assert.equal(createdDefaultType?.type, "info");
+
+        const noSource = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: { title: "No source", description: "body" },
+            }
+        );
+        assert.equal(noSource.status, 200);
+        assert.equal(typeof noSource.body.id, "number");
+        notificationIdToCleanup = noSource.body.id;
+    });
+
+    it("reports insert failures without pruning notifications", async () => {
+        const originalPrepare = db.prepare.bind(db);
+        const consoleError = mock.method(console, "error", () => {});
+        const prepare = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO notifications")) {
+                return { get: () => null } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return originalPrepare(sql);
+        });
+
+        try {
+            const response = await requestJson<{ ok: false; error: string }>(
+                server,
+                "/api/notifications",
+                {
+                    method: "POST",
+                    body: { title: "Broken insert", description: "body", source },
+                }
+            );
+
+            assert.equal(response.status, 500);
+            assert.deepEqual(response.body, {
+                ok: false,
+                error: "Failed to create notification",
+            });
+            assert.equal(consoleError.mock.callCount(), 1);
+        } finally {
+            prepare.mock.restore();
+            consoleError.mock.restore();
+        }
     });
 
     it("creates, upserts, lists, reads, clears, and deletes notifications", async () => {
@@ -129,6 +299,24 @@ describe("notifications routes", () => {
         assert.equal(first.body.ok, true);
         assert.equal(typeof first.body.id, "number");
 
+        const whitespaceFields = await requestJson<{ ok: true; id: number | null }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Whitespace fields",
+                    description: "Body",
+                    source: "   ",
+                    dedupeKey: "   ",
+                    metadata: [],
+                },
+            }
+        );
+        assert.equal(whitespaceFields.status, 200);
+        assert.equal(typeof whitespaceFields.body.id, "number");
+        notificationIdToCleanup = whitespaceFields.body.id;
+
         const upsert = await requestJson<{ ok: true; id: number | null }>(
             server,
             "/api/notifications",
@@ -147,6 +335,7 @@ describe("notifications routes", () => {
         );
 
         assert.equal(upsert.status, 200);
+        assert.equal(upsert.body.id, first.body.id);
 
         const list = await requestJson<{
             items: NotificationItem[];
@@ -156,6 +345,13 @@ describe("notifications routes", () => {
 
         assert.equal(list.status, 200);
         assert.equal(list.body.readCount >= 0, true);
+        const whitespaceItem = list.body.items.find(
+            (notification) => notification.id === whitespaceFields.body.id
+        );
+        assert.ok(whitespaceItem);
+        assert.equal(whitespaceItem.source, null);
+        assert.equal(whitespaceItem.dedupeKey, null);
+        assert.deepEqual(whitespaceItem.metadata, {});
         const item = list.body.items.find(
             (notification) => notification.dedupeKey === `${source}:same`
         );
@@ -187,18 +383,133 @@ describe("notifications routes", () => {
         const clearRead = await requestJson<{ ok: true; deleted: number }>(
             server,
             "/api/notifications/clear-read",
-            { method: "POST" }
+            { method: "POST", body: { source } }
         );
         assert.equal(clearRead.status, 200);
         assert.equal(clearRead.body.deleted >= 1, true);
 
+        const deletable = await requestJson<{ ok: true; id: number }>(
+            server,
+            "/api/notifications",
+            {
+                method: "POST",
+                body: {
+                    title: "Delete me",
+                    description: "Delete branch",
+                    source,
+                },
+            }
+        );
+        assert.equal(deletable.status, 200);
+
+        const deleteExisting = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            `/api/notifications/${deletable.body.id}`,
+            { method: "DELETE" }
+        );
+        assert.equal(deleteExisting.status, 200);
+        assert.equal(deleteExisting.body.deleted, 1);
+
         const deleteMissing = await requestJson<{ ok: true; deleted: number }>(
             server,
-            `/api/notifications/${item.id}`,
+            `/api/notifications/${deletable.body.id}`,
             { method: "DELETE" }
         );
         assert.equal(deleteMissing.status, 200);
         assert.equal(deleteMissing.body.deleted, 0);
+    });
+
+    it("handles invalid notification ids and malformed stored metadata", async () => {
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Malformed metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:malformed`,
+            "{not-json",
+            "2026-05-11T02:00:00.000Z",
+            "2026-05-11T02:00:00.000Z",
+            "2026-05-11T02:00:00.000Z"
+        );
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Empty metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:empty-metadata`,
+            "",
+            "2026-05-11T02:01:00.000Z",
+            "2026-05-11T02:01:00.000Z",
+            "2026-05-11T02:01:00.000Z"
+        );
+        db.prepare(
+            `
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `
+        ).run(
+            "Array metadata",
+            "Historical row",
+            "info",
+            source,
+            `${source}:array-metadata`,
+            "[]",
+            "2026-05-11T02:02:00.000Z",
+            "2026-05-11T02:02:00.000Z",
+            "2026-05-11T02:02:00.000Z"
+        );
+
+        const list = await requestJson<{
+            items: NotificationItem[];
+            unreadCount: number;
+        }>(server, "/api/notifications?limit=not-a-number");
+        assert.equal(list.status, 200);
+        const item = list.body.items.find(
+            (notification) => notification.dedupeKey === `${source}:malformed`
+        );
+        assert.ok(item);
+        assert.deepEqual(item.metadata, {});
+        assert.deepEqual(
+            list.body.items.find(
+                (notification) => notification.dedupeKey === `${source}:empty-metadata`
+            )?.metadata,
+            {}
+        );
+        assert.deepEqual(
+            list.body.items.find(
+                (notification) => notification.dedupeKey === `${source}:array-metadata`
+            )?.metadata,
+            {}
+        );
+
+        const invalidRead = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/not-a-number/read",
+            { method: "POST" }
+        );
+        assert.equal(invalidRead.status, 400);
+        assert.equal(invalidRead.body.error, "invalid id");
+
+        const invalidDelete = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/0",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidDelete.status, 400);
+        assert.equal(invalidDelete.body.error, "invalid id");
     });
 
     it("marks all unread notifications as read", async () => {
@@ -228,5 +539,45 @@ describe("notifications routes", () => {
             ownItems.every((item) => item.isRead),
             true
         );
+
+        const noReadLeft = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST", body: { source } }
+        );
+        assert.equal(noReadLeft.status, 200);
+        assert.equal(noReadLeft.body.deleted, ownItems.length);
+
+        const stillNoReadLeft = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST", body: { source } }
+        );
+        assert.equal(stillNoReadLeft.status, 200);
+        assert.equal(stillNoReadLeft.body.deleted, 0);
+
+        const globalClearRead = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/clear-read",
+            { method: "POST" }
+        );
+        assert.equal(globalClearRead.status, 200);
+        assert.equal(globalClearRead.body.deleted >= 0, true);
+
+        const malformedSource = await requestJson<{ error: string }>(
+            server,
+            "/api/notifications/clear-read?source=a&source=b",
+            { method: "POST" }
+        );
+        assert.equal(malformedSource.status, 400);
+        assert.equal(malformedSource.body.error, "source must be a string");
+
+        const deleteNeverExisted = await requestJson<{ ok: true; deleted: number }>(
+            server,
+            "/api/notifications/999999999",
+            { method: "DELETE" }
+        );
+        assert.equal(deleteNeverExisted.status, 200);
+        assert.equal(deleteNeverExisted.body.deleted, 0);
     });
 });

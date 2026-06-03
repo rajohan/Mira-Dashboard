@@ -3,28 +3,27 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-const execFileAsync = promisify(execFile);
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
+import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const N8N_ROOT = process.env.MIRA_N8N_ROOT || "/home/ubuntu/projects/n8n";
+const execFileAsync = promisify(execFile);
+const EXEC_FILE_OPTIONS = {
+    killSignal: "SIGTERM" as const,
+    timeout: 30_000,
+};
+const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
 const N8N_DATABASE = "n8n";
+const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
 const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
 /** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch((error) => {
-            console.error("[opsRoutes]", error);
-            if (res.headersSent) {
-                next(error);
-                return;
-            }
-            res.status(500).json({
-                error: error instanceof Error ? error.message : "Ops route failed",
-            });
-        });
-    };
+    return baseAsyncRoute(handler, {
+        fallback: "Ops route failed",
+        logLabel: "[opsRoutes]",
+    });
 }
 
 /** Builds n8n script env. */
@@ -34,33 +33,40 @@ function buildN8nScriptEnv() {
         DB_POSTGRESDB_HOST: "127.0.0.1",
         DB_POSTGRESDB_PORT: "6432",
         DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER: process.env.DATABASE_USERNAME || "",
-        DB_POSTGRESDB_PASSWORD: process.env.DATABASE_PASSWORD || "",
+        DB_POSTGRESDB_USER:
+            process.env.DB_POSTGRESDB_USER ??
+            envFallback("DATABASE_USERNAME", "postgres"),
+        DB_POSTGRESDB_PASSWORD:
+            process.env.DB_POSTGRESDB_PASSWORD ??
+            envFallback("DATABASE_PASSWORD", "postgres"),
     };
 }
 
 /** Builds PostgreSQL uri. */
 function buildPostgresUri(database = N8N_DATABASE) {
-    const username = process.env.DATABASE_USERNAME || "postgres";
-    const password = process.env.DATABASE_PASSWORD || "postgres";
-    const host = process.env.DATABASE_HOST || "postgres";
-    const port = process.env.DATABASE_PORT || "5432";
-    return `postgresql://${username}:${password}@${host}:${port}/${database}`;
+    const username =
+        process.env.DB_POSTGRESDB_USER ?? envFallback("DATABASE_USERNAME", "postgres");
+    const password =
+        process.env.DB_POSTGRESDB_PASSWORD ??
+        envFallback("DATABASE_PASSWORD", "postgres");
+    const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
+    const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
+    return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
 /** Performs read log rotation status. */
 async function readLogRotationStatus() {
     const sql = `SELECT COALESCE(data->'lastRun', 'null'::jsonb)::text FROM cache_entries WHERE key = '${LOG_ROTATION_STATE_KEY}'`;
     const { stdout } = await execFileAsync(
-        "docker",
+        dockerBin,
         ["exec", "postgres", "psql", buildPostgresUri(), "-t", "-A", "-c", sql],
         {
+            ...EXEC_FILE_OPTIONS,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
         }
     );
-
-    const raw = String(stdout || "").trim();
+    const raw = stringFallback(stdout).trim();
     return {
         success: true,
         lastRun: raw ? JSON.parse(raw) : null,
@@ -86,6 +92,7 @@ async function runLogRotation(options: { dryRun: boolean }) {
                   ...args,
               ],
         {
+            ...EXEC_FILE_OPTIONS,
             cwd: N8N_ROOT,
             env: buildN8nScriptEnv(),
             maxBuffer: 20 * 1024 * 1024,
@@ -93,8 +100,8 @@ async function runLogRotation(options: { dryRun: boolean }) {
     );
 
     return {
-        result: JSON.parse(String(stdout || "{}")),
-        stderr: String(stderr || ""),
+        result: JSON.parse(stringFallback(stdout).trim() || "{}"),
+        stderr: stringFallback(stderr),
     };
 }
 
@@ -133,3 +140,8 @@ export default function opsRoutes(app: express.Application): void {
         })
     );
 }
+
+export const __testing = {
+    buildN8nScriptEnv,
+    buildPostgresUri,
+};

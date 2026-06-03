@@ -4,15 +4,39 @@ coverage:
     range: 70..100
     status:
         project:
-            default:
+            backend:
                 target: 100%
                 threshold: 0%
                 if_ci_failed: error
+                flags:
+                    - backend
+                paths:
+                    - backend/src/
+            frontend:
+                target: 100%
+                threshold: 0%
+                if_ci_failed: error
+                flags:
+                    - frontend
+                paths:
+                    - src/
         patch:
-            default:
+            backend:
                 target: 100%
                 threshold: 0%
                 if_ci_failed: error
+                flags:
+                    - backend
+                paths:
+                    - backend/src/
+            frontend:
+                target: 100%
+                threshold: 0%
+                if_ci_failed: error
+                flags:
+                    - frontend
+                paths:
+                    - src/
 
 comment:
     layout: "reach,diff,flags,tree"
@@ -23,3 +47,6 @@ flags:
     frontend:
         paths:
             - src/
+    backend:
+        paths:
+            - backend/src/

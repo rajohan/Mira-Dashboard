@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
-import { setCacheStoreDockerBinForTests } from "./cacheStore.js";
+import { __testing as cacheStoreTesting } from "./cacheStore.js";
 
 const originalPath = process.env.PATH;
 const originalMode = process.env.FAKE_MOLTBOOK_CACHE_MODE;
@@ -35,9 +35,10 @@ const payloads = {
   "moltbook.feed.new": { posts: [{ id: "new-1" }], feedType: "new", feedFilter: null, hasMore: false, tip: null },
 };
 const data = mode === "invalid" ? "not-json" : JSON.stringify(payloads[key]);
+const nullable = mode === "nullable";
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  key + "\t" + data + "\tmoltbook\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\t" + status + "\tWARN\tCareful\t2\t{\"producer\":\"test\"}",
+  key + "\t" + data + "\tmoltbook\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
   "",
 ].join("\n"));
 `,
@@ -45,7 +46,7 @@ process.stdout.write([
     );
     await chmod(dockerPath, 0o755);
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-    setCacheStoreDockerBinForTests(dockerPath);
+    cacheStoreTesting.setDockerBinForTests(dockerPath);
 }
 
 describe("Moltbook cache helpers", () => {
@@ -63,13 +64,17 @@ describe("Moltbook cache helpers", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         if (originalMode === undefined) {
             delete process.env.FAKE_MOLTBOOK_CACHE_MODE;
         } else {
             process.env.FAKE_MOLTBOOK_CACHE_MODE = originalMode;
         }
-        setCacheStoreDockerBinForTests(undefined);
+        cacheStoreTesting.setDockerBinForTests(undefined);
         await rm(tempDir, { recursive: true, force: true });
     });
 
@@ -102,6 +107,20 @@ describe("Moltbook cache helpers", () => {
         assert.equal(hotFeed.data.hasMore, true);
         assert.deepEqual(newFeed.data.posts, [{ id: "new-1" }]);
         assert.equal(newFeed.data.hasMore, false);
+    });
+
+    it("maps nullable metadata fields to null/default values", async () => {
+        process.env.FAKE_MOLTBOOK_CACHE_MODE = "nullable";
+
+        const home = await cache.fetchCachedMoltbookHome();
+
+        assert.equal(home.updatedAt, null);
+        assert.equal(home.lastAttemptAt, null);
+        assert.equal(home.expiresAt, null);
+        assert.equal(home.errorCode, null);
+        assert.equal(home.errorMessage, null);
+        assert.equal(home.consecutiveFailures, 0);
+        assert.deepEqual(home.meta, {});
     });
 
     it("rejects missing, stale, and invalid Moltbook cache rows", async () => {

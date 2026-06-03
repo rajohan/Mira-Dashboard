@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test, { after, before } from "node:test";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const serverEntry = path.join(repoRoot, "dist/server.js");
+const serverEntry = path.join(repoRoot, "dist/serverStart.js");
 const port = 3301;
 const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -59,40 +59,59 @@ async function startServer() {
     const openClawHome = path.join(homeRoot, ".openclaw");
     const workspaceRoot = path.join(temporaryRoot, "workspace");
     const dataRoot = path.join(temporaryRoot, "app");
+    const dashboardOpenClawHome = path.join(dataRoot, "openclaw-client");
     const mediaRoot = path.join(openClawHome, "media");
-    await mkdir(path.join(openClawHome, "media"), { recursive: true });
+    await mkdir(mediaRoot, { recursive: true });
     await mkdir(path.join(openClawHome, "cron"), { recursive: true });
-    await mkdir(path.join(openClawHome, "hooks", "transforms"), { recursive: true });
+    await mkdir(path.join(openClawHome, "hooks", "transforms"), {
+        recursive: true,
+    });
+    await mkdir(path.join(dashboardOpenClawHome, "cron"), { recursive: true });
+    await mkdir(path.join(dashboardOpenClawHome, "hooks", "transforms"), {
+        recursive: true,
+    });
     await mkdir(path.join(workspaceRoot, "src"), { recursive: true });
     await mkdir(path.join(workspaceRoot, "assets"), { recursive: true });
     await mkdir(dataRoot, { recursive: true });
 
+    const openclawConfig = {
+        agents: {
+            defaults: {
+                model: { primary: "codex", fallbacks: ["glm51"] },
+                models: { "openai-codex/gpt-5.5": { alias: "codex" } },
+            },
+            list: [
+                { id: "main", default: true, model: { primary: "codex" } },
+                {
+                    id: "ops",
+                    model: { primary: "synthetic/hf:zai-org/GLM-5.1" },
+                },
+            ],
+        },
+    };
     await writeFile(
         path.join(openClawHome, "openclaw.json"),
-        JSON.stringify(
-            {
-                agents: {
-                    defaults: {
-                        model: { primary: "codex", fallbacks: ["glm51"] },
-                        models: { "openai-codex/gpt-5.5": { alias: "codex" } },
-                    },
-                    list: [
-                        { id: "main", default: true, model: { primary: "codex" } },
-                        {
-                            id: "ops",
-                            model: { primary: "synthetic/hf:zai-org/GLM-5.1" },
-                        },
-                    ],
-                },
-            },
-            undefined,
-            2
-        ),
+        JSON.stringify(openclawConfig, undefined, 2),
+        "utf8"
+    );
+    await writeFile(
+        path.join(dashboardOpenClawHome, "openclaw.json"),
+        JSON.stringify(openclawConfig, undefined, 2),
         "utf8"
     );
     await writeFile(path.join(openClawHome, "cron", "jobs.json"), "[]\n", "utf8");
     await writeFile(
         path.join(openClawHome, "hooks", "transforms", "agentmail.ts"),
+        "export {};\n",
+        "utf8"
+    );
+    await writeFile(
+        path.join(dashboardOpenClawHome, "cron", "jobs.json"),
+        "[]\n",
+        "utf8"
+    );
+    await writeFile(
+        path.join(dashboardOpenClawHome, "hooks", "transforms", "agentmail.ts"),
         "export {};\n",
         "utf8"
     );
@@ -112,10 +131,13 @@ async function startServer() {
         env: {
             ...process.env,
             HOME: homeRoot,
-            MIRA_DASHBOARD_OPENCLAW_HOME: path.join(dataRoot, "openclaw-client"),
+            MIRA_DASHBOARD_OPENCLAW_HOME: dashboardOpenClawHome,
             OPENCLAW_HOME: openClawHome,
             PORT: String(port),
             WORKSPACE_ROOT: workspaceRoot,
+            ...(process.env.NODE_V8_COVERAGE
+                ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE }
+                : { NODE_V8_COVERAGE: path.join(temporaryRoot, "coverage") }),
         },
         stdio: ["ignore", "pipe", "pipe"],
     });
@@ -141,6 +163,7 @@ async function startServer() {
     return {
         roots: {
             dataRoot,
+            dashboardOpenClawHome,
             homeRoot,
             mediaRoot,
             openClawHome,
@@ -335,10 +358,14 @@ test("config-files API is whitelist constrained and creates backups on write", a
     const denied = await request("/api/config-files/not-allowed.json");
     assert.equal(denied.response.status, 403);
 
-    await request("/api/config-files/openclaw.json", {
+    const restored = await request("/api/config-files/openclaw.json", {
         method: "PUT",
         body: JSON.stringify({ content: original.body.content }),
     });
+    assert.equal(restored.response.status, 200);
+    const restoredContent = await request("/api/config-files/openclaw.json");
+    assert.equal(restoredContent.response.status, 200);
+    assert.equal(restoredContent.body.content, original.body.content);
 });
 
 test("agent config, status, metadata, and task history APIs work from isolated OpenClaw home", async () => {

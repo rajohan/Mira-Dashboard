@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -13,20 +15,96 @@ interface TestServer {
 }
 
 async function startServer(openclawHome: string): Promise<TestServer> {
+    const prevOpenclawHome = process.env.OPENCLAW_HOME;
+    const prevMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = openclawHome;
-    const { default: mediaRoutes } = await import("./media.js");
+    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+    try {
+        const { default: mediaRoutes } = await import("./media.js");
+        return await startServerWithMediaRoutes(
+            openclawHome,
+            mediaRoutes,
+            prevOpenclawHome,
+            prevMiraOpenclawHome
+        );
+    } catch (error) {
+        if (prevOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = prevOpenclawHome;
+        }
+        if (prevMiraOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = prevMiraOpenclawHome;
+        }
+        throw error;
+    }
+}
 
-    const app = express();
-    mediaRoutes(app);
-    const server = http.createServer(app);
+async function startServerWithMediaRoutes(
+    openclawHome: string,
+    mediaRoutes: (app: express.Application) => void,
+    prevOpenclawHome = process.env.OPENCLAW_HOME,
+    prevMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME
+): Promise<TestServer> {
+    const restoreOpenclawHome = () => {
+        if (prevOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = prevOpenclawHome;
+        }
+        if (prevMiraOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = prevMiraOpenclawHome;
+        }
+    };
+    process.env.OPENCLAW_HOME = openclawHome;
+    delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+    let server: http.Server | undefined;
+    try {
+        const app = express();
+        mediaRoutes(app);
+        server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+        await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+                server?.off("listening", onListening);
+                server?.off("error", onError);
+            };
+            const onListening = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = (error: Error) => {
+                cleanup();
+                reject(error);
+            };
+            server?.once("listening", onListening);
+            server?.once("error", onError);
+            server?.listen(0);
+        });
+    } catch (error) {
+        if (server?.listening) {
+            await new Promise((resolve) => server?.close(resolve));
+        }
+        restoreOpenclawHome();
+        throw error;
+    }
+    assert.ok(server);
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise((resolve) =>
+                server.close(() => {
+                    restoreOpenclawHome();
+                    resolve();
+                })
+            ),
     };
 }
 
@@ -47,6 +125,7 @@ describe("media routes", () => {
             path.join(mediaRoot, "picture.png"),
             Buffer.from("89504e47", "hex")
         );
+        await writeFile(path.join(mediaRoot, "blob.unknown"), "opaque");
         await mkdir(path.join(mediaRoot, "albums"));
         outsideFile = path.join(tempRoot, "outside.txt");
         await writeFile(outsideFile, "secret");
@@ -76,6 +155,315 @@ describe("media routes", () => {
         );
         assert.equal(image.status, 200);
         assert.equal(image.headers.get("content-type"), "image/png");
+
+        const unknown = await fetch(
+            `${server.baseUrl}/api/media?path=${encodeURIComponent(
+                path.join(mediaRoot, "blob.unknown")
+            )}`
+        );
+        assert.equal(unknown.status, 200);
+        assert.equal(unknown.headers.get("content-type"), "application/octet-stream");
+    });
+
+    it("rejects media requests without a path", async () => {
+        const response = await fetch(`${server.baseUrl}/api/media`);
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { error: "Access denied" });
+    });
+
+    it("falls back to the default media root when OPENCLAW_HOME is blank", async () => {
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalMiraOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        try {
+            process.env.OPENCLAW_HOME = "";
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            const module = await import(`./media.js?blank=${randomUUID()}`);
+            assert.equal(typeof module.default, "function");
+            assert.equal(
+                module.__testing.mediaRoot,
+                path.join(os.homedir(), ".openclaw", "media")
+            );
+        } finally {
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            if (originalMiraOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalMiraOpenClawHome;
+            }
+        }
+    });
+
+    it("returns not found when the media root disappears before canonicalization", async () => {
+        const missingHome = path.join(tempRoot, "missing-openclaw");
+        const missingMediaRoot = path.join(missingHome, "media");
+        await mkdir(missingMediaRoot, { recursive: true });
+        const disappearingFile = path.join(missingMediaRoot, "disappears.txt");
+        await writeFile(disappearingFile, "gone");
+
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = missingHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            module = await import(`./media.js?missing-root=${randomUUID()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
+        }
+        const missingServer = await startServerWithMediaRoutes(
+            missingHome,
+            module.default,
+            previousOpenclawHome,
+            previousMiraOpenclawHome
+        );
+        const realExistsSync = fs.existsSync.bind(fs);
+        const existsSync = mock.method(fs, "existsSync", (filePath: fs.PathLike) =>
+            filePath === disappearingFile ? false : realExistsSync(filePath)
+        );
+
+        try {
+            const response = await fetch(
+                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(
+                    disappearingFile
+                )}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            existsSync.mock.restore();
+            await missingServer.close();
+        }
+    });
+
+    it("returns not found when the media root disappears after file validation", async () => {
+        const missingHome = path.join(tempRoot, "missing-root-after-file");
+        const missingMediaRoot = path.join(missingHome, "media");
+        const filePath = path.join(missingMediaRoot, "orphaned.txt");
+        const resolvedFilePath = path.join(tempRoot, "resolved-orphaned.txt");
+        await writeFile(resolvedFilePath, "orphaned");
+
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = missingHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            module = await import(`./media.js?missing-real-root=${randomUUID()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
+        }
+        const missingServer = await startServerWithMediaRoutes(
+            missingHome,
+            module.default,
+            previousOpenclawHome,
+            previousMiraOpenclawHome
+        );
+        const realExistsSync = fs.existsSync.bind(fs);
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const existsSync = mock.method(fs, "existsSync", (candidate: fs.PathLike) => {
+            if (candidate === filePath) {
+                return true;
+            }
+            if (candidate === missingMediaRoot) {
+                return false;
+            }
+            return realExistsSync(candidate);
+        });
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) =>
+            candidate === filePath ? resolvedFilePath : realRealpathSync(candidate)
+        );
+
+        try {
+            const response = await fetch(
+                `${missingServer.baseUrl}/api/media?path=${encodeURIComponent(
+                    path.relative(missingMediaRoot, filePath)
+                )}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            existsSync.mock.restore();
+            realpathSync.mock.restore();
+            await missingServer.close();
+        }
+    });
+
+    it("surfaces unexpected media root canonicalization failures", async () => {
+        const deniedHome = path.join(tempRoot, "denied-media-root");
+        const deniedMediaRoot = path.join(deniedHome, "media");
+        await mkdir(deniedMediaRoot, { recursive: true });
+        const previousOpenclawHome = process.env.OPENCLAW_HOME;
+        const previousMiraOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        let module: typeof import("./media.js");
+        try {
+            process.env.OPENCLAW_HOME = deniedHome;
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            module = await import(`./media.js?denied-real-root=${randomUUID()}`);
+        } finally {
+            if (previousOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = previousOpenclawHome;
+            }
+            if (previousMiraOpenclawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousMiraOpenclawHome;
+            }
+        }
+        const deniedServer = await startServerWithMediaRoutes(
+            deniedHome,
+            module.default,
+            previousOpenclawHome,
+            previousMiraOpenclawHome
+        );
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) => {
+            if (candidate === deniedMediaRoot) {
+                const error = new Error("media root denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return realRealpathSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${deniedServer.baseUrl}/api/media?path=${encodeURIComponent("note.txt")}`
+            );
+            assert.equal(response.status, 500);
+        } finally {
+            realpathSync.mock.restore();
+            await deniedServer.close();
+        }
+    });
+
+    it("returns not found when media file canonicalization races with deletion", async () => {
+        const racingFile = path.join(mediaRoot, "racing.txt");
+        await writeFile(racingFile, "gone");
+        const realRealpathSync = fs.realpathSync.bind(fs);
+        const realpathSync = mock.method(fs, "realpathSync", (candidate: fs.PathLike) => {
+            if (candidate === racingFile) {
+                const error = new Error("missing file") as NodeJS.ErrnoException;
+                error.code = "ENOENT";
+                throw error;
+            }
+            return realRealpathSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(racingFile)}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            realpathSync.mock.restore();
+            await rm(racingFile, { force: true });
+        }
+    });
+
+    it("returns not found when media stat races with a missing parent", async () => {
+        const racingFile = path.join(mediaRoot, "stat-racing.txt");
+        await writeFile(racingFile, "gone");
+        const realStatSync = fs.statSync.bind(fs);
+        const statSync = mock.method(fs, "statSync", (candidate: fs.PathLike) => {
+            if (candidate === racingFile) {
+                const error = new Error("missing parent") as NodeJS.ErrnoException;
+                error.code = "ENOTDIR";
+                throw error;
+            }
+            return realStatSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(racingFile)}`
+            );
+            assert.equal(response.status, 404);
+            assert.deepEqual(await response.json(), { error: "Media not found" });
+        } finally {
+            statSync.mock.restore();
+            await rm(racingFile, { force: true });
+        }
+    });
+
+    it("surfaces unexpected media stat failures", async () => {
+        const failedFile = path.join(mediaRoot, "failed-stat.txt");
+        await writeFile(failedFile, "denied");
+        const realStatSync = fs.statSync.bind(fs);
+        const statSync = mock.method(fs, "statSync", (candidate: fs.PathLike) => {
+            if (candidate === failedFile) {
+                const error = new Error("stat denied") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return realStatSync(candidate);
+        });
+
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/media?path=${encodeURIComponent(failedFile)}`
+            );
+            assert.equal(response.status, 500);
+        } finally {
+            statSync.mock.restore();
+            await rm(failedFile, { force: true });
+        }
+    });
+
+    it("restores OPENCLAW_HOME when startup fails", async () => {
+        const originalOpenClawHome = process.env.OPENCLAW_HOME;
+        const originalMiraOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        process.env.OPENCLAW_HOME = "previous-home";
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "previous-mira-home";
+        const listen = mock.method(
+            http.Server.prototype,
+            "listen",
+            function listen(this: http.Server) {
+                this.emit("error", new Error("listen failed"));
+                return this;
+            }
+        );
+        try {
+            await assert.rejects(startServer(openclawHome), /listen failed/u);
+            assert.equal(process.env.OPENCLAW_HOME, "previous-home");
+            assert.equal(process.env.MIRA_DASHBOARD_OPENCLAW_HOME, "previous-mira-home");
+        } finally {
+            listen.mock.restore();
+            if (originalOpenClawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenClawHome;
+            }
+            if (originalMiraOpenClawHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalMiraOpenClawHome;
+            }
+        }
     });
 
     it("rejects missing, external, and symlink-escaped media paths", async () => {

@@ -9,6 +9,44 @@ const dbPath = path.join(dataDir, "mira-dashboard.db");
 /** Defines db. */
 export const db = new DatabaseSync(dbPath);
 
+interface MigrationDatabase {
+    exec(sql: string): unknown;
+    prepare(sql: string): {
+        all(): Array<Record<string, unknown>>;
+    };
+}
+
+const TASK_AUTOMATION_COLUMN_SQL =
+    "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
+
+function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
+    const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
+    return taskColumns.some((column) => column.name === "automation_json");
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        /duplicate column name:\s*automation_json/u.test(error.message)
+    );
+}
+
+function isTransientSqliteLock(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const code = "code" in error ? String(error.code).toUpperCase() : "";
+    const message = error.message;
+    return (
+        /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message.toUpperCase()}`) ||
+        /database\b.*\blocked\b/iu.test(message)
+    );
+}
+
+async function sleep(milliseconds: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,10 +151,61 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `);
 
-const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{
-    name: string;
-}>;
+/** Ensures older task databases have the automation column. */
+export async function ensureTaskAutomationColumn(
+    targetDb: MigrationDatabase
+): Promise<void> {
+    try {
+        if (taskAutomationColumnExists(targetDb)) {
+            return;
+        }
+    } catch (error) {
+        if (!isTransientSqliteLock(error)) {
+            throw error;
+        }
+    }
 
-if (!taskColumns.some((column) => column.name === "automation_json")) {
-    db.exec("ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'");
+    let lastError: unknown;
+
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            await sleep(delay);
+        }
+
+        try {
+            targetDb.exec(TASK_AUTOMATION_COLUMN_SQL);
+            return;
+        } catch (error) {
+            lastError = error;
+            if (isDuplicateColumnError(error)) {
+                return;
+            }
+
+            try {
+                if (taskAutomationColumnExists(targetDb)) {
+                    return;
+                }
+            } catch (columnError) {
+                if (!isTransientSqliteLock(columnError)) {
+                    throw columnError;
+                }
+            }
+
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+
+    try {
+        if (taskAutomationColumnExists(targetDb)) {
+            return;
+        }
+    } catch {
+        // Preserve the migration error that triggered the retry loop.
+    }
+
+    throw lastError;
 }
+
+await ensureTaskAutomationColumn(db);

@@ -1,24 +1,44 @@
 import assert from "node:assert/strict";
+import { type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import express from "express";
 
-import execRoutes from "./exec.js";
+import execRoutes, { __testing } from "./exec.js";
 
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
 
-async function startServer(): Promise<TestServer> {
+async function startServer(
+    createServer: typeof http.createServer = http.createServer
+): Promise<TestServer> {
     const app = express();
     app.use(express.json());
     execRoutes(app, express);
-    const server = http.createServer(app);
+    const server = createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        function cleanup(): void {
+            server.off("listening", handleListening);
+            server.off("error", handleError);
+        }
+        function handleListening(): void {
+            cleanup();
+            resolve();
+        }
+        function handleError(error: Error): void {
+            cleanup();
+            reject(error);
+        }
+        server.once("listening", handleListening);
+        server.once("error", handleError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -78,6 +98,38 @@ async function waitForJob(
     throw new Error(`Timed out waiting for exec job ${jobId}`);
 }
 
+async function terminateChildProcess(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+    }
+
+    const waitForExit = new Promise<void>((resolve) => {
+        child.once("exit", () => resolve());
+        child.once("close", () => resolve());
+    });
+    const timeout = new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 250);
+    });
+
+    try {
+        if (!child.kill("SIGTERM")) {
+            return;
+        }
+    } catch {
+        return;
+    }
+    if ((await Promise.race([waitForExit, timeout])) === "timeout") {
+        try {
+            if (!child.kill("SIGKILL")) {
+                return;
+            }
+        } catch {
+            return;
+        }
+        await waitForExit;
+    }
+}
+
 describe("exec routes", () => {
     let server: TestServer;
 
@@ -86,7 +138,359 @@ describe("exec routes", () => {
     });
 
     after(async () => {
+        for (const job of __testing.jobs.values()) {
+            if (job.process) {
+                await terminateChildProcess(job.process);
+            }
+        }
+        __testing.jobs.clear();
         await server.close();
+    });
+
+    it("rejects server startup listen errors", async () => {
+        const listeners = new Map<string, (error?: Error) => void>();
+        const fakeServer = {
+            once(event: string, listener: (error?: Error) => void) {
+                listeners.set(event, listener);
+                return fakeServer;
+            },
+            off(event: string) {
+                listeners.delete(event);
+                return fakeServer;
+            },
+            listen() {
+                queueMicrotask(() =>
+                    listeners.get("error")?.(new Error("listen failed"))
+                );
+                return fakeServer;
+            },
+            address: () => null,
+            close(callback?: (error?: Error) => void) {
+                callback?.();
+                return fakeServer;
+            },
+            listenerCount(event: string) {
+                return listeners.has(event) ? 1 : 0;
+            },
+        } as unknown as http.Server;
+
+        await assert.rejects(() => startServer(() => fakeServer), /listen failed/u);
+        assert.equal(fakeServer.listenerCount("listening"), 0);
+        assert.equal(fakeServer.listenerCount("error"), 0);
+    });
+
+    it("covers exec helper and cleanup edge cases", () => {
+        const longOutput = "x".repeat(120_000);
+        assert.equal(__testing.trimOutput(longOutput).length, 100_000);
+        assert.equal(__testing.resolveCwd(void 0), process.cwd());
+        assert.deepEqual(__testing.parseDirectCommand("/bin/echo"), {
+            executable: "/bin/echo",
+            args: [],
+        });
+        assert.throws(
+            () => __testing.getApprovedShellCommand("echo not approved"),
+            /approved ops commands/u
+        );
+        assert.deepEqual(__testing.execErrorResponse(new Error("boom")), {
+            status: 500,
+            error: "internal server error",
+        });
+        assert.deepEqual(__testing.execErrorResponse(null), {
+            status: 500,
+            error: "internal server error",
+        });
+        const routeErrorLog = mock.method(console, "error", () => {});
+        assert.deepEqual(__testing.execErrorResponse(false), {
+            status: 500,
+            error: "internal server error",
+        });
+        assert.equal(routeErrorLog.mock.calls.at(-1)?.arguments.at(1), "false");
+        routeErrorLog.mock.restore();
+
+        __testing.jobs.clear();
+        for (let index = 0; index < 101; index += 1) {
+            const id = `cleanup-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "done",
+                code: 0,
+                stdout: "",
+                stderr: "",
+                startedAt: index,
+                endedAt: index,
+                process:
+                    index === 0
+                        ? ({
+                              killed: false,
+                              kill(): boolean {
+                                  throw new Error("cleanup should not kill jobs");
+                              },
+                          } as never)
+                        : undefined,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 99);
+        assert.equal(__testing.jobs.has("cleanup-0"), false);
+        assert.equal(__testing.jobs.has("cleanup-1"), false);
+
+        __testing.jobs.clear();
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 100; index += 1) {
+            const id = `active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 100);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("active-0"), true);
+
+        __testing.jobs.clear();
+        for (let index = 0; index < 101; index += 1) {
+            const id = `all-active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 101);
+        assert.equal(__testing.jobs.has("all-active-0"), true);
+
+        __testing.jobs.clear();
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 100; index += 1) {
+            const id = `signaled-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: index === 0 ? "signaled" : "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: index === 0 } as never,
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 100);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("signaled-0"), true);
+
+        __testing.jobs.clear();
+        let killed = false;
+        __testing.jobs.set("old-done", {
+            id: "old-done",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 101; index += 1) {
+            const id = `kill-active-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process:
+                    index === 0
+                        ? ({
+                              killed: false,
+                              kill(): boolean {
+                                  killed = true;
+                                  return true;
+                              },
+                          } as never)
+                        : ({ killed: false } as never),
+            });
+        }
+        __testing.cleanupJobs();
+        assert.equal(__testing.jobs.size, 101);
+        assert.equal(killed, false);
+        assert.equal(__testing.jobs.has("old-done"), false);
+        assert.equal(__testing.jobs.has("kill-active-0"), true);
+
+        __testing.updateExecJobOutput("missing", {
+            id: "",
+            status: "running",
+            code: null,
+            stdout: "ignored",
+            stderr: "ignored",
+            startedAt: 0,
+            endedAt: null,
+        });
+        __testing.completeExecJob("missing", {
+            code: 0,
+            stdout: "ignored",
+            stderr: "ignored",
+        });
+        __testing.failExecJob("missing", new Error("ignored"));
+        __testing.jobs.clear();
+        __testing.cleanupJobs();
+
+        __testing.jobs.set("state-helper", {
+            id: "state-helper",
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+        __testing.updateExecJobOutput("state-helper", {
+            id: "",
+            status: "running",
+            code: null,
+            stdout: "partial",
+            stderr: "warning",
+            startedAt: 0,
+            endedAt: null,
+        });
+        assert.equal(__testing.jobs.get("state-helper")?.stdout, "partial");
+        __testing.completeExecJob("state-helper", {
+            code: 0,
+            stdout: "done",
+            stderr: "",
+        });
+        assert.equal(__testing.jobs.get("state-helper")?.status, "done");
+        assert.equal(__testing.jobs.get("state-helper")?.stdout, "done");
+
+        __testing.jobs.set("state-fail", {
+            id: "state-fail",
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "before",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+        __testing.failExecJob("state-fail", new Error("after"));
+        assert.equal(__testing.jobs.get("state-fail")?.code, 1);
+        assert.match(__testing.jobs.get("state-fail")?.stderr || "", /after/u);
+
+        __testing.jobs.set("primitive-fail", {
+            id: "primitive-fail",
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+        __testing.failExecJob("primitive-fail", "plain failure");
+        assert.equal(__testing.jobs.get("primitive-fail")?.code, 1);
+        assert.match(
+            __testing.jobs.get("primitive-fail")?.stderr || "",
+            /plain failure/u
+        );
+    });
+
+    it("rejects new background jobs when only running jobs remain at the cap", async () => {
+        for (let index = 0; index < 100; index += 1) {
+            const id = `cap-running-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/exec/start",
+                {
+                    method: "POST",
+                    body: { command: process.execPath, args: ["-v"] },
+                }
+            );
+            assert.equal(response.status, 429);
+            assert.equal(response.body.error, "Too many exec jobs");
+        } finally {
+            __testing.jobs.clear();
+        }
+    });
+
+    it("makes room for a new background job when stale jobs leave the registry at cap", async () => {
+        __testing.jobs.set("stale", {
+            id: "stale",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 0,
+            endedAt: 0,
+        });
+        for (let index = 0; index < 99; index += 1) {
+            const id = `room-running-${index}`;
+            __testing.jobs.set(id, {
+                id,
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: index + 1,
+                endedAt: null,
+                process: { killed: false } as never,
+            });
+        }
+
+        try {
+            const response = await requestJson<{ jobId: string }>(
+                server,
+                "/api/exec/start",
+                {
+                    method: "POST",
+                    body: { command: process.execPath, args: ["-v"] },
+                }
+            );
+            assert.equal(response.status, 200);
+            assert.equal(__testing.jobs.has("stale"), false);
+        } finally {
+            __testing.jobs.clear();
+        }
     });
 
     it("runs one-shot commands with explicit args", async () => {
@@ -116,6 +520,64 @@ describe("exec routes", () => {
 
         assert.equal(rejected.status, 400);
         assert.match(rejected.body.error, /shell operators/u);
+    });
+
+    it("rejects unparsable and invalid direct commands before spawning", async () => {
+        const cases = [
+            [{ command: "echo ${bad" }, /could not be parsed/u],
+            [{ command: '"' }, /command must start with an executable path/u],
+        ] as const;
+
+        for (const [body, expectedError] of cases) {
+            const response = await requestJson<{ error: string }>(server, "/api/exec", {
+                method: "POST",
+                body,
+            });
+            assert.equal(response.status, 400);
+            assert.match(response.body.error, expectedError);
+        }
+    });
+
+    it("rejects malformed exec request fields", async () => {
+        const cases = [
+            [[], "request body must be a JSON object"],
+            [{ command: "" }, "command must be a non-empty string"],
+            [{ command: "x".repeat(4097) }, "command exceeds maximum length"],
+            [{ command: "echo\nnope" }, "disallowed control characters"],
+            [{ command: process.execPath, shell: "yes" }, "shell must be a boolean"],
+            [
+                { command: process.execPath, args: ["-v"], shell: true },
+                "args cannot be combined with shell mode",
+            ],
+            [
+                { command: "echo unsafe", args: ["hello"] },
+                "command must be an executable path",
+            ],
+            [{ command: process.execPath, args: "bad" }, "args must be an array"],
+            [{ command: process.execPath, args: ["ok", 1] }, "all args must be strings"],
+            [
+                { command: process.execPath, args: ["bad\0arg"] },
+                "args cannot contain null bytes",
+            ],
+            [{ command: process.execPath, cwd: 1 }, "cwd must be a string"],
+            [
+                { command: process.execPath, cwd: "relative" },
+                "cwd must be an absolute path",
+            ],
+            [
+                { command: process.execPath, cwd: "/path/that/does/not/exist" },
+                "cwd does not exist",
+            ],
+        ] as const;
+
+        for (const [body, expectedError] of cases) {
+            const response = await requestJson<{ error: string }>(server, "/api/exec", {
+                method: "POST",
+                body,
+            });
+            assert.equal(response.status, 400);
+            assert.equal(response.body.error.includes(expectedError), true);
+        }
     });
 
     it("preserves shell operators for background terminal commands", async () => {
@@ -148,6 +610,64 @@ describe("exec routes", () => {
         assert.equal(response.status, 200);
         assert.equal(response.body.code, 127);
         assert.match(response.body.stderr, /not found/u);
+    });
+
+    it("reports spawn failures without exposing internals", async () => {
+        const oneShot = await requestJson<{ error: string }>(server, "/api/exec", {
+            method: "POST",
+            body: {
+                command: "/path/that/does/not/exist",
+                args: [],
+            },
+        });
+        assert.equal(oneShot.status, 500);
+        assert.equal(oneShot.body.error, "internal server error");
+
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: {
+                command: "/path/that/does/not/exist",
+                args: [],
+            },
+        });
+        assert.equal(started.status, 200);
+
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 1);
+        assert.match(job.stderr, /ENOENT|no such file/i);
+    });
+
+    it("reports synchronous start failures after creating a job", async () => {
+        const originalRealpathSync = fs.realpathSync;
+        try {
+            fs.realpathSync = ((target: fs.PathLike) => {
+                if (target === "/tmp") {
+                    const error = new Error("permission denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpathSync(target);
+            }) as typeof fs.realpathSync;
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/exec/start",
+                {
+                    method: "POST",
+                    body: {
+                        command: process.execPath,
+                        args: ["-v"],
+                        cwd: "/tmp",
+                    },
+                }
+            );
+
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "internal server error");
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
     });
 
     it("rejects unapproved shell mode commands", async () => {
@@ -214,6 +734,14 @@ describe("exec routes", () => {
         assert.equal(missing.status, 404);
         assert.equal(missing.body.error, "Exec job not found");
 
+        const missingStop = await requestJson<{ error: string }>(
+            server,
+            "/api/exec/00000000-0000-0000-0000-000000000000/stop",
+            { method: "POST" }
+        );
+        assert.equal(missingStop.status, 404);
+        assert.equal(missingStop.body.error, "Exec job not found");
+
         const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
             method: "POST",
             body: {
@@ -231,5 +759,320 @@ describe("exec routes", () => {
         );
         assert.equal(stop.status, 400);
         assert.equal(stop.body.error, "Job is not running");
+    });
+
+    it("reports unavailable process handles for running jobs", async () => {
+        const jobId = "running-without-process";
+        __testing.jobs.set(jobId, {
+            id: jobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+        });
+
+        try {
+            const stop = await requestJson<{ error: string }>(
+                server,
+                `/api/exec/${jobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(stop.status, 400);
+            assert.equal(stop.body.error, "Process not available");
+        } finally {
+            __testing.jobs.delete(jobId);
+        }
+    });
+
+    it("stops running background jobs", async () => {
+        const started = await requestJson<{ jobId: string }>(server, "/api/exec/start", {
+            method: "POST",
+            body: {
+                command: process.execPath,
+                args: ["-e", "setTimeout(() => {}, 10_000)"],
+            },
+        });
+
+        assert.equal(started.status, 200);
+
+        const stop = await requestJson<{ success: true; message: string }>(
+            server,
+            `/api/exec/${started.body.jobId}/stop`,
+            { method: "POST" }
+        );
+
+        assert.equal(stop.status, 200);
+        assert.deepEqual(stop.body, { success: true, message: "Stop signal sent" });
+
+        const job = await waitForJob(server, started.body.jobId);
+        assert.equal(job.status, "done");
+        assert.equal(job.code, 130);
+    });
+
+    it("falls back to direct process kill when process group stop fails", async () => {
+        const originalKill = process.kill;
+        const jobId = "running-with-fallback-kill";
+        const unsentJobId = "running-with-unsent-fallback-kill";
+        let fallbackKilled = false;
+        const fakeProcess = {
+            killed: false,
+            pid: 123_456,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                fakeProcess.killed = true;
+                fallbackKilled = true;
+                return true;
+            },
+        };
+        const unsentProcess = {
+            killed: false,
+            pid: 123_457,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                return false;
+            },
+        };
+        __testing.jobs.set(jobId, {
+            id: jobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: fakeProcess as never,
+        });
+        __testing.jobs.set(unsentJobId, {
+            id: unsentJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: unsentProcess as never,
+        });
+
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            assert.ok(pid === -123_456 || pid === -123_457);
+            assert.equal(signal, "SIGTERM");
+            throw new Error("no process group");
+        }) as typeof process.kill;
+
+        try {
+            const stop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${jobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(stop.status, 200);
+            assert.equal(fallbackKilled, true);
+            assert.equal(__testing.jobs.get(jobId)?.status, "signaled");
+
+            const unsentStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${unsentJobId}/stop`,
+                { method: "POST" }
+            );
+            assert.equal(unsentStop.status, 200);
+            assert.equal(__testing.jobs.get(unsentJobId)?.status, "running");
+        } finally {
+            process.kill = originalKill;
+            __testing.jobs.delete(jobId);
+            __testing.jobs.delete(unsentJobId);
+        }
+    });
+
+    it("force kills lingering stopped jobs and ignores missing process groups", async () => {
+        const originalKill = process.kill;
+        const jobId = "running-with-force-kill";
+        const noPidJobId = "running-without-force-kill-pid";
+        const directGoneJobId = "running-direct-gone";
+        const directErrorJobId = "running-direct-error";
+        const signals: Array<NodeJS.Signals | number | undefined> = [];
+        const fakeProcess = {
+            killed: false,
+            pid: 234_567,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                fakeProcess.killed = true;
+                return true;
+            },
+        };
+        const noPidProcess = {
+            killed: false,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                noPidProcess.killed = true;
+                return true;
+            },
+        };
+        const directGoneProcess = {
+            killed: false,
+            pid: 345_678,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                directGoneProcess.killed = true;
+                return true;
+            },
+        };
+        const directErrorProcess = {
+            killed: false,
+            pid: 456_789,
+            kill(signal: NodeJS.Signals): boolean {
+                assert.equal(signal, "SIGTERM");
+                directErrorProcess.killed = true;
+                return true;
+            },
+        };
+        __testing.jobs.set(jobId, {
+            id: jobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: fakeProcess as never,
+        });
+        __testing.jobs.set(noPidJobId, {
+            id: noPidJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: noPidProcess as never,
+        });
+        __testing.jobs.set(directGoneJobId, {
+            id: directGoneJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: directGoneProcess as never,
+        });
+        __testing.jobs.set(directErrorJobId, {
+            id: directErrorJobId,
+            status: "running",
+            code: null,
+            stdout: "",
+            stderr: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            process: directErrorProcess as never,
+        });
+
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push(signal);
+            if (signal === "SIGTERM" && pid !== -345_678 && pid !== -456_789) {
+                if (Number.isNaN(pid)) {
+                    throw new TypeError("missing pid");
+                }
+                assert.equal(pid, -234_567);
+            } else if (pid === -234_567 && signal === "SIGKILL") {
+                throw new Error("already gone");
+            } else if (pid === -345_678 && signal === "SIGTERM") {
+                return true;
+            } else if (pid === -345_678 && signal === "SIGKILL") {
+                throw new Error("group gone");
+            } else if (pid === 345_678 && signal === "SIGKILL") {
+                const error = new Error("process gone") as NodeJS.ErrnoException;
+                error.code = "ESRCH";
+                throw error;
+            } else if (pid === -456_789 && signal === "SIGTERM") {
+                return true;
+            } else if (pid === -456_789 && signal === "SIGKILL") {
+                throw new Error("group kill failed");
+            } else if (pid === 456_789 && signal === "SIGKILL") {
+                throw new Error("process kill failed");
+            } else {
+                assert.equal(pid, 234_567);
+                assert.equal(signal, "SIGKILL");
+            }
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            const stop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${jobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(stop.status, 200);
+            const noPidStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${noPidJobId}/stop`,
+                { method: "POST" }
+            );
+
+            assert.equal(noPidStop.status, 200);
+            const directGoneStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${directGoneJobId}/stop`,
+                { method: "POST" }
+            );
+            assert.equal(directGoneStop.status, 200);
+            const directErrorStop = await requestJson<{ success: true; message: string }>(
+                server,
+                `/api/exec/${directErrorJobId}/stop`,
+                { method: "POST" }
+            );
+            assert.equal(directErrorStop.status, 200);
+            assert.equal(noPidProcess.killed, true);
+            assert.equal(directGoneProcess.killed, false);
+            assert.equal(directErrorProcess.killed, false);
+            mock.timers.tick(3_050);
+            assert.deepEqual(signals, [
+                "SIGTERM",
+                "SIGTERM",
+                "SIGTERM",
+                "SIGKILL",
+                "SIGKILL",
+                "SIGKILL",
+                "SIGKILL",
+                "SIGKILL",
+                "SIGKILL",
+            ]);
+            const stoppedJob = __testing.jobs.get(jobId);
+            assert.equal(stoppedJob?.status, "done");
+            assert.equal(stoppedJob?.code, 137);
+            assert.equal(stoppedJob?.closePending, true);
+            assert.equal(stoppedJob?.process, fakeProcess);
+            assert.equal(typeof stoppedJob?.endedAt, "number");
+
+            const noPidJob = __testing.jobs.get(noPidJobId);
+            assert.equal(noPidJob?.status, "signaled");
+            assert.equal(noPidJob?.code, null);
+            assert.equal(noPidJob?.closePending, undefined);
+            assert.equal(noPidJob?.process, noPidProcess);
+            assert.equal(noPidJob?.endedAt, null);
+
+            const directGoneJob = __testing.jobs.get(directGoneJobId);
+            assert.equal(directGoneJob?.status, "signaled");
+            assert.equal(directGoneJob?.code, null);
+            assert.equal(directGoneJob?.closePending, undefined);
+
+            const directErrorJob = __testing.jobs.get(directErrorJobId);
+            assert.equal(directErrorJob?.status, "signaled");
+            assert.equal(directErrorJob?.code, null);
+            assert.equal(directErrorJob?.closePending, undefined);
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+            __testing.jobs.delete(jobId);
+            __testing.jobs.delete(noPidJobId);
+            __testing.jobs.delete(directGoneJobId);
+            __testing.jobs.delete(directErrorJobId);
+        }
     });
 });

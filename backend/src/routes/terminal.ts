@@ -8,7 +8,7 @@ import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guard
 /** Represents completion request. */
 interface CompletionRequest {
     partial: string;
-    cwd: string;
+    cwd?: string;
 }
 
 /** Represents cd request. */
@@ -49,7 +49,11 @@ function expandPath(inputPath: string, cwd: string): string {
 }
 
 /** Returns completions. */
-async function getCompletions(partial: string, cwd: string): Promise<CompletionResponse> {
+async function getCompletions(
+    partial: string,
+    cwd: string,
+    statFile = statGuardedAsync
+): Promise<CompletionResponse> {
     const trimmed = partial.trim();
 
     // Extract the path part being completed (after last space for commands)
@@ -91,7 +95,7 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
                 type = "directory";
             } else if (entry.isFile()) {
                 try {
-                    const stats = await statGuardedAsync(guardedPath(fullPath));
+                    const stats = await statFile(guardedPath(fullPath));
                     if (stats.mode & 0o111) {
                         type = "executable";
                     }
@@ -139,24 +143,45 @@ async function getCompletions(partial: string, cwd: string): Promise<CompletionR
     }
 }
 
+export const __testing = {
+    expandPath,
+    getCompletions,
+};
+
 /** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/complete", express.json(), async (req, res) => {
-        const { partial, cwd } = req.body as CompletionRequest;
-
-        if (!partial || typeof partial !== "string" || partial.includes("\0")) {
-            res.status(400).json({ error: "Missing or invalid partial" });
+        const body = req.body;
+        if (!body || typeof body !== "object") {
+            res.status(400).json({ error: "Missing or invalid body" });
             return;
         }
 
-        const resolvedCwd = cwd || HOME_DIR;
+        const { partial, cwd } = body as CompletionRequest;
+
+        if (
+            typeof partial !== "string" ||
+            partial.length === 0 ||
+            partial.includes("\0")
+        ) {
+            res.status(400).json({ error: "Missing or invalid partial" });
+            return;
+        }
+        const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
+        if (
+            cwd !== undefined &&
+            (typeof cwd !== "string" || !trimmedCwd || trimmedCwd.includes("\0"))
+        ) {
+            res.status(400).json({ error: "Missing or invalid cwd" });
+            return;
+        }
+        const resolvedCwd = trimmedCwd || HOME_DIR;
         const result = await getCompletions(partial, resolvedCwd);
         res.json(result);
     });
 
     app.post("/api/terminal/cd", express.json(), async (req, res) => {
         const { path: targetPath, cwd } = req.body as CdRequest;
-
         const resolvedCwd = cwd || HOME_DIR;
 
         if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {

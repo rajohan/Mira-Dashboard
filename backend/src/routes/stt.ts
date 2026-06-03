@@ -1,5 +1,7 @@
 import type express from "express";
 
+import { stringFallback } from "../lib/values.js";
+
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ELEVENLABS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
@@ -9,32 +11,30 @@ const ELEVENLABS_STT_LANGUAGE = process.env.ELEVENLABS_STT_LANGUAGE || "nor";
 let activeTranscription = false;
 
 /** Performs audio extension. */
-function audioExtension(contentType: string | undefined): string {
+function audioExtension(contentType?: string): string {
     if (!contentType) {
         return ".webm";
     }
+    const normalizedContentType = contentType.toLowerCase();
 
-    if (contentType.includes("mp4") || contentType.includes("m4a")) {
+    if (normalizedContentType.includes("mp4") || normalizedContentType.includes("m4a")) {
         return ".m4a";
     }
-
-    if (contentType.includes("mpeg") || contentType.includes("mp3")) {
+    if (normalizedContentType.includes("mpeg") || normalizedContentType.includes("mp3")) {
         return ".mp3";
     }
-
-    if (contentType.includes("ogg")) {
+    if (normalizedContentType.includes("ogg")) {
         return ".ogg";
     }
 
-    if (contentType.includes("wav")) {
+    if (normalizedContentType.includes("wav")) {
         return ".wav";
     }
-
     return ".webm";
 }
 
 /** Performs transcript text from eleven labs. */
-function transcriptTextFromElevenLabs(result: unknown): string {
+function transcriptTextFromElevenLabs(result?: unknown): string {
     if (!result || typeof result !== "object") {
         return "";
     }
@@ -43,7 +43,6 @@ function transcriptTextFromElevenLabs(result: unknown): string {
     if (typeof record.text === "string" && record.text.trim()) {
         return record.text.trim();
     }
-
     if (!Array.isArray(record.words)) {
         return "";
     }
@@ -55,8 +54,9 @@ function transcriptTextFromElevenLabs(result: unknown): string {
             }
 
             const text = (word as { text?: unknown }).text;
-            return typeof text === "string" ? text : "";
+            return typeof text === "string" ? text.trim() : "";
         })
+        .filter(Boolean)
         .join(" ")
         .trim();
 }
@@ -64,7 +64,7 @@ function transcriptTextFromElevenLabs(result: unknown): string {
 /** Performs transcribe with eleven labs. */
 async function transcribeWithElevenLabs(
     audioBuffer: Buffer,
-    contentType: string | undefined
+    contentType: string | string[] | undefined
 ): Promise<string> {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
@@ -74,10 +74,12 @@ async function transcribeWithElevenLabs(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ELEVENLABS_TIMEOUT_MS);
     const formData = new FormData();
-    const fileName = `recording${audioExtension(contentType)}`;
+    const rawContentType = Array.isArray(contentType) ? contentType[0] : contentType;
+    const safeContentType = rawContentType?.trim() || undefined;
+    const fileName = `recording${audioExtension(safeContentType)}`;
     const audioBytes = Uint8Array.from(audioBuffer);
     const audioBlob = new Blob([audioBytes], {
-        type: contentType || "application/octet-stream",
+        type: stringFallback(safeContentType, "application/octet-stream"),
     });
 
     formData.append("file", audioBlob, fileName);
@@ -125,7 +127,6 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
                     .json({ error: "Another transcription is already running" });
                 return;
             }
-
             const audioBuffer = Buffer.isBuffer(request.body) ? request.body : null;
             if (!audioBuffer || audioBuffer.length === 0) {
                 response.status(400).json({ error: "Missing audio payload" });
@@ -141,8 +142,14 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
                 );
                 response.json({ provider: "elevenlabs", text });
             } catch (error) {
+                const message =
+                    error instanceof Error
+                        ? error.message
+                        : typeof error === "string"
+                          ? error
+                          : undefined;
                 response.status(500).json({
-                    error: (error as Error).message || "Failed to transcribe audio",
+                    error: stringFallback(message, "Failed to transcribe audio"),
                 });
             } finally {
                 activeTranscription = false;
@@ -150,3 +157,9 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
         }) as express.RequestHandler
     );
 }
+
+export const __testing = {
+    audioExtension,
+    transcribeWithElevenLabs,
+    transcriptTextFromElevenLabs,
+};

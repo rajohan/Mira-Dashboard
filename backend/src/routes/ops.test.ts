@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -14,6 +15,30 @@ interface TestServer {
 
 const originalPath = process.env.PATH;
 const originalN8nRoot = process.env.MIRA_N8N_ROOT;
+const postgresEnvKeys = [
+    "DATABASE_USERNAME",
+    "DATABASE_PASSWORD",
+    "DB_POSTGRESDB_USER",
+    "DB_POSTGRESDB_PASSWORD",
+    "DATABASE_HOST",
+    "DATABASE_PORT",
+    "DB_POSTGRESDB_HOST",
+    "DB_POSTGRESDB_PORT",
+] as const;
+
+function snapshotEnv(keys: readonly string[]): Record<string, string | undefined> {
+    return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot: Record<string, string | undefined>): void {
+    for (const [key, value] of Object.entries(snapshot)) {
+        if (value === undefined) {
+            delete process.env[key];
+        } else {
+            process.env[key] = value;
+        }
+    }
+}
 
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
@@ -27,6 +52,10 @@ async function installFakeCommands(tempDir: string): Promise<void> {
     await writeExecutable(
         path.join(binDir, "docker"),
         String.raw`#!${process.execPath}
+if (process.env.FAKE_LOG_ROTATION_EMPTY === "1") {
+  process.stdout.write("\n");
+  process.exit(0);
+}
 process.stdout.write('{"completedAt":"2026-05-11T01:00:00.000Z","ok":true}\n');
 `
     );
@@ -34,14 +63,18 @@ process.stdout.write('{"completedAt":"2026-05-11T01:00:00.000Z","ok":true}\n');
         path.join(binDir, "node"),
         String.raw`#!${process.execPath}
 process.stderr.write('dry-run stderr\n');
-process.stdout.write(JSON.stringify({ ok: true, mode: 'dry-run', args: process.argv.slice(2) }));
+if (process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY !== "1") {
+  process.stdout.write(JSON.stringify({ ok: true, mode: 'dry-run', args: process.argv.slice(2) }));
+}
 `
     );
     await writeExecutable(
         path.join(binDir, "sudo"),
         String.raw`#!${process.execPath}
 process.stderr.write('run stderr\n');
-process.stdout.write(JSON.stringify({ ok: true, mode: 'run', args: process.argv.slice(2) }));
+if (process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY !== "1") {
+  process.stdout.write(JSON.stringify({ ok: true, mode: 'run', args: process.argv.slice(2) }));
+}
 `
     );
 
@@ -97,14 +130,27 @@ describe("ops routes", () => {
     });
 
     after(async () => {
-        await server.close();
-        process.env.PATH = originalPath;
-        if (originalN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = originalN8nRoot;
+        try {
+            if (server) {
+                await server.close();
+            }
+        } finally {
+            if (originalPath === undefined) {
+                delete process.env.PATH;
+            } else {
+                process.env.PATH = originalPath;
+            }
+            if (originalN8nRoot === undefined) {
+                delete process.env.MIRA_N8N_ROOT;
+            } else {
+                process.env.MIRA_N8N_ROOT = originalN8nRoot;
+            }
+            delete process.env.FAKE_LOG_ROTATION_EMPTY;
+            delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
+            if (tempDir) {
+                await rm(tempDir, { recursive: true, force: true });
+            }
         }
-        await rm(tempDir, { recursive: true, force: true });
     });
 
     it("returns log rotation status from n8n cache state", async () => {
@@ -118,6 +164,77 @@ describe("ops routes", () => {
             success: true,
             lastRun: { completedAt: "2026-05-11T01:00:00.000Z", ok: true },
         });
+
+        process.env.FAKE_LOG_ROTATION_EMPTY = "1";
+        try {
+            const empty = await requestJson<{
+                success: boolean;
+                lastRun: null;
+            }>(server, "/api/ops/log-rotation/status");
+            assert.equal(empty.status, 200);
+            assert.deepEqual(empty.body, { success: true, lastRun: null });
+        } finally {
+            delete process.env.FAKE_LOG_ROTATION_EMPTY;
+        }
+
+        const originalPostgresEnv = snapshotEnv(postgresEnvKeys);
+        try {
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
+            process.env.DATABASE_USERNAME = "";
+            process.env.DATABASE_PASSWORD = "";
+            process.env.DATABASE_HOST = "";
+            process.env.DATABASE_PORT = "";
+            const { __testing } = await import("./ops.js");
+            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "");
+            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD, "");
+            process.env.DB_POSTGRESDB_USER = "native-user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
+            assert.equal(__testing.buildN8nScriptEnv().DB_POSTGRESDB_USER, "native-user");
+            assert.equal(
+                __testing.buildN8nScriptEnv().DB_POSTGRESDB_PASSWORD,
+                "native-password"
+            );
+            const defaultCredentials = await requestJson<{
+                success: boolean;
+                lastRun: { completedAt: string; ok: boolean };
+            }>(server, "/api/ops/log-rotation/status");
+            assert.equal(defaultCredentials.status, 200);
+            assert.equal(defaultCredentials.body.success, true);
+        } finally {
+            restoreEnv(originalPostgresEnv);
+        }
+    });
+
+    it("encodes PostgreSQL URI credentials and database names", async () => {
+        const { __testing } = await import("./ops.js");
+        const originalPostgresEnv = snapshotEnv(postgresEnvKeys);
+        try {
+            delete process.env.DB_POSTGRESDB_USER;
+            delete process.env.DB_POSTGRESDB_PASSWORD;
+            process.env.DATABASE_USERNAME = "postgres user";
+            process.env.DATABASE_PASSWORD = "p@ss/word";
+            process.env.DATABASE_HOST = "db.example";
+            process.env.DATABASE_PORT = "6543";
+            assert.equal(
+                __testing.buildPostgresUri("n8n/prod db"),
+                "postgresql://postgres%20user:p%40ss%2Fword@db.example:6543/n8n%2Fprod%20db"
+            );
+            process.env.DATABASE_USERNAME = "";
+            process.env.DATABASE_PASSWORD = "";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://:@db.example:6543/n8n"
+            );
+            process.env.DB_POSTGRESDB_USER = "native user";
+            process.env.DB_POSTGRESDB_PASSWORD = "native/pass";
+            assert.equal(
+                __testing.buildPostgresUri("n8n"),
+                "postgresql://native%20user:native%2Fpass@db.example:6543/n8n"
+            );
+        } finally {
+            restoreEnv(originalPostgresEnv);
+        }
     });
 
     it("runs dry-run log rotation with node", async () => {
@@ -132,6 +249,18 @@ describe("ops routes", () => {
         assert.equal(response.body.result.mode, "dry-run");
         assert.equal(response.body.result.args.includes("--dry-run"), true);
         assert.equal(response.body.stderr, "dry-run stderr\n");
+
+        process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY = "1";
+        try {
+            const empty = await requestJson<{
+                success: boolean;
+                result: Record<string, never>;
+            }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
+            assert.equal(empty.status, 200);
+            assert.deepEqual(empty.body.result, {});
+        } finally {
+            delete process.env.FAKE_LOG_ROTATION_SCRIPT_EMPTY;
+        }
     });
 
     it("runs real log rotation through sudo preserve-env wrapper", async () => {
@@ -153,5 +282,32 @@ describe("ops routes", () => {
         );
         assert.equal(response.body.result.args.includes("--dry-run"), false);
         assert.equal(response.body.stderr, "run stderr\n");
+    });
+
+    it("maps command failures to JSON route errors", async () => {
+        const dockerPath = path.join(tempDir, "bin", "docker");
+        const originalDocker = fs.readFileSync(dockerPath, "utf8");
+        const originalMode = fs.statSync(dockerPath).mode & 0o777;
+
+        try {
+            await writeExecutable(
+                dockerPath,
+                String.raw`#!${process.execPath}
+process.stderr.write('psql unavailable\n');
+process.exit(12);
+`
+            );
+
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/ops/log-rotation/status"
+            );
+
+            assert.equal(response.status, 500);
+            assert.match(response.body.error, /Command failed/);
+        } finally {
+            fs.writeFileSync(dockerPath, originalDocker, "utf8");
+            fs.chmodSync(dockerPath, originalMode);
+        }
     });
 });

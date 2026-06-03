@@ -136,7 +136,6 @@ export function findUserByUsername(username: string): UserRow | null {
              WHERE username = ?`
         )
         .get(normalizeUsername(username)) as UserRow | undefined;
-
     return row || null;
 }
 
@@ -157,6 +156,50 @@ export function createUser(username: string, password: string): AuthUser {
         id: Number(result.lastInsertRowid),
         username: normalizedUsername,
     };
+}
+
+/** Atomically creates the first user only when no users exist. */
+export function createFirstUser(username: string, password: string): AuthUser | null {
+    const normalizedUsername = normalizeUsername(username);
+    const timestamp = nowIso();
+    const passwordHash = hashPassword(password);
+    const rollback = (transactionError?: unknown) => {
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            if (transactionError) {
+                throw new AggregateError(
+                    [transactionError, rollbackError],
+                    "First-user transaction and rollback failed",
+                    { cause: rollbackError }
+                );
+            }
+            throw rollbackError;
+        }
+    };
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        const result = db
+            .prepare(
+                `INSERT INTO users (username, password_hash, created_at, updated_at)
+                 SELECT ?, ?, ?, ?
+                 WHERE NOT EXISTS (SELECT 1 FROM users)`
+            )
+            .run(normalizedUsername, passwordHash, timestamp, timestamp);
+        if (result.changes === 0) {
+            rollback();
+            return null;
+        }
+        db.exec("COMMIT");
+        return {
+            id: Number(result.lastInsertRowid),
+            username: normalizedUsername,
+        };
+    } catch (error) {
+        rollback(error);
+        throw error;
+    }
 }
 
 /** Performs persist gateway token. */

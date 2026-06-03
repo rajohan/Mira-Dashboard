@@ -1,6 +1,11 @@
 import express, { type RequestHandler } from "express";
 
 import gateway from "../gateway.js";
+import { stringFallback } from "../lib/values.js";
+
+function isValidSessionKey(sessionKey: string): boolean {
+    return sessionKey.length > 0;
+}
 
 /** Registers sessions API routes. */
 export default function sessionsRoutes(app: express.Application): void {
@@ -31,20 +36,14 @@ export default function sessionsRoutes(app: express.Application): void {
     }) as RequestHandler);
 
     app.post("/api/sessions/:id/action", (async (req, res) => {
-        const sessionKeyParam = req.params.id;
-        const sessionKey = Array.isArray(sessionKeyParam)
-            ? sessionKeyParam[0] || ""
-            : sessionKeyParam || "";
-        const action = String(req.body?.action || "")
-            .trim()
-            .toLowerCase();
+        const sessionKey = stringFallback(req.params.id).trim();
+        const action = stringFallback(req.body?.action).trim().toLowerCase();
+        if (!isValidSessionKey(sessionKey)) {
+            res.status(400).json({ error: "Invalid session id" });
+            return;
+        }
 
         try {
-            if (!sessionKey) {
-                res.status(400).json({ error: "Session id required" });
-                return;
-            }
-
             if (action === "stop") {
                 await gateway.abortSessionRun(sessionKey);
                 res.json({ success: true, action });
@@ -71,17 +70,13 @@ export default function sessionsRoutes(app: express.Application): void {
 
     // Delete a session and archive its transcript through OpenClaw.
     app.delete("/api/sessions/:id", (async (req, res) => {
-        const sessionKeyParam = req.params.id;
-        const sessionKey = Array.isArray(sessionKeyParam)
-            ? sessionKeyParam[0] || ""
-            : sessionKeyParam || "";
+        const sessionKey = stringFallback(req.params.id).trim();
+        if (!isValidSessionKey(sessionKey)) {
+            res.status(400).json({ error: "Invalid session id" });
+            return;
+        }
 
         try {
-            if (!sessionKey) {
-                res.status(400).json({ error: "Session id required" });
-                return;
-            }
-
             const result = await gateway.deleteSession(sessionKey);
             res.json({ success: true, result });
         } catch (error) {

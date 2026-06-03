@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it, mock } from "node:test";
 
 import WebSocket from "ws";
+
+import type { OpenClawGatewayClientOptions } from "./lib/openclawGatewayClient.js";
+import { __testing as logsTesting } from "./routes/logs.js";
 
 /** Provides a minimal WebSocket stand-in for gateway client tests. */
 class FakeWebSocket {
     readonly sent: string[] = [];
     private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
-    readyState = WebSocket.OPEN;
+    closed = false;
+    readyState: number = WebSocket.OPEN;
 
     /** Registers one fake WebSocket event listener. */
     on(event: string, listener: (...args: unknown[]) => void): this {
@@ -29,6 +34,97 @@ class FakeWebSocket {
     send(data: string): void {
         this.sent.push(data);
     }
+
+    close(): void {
+        this.closed = true;
+        this.readyState = WebSocket.CLOSED;
+    }
+}
+
+class ThrowingWebSocket extends FakeWebSocket {
+    throwOnSend = false;
+
+    override send(data: string): void {
+        if (this.throwOnSend) {
+            throw new Error("socket closed");
+        }
+        super.send(data);
+    }
+}
+
+/** Provides a minimal Gateway client stand-in for connected-state tests. */
+class FakeGatewayClient {
+    readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    responses = new Map<string, unknown>();
+    failures = new Map<string, Error>();
+
+    /** Captures Gateway requests and returns configured responses. */
+    async request(method: string, params: unknown = {}): Promise<unknown> {
+        assert.ok(params && typeof params === "object" && !Array.isArray(params));
+        this.calls.push({ method, params: params as Record<string, unknown> });
+        const failure = this.failures.get(method);
+        if (failure) {
+            throw failure;
+        }
+        return this.responses.get(method) ?? {};
+    }
+
+    /** No-op start method matching the real Gateway client surface. */
+    start(): void {}
+
+    /** No-op stop method matching the real Gateway client surface. */
+    stop(): void {}
+}
+
+/** Captures Gateway init options without opening network sockets. */
+class CapturingGatewayClient extends FakeGatewayClient {
+    static instances: CapturingGatewayClient[] = [];
+    readonly options: OpenClawGatewayClientOptions;
+    started = false;
+    stopped = false;
+
+    constructor(options: OpenClawGatewayClientOptions) {
+        super();
+        this.options = options;
+        CapturingGatewayClient.instances.push(this);
+    }
+
+    override start(): void {
+        this.started = true;
+    }
+
+    override stop(): void {
+        this.stopped = true;
+    }
+}
+
+class HangingGatewayClient extends CapturingGatewayClient {
+    releaseRequest: (() => void) | undefined;
+
+    override async request(method: string, params: unknown = {}): Promise<unknown> {
+        if (method === "chat.send") {
+            assert.ok(params && typeof params === "object" && !Array.isArray(params));
+            this.calls.push({ method, params: params as Record<string, unknown> });
+            return new Promise((resolve) => {
+                this.releaseRequest = () => resolve({});
+            });
+        }
+        return super.request(method, params);
+    }
+}
+
+/** Throws synchronously from start to exercise init rollback. */
+class ThrowingStartGatewayClient extends CapturingGatewayClient {
+    override start(): void {
+        throw new Error("start failed");
+    }
+}
+
+/** Throws synchronously from stop to exercise shutdown cleanup ordering. */
+class ThrowingStopGatewayClient extends FakeGatewayClient {
+    override stop(): void {
+        throw new Error("stop failed");
+    }
 }
 
 /** Waits one tick so async WebSocket handlers can settle. */
@@ -36,21 +132,322 @@ async function waitForAsyncHandlers(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
-const openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
-process.env.OPENCLAW_HOME = openclawHome;
-
-const gatewayModule = await import("./gateway.js");
-const gateway = gatewayModule.default;
-const { __testing } = gatewayModule;
+const previousOpenclawHome = process.env.OPENCLAW_HOME;
+const previousDashboardOpenclawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+const previousHome = process.env.HOME;
+let openclawHome: string | undefined;
+let gatewayModule: Awaited<typeof import("./gateway.js")> | undefined;
+let gateway: Awaited<typeof import("./gateway.js")>["default"];
+let __testing: Awaited<typeof import("./gateway.js")>["__testing"];
 
 describe("gateway state and helper utilities", () => {
-    before(() => {
+    before(async () => {
+        openclawHome = await mkdtemp(path.join(os.tmpdir(), "gateway-test-openclaw-"));
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome;
+        process.env.OPENCLAW_HOME = openclawHome;
+        gatewayModule = await import("./gateway.js");
+        gateway = gatewayModule.default;
+        __testing = gatewayModule.__testing;
+        __testing.resetGatewayStateForTest();
+    });
+
+    beforeEach(() => {
         __testing.resetGatewayStateForTest();
     });
 
     after(async () => {
+        __testing?.resetGatewayStateForTest();
+        gatewayModule = undefined;
+        if (previousOpenclawHome === undefined) {
+            delete process.env.OPENCLAW_HOME;
+        } else {
+            process.env.OPENCLAW_HOME = previousOpenclawHome;
+        }
+        if (previousDashboardOpenclawHome === undefined) {
+            delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        } else {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = previousDashboardOpenclawHome;
+        }
+        if (previousHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = previousHome;
+        }
+        if (openclawHome) {
+            await rm(openclawHome, { force: true, recursive: true });
+            openclawHome = undefined;
+        }
+    });
+
+    it("initializes the Gateway client lifecycle and avoids duplicate starts", async () => {
+        const warn = mock.method(console, "warn", () => {});
+        const error = mock.method(console, "error", () => {});
+        CapturingGatewayClient.instances = [];
+        __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
+        const originalGatewayUrl = process.env.OPENCLAW_GATEWAY_URL;
+
+        try {
+            process.env.OPENCLAW_GATEWAY_URL = "";
+            gateway.init("token-a");
+            assert.equal(gateway.isConnected(), false);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            gateway.init("token-a");
+            gateway.init("token-b");
+            assert.deepEqual(gateway.getSessions(), []);
+            assert.equal(gateway.getStatus().sessions, 0);
+            assert.equal(CapturingGatewayClient.instances.length, 2);
+            assert.equal(CapturingGatewayClient.instances[0]?.started, true);
+            assert.equal(CapturingGatewayClient.instances[0]?.stopped, true);
+            assert.equal(CapturingGatewayClient.instances[1]?.started, true);
+
+            const latest = CapturingGatewayClient.instances[1];
+            assert.equal(latest?.options.clientName, "gateway-client");
+            assert.equal(latest?.options.url, "ws://127.0.0.1:18789");
+            latest?.failures.set("sessions.subscribe", new Error("subscribe failed"));
+            latest?.failures.set("sessions.list", new Error("refresh failed"));
+            latest?.options.onHelloOk?.({ type: "hello.ok" });
+            assert.equal(gateway.isConnected(), true);
+            await new Promise((resolve) => setTimeout(resolve, 550));
+            latest?.options.onEvent?.({
+                event: "sessions.updated",
+                payload: { runId: "run-1" },
+            });
+            latest?.options.onConnectError?.(new Error("connect failed"));
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            latest?.options.onClose?.(1006, "closed");
+            assert.equal(gateway.isConnected(), false);
+            assert.deepEqual(gateway.getSessions(), []);
+            await waitForAsyncHandlers();
+
+            gateway.init("token-c");
+            const successful = CapturingGatewayClient.instances[2];
+            successful?.options.onHelloOk?.({ type: "hello.ok" });
+            await waitForAsyncHandlers();
+            assert.deepEqual(successful?.calls.at(-1), {
+                method: "sessions.list",
+                params: {},
+            });
+
+            process.env.OPENCLAW_GATEWAY_URL = "ws://gateway.example";
+            gateway.init("token-d");
+            const active = CapturingGatewayClient.instances[3];
+            assert.equal(active?.options.url, "ws://gateway.example");
+            active?.options.onHelloOk?.({ type: "hello.ok" });
+            assert.equal(gateway.isConnected(), true);
+            successful?.options.onHelloOk?.({ type: "hello.ok" });
+            successful?.options.onEvent?.({ event: "sessions.updated", payload: {} });
+            successful?.options.onConnectError?.(new Error("stale connect failed"));
+            successful?.options.onClose?.(1006, "stale");
+            assert.equal(gateway.isConnected(), true);
+
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            gateway.shutdown();
+            assert.deepEqual(gateway.getSessions(), []);
+            assert.equal(gateway.getStatus().sessions, 0);
+
+            __testing.setGatewayClientForTest(new ThrowingStopGatewayClient());
+            __testing.setGatewayConnectedForTest(true);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            assert.doesNotThrow(() => gateway.shutdown());
+            assert.equal(gateway.isConnected(), false);
+            assert.deepEqual(gateway.getSessions(), []);
+
+            __testing.setGatewayClientConstructorForTest(ThrowingStartGatewayClient);
+            assert.throws(() => gateway.init("token-throws"), /start failed/u);
+            __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
+            gateway.init("token-throws");
+            assert.equal(
+                CapturingGatewayClient.instances.at(-1)?.options.token,
+                "token-throws"
+            );
+
+            __testing.setGatewayClientForTest(new ThrowingStopGatewayClient());
+            __testing.setGatewayConnectedForTest(true);
+            __testing.setSessionListForTest([
+                __testing.transformSession({ key: "agent:main:main" }),
+            ]);
+            gateway.init("token-after-stop-error");
+            assert.equal(
+                CapturingGatewayClient.instances.at(-1)?.options.token,
+                "token-after-stop-error"
+            );
+        } finally {
+            if (originalGatewayUrl === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_URL;
+            } else {
+                process.env.OPENCLAW_GATEWAY_URL = originalGatewayUrl;
+            }
+            __testing.resetGatewayStateForTest();
+            warn.mock.restore();
+            error.mock.restore();
+        }
+    });
+
+    it("covers Gateway init warning fallback branches", async () => {
+        const warn = mock.method(console, "warn", () => {});
+        const originalSetTimeout = globalThis.setTimeout;
+        const originalClearTimeout = globalThis.clearTimeout;
+        const scheduledDelays: number[] = [];
+        const cancelledTimers = new Set<number>();
+        let nextTimerId = 0;
+        CapturingGatewayClient.instances = [];
+        __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
+
+        globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+            scheduledDelays.push(delay ?? 0);
+            nextTimerId += 1;
+            const timerId = nextTimerId;
+            queueMicrotask(() => {
+                if (!cancelledTimers.has(timerId)) {
+                    callback();
+                }
+            });
+            return { id: timerId, unref: () => {} } as unknown as NodeJS.Timeout;
+        }) as typeof setTimeout;
+        globalThis.clearTimeout = ((timeout?: NodeJS.Timeout | number) => {
+            if (typeof timeout === "object" && timeout && "id" in timeout) {
+                cancelledTimers.add(Number(timeout.id));
+            }
+        }) as typeof clearTimeout;
+
+        try {
+            assert.ok(openclawHome);
+            const deviceIdentityPath = path.join(openclawHome, "device.json");
+            assert.equal(
+                __testing.loadOrCreateDashboardDeviceIdentity(deviceIdentityPath, () => {
+                    throw new Error("identity unavailable");
+                }),
+                undefined
+            );
+
+            gateway.init("token-warning");
+            const latest = CapturingGatewayClient.instances.at(-1);
+            assert.ok(latest);
+            latest.failures.set("sessions.subscribe", new Error("subscribe failed"));
+            latest.options.onHelloOk?.({ type: "hello.ok" });
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.deepEqual(scheduledDelays, [500, 1000, 2000]);
+            assert.equal(
+                warn.mock.calls.some((call) =>
+                    String(call.arguments[0]).includes(
+                        "Failed to subscribe to session index events"
+                    )
+                ),
+                true
+            );
+        } finally {
+            globalThis.setTimeout = originalSetTimeout;
+            globalThis.clearTimeout = originalClearTimeout;
+            __testing.resetGatewayStateForTest();
+            warn.mock.restore();
+        }
+    });
+
+    it("rejects invalid OpenClaw root configuration at import time", async () => {
+        const originalDashboardHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const originalOpenclawHome = process.env.OPENCLAW_HOME;
+        const originalHome = process.env.HOME;
+        try {
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = "relative-home";
+            await assert.rejects(
+                import(`./gateway.js?invalid-dashboard-home=${Date.now()}`),
+                /MIRA_DASHBOARD_OPENCLAW_HOME must be an absolute non-root path/
+            );
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome || "/tmp";
+            process.env.OPENCLAW_HOME = path.parse(process.cwd()).root;
+            await assert.rejects(
+                import(`./gateway.js?invalid-openclaw-home=${Date.now()}`),
+                /OPENCLAW_HOME must be an absolute non-root path/
+            );
+
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openclawHome || "/tmp";
+            delete process.env.OPENCLAW_HOME;
+            process.env.HOME = "";
+            await assert.doesNotReject(
+                import(`./gateway.js?blank-home=${Date.now()}`),
+                "blank HOME should fall back to a safe absolute data path"
+            );
+        } finally {
+            if (originalDashboardHome === undefined) {
+                delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+            } else {
+                process.env.MIRA_DASHBOARD_OPENCLAW_HOME = originalDashboardHome;
+            }
+            if (originalOpenclawHome === undefined) {
+                delete process.env.OPENCLAW_HOME;
+            } else {
+                process.env.OPENCLAW_HOME = originalOpenclawHome;
+            }
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+        }
+    });
+
+    it("clears pending requests when resetting test state", async () => {
+        __testing.setGatewayConnectedForTest(true);
+        __testing.setGatewayClientForTest({
+            request: () => new Promise(() => {}),
+            start: () => {},
+            stop: () => {},
+        });
+        const clientWs = {
+            readyState: WebSocket.OPEN,
+            send: () => {},
+        } as unknown as WebSocket;
+
+        void __testing.forwardRequest("chat.send", {}, clientWs, "request-1");
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
         __testing.resetGatewayStateForTest();
-        await rm(openclawHome, { force: true, recursive: true });
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
+    });
+
+    it("fails pending forwarded requests when the Gateway closes", async () => {
+        CapturingGatewayClient.instances = [];
+        __testing.setGatewayClientConstructorForTest(HangingGatewayClient);
+        gateway.init("token-pending-close");
+        const active = CapturingGatewayClient.instances.at(-1) as
+            | HangingGatewayClient
+            | undefined;
+        active?.options.onHelloOk?.({ type: "hello.ok" });
+        await waitForAsyncHandlers();
+
+        const clientWs = new FakeWebSocket();
+        const forwarded = __testing.forwardRequest(
+            "chat.send",
+            { sessionKey: "agent:main:main" },
+            clientWs as unknown as WebSocket,
+            "request-1"
+        );
+        await waitForAsyncHandlers();
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
+
+        active?.options.onClose?.(1006, "closed");
+
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
+        assert.deepEqual(JSON.parse(clientWs.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "request-1",
+            ok: false,
+            error: "Gateway disconnected",
+        });
+        active?.releaseRequest?.();
+        assert.equal(await forwarded, true);
     });
 
     it("transforms Gateway sessions into dashboard session summaries", () => {
@@ -92,6 +489,15 @@ describe("gateway state and helper utilities", () => {
         assert.equal(cron.id, "agent:main:cron:nightly");
         assert.equal(cron.model, "Unknown");
         assert.equal(cron.channel, "unknown");
+
+        const agent = __testing.transformSession({ key: "agent:researcher:main" });
+        assert.equal(agent.type, "SUBAGENT");
+        assert.equal(agent.displayLabel, "Researcher");
+
+        const unknown = __testing.transformSession({});
+        assert.equal(unknown.id, "unknown");
+        assert.equal(unknown.type, "UNKNOWN");
+        assert.equal(unknown.createdAt, null);
     });
 
     it("enriches runtime events with session keys when run ids match", () => {
@@ -129,15 +535,56 @@ describe("gateway state and helper utilities", () => {
             }),
             { runId: "x", sessionKey: "already-present" }
         );
+        assert.deepEqual(__testing.enrichRuntimeEventPayload("agent", null), null);
+        assert.deepEqual(__testing.enrichRuntimeEventPayload("agent", {}), {});
+        assert.deepEqual(__testing.enrichRuntimeEventPayload("agent", { runId: "x" }), {
+            runId: "x",
+        });
     });
 
     it("hydrates omitted chat-history images from raw transcripts", async () => {
-        const transcriptDir = path.join(openclawHome, "agents", "main", "sessions");
+        assert.ok(openclawHome);
+        const home = openclawHome;
+        const transcriptDir = path.join(home, "agents", "main", "sessions");
         await mkdir(transcriptDir, { recursive: true });
         await writeFile(
             path.join(transcriptDir, "session-1.jsonl"),
             [
                 "not json",
+                '{"type":"image",',
+                JSON.stringify({ type: "image", message: null }),
+                JSON.stringify({ timestamp: 1, message: null }),
+                JSON.stringify({
+                    timestamp: 2,
+                    type: "image",
+                    message: { role: "user", content: "not-array" },
+                }),
+                JSON.stringify({
+                    type: "image",
+                    message: {
+                        role: "user",
+                        content: [{ type: "image", source: {} }],
+                    },
+                }),
+                JSON.stringify({
+                    timestamp: 4,
+                    message: {
+                        content: [
+                            {
+                                type: "image",
+                                data: "raw-direct",
+                                mimeType: "image/webp",
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    timestamp: 3,
+                    message: {
+                        role: "user",
+                        content: [{ type: "text", text: "no image blocks" }],
+                    },
+                }),
                 JSON.stringify({
                     timestamp: 1_700_000_000_000,
                     message: {
@@ -147,6 +594,34 @@ describe("gateway state and helper utilities", () => {
                             {
                                 type: "image",
                                 source: { data: "raw-image", media_type: "image/png" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    timestamp: 1_700_000_000_001,
+                    message: {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image",
+                                source: { data: "raw-default-mime" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    timestamp: 1_700_000_000_002,
+                    message: {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image",
+                                data: "   ",
+                                source: {
+                                    data: "raw-source-fallback",
+                                    media_type: "image/gif",
+                                },
                             },
                         ],
                     },
@@ -179,13 +654,218 @@ describe("gateway state and helper utilities", () => {
             data: "raw-image",
             mimeType: "image/png",
         });
+        assert.equal(
+            __testing.readRawTranscriptImageMessages("agent:main:main", "missing").length,
+            0
+        );
+        assert.deepEqual(__testing.readRawTranscriptImageMessages("malformed-key"), []);
+        const rawMessages = __testing.readRawTranscriptImageMessages(
+            "agent:main:main",
+            "session-1"
+        );
+        assert.equal(rawMessages.length, 4);
+        assert.equal(rawMessages[0]?.role, "unknown");
+        assert.deepEqual(rawMessages[0]?.images[0], {
+            type: "image",
+            data: "raw-direct",
+            mimeType: "image/webp",
+        });
+        assert.ok(
+            rawMessages.some(
+                (message) =>
+                    message.images[0]?.data === "raw-default-mime" &&
+                    message.images[0]?.mimeType === "image/jpeg"
+            )
+        );
+        assert.ok(
+            rawMessages.some(
+                (message) =>
+                    message.images[0]?.data === "raw-source-fallback" &&
+                    message.images[0]?.mimeType === "image/gif"
+            )
+        );
+        const readFileSync = mock.method(fs, "readFileSync", () => {
+            throw new Error("read denied");
+        });
+        try {
+            assert.deepEqual(
+                __testing.readRawTranscriptImageMessages("agent:main:main", "session-1"),
+                []
+            );
+        } finally {
+            readFileSync.mock.restore();
+        }
 
         assert.deepEqual(__testing.hydrateOmittedChatHistoryImages({ messages: [] }), {
             messages: [],
         });
+        assert.equal(__testing.getTranscriptPath("agent:main:unknown"), null);
+        assert.equal(
+            __testing.getTranscriptPath("channel:discord:main", "session-1"),
+            null
+        );
+        const dottedAgentDir = path.join(home, "agents", "my.agent", "sessions");
+        await mkdir(dottedAgentDir, { recursive: true });
+        await writeFile(path.join(dottedAgentDir, "session-1.jsonl"), "", "utf8");
+        assert.equal(__testing.getTranscriptPath("agent:", "session-1"), null);
+        assert.equal(__testing.getTranscriptPath("agent::main", "session-1"), null);
+        assert.match(
+            __testing.getTranscriptPath("agent:my.agent:main", "session-1") || "",
+            /agents\/my\.agent\/sessions\/session-1\.jsonl$/u
+        );
+        const casedAgentDir = path.join(home, "agents", "Coder", "sessions");
+        await mkdir(casedAgentDir, { recursive: true });
+        await writeFile(path.join(casedAgentDir, "session-3.jsonl"), "", "utf8");
+        assert.match(
+            __testing.getTranscriptPath("agent:Coder:main", "session-3") || "",
+            /agents\/Coder\/sessions\/session-3\.jsonl$/u
+        );
+        const aliasAgentDir = path.join(home, "agents", "Alias-Agent", "sessions");
+        await mkdir(aliasAgentDir, { recursive: true });
+        await writeFile(path.join(aliasAgentDir, "session-2.jsonl"), "", "utf8");
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "Agent:Alias-Agent:Main",
+                sessionId: "session-2",
+            }),
+        ]);
+        assert.match(
+            __testing.getTranscriptPath("Agent:Alias-Agent:Main") || "",
+            /agents\/Alias-Agent\/sessions\/session-2\.jsonl$/u
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:../main:main", "session-1"),
+            null
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:main:main", "../session-1"),
+            null
+        );
+        await writeFile(path.join(transcriptDir, "agent:main:main.jsonl"), "", "utf8");
+        assert.match(
+            __testing.getTranscriptPath("agent:main:main", "agent:main:main") || "",
+            /agents\/main\/sessions\/agent:main:main\.jsonl$/u
+        );
+        const outsideTranscript = path.join(home, "outside.jsonl");
+        await writeFile(outsideTranscript, "", "utf8");
+        await symlink(
+            outsideTranscript,
+            path.join(transcriptDir, "linked-session.jsonl")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:main:main", "linked-session"),
+            null
+        );
+        await symlink(
+            path.join(home, "agents", "main"),
+            path.join(home, "agents", "linked-agent")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:linked-agent:main", "session-1"),
+            null
+        );
+        const linkedSessionsAgentDir = path.join(home, "agents", "linked-sessions");
+        await mkdir(linkedSessionsAgentDir, { recursive: true });
+        await symlink(
+            path.join(home, "agents", "main", "sessions"),
+            path.join(linkedSessionsAgentDir, "sessions")
+        );
+        assert.equal(
+            __testing.getTranscriptPath("agent:linked-sessions:main", "session-1"),
+            null
+        );
+        assert.equal(
+            __testing.isPathInsideRoot("/tmp/openclaw", "/tmp/elsewhere/file"),
+            false
+        );
+        assert.equal(
+            __testing.resolvePathInsideRoot("/tmp/openclaw", "/tmp/elsewhere/file"),
+            null
+        );
+        assert.deepEqual(
+            __testing.hydrateOmittedChatHistoryImages(
+                {
+                    sessionId: "session-1",
+                    messages: [
+                        "primitive",
+                        { role: "user", content: [{ type: "text", text: "no image" }] },
+                        {
+                            role: "user",
+                            timestamp: "2024-01-01T00:00:00.000Z",
+                            content: [
+                                { type: "text", text: "different" },
+                                { type: "image", source: { omitted: true } },
+                            ],
+                        },
+                    ],
+                },
+                "agent:main:main"
+            ),
+            {
+                sessionId: "session-1",
+                messages: [
+                    "primitive",
+                    { role: "user", content: [{ type: "text", text: "no image" }] },
+                    {
+                        role: "user",
+                        timestamp: "2024-01-01T00:00:00.000Z",
+                        content: [
+                            { type: "text", text: "different" },
+                            { type: "image", source: { omitted: true } },
+                        ],
+                    },
+                ],
+            }
+        );
+
+        const roleFallbackHydrated = __testing.hydrateOmittedChatHistoryImages(
+            {
+                sessionId: "session-1",
+                messages: [
+                    {
+                        content: [{ type: "image", source: { omitted: true } }],
+                    },
+                ],
+            },
+            "agent:main:main"
+        ) as { messages: Array<{ content: unknown[] }> };
+        assert.deepEqual(roleFallbackHydrated.messages[0]?.content[0], {
+            type: "image",
+            data: "raw-direct",
+            mimeType: "image/webp",
+        });
+
+        const missingRawImageHydrated = __testing.hydrateOmittedChatHistoryImages(
+            {
+                sessionId: "session-1",
+                messages: [
+                    {
+                        role: "user",
+                        timestamp: "2023-11-14T22:13:20.000Z",
+                        content: [
+                            { type: "text", text: "look" },
+                            { type: "image", source: { omitted: true } },
+                            { type: "image", source: { omitted: true } },
+                        ],
+                    },
+                ],
+            },
+            "agent:main:main"
+        ) as { messages: Array<{ content: unknown[] }> };
+        assert.deepEqual(missingRawImageHydrated.messages[0]?.content[2], {
+            type: "image",
+            source: { omitted: true },
+        });
     });
 
     it("normalizes primitive helpers and disconnected gateway behavior", async () => {
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
+
         assert.equal(__testing.normalizeMessageText("  hello  "), "hello");
         assert.equal(
             __testing.normalizeMessageText([
@@ -211,6 +891,8 @@ describe("gateway state and helper utilities", () => {
             __testing.imageBlockHasOmittedData({ type: "image", source: {} }),
             true
         );
+        assert.equal(__testing.shouldRetrySessionIndexSubscription(2), true);
+        assert.equal(__testing.shouldRetrySessionIndexSubscription(3), false);
 
         assert.deepEqual(gateway.getStatus(), {
             gateway: "disconnected",
@@ -218,12 +900,19 @@ describe("gateway state and helper utilities", () => {
         });
         assert.equal(gateway.isConnected(), false);
         assert.equal(gateway.getGatewayWs(), null);
+        await __testing.refreshSessions();
         await assert.rejects(() => gateway.request("sessions.list", {}), {
             message: "Gateway not connected",
         });
     });
 
     it("handles WebSocket clients and disconnected request responses", async () => {
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
         const ws = new FakeWebSocket();
 
         gateway.handleClient(ws as unknown as WebSocket);
@@ -259,5 +948,523 @@ describe("gateway state and helper utilities", () => {
         ws.emit("message", Buffer.from("not json"));
         ws.emit("close");
         await waitForAsyncHandlers();
+
+        const throwingWs = new ThrowingWebSocket();
+        gateway.handleClient(throwingWs as unknown as WebSocket);
+        throwingWs.throwOnSend = true;
+        __testing.setGatewayClientForTest(new FakeGatewayClient() as never);
+        __testing.setGatewayConnectedForTest(true);
+        await __testing.refreshSessions();
+        throwingWs.emit("close");
+
+        const errorWs = new FakeWebSocket();
+        const consoleError = mock.method(console, "error", () => {});
+        const initialThrowingWs = new ThrowingWebSocket();
+        initialThrowingWs.throwOnSend = true;
+        assert.doesNotThrow(() =>
+            gateway.handleClient(initialThrowingWs as unknown as WebSocket)
+        );
+        assert.equal(initialThrowingWs.closed, true);
+
+        gateway.handleClient(errorWs as unknown as WebSocket);
+        errorWs.emit(
+            "message",
+            Buffer.from(
+                JSON.stringify({
+                    channel: "logs",
+                    type: "subscribe",
+                })
+            )
+        );
+        assert.equal(logsTesting.subscriberCount(), 1);
+        errorWs.emit("error", new Error("client socket failed"));
+        assert.equal(logsTesting.subscriberCount(), 0);
+        consoleError.mock.restore();
+    });
+
+    it("clears pending client requests when WebSocket clients disconnect", async () => {
+        __testing.setGatewayConnectedForTest(true);
+        __testing.setGatewayClientForTest({
+            request: () => new Promise(() => {}),
+            start: () => {},
+            stop: () => {},
+        });
+        const ws = new FakeWebSocket();
+        gateway.handleClient(ws as unknown as WebSocket);
+
+        ws.emit(
+            "message",
+            Buffer.from(
+                JSON.stringify({
+                    id: "client-request-1",
+                    method: "chat.send",
+                    params: { sessionKey: "agent:main:main" },
+                    type: "request",
+                })
+            )
+        );
+        await waitForAsyncHandlers();
+        assert.equal(__testing.pendingRequestCountForTest(), 1);
+
+        ws.emit("close");
+        assert.equal(__testing.pendingRequestCountForTest(), 0);
+    });
+
+    it("discards stale session refresh results from replaced clients", async () => {
+        const staleClient = new FakeGatewayClient();
+        let releaseRefresh!: () => void;
+        staleClient.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            return {
+                sessions: [{ key: "agent:main:main", updatedAt: 1 }],
+            };
+        };
+
+        __testing.setGatewayClientForTest(staleClient as never);
+        __testing.setGatewayConnectedForTest(true);
+        const refresh = __testing.refreshSessions(staleClient as never);
+        const currentClient = new FakeGatewayClient();
+        __testing.setGatewayClientForTest(currentClient as never);
+        releaseRefresh();
+        await refresh;
+
+        assert.deepEqual(gateway.getSessions(), []);
+    });
+
+    it("discards session refresh results when the Gateway disconnects mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRefresh!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            return {
+                sessions: [{ key: "agent:main:main", updatedAt: 1 }],
+            };
+        };
+
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+        const refresh = __testing.refreshSessions(client as never);
+        __testing.setGatewayConnectedForTest(false);
+        releaseRefresh();
+        await refresh;
+
+        assert.deepEqual(gateway.getSessions(), []);
+    });
+
+    it("treats malformed session list payloads as empty", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.list", { sessions: { key: "agent:main:main" } });
+        __testing.setSessionListForTest([
+            __testing.transformSession({
+                key: "agent:main:main",
+                sessionId: "session-1",
+            }),
+        ]);
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        await __testing.refreshSessions(client as never);
+
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", null);
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", "not an object");
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", { sessions: [null, "bad", {}] });
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(gateway.getSessions(), []);
+
+        client.responses.set("sessions.list", {
+            sessions: [
+                { key: "agent:invalid-date:main", updatedAt: "not a date" },
+                { key: "agent:invalid-number:main", updatedAt: Number.NaN },
+                { key: "agent:valid-string:main", updatedAt: "2026-05-16T13:00:00.000Z" },
+                { key: "agent:valid-null:main", updatedAt: null },
+            ],
+        });
+        await __testing.refreshSessions(client as never);
+        assert.deepEqual(
+            gateway.getSessions().map((session) => ({
+                key: session.key,
+                updatedAt: session.updatedAt,
+            })),
+            [
+                {
+                    key: "agent:valid-string:main",
+                    updatedAt: Date.parse("2026-05-16T13:00:00.000Z"),
+                },
+                { key: "agent:valid-null:main", updatedAt: undefined },
+            ]
+        );
+    });
+
+    it("handles log subscription request aliases", async () => {
+        const ws = new FakeWebSocket();
+        gateway.handleClient(ws as unknown as WebSocket);
+
+        try {
+            ws.emit(
+                "message",
+                Buffer.from(
+                    JSON.stringify({
+                        id: "subscribe-1",
+                        method: "subscribe",
+                        params: { channel: "logs" },
+                        type: "req",
+                    })
+                )
+            );
+            ws.emit(
+                "message",
+                Buffer.from(
+                    JSON.stringify({
+                        id: "unsubscribe-1",
+                        method: "unsubscribe",
+                        params: { channel: "logs" },
+                        type: "request",
+                    })
+                )
+            );
+            ws.emit(
+                "message",
+                Buffer.from(JSON.stringify({ channel: "logs", type: "subscribe" }))
+            );
+            ws.emit(
+                "message",
+                Buffer.from(JSON.stringify({ channel: "logs", type: "unsubscribe" }))
+            );
+            await waitForAsyncHandlers();
+
+            const responses = ws.sent.map(
+                (entry) => JSON.parse(entry) as { id?: string }
+            );
+            assert.deepEqual(
+                responses.find((entry) => entry.id === "subscribe-1"),
+                {
+                    type: "res",
+                    id: "subscribe-1",
+                    ok: true,
+                }
+            );
+            assert.deepEqual(
+                responses.find((entry) => entry.id === "unsubscribe-1"),
+                {
+                    type: "res",
+                    id: "unsubscribe-1",
+                    ok: true,
+                }
+            );
+        } finally {
+            ws.emit("close");
+            logsTesting.resetLogWatcherForTest();
+        }
+    });
+
+    it("refreshes sessions and broadcasts connected request results", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.list", {
+            sessions: [
+                {
+                    key: "agent:main:main",
+                    sessionId: "session-2",
+                    totalTokens: 10,
+                },
+            ],
+        });
+        client.responses.set("chat.history", {
+            messages: [],
+            sessionKey: "agent:main:main",
+        });
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        gateway.handleClient(ws as unknown as WebSocket);
+        await __testing.refreshSessions();
+
+        assert.equal(gateway.isConnected(), true);
+        assert.equal(gateway.getStatus().gateway, "connected");
+        assert.equal(gateway.getSessions()[0]?.id, "session-2");
+        const sessionsBroadcast = JSON.parse(ws.sent.at(-1) || "{}") as {
+            sessions?: Array<{ id?: string }>;
+            type?: string;
+        };
+        assert.equal(sessionsBroadcast.type, "sessions");
+        assert.equal(sessionsBroadcast.sessions?.[0]?.id, "session-2");
+
+        const forwarded = await __testing.forwardRequest(
+            "chat.history",
+            { sessionKey: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "client-request-2"
+        );
+        assert.equal(forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "client-request-2",
+            ok: true,
+            payload: {
+                messages: [],
+                sessionKey: "agent:main:main",
+            },
+        });
+
+        const sessionsForwarded = await __testing.forwardRequest(
+            "sessions.delete",
+            { key: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "client-request-4"
+        );
+        assert.equal(sessionsForwarded, true);
+
+        ws.emit(
+            "message",
+            Buffer.from(
+                JSON.stringify({
+                    id: "client-request-5",
+                    method: "chat.history",
+                    type: "req",
+                })
+            )
+        );
+        await waitForAsyncHandlers();
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "client-request-5",
+            ok: true,
+            payload: {
+                messages: [],
+                sessionKey: "agent:main:main",
+            },
+        });
+
+        await gateway.sendSessionMessage("agent:main:main", "hello");
+        await gateway.abortSessionRun("agent:main:main");
+        const deleted = await gateway.deleteSession("agent:main:main");
+
+        assert.deepEqual(deleted, {});
+        assert.deepEqual(
+            client.calls.map((call) => call.method),
+            [
+                "sessions.list",
+                "chat.history",
+                "sessions.delete",
+                "sessions.list",
+                "chat.history",
+                "chat.send",
+                "chat.abort",
+                "sessions.delete",
+                "sessions.list",
+            ]
+        );
+        assert.equal(
+            (client.calls.find((call) => call.method === "chat.send")?.params || {})
+                .sessionKey,
+            "agent:main:main"
+        );
+    });
+
+    it("reports connected request failures and non-client forwarding results", async () => {
+        const client = new FakeGatewayClient();
+        client.failures.set("chat.history", new Error("history failed"));
+        client.failures.set("chat.send", new Error("send failed"));
+        client.failures.set("sessions.delete", new Error("delete failed"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        const forwarded = await __testing.forwardRequest(
+            "chat.history",
+            {},
+            ws as unknown as WebSocket,
+            "client-request-3"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "client-request-3",
+            ok: false,
+            error: "history failed",
+        });
+        client.failures.delete("sessions.delete");
+        assert.equal(await __testing.forwardRequest("chat.send", {}), false);
+        assert.equal(await __testing.forwardRequest("sessions.delete", {}), true);
+        client.failures.set("sessions.delete", new Error("delete failed"));
+        await assert.rejects(() => gateway.deleteSession("agent:main:main"), {
+            message: "delete failed",
+        });
+    });
+
+    it("preserves successful forwarded responses when the Gateway client changes mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRequest!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRequest = resolve;
+            });
+            return { ok: true };
+        };
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        const forwarded = __testing.forwardRequest(
+            "chat.history",
+            {},
+            ws as unknown as WebSocket,
+            "stale-response"
+        );
+        __testing.setGatewayClientForTest(new FakeGatewayClient() as never);
+        releaseRequest();
+
+        assert.equal(await forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent.at(-1) || "{}"), {
+            type: "res",
+            id: "stale-response",
+            ok: true,
+            payload: { ok: true },
+        });
+    });
+
+    it("preserves successful non-client responses when the Gateway disconnects mid-request", async () => {
+        const client = new FakeGatewayClient();
+        let releaseRequest!: () => void;
+        client.request = async () => {
+            await new Promise<void>((resolve) => {
+                releaseRequest = resolve;
+            });
+            return { deleted: true };
+        };
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const forwarded = __testing.forwardRequest("sessions.delete", {
+            key: "agent:main:main",
+        });
+        __testing.setGatewayConnectedForTest(false);
+        releaseRequest();
+
+        assert.equal(await forwarded, true);
+    });
+
+    it("skips responses for closed client sockets and reports delete refresh warnings", async () => {
+        await __testing.refreshSessions();
+
+        const warn = mock.method(console, "warn", () => {});
+        const client = new FakeGatewayClient();
+        client.responses.set("chat.history", { ok: true });
+        client.responses.set("sessions.delete", { deleted: true });
+        client.failures.set("sessions.list", new Error("refresh unavailable"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        try {
+            const ws = new FakeWebSocket();
+            ws.readyState = WebSocket.CLOSED;
+
+            assert.equal(
+                await __testing.forwardRequest(
+                    "chat.history",
+                    {},
+                    ws as unknown as WebSocket,
+                    "closed-success"
+                ),
+                true
+            );
+            client.failures.set("chat.history", new Error("closed failure"));
+            assert.equal(
+                await __testing.forwardRequest(
+                    "chat.history",
+                    {},
+                    ws as unknown as WebSocket,
+                    "closed-failure"
+                ),
+                true
+            );
+            assert.equal(ws.sent.length, 0);
+
+            assert.deepEqual(await gateway.deleteSession("agent:main:main"), {
+                deleted: true,
+            });
+            assert.equal(warn.mock.callCount(), 1);
+        } finally {
+            warn.mock.restore();
+        }
+    });
+
+    it("sends session request responses before refresh failures are reported", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.delete", { deleted: true });
+        client.failures.set("sessions.list", new Error("refresh unavailable"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new FakeWebSocket();
+        const forwarded = await __testing.forwardRequest(
+            "sessions.delete",
+            { key: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "session-delete"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(JSON.parse(ws.sent[0] || "{}"), {
+            type: "res",
+            id: "session-delete",
+            ok: true,
+            payload: { deleted: true },
+        });
+    });
+
+    it("refreshes sessions after successful requests even when client replies fail", async () => {
+        const client = new FakeGatewayClient();
+        client.responses.set("sessions.delete", { deleted: true });
+        client.responses.set("sessions.list", {
+            sessions: [{ key: "agent:main:main", sessionId: "session-after-send" }],
+        });
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new ThrowingWebSocket();
+        ws.throwOnSend = true;
+        const forwarded = await __testing.forwardRequest(
+            "sessions.delete",
+            { key: "agent:main:main" },
+            ws as unknown as WebSocket,
+            "session-delete-send-failure"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(ws.sent, []);
+        assert.equal(gateway.getSessions()[0]?.id, "session-after-send");
+    });
+
+    it("swallows error reply write failures", async () => {
+        const client = new FakeGatewayClient();
+        client.failures.set("chat.history", new Error("history failed"));
+        __testing.setGatewayClientForTest(client as never);
+        __testing.setGatewayConnectedForTest(true);
+
+        const ws = new ThrowingWebSocket();
+        ws.throwOnSend = true;
+        const forwarded = await __testing.forwardRequest(
+            "chat.history",
+            {},
+            ws as unknown as WebSocket,
+            "history-send-failure"
+        );
+
+        assert.equal(forwarded, true);
+        assert.deepEqual(ws.sent, []);
     });
 });

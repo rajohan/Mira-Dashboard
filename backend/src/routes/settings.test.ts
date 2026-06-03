@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -12,23 +21,59 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function startServer(homeDir: string): Promise<TestServer> {
+async function startServer(
+    homeDir: string,
+    getGatewayStatus = () => ({ gateway: "connected", sessions: 3 })
+): Promise<TestServer> {
+    const originalHome = process.env.HOME;
     process.env.HOME = homeDir;
-    const { default: settingsRoutes } = await import("./settings.js");
+    try {
+        const { default: settingsRoutes } = await import("./settings.js");
 
-    const app = express();
-    app.use(express.json());
-    settingsRoutes(app, express, () => ({ gateway: "connected", sessions: 3 }));
-    const server = http.createServer(app);
+        const app = express();
+        app.use(express.json());
+        settingsRoutes(app, express, getGatewayStatus);
+        const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
+        await new Promise<void>((resolve, reject) => {
+            const onError = (error: Error) => {
+                server.off("listening", onListening);
+                server.close();
+                reject(error);
+            };
+            const onListening = () => {
+                server.off("error", onError);
+                resolve();
+            };
+            server.once("error", onError);
+            server.once("listening", onListening);
+            server.listen(0);
+        });
+        const address = server.address();
+        assert.ok(address && typeof address === "object");
 
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
-    };
+        return {
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            close: () =>
+                new Promise((resolve) =>
+                    server.close(() => {
+                        if (originalHome === undefined) {
+                            delete process.env.HOME;
+                        } else {
+                            process.env.HOME = originalHome;
+                        }
+                        resolve();
+                    })
+                ),
+        };
+    } catch (error) {
+        if (originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = originalHome;
+        }
+        throw error;
+    }
 }
 
 async function requestJson<T>(
@@ -68,6 +113,94 @@ describe("settings routes", () => {
     });
 
     it("returns defaults with gateway status when no settings file exists", async () => {
+        const { __testing } = await import("./settings.js");
+        assert.equal(
+            __testing.resolveSettingsDir("/tmp/settings-home"),
+            path.join("/tmp/settings-home", ".openclaw")
+        );
+        const originalPlatform = process.platform;
+        try {
+            Object.defineProperty(process, "platform", { value: "darwin" });
+            const nonLinuxPath = await __testing.withPinnedSettingsFile(
+                "/tmp/settings-home/.openclaw",
+                (settingsFile) => settingsFile
+            );
+            assert.equal(
+                nonLinuxPath,
+                path.join("/tmp/settings-home/.openclaw", "dashboard-settings.json")
+            );
+        } finally {
+            Object.defineProperty(process, "platform", { value: originalPlatform });
+        }
+
+        const originalRealpathSync = fs.realpathSync;
+        fs.realpathSync = ((target: fs.PathLike) => {
+            if (typeof target === "string" && target.startsWith("/proc/self/fd/")) {
+                return "/tmp/other-settings-dir";
+            }
+            return originalRealpathSync(target);
+        }) as typeof fs.realpathSync;
+        try {
+            await assert.rejects(
+                () =>
+                    __testing.withPinnedSettingsFile(homeDir, (settingsFile) =>
+                        Promise.resolve(settingsFile)
+                    ),
+                /Invalid settings directory/u
+            );
+        } finally {
+            fs.realpathSync = originalRealpathSync;
+        }
+        assert.equal(
+            __testing.resolveSettingsDir(""),
+            path.join(os.homedir(), ".openclaw")
+        );
+        assert.equal(
+            __testing.resolveSettingsDir("   "),
+            path.join(os.homedir(), ".openclaw")
+        );
+        assert.throws(
+            () => __testing.resolveSettingsDir("tmp-home"),
+            /Invalid settings home directory/u
+        );
+        assert.throws(
+            () => __testing.resolveSettingsDir(path.parse(homeDir).root),
+            /Invalid settings home directory/u
+        );
+        assert.equal(__testing.resolveSettingsDir(), path.join(homeDir, ".openclaw"));
+        assert.equal(
+            __testing.resolveSettingsFile(),
+            path.join(homeDir, ".openclaw", "dashboard-settings.json")
+        );
+        const symlinkHome = await mkdtemp(path.join(os.tmpdir(), "mira-settings-link-"));
+        const symlinkTarget = await mkdtemp(
+            path.join(os.tmpdir(), "mira-settings-target-")
+        );
+        try {
+            await symlink(symlinkTarget, path.join(symlinkHome, ".openclaw"));
+            assert.throws(
+                () => __testing.resolveSettingsDir(symlinkHome),
+                /Invalid settings directory/u
+            );
+        } finally {
+            await rm(symlinkHome, { recursive: true, force: true });
+            await rm(symlinkTarget, { recursive: true, force: true });
+        }
+        const originalHome = process.env.HOME;
+        try {
+            delete process.env.HOME;
+            assert.equal(
+                __testing.resolveSettingsDir(),
+                path.join(os.homedir(), ".openclaw")
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+        }
+
         const response = await requestJson<{
             theme: string;
             sidebarCollapsed: boolean;
@@ -85,6 +218,7 @@ describe("settings routes", () => {
     });
 
     it("merges, persists, and reloads settings", async () => {
+        const alternateHome = await mkdtemp(path.join(os.tmpdir(), "mira-settings-alt-"));
         const updated = await requestJson<{
             theme: string;
             sidebarCollapsed: boolean;
@@ -114,6 +248,42 @@ describe("settings routes", () => {
 
         assert.equal(reloaded.body.theme, "system");
         assert.equal(reloaded.body.sidebarCollapsed, true);
+
+        const originalHome = process.env.HOME;
+        try {
+            process.env.HOME = alternateHome;
+            const alternate = await requestJson<{
+                theme: string;
+                sidebarCollapsed: boolean;
+            }>(server, "/api/settings");
+            assert.equal(alternate.body.theme, "dark");
+
+            const alternateUpdate = await requestJson<{ theme: string }>(
+                server,
+                "/api/settings",
+                {
+                    method: "PUT",
+                    body: { theme: "light" },
+                }
+            );
+            assert.equal(alternateUpdate.status, 200);
+            assert.equal(
+                JSON.parse(
+                    await readFile(
+                        path.join(alternateHome, ".openclaw", "dashboard-settings.json"),
+                        "utf8"
+                    )
+                ).theme,
+                "light"
+            );
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME;
+            } else {
+                process.env.HOME = originalHome;
+            }
+            await rm(alternateHome, { recursive: true, force: true });
+        }
     });
 
     it("validates settings updates before writing them", async () => {
@@ -124,6 +294,41 @@ describe("settings routes", () => {
         );
         assert.equal(invalidTheme.status, 400);
         assert.equal(invalidTheme.body.error, "Invalid theme");
+
+        const invalidPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: [] }
+        );
+        assert.equal(invalidPayload.status, 400);
+        assert.equal(invalidPayload.body.error, "Settings payload must be an object");
+
+        const invalidSidebar = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { sidebarCollapsed: "yes" } }
+        );
+        assert.equal(invalidSidebar.status, 400);
+        assert.equal(invalidSidebar.body.error, "Invalid sidebarCollapsed setting");
+
+        const invalidModel = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { defaultModel: "" } }
+        );
+        assert.equal(invalidModel.status, 400);
+        assert.equal(invalidModel.body.error, "Invalid defaultModel setting");
+
+        const invalidRefreshInterval = await requestJson<{ error: string }>(
+            server,
+            "/api/settings",
+            { method: "PUT", body: { refreshInterval: null } }
+        );
+        assert.equal(invalidRefreshInterval.status, 400);
+        assert.equal(
+            invalidRefreshInterval.body.error,
+            "Invalid refreshInterval setting"
+        );
 
         const clamped = await requestJson<{
             defaultModel: string;
@@ -160,6 +365,106 @@ describe("settings routes", () => {
             assert.equal(response.body.refreshInterval, 5000);
         } finally {
             console.error = originalError;
+        }
+    });
+
+    it("falls back to defaults when persisted settings values are invalid", async () => {
+        await writeFile(
+            settingsPath,
+            JSON.stringify({ theme: 42, refreshInterval: "oops" }),
+            "utf8"
+        );
+
+        const response = await requestJson<{
+            theme: string;
+            refreshInterval: number;
+        }>(server, "/api/settings");
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.theme, "dark");
+        assert.equal(response.body.refreshInterval, 5000);
+    });
+
+    it("does not follow symlinked settings files", async () => {
+        const linkedSettings = path.join(homeDir, "linked-settings.json");
+        await writeFile(linkedSettings, JSON.stringify({ theme: "light" }), "utf8");
+        await rm(settingsPath, { force: true });
+        await symlink(linkedSettings, settingsPath);
+
+        const response = await requestJson<{ error: string }>(server, "/api/settings");
+
+        assert.equal(response.status, 500);
+        assert.match(
+            response.body.error,
+            /Refusing to open symbolic link|too many symbolic links/u
+        );
+
+        const update = await requestJson<{ error: string }>(server, "/api/settings", {
+            method: "PUT",
+            body: { theme: "light" },
+        });
+        assert.equal(update.status, 500);
+        assert.match(
+            update.body.error,
+            /Refusing to open symbolic link|too many symbolic links/u
+        );
+    });
+
+    it("reports gateway-status and save failures", async () => {
+        const failingHomeDir = await mkdtemp(
+            path.join(os.tmpdir(), "mira-settings-failing-")
+        );
+        const gatewayFailure = await startServer(failingHomeDir, () => {
+            throw new Error("gateway status failed");
+        });
+        try {
+            const getResponse = await requestJson<{ error: string }>(
+                gatewayFailure,
+                "/api/settings"
+            );
+            assert.equal(getResponse.status, 500);
+            assert.equal(getResponse.body.error, "gateway status failed");
+        } finally {
+            await gatewayFailure.close();
+        }
+
+        await rm(settingsPath, { recursive: true, force: true });
+        await mkdir(path.dirname(settingsPath), { recursive: true });
+        await writeFile(settingsPath, JSON.stringify({ theme: "dark" }), "utf8");
+        await chmod(settingsPath, 0o444);
+        const originalOpen = fs.promises.open;
+        fs.promises.open = (async (
+            target: fs.PathLike,
+            flags: string | number,
+            mode?: fs.Mode
+        ) => {
+            if (
+                String(target).includes(`${path.sep}.dashboard-settings.json.`) &&
+                typeof flags === "number" &&
+                (flags & fs.constants.O_WRONLY) !== 0
+            ) {
+                const error = new Error("settings write failed") as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+            return originalOpen.call(fs.promises, target, flags, mode);
+        }) as typeof fs.promises.open;
+        const originalError = console.error;
+        console.error = () => {};
+        try {
+            const putResponse = await requestJson<{ error: string }>(
+                server,
+                "/api/settings",
+                { method: "PUT", body: { theme: "light" } }
+            );
+            assert.equal(putResponse.status, 500);
+            assert.equal(putResponse.body.error, "Failed to save settings");
+        } finally {
+            fs.promises.open = originalOpen;
+            console.error = originalError;
+            await chmod(settingsPath, 0o644).catch(() => {});
+            await rm(settingsPath, { recursive: true, force: true });
+            await rm(failingHomeDir, { recursive: true, force: true });
         }
     });
 });

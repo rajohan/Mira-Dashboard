@@ -1,19 +1,63 @@
-import express, { type RequestHandler } from "express";
+import { randomUUID } from "node:crypto";
+
+import express from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
+import { asyncRoute } from "../lib/errors.js";
 import {
-    copyGuarded,
+    copyNoFollowGuarded,
     guardedPath,
+    lstatGuarded,
     openReadNoFollowGuarded,
     readdirGuarded,
     statGuarded,
-    writeTextNoFollowGuarded,
+    writeTextNoFollowExclusiveGuarded,
 } from "../lib/guardedOps.js";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
+import { stringFallback } from "../lib/values.js";
 
-const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || "/home/ubuntu/.openclaw/workspace";
+function getDefaultWorkspaceRoot(): string {
+    const openclawHome =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    if (
+        openclawHome &&
+        path.isAbsolute(openclawHome) &&
+        path.parse(openclawHome).root !== openclawHome
+    ) {
+        return path.join(openclawHome, "workspace");
+    }
+
+    const homeDir = os.homedir().trim();
+    if (!homeDir || !path.isAbsolute(homeDir) || path.parse(homeDir).root === homeDir) {
+        throw new Error("Could not resolve a safe workspace root");
+    }
+
+    return path.join(homeDir, ".openclaw", "workspace");
+}
+
+function resolveWorkspaceRoot(): string {
+    const workspaceRoot = process.env.WORKSPACE_ROOT?.trim() || getDefaultWorkspaceRoot();
+    if (
+        !path.isAbsolute(workspaceRoot) ||
+        path.normalize(workspaceRoot) !== workspaceRoot ||
+        path.resolve(workspaceRoot) === path.parse(path.resolve(workspaceRoot)).root
+    ) {
+        throw new Error("WORKSPACE_ROOT must be an absolute normalized path");
+    }
+    return workspaceRoot;
+}
+
+const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
+const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
+const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
+const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
+const HARD_LINK_ERROR = "Access denied: hard links are not supported";
+let listDirectoryRealpathSync = fs.realpathSync;
+let procSelfFdPath = "/proc/self/fd";
 
 /** Represents file item. */
 interface FileItem {
@@ -45,6 +89,10 @@ interface WriteResponse {
     modified: string;
 }
 
+function decodeRouteFilePath(value: unknown): string {
+    return stringFallback(value);
+}
+
 /** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
     for (let i = 0; i < Math.min(content.length, 8000); i++) {
@@ -57,7 +105,7 @@ function isBinaryFile(content: string): boolean {
 function isImageFile(filename: string): boolean {
     const ext = filename.split(".").pop()?.toLowerCase();
     const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"];
-    return imageExts.includes(ext || "");
+    return imageExts.includes(stringFallback(ext));
 }
 
 /** Returns image mime type. */
@@ -73,7 +121,7 @@ function getImageMimeType(filename: string): string {
         ico: "image/x-icon",
         bmp: "image/bmp",
     };
-    return mimeTypes[ext || ""] || "application/octet-stream";
+    return mimeTypes[stringFallback(ext)] || "application/octet-stream";
 }
 
 /** Performs should hIDe file. */
@@ -81,20 +129,37 @@ function shouldHideFile(name: string): boolean {
     return name.startsWith(".") && name !== ".env.example";
 }
 
+function compareNames(a: string, b: string): number {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+
 /** Lists a workspace directory or returns null when the path escapes the workspace. */
 function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
-    const fullPath = safePathWithinRoot(dirPath || ".", WORKSPACE_ROOT);
-
-    if (!fullPath) {
-        return null;
-    }
 
     try {
-        const entries = readdirGuarded(guardedPath(fullPath), { withFileTypes: true });
+        const workspaceRoot = listDirectoryRealpathSync(WORKSPACE_ROOT);
+        const fullPath = safePathWithinRoot(dirPath || ".", workspaceRoot);
+
+        if (!fullPath) {
+            return null;
+        }
+        const resolvedFullPath = safePathWithinRoot(
+            listDirectoryRealpathSync(fullPath),
+            workspaceRoot
+        );
+        if (!resolvedFullPath) {
+            return null;
+        }
+
+        const entries = readdirGuarded(guardedPath(resolvedFullPath), {
+            withFileTypes: true,
+        });
         for (const entry of entries) {
             if (shouldHideFile(entry.name)) continue;
-
+            if (entry.isSymbolicLink()) continue;
             const itemPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
 
             if (entry.isDirectory()) {
@@ -104,10 +169,9 @@ function listDirectory(dirPath: string): FileItem[] | null {
                     path: itemPath,
                 });
             } else {
-                // Use stat from readdirSync entry info; avoid separate existsSync/statSync TOCTOU
                 try {
-                    const stat = statGuarded(
-                        guardedPath(path.join(fullPath, entry.name))
+                    const stat = lstatGuarded(
+                        guardedPath(path.join(resolvedFullPath, entry.name))
                     );
                     items.push({
                         name: entry.name,
@@ -127,14 +191,139 @@ function listDirectory(dirPath: string): FileItem[] | null {
             }
         }
     } catch (error) {
+        if (
+            !dirPath &&
+            (error as NodeJS.ErrnoException).code === "ENOENT" &&
+            path.resolve(WORKSPACE_ROOT) === WORKSPACE_ROOT
+        ) {
+            return [];
+        }
         console.error("[Files] Error listing directory:", (error as Error).message);
+        throw error;
     }
 
-    return items.sort((a, b) => {
-        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
-        return a.name.localeCompare(b.name);
-    });
+    const typeOrder: Record<FileItem["type"], number> = { directory: 0, file: 1 };
+    return items.sort(
+        (a, b) => typeOrder[a.type] - typeOrder[b.type] || compareNames(a.name, b.name)
+    );
 }
+
+async function withRootedParentPath<T>(
+    safePath: string,
+    rootPath: string,
+    callback: (rootedPath: string) => Promise<T> | T
+): Promise<T> {
+    const parentPath = path.dirname(safePath);
+    const parentFd = fs.openSync(
+        parentPath,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const realRoot = fs.realpathSync(rootPath);
+        const procSelfFd = procSelfFdPath;
+        let rootedPath = safePath;
+        let realParent: string;
+        if (
+            process.platform === "linux" &&
+            fs.existsSync(procSelfFd) &&
+            fs.statSync(procSelfFd).isDirectory()
+        ) {
+            realParent = fs.realpathSync(path.join(procSelfFd, String(parentFd)));
+            rootedPath = path.join(procSelfFd, String(parentFd), path.basename(safePath));
+        } else {
+            realParent = fs.realpathSync(parentPath);
+            const openedParentStat = fs.fstatSync(parentFd);
+            const realParentStat = fs.statSync(realParent);
+            if (
+                openedParentStat.dev !== realParentStat.dev ||
+                openedParentStat.ino !== realParentStat.ino
+            ) {
+                const error = new Error(
+                    "Parent path validation failed"
+                ) as NodeJS.ErrnoException;
+                error.code = "EACCES";
+                throw error;
+            }
+        }
+        if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
+            const error = new Error(
+                "Parent path validation failed"
+            ) as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        }
+
+        return await callback(rootedPath);
+    } finally {
+        fs.closeSync(parentFd);
+    }
+}
+
+async function ensureSafeParentDirectoryForWrite(
+    preparedSafePath: string,
+    rootPath: string
+): Promise<void> {
+    const canonicalRoot = fs.realpathSync(rootPath);
+    await withRootedParentPath(preparedSafePath, canonicalRoot, () => {});
+}
+
+async function realpathForOpenedFile(
+    file: fs.promises.FileHandle,
+    candidatePath: string
+): Promise<string> {
+    const procSelfFd = procSelfFdPath;
+    if (
+        process.platform === "linux" &&
+        fs.existsSync(procSelfFd) &&
+        fs.statSync(procSelfFd).isDirectory()
+    ) {
+        return fs.realpathSync(path.join(procSelfFd, String(file.fd)));
+    }
+
+    const openedStat = await file.stat();
+    const resolvedCandidatePath = await fs.promises.realpath(candidatePath);
+    const targetStat = fs.statSync(resolvedCandidatePath);
+    if (openedStat.dev !== targetStat.dev || openedStat.ino !== targetStat.ino) {
+        const error = new Error("File path validation failed") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+    }
+    return resolvedCandidatePath;
+}
+
+function sendRootedParentError(
+    res: express.Response,
+    error: NodeJS.ErrnoException
+): boolean {
+    if (error.code !== "EACCES") {
+        return false;
+    }
+    if (error.message !== "Parent path validation failed") {
+        return false;
+    }
+    res.status(403).json({ error: "Access denied: path outside workspace" });
+    return true;
+}
+
+export const __testing = {
+    compareNames,
+    decodeRouteFilePath,
+    getDefaultWorkspaceRoot,
+    getImageMimeType,
+    isBinaryFile,
+    isImageFile,
+    listDirectory,
+    resolveWorkspaceRoot,
+    sendRootedParentError,
+    setListDirectoryRealpathSyncForTest(nextRealpathSync?: typeof fs.realpathSync): void {
+        listDirectoryRealpathSync = nextRealpathSync ?? fs.realpathSync;
+    },
+    setProcSelfFdPathForTest(nextPath?: string): void {
+        procSelfFdPath = nextPath ?? "/proc/self/fd";
+    },
+    shouldHideFile,
+    withRootedParentPath,
+};
 
 /** Registers files API routes. */
 export default function filesRoutes(
@@ -142,132 +331,179 @@ export default function filesRoutes(
     _express: typeof express
 ): void {
     // List files
-    app.get("/api/files", (async (req, res) => {
-        try {
-            const dirPath = (req.query.path as string) || "";
-            const files = listDirectory(dirPath);
-            if (!files) {
-                res.status(403).json({ error: "Access denied: path outside workspace" });
-                return;
-            }
-            res.json({ files, root: WORKSPACE_ROOT });
-        } catch (error) {
-            console.error("[Backend] Files list error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
-
-    // Read file content
-    app.get(/^\/api\/files\/(.*)$/, (async (req, res) => {
-        const filePath = decodeURIComponent(req.params[0] || "");
-
-        try {
-            let workspaceRoot: string;
-            try {
-                workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                    res.status(404).json({ error: "File not found" });
-                    return;
+    app.get(
+        "/api/files",
+        asyncRoute(
+            async (req, res) => {
+                const dirPath = stringFallback(req.query.path);
+                let files: FileItem[] | null;
+                try {
+                    files = listDirectory(dirPath);
+                } catch (error) {
+                    if (
+                        (error as NodeJS.ErrnoException).code === "ENOENT" ||
+                        (error as NodeJS.ErrnoException).code === "ENOTDIR"
+                    ) {
+                        res.status(404).json({ error: "Directory not found" });
+                        return;
+                    }
+                    throw error;
                 }
-                throw error;
-            }
-
-            const candidatePath = path.resolve(workspaceRoot, filePath);
-
-            if (
-                candidatePath !== workspaceRoot &&
-                !candidatePath.startsWith(workspaceRoot + path.sep)
-            ) {
-                res.status(403).json({ error: "Access denied: path outside workspace" });
-                return;
-            }
-
-            let fullPath: string;
-            try {
-                fullPath = fs.realpathSync(candidatePath);
-            } catch (error) {
-                const code = (error as NodeJS.ErrnoException).code;
-                if (
-                    code === "ENOENT" ||
-                    code === "ENOTDIR" ||
-                    code === "ELOOP" ||
-                    code === "ERR_INVALID_ARG_VALUE"
-                ) {
-                    res.status(404).json({ error: "File not found" });
-                    return;
-                }
-                throw error;
-            }
-
-            if (
-                fullPath !== workspaceRoot &&
-                !fullPath.startsWith(workspaceRoot + path.sep)
-            ) {
-                res.status(403).json({ error: "Access denied: path outside workspace" });
-                return;
-            }
-
-            // Open file first to avoid TOCTOU race between stat and read.
-            // O_NOFOLLOW rejects a final-component symlink if the path is swapped
-            // after canonicalization but before open.
-            let file: fs.promises.FileHandle | undefined;
-            try {
-                file = await openReadNoFollowGuarded(guardedPath(fullPath));
-            } catch (error) {
-                const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT") {
-                    res.status(404).json({ error: "File not found" });
-                    return;
-                }
-                if (code === "ELOOP") {
+                if (!files) {
                     res.status(403).json({
-                        error: "Access denied: symlinks are not readable",
+                        error: "Access denied: path outside workspace",
                     });
                     return;
                 }
-                throw error;
-            }
+                res.json({ files, root: WORKSPACE_ROOT });
+            },
+            { fallback: "Files list failed", logLabel: "[Backend] Files list error:" }
+        )
+    );
 
-            try {
-                const stat = await file.stat();
+    // Read file content
+    app.get(
+        /^\/api\/files\/(.*)$/,
+        asyncRoute(
+            async (req, res) => {
+                const filePath = decodeRouteFilePath(req.params[0]);
 
-                if (stat.isDirectory()) {
-                    res.status(400).json({ error: "Path is a directory, not a file" });
+                let workspaceRoot: string;
+                try {
+                    workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                    throw error;
+                }
+
+                const candidatePath = path.resolve(workspaceRoot, filePath);
+
+                if (
+                    candidatePath !== workspaceRoot &&
+                    !candidatePath.startsWith(workspaceRoot + path.sep)
+                ) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
                     return;
                 }
 
-                const filename = path.basename(filePath);
+                let file: fs.promises.FileHandle | undefined;
+                let fullPath: string;
+                try {
+                    file = await openReadNoFollowGuarded(guardedPath(candidatePath));
+                    fullPath = await realpathForOpenedFile(file, candidatePath);
+                } catch (error) {
+                    if (file) {
+                        await file.close();
+                    }
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (
+                        code === "ENOENT" ||
+                        code === "ENOTDIR" ||
+                        code === "ERR_INVALID_ARG_VALUE"
+                    ) {
+                        res.status(404).json({ error: "File not found" });
+                        return;
+                    }
+                    if (code === "ELOOP") {
+                        res.status(403).json({
+                            error: "Access denied: symlinks are not readable",
+                        });
+                        return;
+                    }
+                    if (
+                        code === "EACCES" &&
+                        (error as Error).message === "File path validation failed"
+                    ) {
+                        res.status(403).json({
+                            error: "Access denied: path outside workspace",
+                        });
+                        return;
+                    }
+                    throw error;
+                }
 
-                // Handle image files
-                if (isImageFile(filename)) {
-                    if (stat.size > MAX_FILE_SIZE) {
-                        res.status(413).json({
-                            error: "Image file is too large to preview",
+                if (
+                    fullPath !== workspaceRoot &&
+                    !fullPath.startsWith(workspaceRoot + path.sep)
+                ) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
+                    if (file) await file.close();
+                    return;
+                }
+
+                try {
+                    const stat = await file.stat();
+
+                    if (stat.isDirectory()) {
+                        res.status(400).json({
+                            error: "Path is a directory, not a file",
                         });
                         return;
                     }
 
-                    const buffer = await file.readFile();
-                    const base64 = buffer.toString("base64");
-                    const mimeType = getImageMimeType(filename);
+                    if (stat.nlink > 1) {
+                        res.status(403).json({ error: HARD_LINK_ERROR });
+                        return;
+                    }
 
-                    res.json({
-                        path: filePath,
-                        content: base64,
-                        mimeType: mimeType,
-                        size: stat.size,
-                        modified: stat.mtime.toISOString(),
-                        isImage: true,
-                        isBinary: true,
-                    } satisfies FileResponse);
-                    return;
-                }
+                    const filename = path.basename(filePath);
 
-                if (stat.size > MAX_FILE_SIZE) {
-                    const buffer = Buffer.alloc(MAX_FILE_SIZE);
-                    const { bytesRead } = await file.read(buffer, 0, MAX_FILE_SIZE, 0);
-                    const content = buffer.subarray(0, bytesRead).toString("utf8");
+                    // Handle image files
+                    if (isImageFile(filename)) {
+                        if (stat.size > MAX_FILE_SIZE) {
+                            res.status(413).json({
+                                error: "Image file is too large to preview",
+                            });
+                            return;
+                        }
+
+                        const buffer = await file.readFile();
+                        const base64 = buffer.toString("base64");
+                        const mimeType = getImageMimeType(filename);
+
+                        res.json({
+                            path: filePath,
+                            content: base64,
+                            mimeType: mimeType,
+                            size: stat.size,
+                            modified: stat.mtime.toISOString(),
+                            isImage: true,
+                            isBinary: true,
+                        } satisfies FileResponse);
+                        return;
+                    }
+
+                    if (stat.size > MAX_FILE_SIZE) {
+                        const buffer = Buffer.alloc(MAX_FILE_SIZE);
+                        const { bytesRead } = await file.read(
+                            buffer,
+                            0,
+                            MAX_FILE_SIZE,
+                            0
+                        );
+                        const content = buffer.subarray(0, bytesRead).toString("utf8");
+                        const isBinary = isBinaryFile(content);
+
+                        res.json({
+                            path: filePath,
+                            content: isBinary ? "[Binary file]" : content,
+                            size: stat.size,
+                            modified: stat.mtime.toISOString(),
+                            isBinary: isBinary,
+                            truncated: true,
+                        } satisfies FileResponse);
+                        return;
+                    }
+
+                    const fullBuffer = await file.readFile();
+                    const content = fullBuffer.toString("utf8");
                     const isBinary = isBinaryFile(content);
 
                     res.json({
@@ -276,79 +512,238 @@ export default function filesRoutes(
                         size: stat.size,
                         modified: stat.mtime.toISOString(),
                         isBinary: isBinary,
-                        truncated: true,
                     } satisfies FileResponse);
+                } finally {
+                    if (file) await file.close();
+                }
+            },
+            { fallback: "File read failed", logLabel: "[Backend] File read error:" }
+        )
+    );
+
+    // Write file
+    app.put(
+        /^\/api\/files\/(.*)$/,
+        express.json({ limit: JSON_WRITE_BODY_LIMIT }),
+        asyncRoute(
+            async (req, res) => {
+                const filePath = decodeRouteFilePath(req.params[0]);
+                const content =
+                    req.body && typeof req.body === "object"
+                        ? (req.body as { content?: unknown }).content
+                        : undefined;
+
+                if (typeof content !== "string") {
+                    res.status(400).json({ error: "Content required" });
+                    return;
+                }
+                if (Buffer.byteLength(content, "utf8") > MAX_FILE_SIZE) {
+                    res.status(413).json({ error: "File is too large to write" });
                     return;
                 }
 
-                const fullBuffer = await file.readFile();
-                const content = fullBuffer.toString("utf8");
-                const isBinary = isBinaryFile(content);
+                let workspaceRoot: string;
+                try {
+                    workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT") {
+                        workspaceRoot = path.resolve(WORKSPACE_ROOT);
+                    } else {
+                        if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                            return;
+                        }
+                        throw error;
+                    }
+                }
 
-                res.json({
-                    path: filePath,
-                    content: isBinary ? "[Binary file]" : content,
-                    size: stat.size,
-                    modified: stat.mtime.toISOString(),
-                    isBinary: isBinary,
-                } satisfies FileResponse);
-            } finally {
-                if (file) await file.close();
-            }
-        } catch (error) {
-            console.error("[Backend] File read error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
+                const fullPath = safePathWithinRoot(filePath, workspaceRoot);
 
-    // Write file
-    app.put(/^\/api\/files\/(.*)$/, express.json(), (async (req, res) => {
-        const filePath = decodeURIComponent(req.params[0] || "");
-        const { content } = req.body as { content?: string };
+                if (!fullPath) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
+                    return;
+                }
 
-        if (typeof content !== "string") {
-            res.status(400).json({ error: "Content required" });
-            return;
-        }
+                const safeFullPath = prepareSafeWriteTargetWithinRoot(
+                    fullPath,
+                    workspaceRoot
+                );
+                if (!safeFullPath) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
+                    return;
+                }
 
-        try {
-            const fullPath = safePathWithinRoot(filePath, WORKSPACE_ROOT);
-
-            if (!fullPath) {
-                res.status(403).json({ error: "Access denied: path outside workspace" });
-                return;
-            }
-
-            const safeFullPath = prepareSafeWriteTargetWithinRoot(
-                fullPath,
-                WORKSPACE_ROOT
-            );
-            if (!safeFullPath) {
-                res.status(403).json({ error: "Access denied: path outside workspace" });
-                return;
-            }
-
-            try {
                 const backupPath = safeFullPath + ".bak";
-                copyGuarded(guardedPath(safeFullPath), guardedPath(backupPath));
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                const safeBackupPath = prepareSafeWriteTargetWithinRoot(
+                    backupPath,
+                    workspaceRoot
+                );
+                if (!safeBackupPath) {
+                    res.status(403).json({
+                        error: "Access denied: path outside workspace",
+                    });
+                    return;
+                }
+                try {
+                    await ensureSafeParentDirectoryForWrite(safeFullPath, workspaceRoot);
+                } catch (error) {
+                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                        return;
+                    }
                     throw error;
                 }
+
+                let stat: fs.Stats | null;
+                try {
+                    stat = await withRootedParentPath(
+                        safeFullPath,
+                        workspaceRoot,
+                        async (rootedFullPath) => {
+                            let existingMode: number | null = null;
+                            let shouldCopyBackup = false;
+                            try {
+                                const existingStat = statGuarded(
+                                    guardedPath(rootedFullPath)
+                                );
+                                if (existingStat.isDirectory()) {
+                                    throw Object.assign(
+                                        new Error("Path is a directory, not a file"),
+                                        { code: "EISDIR" }
+                                    );
+                                }
+                                if (existingStat.nlink > 1) {
+                                    return null;
+                                }
+                                existingMode = existingStat.mode & 0o777;
+                                if (existingStat.size > MAX_BACKUP_COPY_BYTES) {
+                                    await fs.promises
+                                        .unlink(
+                                            path.join(
+                                                path.dirname(rootedFullPath),
+                                                path.basename(safeBackupPath)
+                                            )
+                                        )
+                                        .catch((error) => {
+                                            if (
+                                                (error as NodeJS.ErrnoException).code !==
+                                                "ENOENT"
+                                            ) {
+                                                throw error;
+                                            }
+                                        });
+                                    shouldCopyBackup = false;
+                                } else {
+                                    shouldCopyBackup = true;
+                                }
+                            } catch (error) {
+                                const code = (error as NodeJS.ErrnoException).code;
+                                if (code !== "ENOENT") {
+                                    throw error;
+                                }
+                            }
+
+                            if (shouldCopyBackup) {
+                                try {
+                                    await withRootedParentPath(
+                                        safeBackupPath,
+                                        workspaceRoot,
+                                        (rootedBackupPath) =>
+                                            copyNoFollowGuarded(
+                                                guardedPath(rootedFullPath),
+                                                guardedPath(rootedBackupPath)
+                                            )
+                                    );
+                                } catch (error) {
+                                    const code = (error as NodeJS.ErrnoException).code;
+                                    if (code === "EMLINK") {
+                                        return null;
+                                    }
+                                    if (code !== "ENOENT") {
+                                        throw error;
+                                    }
+                                }
+                            }
+
+                            const tempPath = `${rootedFullPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+                            try {
+                                await writeTextNoFollowExclusiveGuarded(
+                                    guardedPath(tempPath),
+                                    content,
+                                    existingMode ?? undefined
+                                );
+                                await fs.promises.rename(tempPath, rootedFullPath);
+                                return statGuarded(guardedPath(rootedFullPath));
+                            } finally {
+                                await fs.promises.rm(tempPath, { force: true });
+                            }
+                        }
+                    );
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code === "ENOENT") {
+                        res.status(404).json({ error: "Path not found" });
+                        return;
+                    }
+                    if (code === "ENOTDIR") {
+                        res.status(400).json({ error: "Not a directory" });
+                        return;
+                    }
+                    if (code === "ELOOP") {
+                        res.status(403).json({
+                            error: "Access denied: symlinks are not writable",
+                        });
+                        return;
+                    }
+                    if (code === "EISDIR") {
+                        res.status(400).json({
+                            error: "Path is a directory, not a file",
+                        });
+                        return;
+                    }
+                    if (code === "EINVAL") {
+                        res.status(400).json({
+                            error: (error as Error).message,
+                        });
+                        return;
+                    }
+                    if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
+                        return;
+                    }
+                    throw error;
+                }
+                if (!stat) {
+                    res.status(403).json({ error: HARD_LINK_ERROR });
+                    return;
+                }
+
+                res.json({
+                    success: true,
+                    path: filePath,
+                    size: stat.size,
+                    modified: stat.mtime.toISOString(),
+                } satisfies WriteResponse);
+            },
+            { fallback: "File write failed", logLabel: "[Backend] File write error:" }
+        )
+    );
+
+    app.use(
+        "/api/files",
+        (
+            error: unknown,
+            _req: express.Request,
+            res: express.Response,
+            next: express.NextFunction
+        ) => {
+            if (error instanceof URIError) {
+                res.status(400).json({ error: "Malformed URL encoding" });
+                return;
             }
-
-            await writeTextNoFollowGuarded(guardedPath(safeFullPath), content);
-            const stat = statGuarded(guardedPath(safeFullPath));
-
-            res.json({
-                success: true,
-                path: filePath,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-            } satisfies WriteResponse);
-        } catch (error) {
-            console.error("[Backend] File write error:", (error as Error).message);
-            res.status(500).json({ error: (error as Error).message });
+            next(error);
         }
-    }) as RequestHandler);
+    );
 }

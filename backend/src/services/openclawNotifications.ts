@@ -3,6 +3,7 @@ import { fetchCachedSystemHost } from "../lib/systemCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Represents alert state. */
 interface AlertState {
@@ -63,6 +64,7 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 }
 
 let running = false;
+let monitorTimer: NodeJS.Timeout | undefined;
 
 /** Performs run OpenClaw notification check. */
 export async function runOpenClawNotificationCheck(): Promise<void> {
@@ -75,7 +77,6 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
     try {
         const cached = await fetchCachedSystemHost();
         const version = cached.data.version;
-
         if (!version) {
             throw new Error("OpenClaw version missing from system.host cache");
         }
@@ -109,11 +110,30 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
 export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
     const safeInterval =
         Number.isFinite(intervalMs) && intervalMs >= 60_000
-            ? intervalMs
+            ? Math.min(Math.trunc(intervalMs), MAX_TIMER_MS)
             : DEFAULT_INTERVAL_MS;
 
+    if (monitorTimer) {
+        clearInterval(monitorTimer);
+        monitorTimer = undefined;
+    }
+
     void runOpenClawNotificationCheck();
-    setInterval(() => {
+    monitorTimer = setInterval(() => {
         void runOpenClawNotificationCheck();
     }, safeInterval).unref();
 }
+
+/** Stops OpenClaw notification monitor. */
+export function stopOpenClawNotificationMonitor(): void {
+    if (!monitorTimer) {
+        return;
+    }
+    clearInterval(monitorTimer);
+    monitorTimer = undefined;
+}
+
+export const __testing = {
+    getState,
+    stopOpenClawNotificationMonitorForTest: stopOpenClawNotificationMonitor,
+};

@@ -6,6 +6,7 @@ import WebSocket from "ws";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const MIN_TICK_INTERVAL_MS = 1_000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
@@ -119,7 +120,6 @@ function derivePublicKeyRaw(publicKeyPem: string): Buffer {
     ) {
         return spki.subarray(ED25519_SPKI_PREFIX.length);
     }
-
     return spki;
 }
 
@@ -134,6 +134,11 @@ function fingerprintPublicKey(publicKeyPem: string): string {
 /** Performs public key raw base64 URL from pem. */
 function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
     return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
+}
+
+/** Returns a normalized error instance for callback surfaces. */
+function asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
 }
 
 /** Performs sign device payload. */
@@ -243,23 +248,40 @@ function buildDeviceAuthPayloadV3(params: {
     ].join("|");
 }
 
+export const __testing = {
+    asError,
+    derivePublicKeyRaw,
+    sanitizeTimerDurationMs,
+    normalizeDeviceMetadataForAuth,
+    buildDeviceAuthPayloadV3,
+};
+
 /** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private readonly opts: OpenClawGatewayClientOptions;
     private ws: WebSocket | null = null;
-    private requestId = 0;
-    private readonly pending = new Map<string, PendingRequestEntry>();
+    private requestId: number = 0;
+    private readonly pending: Map<string, PendingRequestEntry>;
     private static readonly MAX_PENDING_REQUESTS = 1000;
-    private closed = false;
-    private reconnectTimer: NodeJS.Timeout | null = null;
-    private connectChallengeTimer: NodeJS.Timeout | null = null;
-    private backoffMs = 1_000;
-    private tickTimer: NodeJS.Timeout | null = null;
-    private tickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
-    private lastTickAt = 0;
+    private closed: boolean;
+    private reconnectTimer: NodeJS.Timeout | null;
+    private connectChallengeTimer: NodeJS.Timeout | null;
+    private backoffMs: number;
+    private tickTimer: NodeJS.Timeout | null;
+    private tickIntervalMs: number;
+    private lastTickAt: number;
 
     constructor(opts: OpenClawGatewayClientOptions) {
+        this.pending = new Map();
+        this.closed = false;
+        this.reconnectTimer = null;
+        this.connectChallengeTimer = null;
+        this.backoffMs = 1_000;
+        this.tickTimer = null;
+        this.tickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
+        this.lastTickAt = 0;
         this.opts = {
+            url: "ws://127.0.0.1:18789",
             requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
             clientName: "gateway-client",
             clientVersion: "1.0.0",
@@ -276,9 +298,23 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (this.closed || this.ws) {
             return;
         }
-
-        const url = this.opts.url || "ws://127.0.0.1:18789";
-        const ws = new WebSocket(url);
+        const trimmedUrl = (
+            typeof this.opts.url === "string" ? this.opts.url : "ws://127.0.0.1:18789"
+        ).trim();
+        if (trimmedUrl === "") {
+            throw new Error("Gateway URL must be a non-empty string");
+        }
+        const requestTimeoutMs =
+            typeof this.opts.requestTimeoutMs === "number" &&
+            Number.isFinite(this.opts.requestTimeoutMs) &&
+            this.opts.requestTimeoutMs > 0
+                ? Math.trunc(this.opts.requestTimeoutMs)
+                : DEFAULT_REQUEST_TIMEOUT_MS;
+        this.opts.requestTimeoutMs = Math.min(
+            Math.max(requestTimeoutMs, 1),
+            MAX_TIMER_DELAY_MS
+        );
+        const ws = new WebSocket(trimmedUrl);
         this.ws = ws;
 
         ws.on("open", () => {
@@ -304,9 +340,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         });
 
         ws.on("error", (error) => {
-            this.opts.onConnectError?.(
-                error instanceof Error ? error : new Error(String(error))
-            );
+            this.opts.onConnectError?.(asError(error));
         });
     }
 
@@ -326,10 +360,10 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     }
 
     request(method: string, params: unknown = {}): Promise<unknown> {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        const ws = this.ws;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
         }
-
         if (this.pending.size >= OpenClawGatewayClient.MAX_PENDING_REQUESTS) {
             return Promise.reject(new Error("Too many pending gateway requests"));
         }
@@ -346,10 +380,23 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             const timeout = setTimeout(() => {
                 this.pending.delete(id);
                 reject(new Error(`Gateway request timed out: ${method}`));
-            }, this.opts.requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS);
+            }, this.opts.requestTimeoutMs as number);
 
             this.pending.set(id, { resolve, reject, timeout });
-            this.ws?.send(JSON.stringify(frame));
+            try {
+                ws.send(JSON.stringify(frame), (error) => {
+                    if (!error) {
+                        return;
+                    }
+                    this.pending.delete(id);
+                    clearTimeout(timeout);
+                    reject(error);
+                });
+            } catch (error) {
+                this.pending.delete(id);
+                clearTimeout(timeout);
+                reject(error);
+            }
         });
     }
 
@@ -375,7 +422,6 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (this.reconnectTimer || this.closed) {
             return;
         }
-
         const delay = this.backoffMs;
         this.backoffMs = Math.min(this.backoffMs * 2, 30_000);
         this.reconnectTimer = setTimeout(() => {
@@ -392,7 +438,6 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
                 return;
             }
-
             const now = Date.now();
             const maxSilenceMs = this.tickIntervalMs * 3;
             if (this.lastTickAt && now - this.lastTickAt > maxSilenceMs) {

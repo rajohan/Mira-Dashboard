@@ -117,12 +117,13 @@ interface ExecResponse {
 /** Represents exec job. */
 interface ExecJob {
     id: string;
-    status: "running" | "done";
+    status: "running" | "signaled" | "done";
     code: number | null;
     stdout: string;
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    closePending?: boolean;
     process?: ChildProcess;
 }
 
@@ -134,7 +135,7 @@ interface ExecStartResponse {
 /** Represents the exec job API response. */
 interface ExecJobResponse {
     jobId: string;
-    status: "running" | "done";
+    status: "running" | "signaled" | "done";
     code: number | null;
     stdout: string;
     stderr: string;
@@ -154,7 +155,6 @@ function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
     }
-
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
@@ -184,7 +184,6 @@ function parseDirectCommand(command: string): { executable: string; args: string
     if (!executable || !EXECUTABLE_RE.test(executable)) {
         throw new ExecValidationError("command must start with an executable path");
     }
-
     return { executable, args: parsedArgs };
 }
 
@@ -255,7 +254,13 @@ function execErrorResponse(error: unknown): { status: number; error: string } {
         return { status: 400, error: error.message };
     }
 
-    console.error("[Exec] Route error:", (error as Error).message);
+    const message =
+        error instanceof Error
+            ? error.message
+            : error == null
+              ? "Unknown error"
+              : String(error);
+    console.error("[Exec] Route error:", message);
     return { status: 500, error: "internal server error" };
 }
 
@@ -339,21 +344,103 @@ function runExecCommand(
 
 /** Performs cleanup jobs. */
 function cleanupJobs(): void {
-    if (jobs.size <= MAX_JOBS) {
+    if (jobs.size < MAX_JOBS) {
+        return;
+    }
+    const entries = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
+    let overflow = entries.length - (MAX_JOBS - 1);
+
+    for (const job of entries) {
+        if (overflow <= 0) {
+            break;
+        }
+        if (
+            job.closePending ||
+            ((job.status === "running" || job.status === "signaled") && job.process)
+        ) {
+            continue;
+        }
+        jobs.delete(job.id);
+        overflow -= 1;
+    }
+
+    if (overflow > 0) {
+        console.warn("[Exec] Job cleanup skipped active jobs while enforcing cap");
+    }
+}
+
+/** Updates buffered output for a running exec job. */
+function updateExecJobOutput(jobId: string, update: ExecJob): void {
+    const current = jobs.get(jobId);
+    if (!current) {
         return;
     }
 
-    const entries = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
-    const overflow = entries.length - MAX_JOBS;
-
-    for (let index = 0; index < overflow; index += 1) {
-        const job = entries[index];
-        if (job.process && !job.process.killed) {
-            job.process.kill("SIGTERM");
-        }
-        jobs.delete(job.id);
-    }
+    current.stdout = update.stdout;
+    current.stderr = update.stderr;
 }
+
+/** Marks an exec job as finished successfully. */
+function completeExecJob(jobId: string, result: ExecResponse): void {
+    const current = jobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    if (!current.closePending) {
+        current.code = result.code;
+    }
+    current.stdout = result.stdout;
+    current.stderr = result.stderr;
+    current.endedAt = Date.now();
+    current.closePending = false;
+    current.process = undefined;
+    cleanupJobs();
+}
+
+function markExecJobForcedKilled(job: ExecJob): void {
+    job.closePending = true;
+    job.status = "done";
+    job.code = 137;
+    job.endedAt = Date.now();
+    cleanupJobs();
+}
+
+function isProcessGoneError(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+}
+
+/** Marks an exec job as finished with an execution error. */
+function failExecJob(jobId: string, error: unknown): void {
+    const current = jobs.get(jobId);
+    if (!current) {
+        return;
+    }
+
+    current.status = "done";
+    current.code = 1;
+    const message = error instanceof Error ? error.message : String(error);
+    current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
+    current.endedAt = Date.now();
+    current.closePending = false;
+    current.process = undefined;
+    cleanupJobs();
+}
+
+/** Defines testing. */
+export const __testing = {
+    cleanupJobs,
+    completeExecJob,
+    execErrorResponse,
+    failExecJob,
+    getApprovedShellCommand,
+    jobs,
+    parseDirectCommand,
+    resolveCwd,
+    trimOutput,
+    updateExecJobOutput,
+};
 
 /** Registers exec API routes. */
 export default function execRoutes(
@@ -386,6 +473,12 @@ export default function execRoutes(
             return;
         }
 
+        cleanupJobs();
+        if (jobs.size >= MAX_JOBS) {
+            res.status(429).json({ error: "Too many exec jobs" });
+            return;
+        }
+
         const jobId = randomUUID();
         const startedAt = Date.now();
         jobs.set(jobId, {
@@ -396,6 +489,7 @@ export default function execRoutes(
             stderr: "",
             startedAt,
             endedAt: null,
+            closePending: false,
         });
 
         let runPromise: Promise<ExecResponse>;
@@ -403,15 +497,7 @@ export default function execRoutes(
             runPromise = runExecCommand(
                 payload,
                 jobId,
-                (update) => {
-                    const current = jobs.get(jobId);
-                    if (!current) {
-                        return;
-                    }
-
-                    current.stdout = update.stdout;
-                    current.stderr = update.stderr;
-                },
+                (update) => updateExecJobOutput(jobId, update),
                 { allowTerminalShell: true }
             );
         } catch (error) {
@@ -422,41 +508,15 @@ export default function execRoutes(
         }
 
         void runPromise
-            .then((result) => {
-                const current = jobs.get(jobId);
-                if (!current) {
-                    return;
-                }
-
-                current.status = "done";
-                current.code = result.code;
-                current.stdout = result.stdout;
-                current.stderr = result.stderr;
-                current.endedAt = Date.now();
-                cleanupJobs();
-            })
-            .catch((error) => {
-                const current = jobs.get(jobId);
-                if (!current) {
-                    return;
-                }
-
-                current.status = "done";
-                current.code = 1;
-                current.stderr = trimOutput(
-                    `${current.stderr}\n${(error as Error).message}`.trim()
-                );
-                current.endedAt = Date.now();
-                cleanupJobs();
-            });
+            .then((result) => completeExecJob(jobId, result))
+            .catch((error) => failExecJob(jobId, error));
 
         res.json({ jobId } satisfies ExecStartResponse);
     }) as RequestHandler);
 
     app.post("/api/exec/:jobId/stop", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = String(req.params.jobId);
         const job = jobs.get(jobId);
-
         if (!job) {
             res.status(404).json({ error: "Exec job not found" });
             return;
@@ -468,22 +528,49 @@ export default function execRoutes(
         }
 
         if (job.process && !job.process.killed) {
+            const processId = job.process.pid;
             try {
                 // Kill the entire process group (negative PID)
-                process.kill(-job.process.pid!, "SIGTERM");
+                if (typeof processId !== "number") {
+                    throw new TypeError("Process PID is unavailable");
+                }
+                process.kill(-processId, "SIGTERM");
             } catch {
                 // Fallback to killing just the process if process group fails
-                job.process.kill("SIGTERM");
+                const sent = job.process.kill("SIGTERM");
+                if (!sent) {
+                    // Process already gone – close handler will transition to done
+                    res.json({ success: true, message: "Process already terminated" });
+                    return;
+                }
             }
+            job.status = "signaled";
 
             // Force kill after 3 seconds if still running
             setTimeout(() => {
-                try {
-                    if (job.process && !job.process.killed) {
-                        process.kill(-job.process.pid!, "SIGKILL");
+                if (job.process && job.status === "signaled") {
+                    const processId = job.process.pid;
+                    try {
+                        if (typeof processId === "number") {
+                            process.kill(-processId, "SIGKILL");
+                            markExecJobForcedKilled(job);
+                        }
+                    } catch (groupKillError) {
+                        if (isProcessGoneError(groupKillError)) {
+                            return;
+                        }
+                        if (typeof processId === "number") {
+                            try {
+                                process.kill(processId, "SIGKILL");
+                                markExecJobForcedKilled(job);
+                            } catch (processKillError) {
+                                if (isProcessGoneError(processKillError)) {
+                                    return;
+                                }
+                                return;
+                            }
+                        }
                     }
-                } catch {
-                    // Ignore errors - process might already be gone
                 }
             }, 3000);
 
@@ -494,7 +581,7 @@ export default function execRoutes(
     }) as RequestHandler);
 
     app.get("/api/exec/:jobId", ((req, res) => {
-        const jobId = String(req.params.jobId || "");
+        const jobId = String(req.params.jobId);
         const job = jobs.get(jobId);
 
         if (!job) {

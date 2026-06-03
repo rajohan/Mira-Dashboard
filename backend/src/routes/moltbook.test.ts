@@ -30,14 +30,19 @@ function row(key, data, meta = {}) {
   ].join("\n");
 }
 if (command.includes("moltbook.home")) {
+  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "home") throw new Error("home cache failed");
   process.stdout.write(row("moltbook.home", { pendingRequestCount: 1, unreadMessageCount: 2, activityOnYourPostsCount: 0, activityOnYourPosts: [], latestAnnouncement: { postId: "post-1", title: "Hello", authorName: "Mira", createdAt: "2026-05-11", preview: "Hi" }, postsFromAccountsYouFollowCount: 3, exploreCount: 4, nextActions: ["reply"], fetchedAt: "2026-05-11T00:00:00.000Z" }, { ttl: 60 }));
 } else if (command.includes("moltbook.feed.new")) {
+  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "feed") throw new Error("feed cache failed");
   process.stdout.write(row("moltbook.feed.new", { posts: [{ id: "new-1" }], feedType: "explore", feedFilter: "new", hasMore: false, tip: null }));
 } else if (command.includes("moltbook.feed.hot")) {
+  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "feed") throw new Error("feed cache failed");
   process.stdout.write(row("moltbook.feed.hot", { posts: [{ id: "hot-1" }], feedType: "explore", feedFilter: "hot", hasMore: true, tip: "Be specific" }));
 } else if (command.includes("moltbook.profile")) {
+  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "profile") throw new Error("profile cache failed");
   process.stdout.write(row("moltbook.profile", { agent: { username: "mira_2026" } }));
 } else if (command.includes("moltbook.my-content")) {
+  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "content") throw new Error("content cache failed");
   process.stdout.write(row("moltbook.my-content", { posts: [{ id: "mine-1" }], comments: [{ id: "comment-1" }] }));
 } else {
   process.stderr.write("Unexpected fake docker command: " + command);
@@ -56,7 +61,24 @@ async function startServer(): Promise<TestServer> {
     moltbookRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("listening", onListening);
+            server.off("error", onError);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
@@ -77,9 +99,18 @@ describe("moltbook routes", () => {
     });
 
     after(async () => {
-        await server.close();
-        process.env.PATH = originalPath;
-        await rm(tempDir, { recursive: true, force: true });
+        if (server) {
+            await server.close();
+        }
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
+        delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("returns cached Moltbook home metadata", async () => {
@@ -132,5 +163,29 @@ describe("moltbook routes", () => {
             posts: [{ id: "mine-1" }],
             comments: [{ id: "comment-1" }],
         });
+    });
+
+    it("maps cache command failures to 503 responses", async () => {
+        const cases = [
+            ["home", "/api/moltbook/home", "home cache failed"],
+            ["feed", "/api/moltbook/feed", "feed cache failed"],
+            ["profile", "/api/moltbook/profile", "profile cache failed"],
+            ["content", "/api/moltbook/my-posts", "content cache failed"],
+        ] as const;
+
+        for (const [failure, route, expectedError] of cases) {
+            try {
+                process.env.MIRA_TEST_MOLTBOOK_FAIL = failure;
+                const response = await fetch(`${server.baseUrl}${route}`);
+                const body = (await response.json()) as { error: string };
+                assert.equal(response.status, 503);
+                assert.ok(
+                    body.error.includes(expectedError),
+                    `unexpected error: ${body.error}`
+                );
+            } finally {
+                delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
+            }
+        }
     });
 });

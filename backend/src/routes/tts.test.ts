@@ -77,6 +77,10 @@ describe("TTS routes", () => {
         assert.equal(missingText.status, 400);
         assert.equal(missingText.body.error, "Missing text");
 
+        const nonStringText = await postJson<{ error: string }>(server, { text: 42 });
+        assert.equal(nonStringText.status, 400);
+        assert.equal(nonStringText.body.error, "Missing text");
+
         const tooLong = await postJson<{ error: string }>(server, {
             text: "x".repeat(4001),
         });
@@ -87,41 +91,93 @@ describe("TTS routes", () => {
     it("proxies successful speech generation as MPEG audio", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         fetchCalls.length = 0;
-        globalThis.fetch = async (url, init) => {
-            fetchCalls.push({ url: String(url), init: init || {} });
-            return new Response(Buffer.from([1, 2, 3]), { status: 200 });
-        };
+        try {
+            globalThis.fetch = async (url, init) => {
+                fetchCalls.push({ url: String(url), init: init || {} });
+                return new Response(Buffer.from([1, 2, 3]), { status: 200 });
+            };
 
-        const response = await originalFetch(`${server.baseUrl}/api/tts/speak`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: "  Hello Mira  " }),
-        });
+            const response = await originalFetch(`${server.baseUrl}/api/tts/speak`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: "  Hello Mira  " }),
+            });
 
-        assert.equal(response.status, 200);
-        assert.equal(response.headers.get("content-type"), "audio/mpeg");
-        assert.equal(response.headers.get("cache-control"), "no-store");
-        assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3]);
-        assert.equal(fetchCalls.length, 1);
-        assert.match(fetchCalls[0]?.url || "", /\/v1\/text-to-speech\//u);
-        assert.equal(
-            (fetchCalls[0]?.init.headers as Record<string, string>)["xi-api-key"],
-            "test-key"
-        );
-        assert.deepEqual(JSON.parse(String(fetchCalls[0]?.init.body)), {
-            text: "Hello Mira",
-            model_id: "eleven_turbo_v2_5",
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-        });
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get("content-type"), "audio/mpeg");
+            assert.equal(response.headers.get("cache-control"), "no-store");
+            assert.deepEqual(
+                [...new Uint8Array(await response.arrayBuffer())],
+                [1, 2, 3]
+            );
+            assert.equal(fetchCalls.length, 1);
+            assert.match(fetchCalls[0]?.url || "", /\/v1\/text-to-speech\//u);
+            assert.equal(
+                (fetchCalls[0]?.init.headers as Record<string, string>)["xi-api-key"],
+                "test-key"
+            );
+            assert.deepEqual(JSON.parse(String(fetchCalls[0]?.init.body)), {
+                text: "Hello Mira",
+                model_id: "eleven_turbo_v2_5",
+                voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 
     it("forwards ElevenLabs error responses", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
-        globalThis.fetch = async () => new Response("quota exceeded", { status: 429 });
+        try {
+            globalThis.fetch = async () =>
+                new Response("quota exceeded", { status: 429 });
 
-        const response = await postJson<{ error: string }>(server, { text: "hello" });
+            const response = await postJson<{ error: string }>(server, { text: "hello" });
 
-        assert.equal(response.status, 429);
-        assert.equal(response.body.error, "quota exceeded");
+            assert.equal(response.status, 429);
+            assert.equal(response.body.error, "quota exceeded");
+
+            globalThis.fetch = async () =>
+                ({
+                    ok: false,
+                    status: 502,
+                    text: async () => {
+                        throw new Error("body unavailable");
+                    },
+                }) as unknown as Response;
+            const fallback = await postJson<{ error: string }>(server, {
+                text: "hello",
+            });
+            assert.equal(fallback.status, 502);
+            assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it("surfaces speech generation exceptions", async () => {
+        process.env.ELEVENLABS_API_KEY = "test-key";
+        try {
+            globalThis.fetch = async () => {
+                throw new Error("network down");
+            };
+
+            const response = await postJson<{ error: string }>(server, { text: "hello" });
+
+            assert.equal(response.status, 500);
+            assert.equal(response.body.error, "network down");
+
+            globalThis.fetch = async () => {
+                throw "";
+            };
+
+            const fallback = await postJson<{ error: string }>(server, {
+                text: "hello",
+            });
+            assert.equal(fallback.status, 500);
+            assert.equal(fallback.body.error, "Failed to generate speech");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 });

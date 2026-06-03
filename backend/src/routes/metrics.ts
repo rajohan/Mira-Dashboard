@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "fs";
 import os from "os";
 
 import gateway from "../gateway.js";
+import { stringFallback } from "../lib/values.js";
 
 /** Represents cpu metrics. */
 interface CpuMetrics {
@@ -79,6 +80,28 @@ let previousNetworkSample: {
     uploadBytes: number;
 } | null = null;
 
+const metricsDeps = {
+    execSync,
+    readdirSync,
+    readFileSync,
+};
+
+export const __testing = {
+    getNetworkMetrics,
+    getTokenMetrics,
+    resetNetworkSample(): void {
+        previousNetworkSample = null;
+    },
+    setDepsForTest(deps: Partial<typeof metricsDeps>): void {
+        Object.assign(metricsDeps, deps);
+    },
+    resetDepsForTest(): void {
+        metricsDeps.execSync = execSync;
+        metricsDeps.readdirSync = readdirSync;
+        metricsDeps.readFileSync = readFileSync;
+    },
+};
+
 /** Returns network metrics. */
 function getNetworkMetrics(): NetworkMetrics {
     let downloadBytes = 0;
@@ -86,7 +109,7 @@ function getNetworkMetrics(): NetworkMetrics {
 
     try {
         const preferredInterface = "enp0s6";
-        const availableInterfaces = readdirSync("/sys/class/net");
+        const availableInterfaces = metricsDeps.readdirSync("/sys/class/net");
         const interfaces = availableInterfaces.includes(preferredInterface)
             ? [preferredInterface]
             : availableInterfaces.filter((name) => name !== "lo");
@@ -94,11 +117,11 @@ function getNetworkMetrics(): NetworkMetrics {
         for (const name of interfaces) {
             const basePath = `/sys/class/net/${name}/statistics`;
             const rxBytes = Number.parseInt(
-                readFileSync(`${basePath}/rx_bytes`, "utf8").trim(),
+                metricsDeps.readFileSync(`${basePath}/rx_bytes`, "utf8").trim(),
                 10
             );
             const txBytes = Number.parseInt(
-                readFileSync(`${basePath}/tx_bytes`, "utf8").trim(),
+                metricsDeps.readFileSync(`${basePath}/tx_bytes`, "utf8").trim(),
                 10
             );
 
@@ -125,8 +148,8 @@ function getNetworkMetrics(): NetworkMetrics {
     }
 
     const elapsedSeconds = (timestamp - previousNetworkSample.timestamp) / 1000;
-
     if (elapsedSeconds <= 0) {
+        previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
         return {
             downloadMbps: 0,
             uploadMbps: 0,
@@ -167,9 +190,11 @@ function getSystemMetrics(): SystemMetricsResponse {
     let diskPercent = 0;
 
     try {
-        const dfOutput = execSync("df -B1 / | tail -1", { encoding: "utf8" });
+        const dfOutput = metricsDeps.execSync("df -B1 / | tail -1", {
+            encoding: "utf8",
+        });
         const parts = dfOutput.trim().split(/\s+/);
-        if (parts.length >= 4) {
+        if (parts.length >= 5) {
             diskTotal = Number.parseInt(parts[1], 10);
             diskUsed = Number.parseInt(parts[2], 10);
             diskPercent = Number.parseInt(parts[4], 10);
@@ -185,7 +210,7 @@ function getSystemMetrics(): SystemMetricsResponse {
     return {
         cpu: {
             count: cpus.length,
-            model: cpus[0]?.model || "Unknown",
+            model: stringFallback(cpus[0]?.model, "Unknown"),
             loadAvg: loadAvg.map((v) => Math.round(v * 100) / 100),
             loadPercent: Math.round((loadAvg[0] / cpus.length) * 100),
         },
@@ -224,23 +249,30 @@ function getTokenMetrics(): TokenMetrics {
         [];
 
     for (const session of sessions) {
-        const model = session.model || "unknown";
+        const model = stringFallback(session.model).trim() || "unknown";
         const tokens = session.tokenCount || 0;
 
         totalTokens += tokens;
         byModel[model] = (byModel[model] || 0) + tokens;
 
         // Count sessions by model
-        const modelKey = model.split("/").pop() || model; // Remove provider prefix
+        const parsedModelKey = model.includes("/")
+            ? stringFallback(model.split("/").pop()).trim()
+            : model;
+        const modelKey = parsedModelKey || model;
         sessionsByModel[modelKey] = (sessionsByModel[modelKey] || 0) + 1;
 
         // Agent data
-        if (session.displayLabel || session.label) {
+        const displayLabel = stringFallback(session.displayLabel).trim();
+        const fallbackLabel = stringFallback(session.label).trim();
+        const sessionType = stringFallback(session.type).trim() || "Unknown";
+        const agentLabel = displayLabel || fallbackLabel;
+        if (agentLabel) {
             byAgent.push({
-                label: session.displayLabel || session.label || "Unknown",
+                label: agentLabel,
                 model: model,
                 tokens: tokens,
-                type: session.type || "Unknown",
+                type: sessionType,
             });
         }
     }

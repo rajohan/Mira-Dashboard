@@ -1,10 +1,12 @@
 import express, { type RequestHandler } from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import {
     guardedPath,
     mkdirGuarded,
+    readTextNoFollowGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.js";
 
@@ -16,8 +18,57 @@ interface Settings {
     refreshInterval: number;
 }
 
-const SETTINGS_DIR = path.join(process.env.HOME || "", ".openclaw");
-const SETTINGS_FILE = path.join(SETTINGS_DIR, "dashboard-settings.json");
+/** Resolves dashboard settings directory from a home directory value. */
+function resolveSettingsDir(home = process.env.HOME): string {
+    const normalizedHome = home?.trim() || os.homedir().trim();
+    if (
+        !normalizedHome ||
+        !path.isAbsolute(normalizedHome) ||
+        path.resolve(normalizedHome) === path.parse(path.resolve(normalizedHome)).root
+    ) {
+        throw new Error("Invalid settings home directory");
+    }
+    const settingsDir = path.resolve(path.join(normalizedHome, ".openclaw"));
+    try {
+        if (fs.lstatSync(settingsDir).isSymbolicLink()) {
+            throw new Error("Invalid settings directory");
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    }
+    return settingsDir;
+}
+
+function resolveSettingsFile(): string {
+    return path.join(resolveSettingsDir(), "dashboard-settings.json");
+}
+
+async function withPinnedSettingsFile<T>(
+    settingsDir: string,
+    callback: (settingsFile: string) => Promise<T> | T
+): Promise<T> {
+    if (process.platform !== "linux") {
+        return callback(path.join(settingsDir, "dashboard-settings.json"));
+    }
+
+    const parentFd = fs.openSync(
+        settingsDir,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+    );
+    try {
+        const realSettingsDir = fs.realpathSync(settingsDir);
+        const realPinnedDir = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        if (realPinnedDir !== realSettingsDir) {
+            throw new Error("Invalid settings directory");
+        }
+
+        return await callback(`/proc/self/fd/${parentFd}/dashboard-settings.json`);
+    } finally {
+        fs.closeSync(parentFd);
+    }
+}
 
 const DEFAULT_SETTINGS: Settings = {
     theme: "dark",
@@ -27,14 +78,27 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Performs load settings. */
-function loadSettings(): Settings {
+async function loadSettings(): Promise<Settings> {
+    const settingsDir = resolveSettingsDir();
+    let content: string;
+
     try {
-        const content = fs.readFileSync(SETTINGS_FILE, "utf8");
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(content) };
-    } catch {
-        // File doesn't exist or is unreadable; return defaults
+        content = await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+            readTextNoFollowGuarded(guardedPath(settingsFile))
+        );
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return DEFAULT_SETTINGS;
+        }
+        throw error;
     }
-    return DEFAULT_SETTINGS;
+
+    try {
+        const persisted = JSON.parse(content) as unknown;
+        return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
+    } catch {
+        return DEFAULT_SETTINGS;
+    }
 }
 
 /** Returns a validated settings patch and rejects malformed input before persistence. */
@@ -90,10 +154,13 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
 
 /** Performs save settings. */
 async function saveSettings(settings: Settings): Promise<void> {
-    mkdirGuarded(guardedPath(SETTINGS_DIR), { recursive: true });
-    await writeTextNoFollowGuarded(
-        guardedPath(SETTINGS_FILE),
-        JSON.stringify(settings, null, 2)
+    const settingsDir = resolveSettingsDir();
+    mkdirGuarded(guardedPath(settingsDir), { recursive: true });
+    await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+        writeTextNoFollowGuarded(
+            guardedPath(settingsFile),
+            JSON.stringify(settings, null, 2)
+        )
     );
 }
 
@@ -106,7 +173,7 @@ export default function settingsRoutes(
     // Get settings
     app.get("/api/settings", (async (_req, res) => {
         try {
-            const settings = loadSettings();
+            const settings = await loadSettings();
             const gatewayStatus = getGatewayStatus();
             res.json({ ...settings, gateway: gatewayStatus });
         } catch (error) {
@@ -116,9 +183,17 @@ export default function settingsRoutes(
 
     // Update settings
     app.put("/api/settings", express.json(), (async (req, res) => {
+        let current: Settings;
         let updated: Settings;
+
         try {
-            const current = loadSettings();
+            current = await loadSettings();
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
+            return;
+        }
+
+        try {
             updated = { ...current, ...parseSettingsPatch(req.body) };
         } catch (error) {
             res.status(400).json({ error: (error as Error).message });
@@ -134,3 +209,9 @@ export default function settingsRoutes(
         }
     }) as RequestHandler);
 }
+
+export const __testing = {
+    resolveSettingsDir,
+    resolveSettingsFile,
+    withPinnedSettingsFile,
+};

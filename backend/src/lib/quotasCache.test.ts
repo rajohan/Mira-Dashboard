@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
-import { setCacheStoreDockerBinForTests } from "./cacheStore.js";
+import { __testing as cacheStoreTesting } from "./cacheStore.js";
 
 const originalPath = process.env.PATH;
 const originalMode = process.env.FAKE_QUOTAS_CACHE_MODE;
@@ -39,7 +39,7 @@ process.stdout.write([
     );
     await chmod(dockerPath, 0o755);
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-    setCacheStoreDockerBinForTests(dockerPath);
+    cacheStoreTesting.setDockerBinForTests(dockerPath);
 }
 
 describe("quota cache helpers", () => {
@@ -58,13 +58,17 @@ describe("quota cache helpers", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         if (originalMode === undefined) {
             delete process.env.FAKE_QUOTAS_CACHE_MODE;
         } else {
             process.env.FAKE_QUOTAS_CACHE_MODE = originalMode;
         }
-        setCacheStoreDockerBinForTests(undefined);
+        cacheStoreTesting.setDockerBinForTests(undefined);
         await rm(tempDir, { recursive: true, force: true });
     });
 

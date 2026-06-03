@@ -1,11 +1,24 @@
 import express, { type RequestHandler } from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || "/home/ubuntu/.openclaw";
+import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+
+const OPENCLAW_HOME = nonEmptyEnvFallback(
+    "OPENCLAW_HOME",
+    nonEmptyEnvFallback(
+        "MIRA_DASHBOARD_OPENCLAW_HOME",
+        path.join(os.homedir(), ".openclaw")
+    )
+);
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
-const REAL_MEDIA_ROOT = fs.realpathSync(MEDIA_ROOT);
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
+let cachedRealMediaRoot: string | undefined;
+
+export const __testing = {
+    mediaRoot: MEDIA_ROOT,
+};
 
 const MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
@@ -27,14 +40,37 @@ function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
+/** Resolves and caches the canonical media root after it exists. */
+function getRealMediaRoot(): string | null {
+    if (cachedRealMediaRoot) {
+        return cachedRealMediaRoot;
+    }
+    try {
+        cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
+        return cachedRealMediaRoot;
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") {
+            throw error;
+        }
+        return null;
+    }
+}
+
 /** Registers media API routes. */
 export default function mediaRoutes(app: express.Application): void {
     app.get("/api/media", ((request, response) => {
-        const requestedPath = String(request.query.path || "");
-        const fullPath = path.resolve(requestedPath);
+        const requestedPath = stringFallback(request.query.path);
 
-        if (!requestedPath || !fullPath.startsWith(`${MEDIA_ROOT}${path.sep}`)) {
+        if (!requestedPath) {
             response.status(403).json({ error: "Access denied" });
+            return;
+        }
+
+        const fullPath = path.resolve(MEDIA_ROOT, requestedPath);
+        const realMediaRoot = getRealMediaRoot();
+        if (!realMediaRoot) {
+            response.status(404).json({ error: "Media not found" });
             return;
         }
 
@@ -43,13 +79,25 @@ export default function mediaRoutes(app: express.Application): void {
             return;
         }
 
-        const realPath = fs.realpathSync(fullPath);
-        if (!realPath.startsWith(`${REAL_MEDIA_ROOT}${path.sep}`)) {
+        let realPath: string;
+        let stat: fs.Stats;
+        try {
+            realPath = fs.realpathSync(fullPath);
+            stat = fs.statSync(realPath);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === "ENOENT" || code === "ENOTDIR") {
+                response.status(404).json({ error: "Media not found" });
+                return;
+            }
+            throw error;
+        }
+        const relativeRealPath = path.relative(realMediaRoot, realPath);
+        if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
             response.status(403).json({ error: "Access denied" });
             return;
         }
 
-        const stat = fs.statSync(realPath);
         if (!stat.isFile()) {
             response.status(400).json({ error: "Media path is not a file" });
             return;

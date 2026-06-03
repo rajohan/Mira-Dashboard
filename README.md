@@ -1,6 +1,7 @@
 # Mira Dashboard
 
-[![codecov](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+[![frontend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+[![backend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
 
 Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Node/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
