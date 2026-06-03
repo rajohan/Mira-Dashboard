@@ -71,7 +71,8 @@ export function getCronStatusVariant(
         normalized === "running" ||
         normalized === "pending" ||
         normalized === "queued" ||
-        normalized === "in_progress"
+        normalized === "in_progress" ||
+        normalized === "in-progress"
     ) {
         return "warning";
     }
