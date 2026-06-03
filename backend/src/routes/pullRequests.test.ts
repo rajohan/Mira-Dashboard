@@ -194,6 +194,25 @@ const pullRequests = [
   changedFiles: 1
 },
 {
+  number: 16,
+  title: "Refresh dirty blocker",
+  body: "Verify dirty merge states are refreshed",
+  url: "https://github.com/rajohan/Mira-Dashboard/pull/16",
+  headRefName: "refresh-dirty-blocker",
+  baseRefName: "main",
+  author: { login: "mira-2026" },
+  createdAt: "2026-05-10T01:50:00Z",
+  updatedAt: "2026-05-11T06:30:00Z",
+  isDraft: false,
+  mergeable: "DIRTY",
+  mergeStateStatus: "BLOCKED",
+  reviewDecision: "APPROVED",
+  statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+  additions: 4,
+  deletions: 2,
+  changedFiles: 2
+},
+{
   number: 12,
   title: "Target a release branch",
   body: "Not for the main dashboard review queue",
@@ -286,6 +305,14 @@ if (args[0] === "pr" && args[1] === "view") {
   if (requested === 15) {
     process.stderr.write("fresh lookup failed");
     process.exit(1);
+  }
+  if (requested === 16) {
+    process.stdout.write(JSON.stringify({
+      ...pullRequests.find((candidate) => candidate.number === 16),
+      title: "Fresh dirty blocker",
+      body: "Fresh lookup still reports a dirty branch blocker"
+    }));
+    process.exit(0);
   }
   const pr = pullRequests.find((candidate) => candidate.number === requested);
   if (!pr) {
@@ -591,6 +618,25 @@ describe("pull request routes", () => {
                 additions: 3,
                 deletions: 1,
                 changedFiles: 1,
+            },
+            {
+                number: 16,
+                title: "Fresh dirty blocker",
+                body: "Fresh lookup still reports a dirty branch blocker",
+                url: "https://github.com/rajohan/Mira-Dashboard/pull/16",
+                headRefName: "refresh-dirty-blocker",
+                baseRefName: "main",
+                author: { login: "mira-2026" },
+                createdAt: "2026-05-10T01:50:00Z",
+                updatedAt: "2026-05-11T06:30:00Z",
+                isDraft: false,
+                mergeable: "DIRTY",
+                mergeStateStatus: "BLOCKED",
+                reviewDecision: "APPROVED",
+                statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+                additions: 4,
+                deletions: 2,
+                changedFiles: 2,
             },
             {
                 number: 15,

@@ -457,9 +457,10 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
 
 /** Returns whether a blocked list state should be verified with fresh PR details. */
 function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
+    const mergeable = String(pr.mergeable).toUpperCase();
     return (
         pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
-        pr.mergeable?.toUpperCase() === "MERGEABLE" &&
+        (mergeable === "MERGEABLE" || mergeable === "DIRTY") &&
         pr.reviewDecision?.toUpperCase() === "APPROVED" &&
         !pr.isDraft &&
         pullRequestChecksPassed(pr.statusCheckRollup)

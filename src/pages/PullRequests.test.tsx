@@ -436,6 +436,28 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled();
     });
 
+    it("keeps merge actions enabled when mergeable metadata is missing without blockers", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeable: undefined,
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByText("mergeable unknown")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Merge + deploy" })).not.toBeDisabled();
+        expect(screen.getByRole("button", { name: "Merge only" })).not.toBeDisabled();
+    });
+
     it("does not show expected checks as passed", () => {
         mockPullRequests({
             pullRequests: {
