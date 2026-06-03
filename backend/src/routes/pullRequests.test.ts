@@ -1076,6 +1076,14 @@ describe("pull request routes", () => {
                     },
                     {
                         author: { login: "rajohan" },
+                        submittedAt: "2026-06-03T16:00:00Z",
+                    },
+                    {
+                        state: "APPROVED",
+                        submittedAt: "2026-06-03T16:05:00Z",
+                    },
+                    {
+                        author: { login: "rajohan" },
                         state: "DISMISSED",
                         submittedAt: "2026-06-03T16:13:20Z",
                     },
