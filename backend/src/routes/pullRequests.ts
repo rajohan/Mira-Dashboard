@@ -603,7 +603,7 @@ function validateMiraPr(pr: PullRequestSummary): void {
     }
 }
 
-/** Validates mira pr can be merged from the dashboard. */
+/** Validates mira pr can be approved and merged from the dashboard. */
 function validateMiraPrForApproval(pr: PullRequestSummary): void {
     validateMiraPr(pr);
     if (!pullRequestChecksPassed(pr.statusCheckRollup)) {
