@@ -470,7 +470,7 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.status, 500);
             assert.equal(
                 registered.body.error,
-                "Failed to roll back first-user bootstrap: rollback unavailable"
+                "Failed to roll back first-user bootstrap"
             );
             assert.equal(rollbackCalled, true);
             assert.equal(shutdown, true);
@@ -508,7 +508,7 @@ describe("auth first-user bootstrap routes", () => {
             assert.equal(registered.status, 500);
             assert.equal(
                 registered.body.error,
-                "Failed to roll back first-user bootstrap: primitive rollback unavailable"
+                "Failed to roll back first-user bootstrap"
             );
         } finally {
             await throwingRollbackServer.close();
