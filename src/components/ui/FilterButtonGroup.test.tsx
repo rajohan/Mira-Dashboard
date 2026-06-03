@@ -14,7 +14,7 @@ describe("FilterButtonGroup", () => {
             />
         );
 
-        expect(container.firstElementChild).toHaveClass("flex", "gap-2");
+        expect(container.firstElementChild).toHaveClass("flex", "gap-1.5");
     });
 
     it("renders options and emits selected values", async () => {

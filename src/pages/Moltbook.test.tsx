@@ -65,6 +65,7 @@ describe("Moltbook page", () => {
         const { container } = render(<Moltbook />);
 
         expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+        expect(screen.getByText("Loading Moltbook...")).toBeInTheDocument();
     });
 
     it("renders error state and retries", async () => {

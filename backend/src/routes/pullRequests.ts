@@ -33,6 +33,7 @@ const DASHBOARD_WORKTREE_ROOT = resolveConfiguredRoot(
 );
 const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
+const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEFAULT_BASE = "main";
 const DEPLOYMENT_DIR = path.join(DASHBOARD_ROOT, "data", "deployments");
 const MAX_BUFFER = 20 * 1024 * 1024;
@@ -74,10 +75,25 @@ interface PullRequestSummary {
     mergeable?: string;
     mergeStateStatus?: string;
     reviewDecision?: string;
+    reviewerApproved?: boolean;
+    latestOpinionatedReviews?: PullRequestReviewConnection;
+    reviews?: PullRequestReview[];
     statusCheckRollup?: unknown[];
     additions?: number;
     deletions?: number;
     changedFiles?: number;
+}
+
+/** Represents a pull request review. */
+interface PullRequestReview {
+    state?: string;
+    submittedAt?: string;
+    author?: PullRequestAuthor;
+}
+
+/** Represents a pull request review connection. */
+interface PullRequestReviewConnection {
+    nodes?: PullRequestReview[];
 }
 
 /** Represents deployment job. */
@@ -175,38 +191,87 @@ function parseRepoParts(repo: string): { owner: string; name: string } {
     return { owner, name };
 }
 
-/** Builds command env. */
-function buildCommandEnv(): NodeJS.ProcessEnv {
-    const githubToken =
-        process.env.MIRA_GITHUB_TOKEN?.trim() ||
-        process.env.GH_TOKEN?.trim() ||
-        process.env.GITHUB_TOKEN?.trim() ||
-        "";
+/** Builds GitHub command env for one token. */
+function buildGithubCommandEnv(githubToken: string): NodeJS.ProcessEnv {
     const env = { ...process.env };
     for (const key of Object.keys(env)) {
-        if (key === "MIRA_GITHUB_TOKEN" || key.startsWith("MIRA_GITHUB_TOKEN_")) {
+        if (
+            key === "MIRA_GITHUB_TOKEN" ||
+            key.startsWith("MIRA_GITHUB_TOKEN_") ||
+            key === "RAJOHAN_GITHUB_TOKEN" ||
+            key.startsWith("RAJOHAN_GITHUB_TOKEN_")
+        ) {
             delete env[key];
         }
     }
+    delete env.GITHUB_TOKEN;
     if (githubToken) {
         env.GH_TOKEN = githubToken;
-        env.GITHUB_TOKEN = githubToken;
     } else {
         delete env.GH_TOKEN;
-        delete env.GITHUB_TOKEN;
     }
     return env;
+}
+
+/** Builds command env. */
+function buildCommandEnv(): NodeJS.ProcessEnv {
+    const githubToken =
+        process.env.MIRA_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+    return buildGithubCommandEnv(githubToken);
+}
+
+/** Builds reviewer command env. */
+function buildReviewCommandEnv(): NodeJS.ProcessEnv {
+    const githubToken = process.env.RAJOHAN_GITHUB_TOKEN?.trim() || "";
+    if (!githubToken) {
+        throw new Error("Rajohan GitHub review token is not configured");
+    }
+    return buildGithubCommandEnv(githubToken);
+}
+
+/** Returns the configured reviewer author. */
+function reviewerAuthor(): string {
+    return process.env.RAYMOND_GITHUB_USERNAME?.trim() || DEFAULT_REVIEWER_AUTHOR;
+}
+
+/** Returns whether the configured reviewer has approved the pull request. */
+function hasReviewerApproval(pr: PullRequestSummary): boolean {
+    const author = reviewerAuthor();
+    const reviews = (
+        pr.latestOpinionatedReviews?.nodes?.length
+            ? pr.latestOpinionatedReviews.nodes
+            : pr.reviews || []
+    ).filter((review) => review.author?.login === author);
+    const latestReview = reviews.sort((a, b) =>
+        String(b.submittedAt || "").localeCompare(String(a.submittedAt || ""))
+    )[0];
+    return latestReview?.state?.toUpperCase() === "APPROVED";
+}
+
+/** Normalizes pull request metadata for the dashboard API. */
+function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
+    const rest = { ...pr };
+    delete rest.latestOpinionatedReviews;
+    delete rest.reviews;
+
+    return {
+        ...rest,
+        reviewerApproved:
+            pr.reviewerApproved === true ||
+            pr.reviewDecision?.toUpperCase() === "APPROVED" ||
+            hasReviewerApproval(pr),
+    };
 }
 
 /** Performs run command. */
 async function runCommand(
     command: string,
     args: string[],
-    options: { cwd?: string; timeoutMs?: number } = {}
+    options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
 ): Promise<CommandResult> {
     const { stdout, stderr } = await execFileAsync(command, args, {
         cwd: options.cwd || DASHBOARD_ROOT,
-        env: buildCommandEnv(),
+        env: options.env || buildCommandEnv(),
         maxBuffer: MAX_BUFFER,
         timeout: options.timeoutMs || 120_000,
     });
@@ -419,6 +484,15 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
                         mergeable
                         mergeStateStatus
                         reviewDecision
+                        latestOpinionatedReviews(first: 20) {
+                            nodes {
+                                state
+                                submittedAt
+                                author {
+                                    login
+                                }
+                            }
+                        }
                         additions
                         deletions
                         changedFiles
@@ -441,13 +515,13 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     const refreshedPullRequests = await Promise.all(
         pullRequests.map(async (pr) => {
             if (!shouldRefreshBlockedMergeState(pr)) {
-                return pr;
+                return normalizePullRequest(pr);
             }
 
             try {
-                return await getPullRequest(pr.number);
+                return normalizePullRequest(await getPullRequest(pr.number));
             } catch {
-                return pr;
+                return normalizePullRequest(pr);
             }
         })
     );
@@ -461,7 +535,9 @@ function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
     return (
         pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
         (mergeable === "MERGEABLE" || mergeable === "DIRTY") &&
-        pr.reviewDecision?.toUpperCase() === "APPROVED" &&
+        (pr.reviewDecision?.toUpperCase() === "APPROVED" ||
+            pr.reviewerApproved === true ||
+            hasReviewerApproval(pr)) &&
         !pr.isDraft &&
         pullRequestChecksPassed(pr.statusCheckRollup)
     );
@@ -469,33 +545,36 @@ function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
 
 /** Returns the current GitHub metadata for one pull request. */
 async function getPullRequest(number: number): Promise<PullRequestSummary> {
-    return runGhJson<PullRequestSummary>([
-        "pr",
-        "view",
-        String(number),
-        "--repo",
-        DASHBOARD_REPO,
-        "--json",
-        [
-            "number",
-            "title",
-            "body",
-            "url",
-            "headRefName",
-            "baseRefName",
-            "author",
-            "createdAt",
-            "updatedAt",
-            "isDraft",
-            "mergeable",
-            "mergeStateStatus",
-            "reviewDecision",
-            "statusCheckRollup",
-            "additions",
-            "deletions",
-            "changedFiles",
-        ].join(","),
-    ]);
+    return normalizePullRequest(
+        await runGhJson<PullRequestSummary>([
+            "pr",
+            "view",
+            String(number),
+            "--repo",
+            DASHBOARD_REPO,
+            "--json",
+            [
+                "number",
+                "title",
+                "body",
+                "url",
+                "headRefName",
+                "baseRefName",
+                "author",
+                "createdAt",
+                "updatedAt",
+                "isDraft",
+                "mergeable",
+                "mergeStateStatus",
+                "reviewDecision",
+                "reviews",
+                "statusCheckRollup",
+                "additions",
+                "deletions",
+                "changedFiles",
+            ].join(","),
+        ])
+    );
 }
 
 /** Validates pr number. */
@@ -618,6 +697,11 @@ function validateMiraPr(pr: PullRequestSummary): void {
         throw new Error("Only Mira-authored pull requests can be managed here");
     }
 
+    validateDashboardPr(pr);
+}
+
+/** Validates a pull request can be managed from the dashboard. */
+function validateDashboardPr(pr: PullRequestSummary): void {
     if (pr.baseRefName !== DEFAULT_BASE) {
         throw new Error(
             `Only ${DEFAULT_BASE}-targeted pull requests can be managed here`
@@ -630,11 +714,31 @@ function validateMiraPr(pr: PullRequestSummary): void {
 }
 
 /** Validates mira pr can be approved and merged from the dashboard. */
-function validateMiraPrForApproval(pr: PullRequestSummary): void {
-    validateMiraPr(pr);
+function validateDashboardPrForApproval(pr: PullRequestSummary): void {
+    validateDashboardPr(pr);
     if (!pullRequestChecksPassed(pr.statusCheckRollup)) {
         throw new Error("Pull request CI checks must pass before approval");
     }
+}
+
+/** Validates a pull request can receive Raymond's review approval. */
+function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
+    validateDashboardPr(pr);
+    if (pr.author?.login === reviewerAuthor()) {
+        throw new Error("Raymond cannot approve his own pull request");
+    }
+    if (
+        pr.reviewDecision?.toUpperCase() === "APPROVED" ||
+        pr.reviewerApproved === true ||
+        hasReviewerApproval(pr)
+    ) {
+        throw new Error("Pull request is already approved");
+    }
+}
+
+/** Validates mira pr can be approved and merged from the dashboard. */
+function validateMiraPrForApproval(pr: PullRequestSummary): void {
+    validateDashboardPrForApproval(pr);
 }
 
 /** Returns whether pull request checks are conclusively passing. */
@@ -851,7 +955,7 @@ async function deployLatest(): Promise<DeploymentJob> {
 async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
-    validateMiraPrForApproval(pr);
+    validateDashboardPrForApproval(pr);
 
     await runCommand(
         "gh",
@@ -899,6 +1003,26 @@ async function approvePullRequest(number: number, deploy: boolean) {
         cleanup,
         syncError,
         deployError,
+    };
+}
+
+/** Performs approve pull request review. */
+async function approvePullRequestReview(number: number) {
+    const pr = await getPullRequest(number);
+    validateDashboardPrForReviewApproval(pr);
+
+    await runCommand(
+        "gh",
+        ["pr", "review", String(number), "--approve", "--repo", DASHBOARD_REPO],
+        { env: buildReviewCommandEnv(), timeoutMs: 60_000 }
+    );
+
+    const pullRequest = await getPullRequest(number);
+
+    return {
+        ok: true,
+        message: `PR #${number} review approved`,
+        pullRequest,
     };
 }
 
@@ -971,6 +1095,23 @@ export default function pullRequestsRoutes(app: express.Application): void {
     );
 
     app.post(
+        "/api/pull-requests/:number/review-approval",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
+            res.json(await approvePullRequestReview(number));
+        })
+    );
+
+    app.post(
         "/api/pull-requests/:number/reject",
         express.json(),
         asyncRoute(async (req, res) => {
@@ -994,6 +1135,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
 
 export const __testing = {
     buildCommandEnv,
+    buildReviewCommandEnv,
     clearForceKillTimerIfAllowed,
     parseGhJsonLine,
     parseRepoParts,
@@ -1004,6 +1146,9 @@ export const __testing = {
     runGhJsonLines,
     toGhJsonParseError,
     validatePrNumber,
+    validateDashboardPr,
+    validateDashboardPrForApproval,
+    validateDashboardPrForReviewApproval,
     validateMiraPr,
     validateMiraPrForApproval,
     shellQuote,

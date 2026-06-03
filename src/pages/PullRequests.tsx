@@ -1,4 +1,4 @@
-import { GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
+import { CheckCircle, GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -20,6 +20,7 @@ import type {
 } from "../hooks";
 import {
     useApprovePullRequest,
+    useApprovePullRequestReview,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
@@ -32,13 +33,14 @@ import { formatDate } from "../utils/format";
 type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
+    | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
     | { type: "deploy" }
     | null;
 type PendingActionType = Exclude<PendingAction, null>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
-    "deploy" | "merge" | "merge-deploy" | "reject"
+    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -47,6 +49,7 @@ const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends ne
 void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 
 const MIRA_AUTHOR = "mira-2026";
+const RAYMOND_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
@@ -78,7 +81,9 @@ function statusVariant(value: string | undefined) {
     }
 
     if (
-        ["unknown", "unstable", "pending", "queued", "in_progress"].includes(normalized)
+        ["unknown", "unstable", "pending", "queued", "in_progress", "behind"].includes(
+            normalized
+        )
     ) {
         return "warning" as const;
     }
@@ -87,20 +92,21 @@ function statusVariant(value: string | undefined) {
 }
 
 /** Performs review decision variant. */
-function reviewDecisionVariant(value: string | undefined) {
+function reviewDecisionVariant(pr: PullRequestSummary) {
+    if (pullRequestReviewApproved(pr)) return "success" as const;
+    const value = pr.reviewDecision;
     const normalized = (value || "").toUpperCase();
-    if (normalized === "APPROVED") return "success" as const;
     if (normalized === "CHANGES_REQUESTED") return "error" as const;
     if (normalized === "REVIEW_REQUIRED") return "warning" as const;
     return "default" as const;
 }
 
 /** Performs review decision label. */
-function reviewDecisionLabel(value: string | undefined) {
+function reviewDecisionLabel(pr: PullRequestSummary) {
+    if (pullRequestReviewApproved(pr)) return "Review approved";
+    const value = pr.reviewDecision;
     const normalized = (value || "").toUpperCase();
     switch (normalized) {
-        case "APPROVED":
-            return "Review approved";
         case "CHANGES_REQUESTED":
             return "Changes requested";
         case "REVIEW_REQUIRED":
@@ -108,6 +114,13 @@ function reviewDecisionLabel(value: string | undefined) {
         default:
             return value ? value.replaceAll("_", " ") : "Review pending";
     }
+}
+
+/** Returns whether the pull request has a dashboard-accepted approval. */
+function pullRequestReviewApproved(pr: PullRequestSummary): boolean {
+    return (
+        pr.reviewDecision?.toUpperCase() === "APPROVED" || pr.reviewerApproved === true
+    );
 }
 
 /** Performs summarize checks. */
@@ -220,8 +233,17 @@ function checkoutMessage(
 /** Returns whether GitHub currently reports a pull request merge blocker. */
 function githubMergeBlocked(pr: PullRequestSummary): boolean {
     return (
-        pr.mergeStateStatus?.toUpperCase() === "BLOCKED" ||
+        ["BEHIND", "BLOCKED"].includes(pr.mergeStateStatus?.toUpperCase() || "") ||
         ["CONFLICTING", "DIRTY"].includes(pr.mergeable?.toUpperCase() || "")
+    );
+}
+
+/** Returns whether Raymond can approve the pull request review. */
+function canRaymondApproveReview(pr: PullRequestSummary): boolean {
+    return (
+        pr.author?.login !== RAYMOND_AUTHOR &&
+        !pr.isDraft &&
+        !pullRequestReviewApproved(pr)
     );
 }
 
@@ -232,6 +254,8 @@ function actionLabel(action: Exclude<PendingAction, null>) {
             return "Merge PR";
         case "merge-deploy":
             return "Merge + deploy";
+        case "review-approve":
+            return "Approve PR";
         case "reject":
             return "Reject PR";
         case "deploy":
@@ -246,6 +270,8 @@ function actionMessage(action: Exclude<PendingAction, null>) {
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
         case "merge-deploy":
             return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
+        case "review-approve":
+            return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
         case "reject":
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
         case "deploy":
@@ -297,7 +323,7 @@ function PullRequestCard({
     actions,
 }: {
     pr: PullRequestSummary;
-    actions?: ReactNode;
+    actions: ReactNode;
 }) {
     const checks = summarizeChecks(pr.statusCheckRollup);
 
@@ -325,7 +351,7 @@ function PullRequestCard({
                         {pr.changedFiles ?? 0} files
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                     <Badge variant={isMiraPullRequest(pr) ? "info" : "default"}>
                         {authorLabel(pr)}
                     </Badge>
@@ -337,19 +363,15 @@ function PullRequestCard({
                     </Badge>
                     <Badge variant={checks.variant}>{checks.label}</Badge>
                     {pr.isDraft ? <Badge variant="warning">Draft</Badge> : null}
-                    <Badge variant={reviewDecisionVariant(pr.reviewDecision)}>
-                        {reviewDecisionLabel(pr.reviewDecision)}
+                    <Badge variant={reviewDecisionVariant(pr)}>
+                        {reviewDecisionLabel(pr)}
                     </Badge>
                 </div>
             </div>
 
             {pr.body ? <PullRequestDescription body={pr.body} /> : null}
 
-            {actions ? (
-                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-                    {actions}
-                </div>
-            ) : null}
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">{actions}</div>
         </Card>
     );
 }
@@ -404,36 +426,24 @@ export function PullRequests() {
         error,
         refetch: refetchPullRequests,
     } = usePullRequests();
-    const { data: deployments = [], refetch: refetchDeployments } =
-        usePullRequestDeployments();
-    const {
-        data: productionCheckout,
-        error: productionCheckoutError,
-        refetch: refetchProductionCheckout,
-    } = useProductionCheckout();
+    const { data: deployments = [] } = usePullRequestDeployments();
+    const { data: productionCheckout, error: productionCheckoutError } =
+        useProductionCheckout();
     const approvePullRequest = useApprovePullRequest();
+    const approvePullRequestReview = useApprovePullRequestReview();
     const rejectPullRequest = useRejectPullRequest();
     const deployDashboard = useDeployDashboard();
     const [pendingAction, setPendingAction] = useState<PendingAction>(null);
     const [lastResult, setLastResult] = useState<string | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
-
     const isActionPending =
         approvePullRequest.isPending ||
+        approvePullRequestReview.isPending ||
         rejectPullRequest.isPending ||
         deployDashboard.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
-
-    /** Refreshes every data source displayed on the PR page. */
-    function refreshPageData() {
-        return Promise.all([
-            refetchPullRequests(),
-            refetchDeployments(),
-            refetchProductionCheckout(),
-        ]);
-    }
 
     /** Performs confirm action. */
     async function confirmAction(action: Exclude<PendingAction, null>) {
@@ -463,6 +473,16 @@ export function PullRequests() {
                     break;
                 }
 
+                case "review-approve": {
+                    const result = await approvePullRequestReview.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(result.message);
+                    setPendingAction(null);
+                    void refetchPullRequests();
+                    return;
+                }
+
                 case "reject": {
                     const result = await rejectPullRequest.mutateAsync({
                         number: action.pr.number,
@@ -484,10 +504,97 @@ export function PullRequests() {
         }
     }
 
+    /** Renders merge controls for a pull request. */
+    function renderPullRequestActions(pr: PullRequestSummary) {
+        const checksPassed = pullRequestChecksPassed(pr.statusCheckRollup);
+        const reviewApproved = pullRequestReviewApproved(pr);
+        const mergeBlocked = githubMergeBlocked(pr);
+        const mergeDisabled =
+            isActionPending ||
+            isProductionActionBlocked ||
+            pr.isDraft ||
+            !checksPassed ||
+            !reviewApproved ||
+            mergeBlocked;
+        let mergeDisabledReason: string | undefined;
+        if (pr.isDraft) {
+            mergeDisabledReason =
+                "Draft pull requests cannot be merged from the dashboard";
+        } else if (checksPassed) {
+            if (reviewApproved) {
+                if (mergeBlocked) {
+                    mergeDisabledReason =
+                        "GitHub reports this pull request is blocked from merging";
+                } else if (isProductionActionBlocked) {
+                    mergeDisabledReason = checkoutMessage(
+                        productionCheckout,
+                        productionCheckoutError
+                    );
+                }
+            } else {
+                mergeDisabledReason = "Approve the PR before merging from the dashboard";
+            }
+        } else {
+            mergeDisabledReason = "CI checks must pass before merging from the dashboard";
+        }
+        const mergeDisabledReasonId = mergeDisabledReason
+            ? `pr-${pr.number}-merge-disabled-reason`
+            : undefined;
+
+        return (
+            <>
+                {mergeDisabledReason ? (
+                    <p
+                        id={mergeDisabledReasonId}
+                        className="text-primary-400 text-xs sm:basis-full"
+                    >
+                        {mergeDisabledReason}
+                    </p>
+                ) : null}
+                {canRaymondApproveReview(pr) ? (
+                    <Button
+                        variant="secondary"
+                        onClick={() => setPendingAction({ type: "review-approve", pr })}
+                        disabled={isActionPending}
+                    >
+                        <CheckCircle className="h-4 w-4" />
+                        Approve PR
+                    </Button>
+                ) : null}
+                <Button
+                    variant="primary"
+                    onClick={() => setPendingAction({ type: "merge-deploy", pr })}
+                    disabled={mergeDisabled}
+                    aria-describedby={mergeDisabledReasonId}
+                >
+                    <Rocket className="h-4 w-4" />
+                    Merge + deploy
+                </Button>
+                <Button
+                    variant="secondary"
+                    onClick={() => setPendingAction({ type: "merge", pr })}
+                    disabled={mergeDisabled}
+                    aria-describedby={mergeDisabledReasonId}
+                >
+                    <GitMerge className="h-4 w-4" />
+                    Merge only
+                </Button>
+                <Button
+                    variant="danger"
+                    onClick={() => setPendingAction({ type: "reject", pr })}
+                    disabled={isActionPending}
+                >
+                    <XCircle className="h-4 w-4" />
+                    Reject
+                </Button>
+            </>
+        );
+    }
+
     return (
         <PageState
             isLoading={isLoading}
-            loading={<LoadingState size="lg" />}
+            loading={<LoadingState message="Loading pull requests..." size="lg" />}
             error={error?.message ?? null}
             errorView={
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
@@ -508,16 +615,11 @@ export function PullRequests() {
                         </h2>
                         <p className="text-primary-400 mt-1 max-w-2xl text-sm">
                             Review open rajohan/Mira-Dashboard pull requests. Dashboard
-                            actions are only enabled for Mira-authored PRs.
+                            merge actions are enabled after review approval, passing CI,
+                            and a safe production checkout.
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:flex">
-                        <RefreshButton
-                            onClick={() => void refreshPageData()}
-                            isLoading={isLoading}
-                            label="Refresh"
-                            variant="secondary"
-                        />
                         <Button
                             variant="primary"
                             onClick={() => setPendingAction({ type: "deploy" })}
@@ -559,7 +661,7 @@ export function PullRequests() {
                                 )}
                             </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-1.5">
                             <Badge variant={checkoutVariant(productionCheckout)}>
                                 {checkoutLabel(productionCheckout)}
                             </Badge>
@@ -624,111 +726,13 @@ export function PullRequests() {
                             </div>
                             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
                                 <div className="space-y-3">
-                                    {miraPullRequests.map((pr) => {
-                                        const checksPassed = pullRequestChecksPassed(
-                                            pr.statusCheckRollup
-                                        );
-                                        const reviewApproved =
-                                            pr.reviewDecision?.toUpperCase() ===
-                                            "APPROVED";
-                                        const mergeDisabled =
-                                            isActionPending ||
-                                            isProductionActionBlocked ||
-                                            pr.isDraft ||
-                                            !checksPassed ||
-                                            !reviewApproved ||
-                                            githubMergeBlocked(pr);
-                                        let mergeDisabledReason: string | undefined;
-                                        if (pr.isDraft) {
-                                            mergeDisabledReason =
-                                                "Draft pull requests cannot be merged from the dashboard";
-                                        } else if (checksPassed) {
-                                            if (reviewApproved) {
-                                                if (githubMergeBlocked(pr)) {
-                                                    mergeDisabledReason =
-                                                        "GitHub reports this pull request is blocked from merging";
-                                                } else if (isProductionActionBlocked) {
-                                                    mergeDisabledReason = checkoutMessage(
-                                                        productionCheckout,
-                                                        productionCheckoutError
-                                                    );
-                                                }
-                                            } else {
-                                                mergeDisabledReason =
-                                                    "Review approval is required before merging from the dashboard";
-                                            }
-                                        } else {
-                                            mergeDisabledReason =
-                                                "CI checks must pass before merging from the dashboard";
-                                        }
-                                        const mergeDisabledReasonId = mergeDisabledReason
-                                            ? `pr-${pr.number}-merge-disabled-reason`
-                                            : undefined;
-
-                                        return (
-                                            <PullRequestCard
-                                                key={pr.number}
-                                                pr={pr}
-                                                actions={
-                                                    <>
-                                                        {mergeDisabledReason ? (
-                                                            <p
-                                                                id={mergeDisabledReasonId}
-                                                                className="text-primary-400 text-xs sm:basis-full"
-                                                            >
-                                                                {mergeDisabledReason}
-                                                            </p>
-                                                        ) : null}
-                                                        <Button
-                                                            variant="primary"
-                                                            onClick={() =>
-                                                                setPendingAction({
-                                                                    type: "merge-deploy",
-                                                                    pr,
-                                                                })
-                                                            }
-                                                            disabled={mergeDisabled}
-                                                            aria-describedby={
-                                                                mergeDisabledReasonId
-                                                            }
-                                                        >
-                                                            <Rocket className="h-4 w-4" />
-                                                            Merge + deploy
-                                                        </Button>
-                                                        <Button
-                                                            variant="secondary"
-                                                            onClick={() =>
-                                                                setPendingAction({
-                                                                    type: "merge",
-                                                                    pr,
-                                                                })
-                                                            }
-                                                            disabled={mergeDisabled}
-                                                            aria-describedby={
-                                                                mergeDisabledReasonId
-                                                            }
-                                                        >
-                                                            <GitMerge className="h-4 w-4" />
-                                                            Merge only
-                                                        </Button>
-                                                        <Button
-                                                            variant="danger"
-                                                            onClick={() =>
-                                                                setPendingAction({
-                                                                    type: "reject",
-                                                                    pr,
-                                                                })
-                                                            }
-                                                            disabled={isActionPending}
-                                                        >
-                                                            <XCircle className="h-4 w-4" />
-                                                            Reject
-                                                        </Button>
-                                                    </>
-                                                }
-                                            />
-                                        );
-                                    })}
+                                    {miraPullRequests.map((pr) => (
+                                        <PullRequestCard
+                                            key={pr.number}
+                                            pr={pr}
+                                            actions={renderPullRequestActions(pr)}
+                                        />
+                                    ))}
                                 </div>
                                 <RecentDeploysCard deployments={deployments} />
                             </div>
@@ -750,13 +754,22 @@ export function PullRequests() {
                                     Dependency / external PRs
                                 </CardTitle>
                                 <p className="text-primary-400 mt-1 text-sm">
-                                    Visible for review status. Manage these on GitHub
-                                    until we add a dedicated safe policy.
+                                    These can be merged after the same review, CI, and
+                                    checkout gates as Mira-authored PRs.
                                 </p>
                             </div>
-                            {externalPullRequests.map((pr) => (
-                                <PullRequestCard key={pr.number} pr={pr} />
-                            ))}
+                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                                <div className="space-y-3">
+                                    {externalPullRequests.map((pr) => (
+                                        <PullRequestCard
+                                            key={pr.number}
+                                            pr={pr}
+                                            actions={renderPullRequestActions(pr)}
+                                        />
+                                    ))}
+                                </div>
+                                <div />
+                            </div>
                         </section>
                     ) : null}
                 </div>

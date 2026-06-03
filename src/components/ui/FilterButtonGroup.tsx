@@ -22,7 +22,7 @@ export function FilterButtonGroup<T extends string>({
     className,
 }: FilterButtonGroupProps<T>) {
     return (
-        <div className={"flex flex-wrap gap-2 " + (className || "")}>
+        <div className={"flex flex-wrap gap-1.5 " + (className || "")}>
             {options.map((option) => (
                 <Button
                     key={option.value}
