@@ -53,6 +53,28 @@ const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
+const FAILED_CHECK_VALUES = new Set([
+    "error",
+    "failed",
+    "failure",
+    "startup_failure",
+    "timed_out",
+]);
+const RUNNING_CHECK_VALUES = new Set([
+    "expected",
+    "in_progress",
+    "pending",
+    "queued",
+    "requested",
+    "waiting",
+]);
+const ATTENTION_CHECK_VALUES = new Set([
+    "action_required",
+    "cancelled",
+    "canceled",
+    "stale",
+]);
+const SKIPPED_CHECK_VALUES = new Set(["neutral", "skipped"]);
 
 /** Returns whether mira pull request. */
 function isMiraPullRequest(pr: PullRequestSummary): boolean {
@@ -137,21 +159,30 @@ function summarizeChecks(checks: unknown[] | undefined) {
         const conclusion = normalizedCheckValue(check.conclusion);
         return conclusion || normalizedCheckValue(check.status ?? check.state);
     });
+    const visibleValues = values.filter(Boolean);
 
-    if (values.some((value) => ["failure", "failed", "error"].includes(value))) {
+    if (visibleValues.length === 0) {
+        return { label: "No CI checks", variant: "default" as const };
+    }
+
+    if (visibleValues.some((value) => FAILED_CHECK_VALUES.has(value))) {
         return { label: "Checks failed", variant: "error" as const };
+    }
+
+    if (visibleValues.some((value) => RUNNING_CHECK_VALUES.has(value))) {
+        return { label: "Checks running", variant: "warning" as const };
+    }
+
+    if (visibleValues.some((value) => ATTENTION_CHECK_VALUES.has(value))) {
+        return { label: "Checks need attention", variant: "warning" as const };
+    }
+
+    if (visibleValues.some((value) => SKIPPED_CHECK_VALUES.has(value))) {
+        return { label: "Checks skipped", variant: "warning" as const };
     }
 
     if (pullRequestChecksPassed(checks)) {
         return { label: "Checks passed", variant: "success" as const };
-    }
-
-    if (
-        values.some((value) =>
-            ["queued", "pending", "in_progress", "expected", "waiting"].includes(value)
-        )
-    ) {
-        return { label: "Checks running", variant: "warning" as const };
     }
 
     return { label: "Checks pending", variant: "warning" as const };

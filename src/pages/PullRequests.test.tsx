@@ -599,8 +599,8 @@ describe("PullRequests page", () => {
                     {
                         ...hooks.pullRequests[0],
                         reviewDecision: "APPROVED",
-                        statusCheckRollup: [{ status: "ACTION_REQUIRED", name: "ci" }],
-                        title: "Needs CI action",
+                        statusCheckRollup: [{ status: "UNKNOWN_STATE", name: "ci" }],
+                        title: "Needs CI state mapping",
                     },
                 ],
                 error: null,
@@ -717,6 +717,26 @@ describe("PullRequests page", () => {
                         statusCheckRollup: [],
                         title: "No checks yet",
                     },
+                    {
+                        ...hooks.pullRequests[0],
+                        number: 14,
+                        statusCheckRollup: [
+                            { conclusion: "ACTION_REQUIRED", name: "ci" },
+                        ],
+                        title: "Needs check action",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        number: 15,
+                        statusCheckRollup: [{ conclusion: "SKIPPED", name: "ci" }],
+                        title: "Skipped checks",
+                    },
+                    {
+                        ...hooks.pullRequests[0],
+                        number: 16,
+                        statusCheckRollup: [{}],
+                        title: "Malformed checks",
+                    },
                 ],
                 error: null,
                 isLoading: false,
@@ -728,14 +748,16 @@ describe("PullRequests page", () => {
 
         expect(screen.getByText("Off main")).toBeInTheDocument();
         expect(
-            screen.getByText(/checkout is switched from feature-branch/)
-        ).toBeInTheDocument();
+            screen.getAllByText(/checkout is switched from feature-branch/).length
+        ).toBeGreaterThanOrEqual(1);
         expect(
             screen.getByText("No dashboard deploy jobs recorded yet.")
         ).toBeInTheDocument();
         expect(screen.getByText("Checks failed")).toBeInTheDocument();
         expect(screen.getByText("Checks running")).toBeInTheDocument();
-        expect(screen.getByText("No CI checks")).toBeInTheDocument();
+        expect(screen.getAllByText("No CI checks")).toHaveLength(2);
+        expect(screen.getByText("Checks need attention")).toBeInTheDocument();
+        expect(screen.getByText("Checks skipped")).toBeInTheDocument();
         expect(screen.getByText("Changes requested")).toBeInTheDocument();
         expect(screen.getByText("Review required")).toBeInTheDocument();
         expect(screen.getByText("CONFLICTING")).toBeInTheDocument();
