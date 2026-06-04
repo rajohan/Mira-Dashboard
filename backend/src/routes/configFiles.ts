@@ -18,11 +18,7 @@ const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 const CONFIG_WRITE_JSON_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
 
 // Allowed config files (whitelist for security)
-const ALLOWED_CONFIG_FILES = [
-    "openclaw.json",
-    "cron/jobs.json",
-    "hooks/transforms/agentmail.ts",
-];
+const ALLOWED_CONFIG_FILES = ["openclaw.json", "hooks/transforms/agentmail.ts"];
 
 /** Represents config file. */
 interface ConfigFile {

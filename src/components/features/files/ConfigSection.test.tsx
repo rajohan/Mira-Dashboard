@@ -12,20 +12,13 @@ describe("ConfigSection", () => {
         render(<ConfigSection selectedPath="config:openclaw.json" onSelect={onSelect} />);
 
         expect(screen.getByText("openclaw.json")).toBeInTheDocument();
-        expect(screen.queryByText("jobs.json")).not.toBeInTheDocument();
         expect(screen.queryByText("agentmail.ts")).not.toBeInTheDocument();
 
-        const cronButton = screen.getByRole("button", { name: "cron" });
         const hooksButton = screen.getByRole("button", { name: "hooks" });
         const openclawButton = screen.getByRole("button", { name: "openclaw.json" });
 
-        expect(cronButton).toHaveAttribute("aria-expanded", "false");
         expect(hooksButton).toHaveAttribute("aria-expanded", "false");
         expect(openclawButton).toHaveAttribute("aria-current", "true");
-
-        await user.click(cronButton);
-        expect(cronButton).toHaveAttribute("aria-expanded", "true");
-        await user.click(screen.getByRole("button", { name: "jobs.json" }));
 
         await user.click(hooksButton);
         expect(hooksButton).toHaveAttribute("aria-expanded", "true");
@@ -33,12 +26,11 @@ describe("ConfigSection", () => {
         await user.click(openclawButton);
 
         expect(screen.getByText("transforms")).toBeInTheDocument();
-        expect(onSelect).toHaveBeenNthCalledWith(1, "config:cron/jobs.json");
         expect(onSelect).toHaveBeenNthCalledWith(
-            2,
+            1,
             "config:hooks/transforms/agentmail.ts"
         );
-        expect(onSelect).toHaveBeenNthCalledWith(3, "config:openclaw.json");
+        expect(onSelect).toHaveBeenNthCalledWith(2, "config:openclaw.json");
     });
 
     it("supports keyboard activation for config groups and files", async () => {
@@ -48,27 +40,26 @@ describe("ConfigSection", () => {
         render(<ConfigSection selectedPath={null} onSelect={onSelect} />);
 
         await user.tab();
-        expect(screen.getByRole("button", { name: "cron" })).toHaveFocus();
+        expect(screen.getByRole("button", { name: "hooks" })).toHaveFocus();
         await user.keyboard("{Enter}");
-        expect(screen.getByRole("button", { name: "cron" })).toHaveAttribute(
+        expect(screen.getByRole("button", { name: "hooks" })).toHaveAttribute(
             "aria-expanded",
             "true"
         );
 
         await user.tab();
-        expect(screen.getByRole("button", { name: "jobs.json" })).toHaveFocus();
+        expect(screen.getByRole("button", { name: "agentmail.ts" })).toHaveFocus();
         await user.keyboard(" ");
-        expect(onSelect).toHaveBeenCalledWith("config:cron/jobs.json");
+        expect(onSelect).toHaveBeenCalledWith("config:hooks/transforms/agentmail.ts");
     });
 
-    it("marks selected nested cron and hook files", async () => {
+    it("marks selected nested hook files", async () => {
         const user = userEvent.setup();
         const { rerender } = render(
-            <ConfigSection selectedPath="config:cron/jobs.json" onSelect={vi.fn()} />
+            <ConfigSection selectedPath="config:openclaw.json" onSelect={vi.fn()} />
         );
 
-        await user.click(screen.getByRole("button", { name: "cron" }));
-        expect(screen.getByRole("button", { name: "jobs.json" })).toHaveAttribute(
+        expect(screen.getByRole("button", { name: "openclaw.json" })).toHaveAttribute(
             "aria-current",
             "true"
         );

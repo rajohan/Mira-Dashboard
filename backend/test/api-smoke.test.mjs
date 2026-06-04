@@ -332,7 +332,7 @@ test("config-files API is whitelist constrained and creates backups on write", a
     assert.equal(listed.body.root, roots.openClawHome);
     assert.deepEqual(
         listed.body.files.map((file) => file.relPath).toSorted(),
-        ["cron/jobs.json", "hooks/transforms/agentmail.ts", "openclaw.json"].toSorted()
+        ["hooks/transforms/agentmail.ts", "openclaw.json"].toSorted()
     );
 
     const original = await request("/api/config-files/openclaw.json");

@@ -141,7 +141,6 @@ describe("config files routes", () => {
         await mkdir(path.join(openclawRoot, "cron"), { recursive: true });
         await mkdir(path.join(openclawRoot, "hooks", "transforms"), { recursive: true });
         await writeFile(path.join(openclawRoot, "openclaw.json"), '{"model":"codex"}\n');
-        await writeFile(path.join(openclawRoot, "cron", "jobs.json"), "[]\n");
         server = await startServer(homeDir);
     });
 
@@ -180,12 +179,6 @@ describe("config files routes", () => {
                         name: "openclaw.json",
                         path: "config:openclaw.json",
                         relPath: "openclaw.json",
-                        type: "file",
-                    },
-                    {
-                        name: "jobs.json",
-                        path: "config:cron/jobs.json",
-                        relPath: "cron/jobs.json",
                         type: "file",
                     },
                 ]
@@ -529,21 +522,34 @@ describe("config files routes", () => {
             await rm(path.join(cronDir, "agentmail.ts"), { force: true });
         }
 
-        const cronJobsPath = path.join(openclawRoot, "cron", "jobs.json");
-        const originalCronJobs = await readFile(cronJobsPath, "utf8");
-        await rm(cronJobsPath, { force: true });
-        await mkdir(cronJobsPath);
+        const openclawConfigDirPath = path.join(openclawRoot, "openclaw.json");
+        const originalOpenclawConfigForDir = await readFile(
+            openclawConfigDirPath,
+            "utf8"
+        );
+        await rm(openclawConfigDirPath, { force: true });
+        await mkdir(openclawConfigDirPath);
         try {
             const directory = await requestJson<{ error: string }>(
                 server,
-                "/api/config-files/cron%2Fjobs.json"
+                "/api/config-files/openclaw.json"
             );
             assert.equal(directory.status, 400);
             assert.equal(directory.body.error, "Path is a directory, not a file");
         } finally {
-            await rm(cronJobsPath, { recursive: true, force: true });
-            await writeFile(cronJobsPath, originalCronJobs);
+            await rm(openclawConfigDirPath, { recursive: true, force: true });
+            await writeFile(openclawConfigDirPath, originalOpenclawConfigForDir);
         }
+
+        const removedCronConfig = await requestJson<{ error: string }>(
+            server,
+            "/api/config-files/cron%2Fjobs.json"
+        );
+        assert.equal(removedCronConfig.status, 403);
+        assert.equal(
+            removedCronConfig.body.error,
+            "Access denied: file not in allowed list"
+        );
 
         const openclawConfig = path.join(openclawRoot, "openclaw.json");
         const originalOpenclawConfig = await readFile(openclawConfig, "utf8");
@@ -1265,7 +1271,6 @@ describe("config files routes", () => {
             recursive: true,
         });
         await writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
-        await writeFile(path.join(openclawRoot, "cron", "jobs.json"), "[]\n");
 
         const transformsDir = path.join(openclawRoot, "hooks", "transforms");
         const outsideParent = await mkdtemp(

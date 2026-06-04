@@ -4,11 +4,6 @@ export const CONFIG_TOP_FILES = [
     { path: "config:openclaw.json", label: "openclaw.json", relPath: "openclaw.json" },
 ];
 
-/** Defines cron dir files. */
-export const CRON_DIR_FILES = [
-    { path: "config:cron/jobs.json", label: "jobs.json", relPath: "cron/jobs.json" },
-];
-
 /** Defines hooks dir files. */
 export const HOOKS_DIR_FILES = [
     {
