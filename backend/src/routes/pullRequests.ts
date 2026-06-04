@@ -184,6 +184,17 @@ function writeDeploymentJob(job: DeploymentJob): void {
         job.stdout ?? null,
         job.stderr ?? null
     );
+    db.prepare(
+        `
+        DELETE FROM deployment_jobs
+        WHERE id NOT IN (
+            SELECT id
+            FROM deployment_jobs
+            ORDER BY updated_at DESC
+            LIMIT 10
+        )
+        `
+    ).run();
 }
 
 interface DeploymentJobRow {
@@ -1194,7 +1205,7 @@ function reportBackgroundDeploymentError(error: unknown): void {
 }
 
 /** Starts deploy latest in the background. */
-function startDeployLatest(): DeploymentJob {
+function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     const now = new Date().toISOString();
     const job: DeploymentJob = {
         id: randomUUID(),
@@ -1203,13 +1214,22 @@ function startDeployLatest(): DeploymentJob {
         updatedAt: now,
         note: "Deploy started",
     };
-    acquireDeploymentLock(job.id);
+    if (lockHeldBy) {
+        db.prepare(
+            "UPDATE deployment_lock SET job_id = ?, updated_at = ? WHERE id = 1 AND job_id = ?"
+        ).run(job.id, now, lockHeldBy);
+    } else {
+        acquireDeploymentLock(job.id);
+    }
     try {
         writeDeploymentJob(job);
         void runDeploymentJob(job).catch(reportBackgroundDeploymentError);
         return job;
     } catch (error) {
         releaseDeploymentLock(job.id);
+        if (lockHeldBy) {
+            releaseDeploymentLock(lockHeldBy);
+        }
         throw error;
     }
 }
@@ -1219,37 +1239,48 @@ async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
-    ensureNoActiveDeployment();
+    const lockId = `approve-${randomUUID()}`;
+    acquireDeploymentLock(lockId);
+    let releaseLock = true;
 
-    await runCommand(
-        "gh",
-        [
-            "pr",
-            "merge",
-            String(number),
-            "--squash",
-            "--delete-branch",
-            "--repo",
-            DASHBOARD_REPO,
-        ],
-        { timeoutMs: 120_000 }
-    );
-    const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
     let syncError: string | undefined;
     let deployError: string | undefined;
     let deployment: DeploymentJob | undefined;
+    let cleanup: WorktreeCleanupResult;
 
     try {
-        await syncMain();
-    } catch (error) {
-        syncError = errorMessage(error, "Failed to sync main after merge");
-    }
+        await runCommand(
+            "gh",
+            [
+                "pr",
+                "merge",
+                String(number),
+                "--squash",
+                "--delete-branch",
+                "--repo",
+                DASHBOARD_REPO,
+            ],
+            { timeoutMs: 120_000 }
+        );
+        cleanup = await cleanupPullRequestWorktree(pr.headRefName);
 
-    if (deploy && !syncError) {
         try {
-            deployment = startDeployLatest();
+            await syncMain();
         } catch (error) {
-            deployError = errorMessage(error, "Deploy failed to start");
+            syncError = errorMessage(error, "Failed to sync main after merge");
+        }
+
+        if (deploy && !syncError) {
+            try {
+                deployment = startDeployLatest(lockId);
+                releaseLock = false;
+            } catch (error) {
+                deployError = errorMessage(error, "Deploy failed to start");
+            }
+        }
+    } finally {
+        if (releaseLock) {
+            releaseDeploymentLock(lockId);
         }
     }
 

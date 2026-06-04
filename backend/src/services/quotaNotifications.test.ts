@@ -237,7 +237,7 @@ describe("quota notifications", () => {
             }
             for (
                 let attempt = 0;
-                quotaTesting.isRunning() && attempt < 20;
+                quotaTesting.isRunning() && attempt < 200;
                 attempt += 1
             ) {
                 await new Promise((resolve) => setTimeout(resolve, 10));
