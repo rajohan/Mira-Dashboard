@@ -287,4 +287,41 @@ describe("NotificationBell", () => {
             .map((element) => element.textContent);
         expect(titles).toEqual(["Recovered timestamp", "Older notification"]);
     });
+
+    it("renders unknown time when notification timestamps are invalid", async () => {
+        const user = userEvent.setup();
+        hooks.useNotifications.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        createdAt: "also-not-a-date",
+                        dedupeKey: null,
+                        description: "Malformed event and created times",
+                        id: 5,
+                        isRead: false,
+                        metadata: {},
+                        occurredAt: "not-a-date",
+                        source: null,
+                        title: "Unknown timestamp",
+                        type: "warning",
+                        updatedAt: "also-not-a-date",
+                    },
+                ],
+                readCount: 0,
+                unreadCount: 1,
+            },
+        });
+
+        render(<NotificationBell />);
+
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open notifications, 1 unread",
+            })
+        );
+
+        expect(screen.getByText("Unknown timestamp")).toBeInTheDocument();
+        expect(screen.getByText("Unknown time")).toBeInTheDocument();
+        expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
+    });
 });

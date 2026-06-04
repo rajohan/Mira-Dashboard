@@ -27,7 +27,7 @@ function listNotifications(limit: number): NotificationRow[] {
     const statement = db.prepare(`
         SELECT id, title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
         FROM notifications
-        ORDER BY datetime(occurred_at) DESC
+        ORDER BY COALESCE(datetime(occurred_at), datetime(created_at)) DESC
         LIMIT ?
     `);
 

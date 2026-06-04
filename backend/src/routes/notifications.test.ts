@@ -419,6 +419,45 @@ describe("notifications routes", () => {
         assert.equal(deleteMissing.body.deleted, 0);
     });
 
+    it("orders malformed occurredAt rows by createdAt before applying limit", async () => {
+        const insert = db.prepare(`
+            INSERT INTO notifications (
+                title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
+            ) VALUES (?, ?, 'info', ?, ?, '{}', 0, ?, ?, ?)
+        `);
+
+        for (let index = 0; index < 100; index += 1) {
+            const timestamp = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
+            insert.run(
+                `Older valid ${index}`,
+                "Valid occurred_at row",
+                source,
+                `${source}:valid:${index}`,
+                timestamp,
+                timestamp,
+                timestamp
+            );
+        }
+
+        insert.run(
+            "Malformed occurredAt",
+            "Created later than valid occurred_at rows",
+            source,
+            `${source}:malformed-occurred-at`,
+            "2100-01-01T00:00:00.000Z",
+            "2100-01-01T00:00:00.000Z",
+            "not-a-date"
+        );
+
+        const list = await requestJson<{ items: NotificationItem[] }>(
+            server,
+            "/api/notifications?limit=1"
+        );
+
+        assert.equal(list.status, 200);
+        assert.equal(list.body.items[0]?.dedupeKey, `${source}:malformed-occurred-at`);
+    });
+
     it("handles invalid notification ids and malformed stored metadata", async () => {
         db.prepare(
             `
