@@ -53,6 +53,7 @@ describe("format utils", () => {
         expect(formatSize(5 * 1024 * 1024 * 1024)).toBe("5.0 GB");
         expect(formatSize(3 * 1024 * 1024 * 1024 * 1024)).toBe("3.0 TB");
         expect(formatSize(Number.NaN)).toBe("Unknown");
+        expect(formatSize(Infinity)).toBe("Unknown");
         expect(formatSize(-1)).toBe("Unknown");
         expect(formatLoad([0.123, 1.2, 9])).toBe("0.12, 1.20, 9.00");
     });
