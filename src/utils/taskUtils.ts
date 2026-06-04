@@ -72,6 +72,12 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
     return "low";
 }
 
+/** Returns a comparable updated-at timestamp for task ordering. */
+export function getTaskUpdatedAtMs(task: Task): number {
+    const updatedAt = Date.parse(task.updatedAt);
+    return Number.isFinite(updatedAt) ? updatedAt : 0;
+}
+
 /** Returns the searchable text for one task label. */
 function getTaskLabelSearchValue(label: Task["labels"][number]): string {
     return label.name;
