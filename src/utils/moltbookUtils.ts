@@ -5,12 +5,13 @@ const MOLTBOOK_URL = "https://www.moltbook.com";
 
 /** Formats time for display. */
 export function formatTime(dateStr: string): string {
-    const timestamp = new Date(dateStr).getTime();
+    const date = new Date(dateStr);
+    const timestamp = date.getTime();
     if (!Number.isFinite(timestamp)) {
         return "Unknown";
     }
 
-    return formatDistanceToNow(new Date(timestamp), {
+    return formatDistanceToNow(date, {
         addSuffix: true,
         locale: enUS,
     });
