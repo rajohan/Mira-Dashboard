@@ -794,11 +794,7 @@ export function PullRequests() {
                             </section>
                         ) : null}
                     </div>
-                    <div
-                        className={
-                            miraPullRequests.length > 0 ? "xl:pt-[60px]" : undefined
-                        }
-                    >
+                    <div className={pullRequests.length > 0 ? "xl:pt-[60px]" : undefined}>
                         <RecentDeploysCard deployments={deployments} />
                     </div>
                 </div>
