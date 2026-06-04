@@ -10,19 +10,24 @@ test("uses process cwd data directory when no explicit db path is configured", a
     const originalCwd = process.cwd();
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-default-"));
+    let db: { close(): void } | undefined;
 
     try {
         delete process.env.MIRA_DASHBOARD_DB_PATH;
         process.chdir(tempDir);
-        const { db, miraDbPath } = await import(`./db.js?defaultPath=${randomUUID()}`);
-        const expectedPath = path.join(
-            fs.realpathSync(tempDir),
-            "data",
-            "mira-dashboard.db"
-        );
+        try {
+            const result = await import(`./db.js?defaultPath=${randomUUID()}`);
+            db = result.db;
+            const expectedPath = path.join(
+                fs.realpathSync(tempDir),
+                "data",
+                "mira-dashboard.db"
+            );
 
-        assert.equal(miraDbPath, expectedPath);
-        db.close();
+            assert.equal(result.miraDbPath, expectedPath);
+        } finally {
+            db?.close();
+        }
     } finally {
         process.chdir(originalCwd);
         if (originalDbPath === undefined) {
@@ -38,13 +43,18 @@ test("uses configured db path when provided", async () => {
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-configured-"));
     const configuredPath = path.join(tempDir, "nested", "configured.db");
+    let db: { close(): void } | undefined;
 
     try {
         process.env.MIRA_DASHBOARD_DB_PATH = configuredPath;
-        const { db, miraDbPath } = await import(`./db.js?configuredPath=${randomUUID()}`);
+        try {
+            const result = await import(`./db.js?configuredPath=${randomUUID()}`);
+            db = result.db;
 
-        assert.equal(miraDbPath, configuredPath);
-        db.close();
+            assert.equal(result.miraDbPath, configuredPath);
+        } finally {
+            db?.close();
+        }
     } finally {
         if (originalDbPath === undefined) {
             delete process.env.MIRA_DASHBOARD_DB_PATH;
