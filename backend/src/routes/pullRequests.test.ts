@@ -1279,14 +1279,15 @@ describe("pull request routes", () => {
             { message: "Pull request CI checks must pass before approval" }
         );
         assert.equal(__testing.shellQuote("can't"), String.raw`'can'\''t'`);
-        assert.match(
-            __testing.deploymentJobUpdateCommand({
-                id: "path-check",
-                status: "ok",
-                startedAt: "2026-06-03T19:41:52.233Z",
-                updatedAt: "2026-06-03T19:41:52.233Z",
-            }),
-            new RegExp(`MIRA_DEPLOYMENT_DB='${process.env.MIRA_DASHBOARD_DB_PATH}'`)
+        assert.ok(
+            __testing
+                .deploymentJobUpdateCommand({
+                    id: "path-check",
+                    status: "ok",
+                    startedAt: "2026-06-03T19:41:52.233Z",
+                    updatedAt: "2026-06-03T19:41:52.233Z",
+                })
+                .includes(`MIRA_DEPLOYMENT_DB='${process.env.MIRA_DASHBOARD_DB_PATH}'`)
         );
         assert.match(
             __testing.deploymentJobUpdateCommand({
@@ -1512,6 +1513,11 @@ describe("pull request routes", () => {
             } finally {
                 failedJobWriteMock.mock.restore();
             }
+
+            assert.throws(() => __testing.startDeployLatest("missing-lock"), {
+                message: "Dashboard deploy lock handoff failed",
+            });
+            assert.equal(__testing.readDeploymentLock(), undefined);
 
             const originalConsoleError = console.error;
             const backgroundErrors: unknown[][] = [];

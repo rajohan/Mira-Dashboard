@@ -1215,9 +1215,14 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
         note: "Deploy started",
     };
     if (lockHeldBy) {
-        db.prepare(
-            "UPDATE deployment_lock SET job_id = ?, updated_at = ? WHERE id = 1 AND job_id = ?"
-        ).run(job.id, now, lockHeldBy);
+        const result = db
+            .prepare(
+                "UPDATE deployment_lock SET job_id = ?, updated_at = ? WHERE id = 1 AND job_id = ?"
+            )
+            .run(job.id, now, lockHeldBy);
+        if (result.changes !== 1) {
+            throw new Error("Dashboard deploy lock handoff failed");
+        }
     } else {
         acquireDeploymentLock(job.id);
     }
