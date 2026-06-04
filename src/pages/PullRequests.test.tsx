@@ -881,6 +881,9 @@ describe("PullRequests page", () => {
         expect(screen.getAllByRole("button", { name: "Merge + deploy" })).toHaveLength(2);
         expect(screen.getAllByRole("button", { name: "Merge only" })).toHaveLength(2);
         expect(screen.getAllByRole("button", { name: "Reject" })).toHaveLength(2);
+        expect(
+            screen.getByText("Recent deploys").parentElement?.parentElement
+        ).toHaveClass("xl:pt-[60px]");
         expect(screen.getByText("deploy-ok")).toBeInTheDocument();
         expect(screen.getByText("failed")).toBeInTheDocument();
         expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(1);
