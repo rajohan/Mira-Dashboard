@@ -5,6 +5,9 @@ import { formatBytes, formatNumber, truncateQuery } from "./databaseUtils";
 describe("database utils", () => {
     it("formats numbers and byte sizes", () => {
         expect(formatNumber(1234567)).toBe("1,234,567");
+        expect(formatNumber(Number.NaN)).toBe("0");
+        expect(formatNumber(Number.POSITIVE_INFINITY)).toBe("0");
+        expect(formatNumber(Number.NEGATIVE_INFINITY)).toBe("0");
         expect(formatBytes(0)).toBe("0 B");
         expect(formatBytes(-1)).toBe("0 B");
         expect(formatBytes(Number.POSITIVE_INFINITY)).toBe("0 B");
