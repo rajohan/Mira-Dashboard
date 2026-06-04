@@ -79,6 +79,13 @@ export function FileTreeItem({
         node.type === "directory" && node.children && node.children.length > 0;
     const isLoading =
         node.type === "directory" && !node.loaded && expandedPaths.has(node.path);
+    const sortedChildren =
+        node.type === "directory" && isExpanded && node.children
+            ? [...node.children].sort((a, b) => {
+                  if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+                  return a.name.localeCompare(b.name);
+              })
+            : [];
 
     return (
         <div>
@@ -134,22 +141,17 @@ export function FileTreeItem({
             </button>
             {node.type === "directory" && isExpanded && node.children && (
                 <div>
-                    {node.children
-                        .sort((a, b) => {
-                            if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
-                            return a.name.localeCompare(b.name);
-                        })
-                        .map((child) => (
-                            <FileTreeItem
-                                key={child.path}
-                                node={child}
-                                selectedPath={selectedPath}
-                                expandedPaths={expandedPaths}
-                                onSelect={onSelect}
-                                onToggle={onToggle}
-                                depth={depth + 1}
-                            />
-                        ))}
+                    {sortedChildren.map((child) => (
+                        <FileTreeItem
+                            key={child.path}
+                            node={child}
+                            selectedPath={selectedPath}
+                            expandedPaths={expandedPaths}
+                            onSelect={onSelect}
+                            onToggle={onToggle}
+                            depth={depth + 1}
+                        />
+                    ))}
                 </div>
             )}
         </div>

@@ -138,4 +138,57 @@ describe("FileTreeItem", () => {
 
         expect(screen.getByText("loading")).toBeInTheDocument();
     });
+
+    it("does not mutate child order while rendering sorted entries", () => {
+        const childOrder = ["zeta.txt", "src", "alpha.txt"];
+        const node: FileNode = {
+            children: [
+                { name: childOrder[0], path: "/repo/zeta.txt", type: "file" },
+                { name: childOrder[1], path: "/repo/src", type: "directory" },
+                { name: childOrder[2], path: "/repo/alpha.txt", type: "file" },
+            ],
+            loaded: true,
+            name: "repo",
+            path: "/repo",
+            type: "directory",
+        };
+
+        render(
+            <FileTreeItem
+                node={node}
+                selectedPath={null}
+                expandedPaths={new Set(["/repo"])}
+                onSelect={vi.fn()}
+                onToggle={vi.fn()}
+            />
+        );
+
+        const renderedNames = screen
+            .getAllByText(/^(repo|src|alpha\.txt|zeta\.txt)$/u)
+            .map((element) => element.textContent);
+        expect(renderedNames).toEqual(["repo", "src", "alpha.txt", "zeta.txt"]);
+        expect(node.children?.map((child) => child.name)).toEqual(childOrder);
+    });
+
+    it("does not sort hidden children while collapsed", () => {
+        const sortSpy = vi.spyOn(Array.prototype, "sort");
+
+        try {
+            render(
+                <FileTreeItem
+                    node={tree}
+                    selectedPath={null}
+                    expandedPaths={new Set()}
+                    onSelect={vi.fn()}
+                    onToggle={vi.fn()}
+                />
+            );
+
+            expect(screen.getByText("repo")).toBeInTheDocument();
+            expect(screen.queryByText("src")).not.toBeInTheDocument();
+            expect(sortSpy).not.toHaveBeenCalled();
+        } finally {
+            sortSpy.mockRestore();
+        }
+    });
 });
