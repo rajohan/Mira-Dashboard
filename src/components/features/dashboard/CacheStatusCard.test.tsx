@@ -31,6 +31,11 @@ describe("CacheStatusCard", () => {
                         errorMessage: "git failed",
                         updatedAt: null,
                     },
+                    {
+                        key: "weather.spydeberg",
+                        status: "stale",
+                        updatedAt: "not-a-date",
+                    },
                 ],
             },
         });
@@ -51,6 +56,7 @@ describe("CacheStatusCard", () => {
                         refreshKeys: ["system.host", "system.openclaw"],
                     },
                     { key: "git.workspace", label: "Git" },
+                    { key: "weather.spydeberg", label: "Weather" },
                     { key: "missing.entry", label: "Missing" },
                 ]}
             />
@@ -61,6 +67,8 @@ describe("CacheStatusCard", () => {
         expect(screen.getByText("fresh")).toBeInTheDocument();
         expect(screen.getByText("error")).toBeInTheDocument();
         expect(screen.getByText("git failed")).toBeInTheDocument();
+        expect(screen.getByText("stale")).toBeInTheDocument();
+        expect(screen.getByText("Unknown")).toBeInTheDocument();
         expect(screen.getByText("missing")).toBeInTheDocument();
 
         await userEvent.click(
