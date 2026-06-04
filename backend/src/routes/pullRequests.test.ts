@@ -1234,6 +1234,17 @@ describe("pull request routes", () => {
         );
         const restoreReviewerEnv = saveEnv(["RAJOHAN_GITHUB_USERNAME"]);
         try {
+            process.env.RAJOHAN_GITHUB_USERNAME = "   ";
+            assert.throws(
+                () =>
+                    __testing.validateDashboardPrForReviewApproval({
+                        author: { login: "rajohan" },
+                        baseRefName: "main",
+                        isDraft: false,
+                    } as never),
+                { message: "Rajohan cannot approve his own pull request" }
+            );
+
             process.env.RAJOHAN_GITHUB_USERNAME = "custom-reviewer";
             assert.throws(
                 () =>
