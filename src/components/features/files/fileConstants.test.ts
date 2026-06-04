@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-    CONFIG_TOP_FILES,
-    HOOKS_DIR_FILES,
-    MAX_PREVIEW_SIZE,
-} from "./fileConstants";
+import { CONFIG_TOP_FILES, HOOKS_DIR_FILES, MAX_PREVIEW_SIZE } from "./fileConstants";
 
 describe("file constants", () => {
     it("describes whitelisted config files shown in the sidebar", () => {

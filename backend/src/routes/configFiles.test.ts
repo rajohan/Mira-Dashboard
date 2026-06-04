@@ -523,7 +523,10 @@ describe("config files routes", () => {
         }
 
         const openclawConfigDirPath = path.join(openclawRoot, "openclaw.json");
-        const originalOpenclawConfigForDir = await readFile(openclawConfigDirPath, "utf8");
+        const originalOpenclawConfigForDir = await readFile(
+            openclawConfigDirPath,
+            "utf8"
+        );
         await rm(openclawConfigDirPath, { force: true });
         await mkdir(openclawConfigDirPath);
         try {
