@@ -887,8 +887,14 @@ describe("PullRequests page", () => {
         hooks.approve.mockResolvedValueOnce({ message: "Merged without cleanup" });
         hooks.approve.mockResolvedValueOnce({
             cleanup: undefined,
+            deployError: "Deploy already in progress",
             deployment: undefined,
             message: "Merged and deployed fallback",
+        });
+        hooks.approve.mockResolvedValueOnce({
+            cleanup: undefined,
+            deployment: undefined,
+            message: "Merged and deploy started",
         });
         hooks.deploy.mockResolvedValueOnce({ deployment: null });
 
@@ -905,7 +911,9 @@ describe("PullRequests page", () => {
             screen.getByTestId("confirm-modal").querySelector("button:last-child")!
         );
         expect(
-            await screen.findByText("Merged and deployed fallback")
+            await screen.findByText(
+                "Merged and deployed fallback: Deploy already in progress"
+            )
         ).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
@@ -913,6 +921,12 @@ describe("PullRequests page", () => {
             screen.getByTestId("confirm-modal").querySelector("button:last-child")!
         );
         expect(await screen.findByText("Deploy scheduled")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Merge + deploy" }));
+        await user.click(
+            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+        );
+        expect(await screen.findByText("Merged and deploy started")).toBeInTheDocument();
     });
 
     it("keeps the confirmation modal open while mutations are pending", async () => {

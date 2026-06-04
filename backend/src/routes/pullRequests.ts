@@ -1,10 +1,11 @@
 import { execFile, spawn } from "node:child_process";
-import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
+import { db, miraDbPath } from "../db.js";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 
@@ -35,12 +36,13 @@ const DASHBOARD_SERVICE = "mira-dashboard.service";
 const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEFAULT_BASE = "main";
-const DEPLOYMENT_DIR = path.join(DASHBOARD_ROOT, "data", "deployments");
+const DEPLOYMENT_LOCK_STALE_MS = 30 * 60 * 1000;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
+const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 
 function getResolvedRoots() {
     return {
@@ -148,34 +150,213 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     });
 }
 
-/** Performs ensure deployment dir. */
-function ensureDeploymentDir(): void {
-    fs.mkdirSync(DEPLOYMENT_DIR, { recursive: true });
-}
-
-/** Performs deployment path. */
-function deploymentPath(jobId: string): string {
-    return path.join(DEPLOYMENT_DIR, `${jobId}.json`);
-}
-
 /** Performs write deployment job. */
 function writeDeploymentJob(job: DeploymentJob): void {
-    ensureDeploymentDir();
-    fs.writeFileSync(deploymentPath(job.id), JSON.stringify(job, null, 2));
+    db.prepare(
+        `
+        INSERT INTO deployment_jobs (
+            id,
+            status,
+            started_at,
+            updated_at,
+            commit_sha,
+            note,
+            stdout,
+            stderr
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            status = excluded.status,
+            started_at = excluded.started_at,
+            updated_at = excluded.updated_at,
+            commit_sha = excluded.commit_sha,
+            note = excluded.note,
+            stdout = excluded.stdout,
+            stderr = excluded.stderr
+        `
+    ).run(
+        job.id,
+        job.status,
+        job.startedAt,
+        job.updatedAt,
+        job.commit ?? null,
+        job.note ?? null,
+        job.stdout ?? null,
+        job.stderr ?? null
+    );
+    db.prepare(
+        `
+        DELETE FROM deployment_jobs
+        WHERE id NOT IN (
+            SELECT id
+            FROM deployment_jobs
+            ORDER BY updated_at DESC
+            LIMIT 10
+        )
+        `
+    ).run();
+}
+
+interface DeploymentJobRow {
+    id: string;
+    status: DeploymentJob["status"];
+    started_at: string;
+    updated_at: string;
+    commit_sha: string | null;
+    note: string | null;
+    stdout: string | null;
+    stderr: string | null;
+}
+
+function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
+    return {
+        id: row.id,
+        status: row.status,
+        startedAt: row.started_at,
+        updatedAt: row.updated_at,
+        commit: row.commit_sha ?? undefined,
+        note: row.note ?? undefined,
+        stdout: row.stdout ?? undefined,
+        stderr: row.stderr ?? undefined,
+    };
+}
+
+/** Reads one deployment job. */
+function readDeploymentJob(jobId: string): DeploymentJob | undefined {
+    const row = db
+        .prepare(
+            `
+            SELECT
+                id,
+                status,
+                started_at,
+                updated_at,
+                commit_sha,
+                note,
+                stdout,
+                stderr
+            FROM deployment_jobs
+            WHERE id = ?
+            `
+        )
+        .get(jobId) as DeploymentJobRow | undefined;
+    return row ? mapDeploymentJob(row) : undefined;
+}
+
+/** Checks whether an active deployment lock is stale enough to replace. */
+function isDeploymentJobStale(job: DeploymentJob, now = Date.now()): boolean {
+    const updatedAt = Date.parse(job.updatedAt || job.startedAt);
+    if (!Number.isFinite(updatedAt)) {
+        return true;
+    }
+    return now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
+}
+
+interface DeploymentLockRow {
+    job_id: string;
+    updated_at: string;
+}
+
+/** Checks whether an active deployment lock row is stale enough to replace. */
+function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boolean {
+    const updatedAt = Date.parse(lock.updated_at);
+    if (!Number.isFinite(updatedAt)) {
+        return true;
+    }
+    return now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
+}
+
+/** Reads the active deployment lock. */
+function readDeploymentLockRow(): DeploymentLockRow | undefined {
+    return db
+        .prepare("SELECT job_id, updated_at FROM deployment_lock WHERE id = 1")
+        .get() as DeploymentLockRow | undefined;
+}
+
+/** Reads the active deployment lock job id. */
+function readDeploymentLock(): string | undefined {
+    const row = readDeploymentLockRow();
+    return row?.job_id;
+}
+
+/** Releases the active deploy lock if it still belongs to the given job. */
+function releaseDeploymentLock(jobId: string): void {
+    try {
+        db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(jobId);
+    } catch {
+        // Best-effort cleanup; stale locks are validated before starting deploys.
+    }
+}
+
+/** Ensures no active deploy owns the production checkout. */
+function ensureNoActiveDeployment(): void {
+    const activeLock = readDeploymentLockRow();
+    const activeJobId = activeLock?.job_id;
+    if (activeJobId) {
+        const activeJob = readDeploymentJob(activeJobId);
+        if (!activeJob) {
+            if (!isDeploymentLockStale(activeLock)) {
+                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+            }
+            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+        } else if (
+            ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
+            !isDeploymentJobStale(activeJob)
+        ) {
+            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+        } else {
+            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+        }
+    }
+}
+
+/** Acquires the active deploy lock for a new deployment job. */
+function acquireDeploymentLock(jobId: string): void {
+    ensureNoActiveDeployment();
+    try {
+        db.prepare(
+            "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+        ).run(jobId, new Date().toISOString());
+    } catch (error) {
+        if (error instanceof Error && /constraint/i.test(error.message)) {
+            throw new Error("Dashboard deploy already in progress", { cause: error });
+        }
+        throw error;
+    }
+}
+
+/** Refreshes the active deploy heartbeat while long-running work continues. */
+function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
+    const updatedJob = { ...job, updatedAt: new Date().toISOString() };
+    writeDeploymentJob(updatedJob);
+    db.prepare(
+        "UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?"
+    ).run(updatedJob.updatedAt, updatedJob.id);
+    return updatedJob;
 }
 
 /** Performs read deployment jobs. */
 function readDeploymentJobs(): DeploymentJob[] {
-    ensureDeploymentDir();
-    return fs
-        .readdirSync(DEPLOYMENT_DIR)
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => {
-            const raw = fs.readFileSync(path.join(DEPLOYMENT_DIR, file), "utf8");
-            return JSON.parse(raw) as DeploymentJob;
-        })
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, 10);
+    return (
+        db
+            .prepare(
+                `
+                SELECT
+                    id,
+                    status,
+                    started_at,
+                    updated_at,
+                    commit_sha,
+                    note,
+                    stdout,
+                    stderr
+                FROM deployment_jobs
+                ORDER BY updated_at DESC
+                LIMIT 10
+                `
+            )
+            .all() as unknown as DeploymentJobRow[]
+    ).map(mapDeploymentJob);
 }
 
 /** Performs trim output. */
@@ -878,9 +1059,67 @@ function shellQuote(value: string): string {
     return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
+/** Builds a shell command that records deployment status from a detached process. */
+function deploymentJobUpdateCommand(job: DeploymentJob): string {
+    const script = `
+const { DatabaseSync } = require("node:sqlite");
+const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
+const db = new DatabaseSync(process.env.MIRA_DEPLOYMENT_DB);
+db.exec("PRAGMA busy_timeout = 5000");
+try {
+    db.exec("BEGIN IMMEDIATE");
+    db.prepare(\`
+    INSERT INTO deployment_jobs (
+        id,
+        status,
+        started_at,
+        updated_at,
+        commit_sha,
+        note,
+        stdout,
+        stderr
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        started_at = excluded.started_at,
+        updated_at = excluded.updated_at,
+        commit_sha = excluded.commit_sha,
+        note = excluded.note,
+        stdout = excluded.stdout,
+        stderr = excluded.stderr
+\`).run(
+    job.id,
+    job.status,
+    job.startedAt,
+    job.updatedAt,
+    job.commit ?? null,
+    job.note ?? null,
+    job.stdout ?? null,
+    job.stderr ?? null
+);
+    db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
+    db.exec("COMMIT");
+} catch (error) {
+    try {
+        db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+} finally {
+    db.close();
+}
+`;
+    return [
+        `MIRA_DEPLOYMENT_DB=${shellQuote(miraDbPath)}`,
+        `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
+        shellQuote(process.execPath),
+        "-e",
+        shellQuote(script),
+    ].join(" ");
+}
+
 /** Performs schedule restart health check. */
 async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandResult> {
-    const jobPath = deploymentPath(job.id);
     const okJob: DeploymentJob = {
         ...job,
         status: "ok",
@@ -896,20 +1135,19 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
 
     const script = [
         "restart_status=0",
-        `systemctl restart ${DASHBOARD_SERVICE} || restart_status=$?`,
+        `systemctl --user restart ${DASHBOARD_SERVICE} || restart_status=$?`,
         "sleep 4",
         'if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health >/dev/null; then',
-        `  printf %s ${shellQuote(JSON.stringify(okJob, null, 2))} > ${shellQuote(jobPath)}`,
+        `  ${deploymentJobUpdateCommand(okJob)}`,
         "else",
-        `  printf %s ${shellQuote(JSON.stringify(failedJob, null, 2))} > ${shellQuote(jobPath)}`,
+        `  ${deploymentJobUpdateCommand(failedJob)}`,
         "fi",
     ].join("\n");
 
     return runCommand(
-        "sudo",
+        "systemd-run",
         [
-            "-n",
-            "systemd-run",
+            "--user",
             `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard deploy restart + health check",
             "/bin/bash",
@@ -920,25 +1158,21 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
     );
 }
 
-/** Performs deploy latest. */
-async function deployLatest(): Promise<DeploymentJob> {
-    const now = new Date().toISOString();
-    const job: DeploymentJob = {
-        id: Date.now().toString(36),
-        status: "building",
-        startedAt: now,
-        updatedAt: now,
-        note: "Deploy started",
-    };
-    writeDeploymentJob(job);
-
+/** Runs deployment work after the API has returned a job to the caller. */
+async function runDeploymentJob(job: DeploymentJob): Promise<void> {
+    let currentJob = job;
     try {
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await syncMain();
+        currentJob = refreshDeploymentHeartbeat(currentJob);
 
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("npm", ["--prefix", "backend", "run", "build"], {
             timeoutMs: 120_000,
         });
+        currentJob = refreshDeploymentHeartbeat(currentJob);
         const { stdout: commit } = await runCommand(
             "git",
             ["rev-parse", "--short", "HEAD"],
@@ -946,9 +1180,10 @@ async function deployLatest(): Promise<DeploymentJob> {
                 timeoutMs: 30_000,
             }
         );
+        currentJob = refreshDeploymentHeartbeat(currentJob);
 
         const restartScheduled: DeploymentJob = {
-            ...job,
+            ...currentJob,
             status: "restart-scheduled",
             updatedAt: new Date().toISOString(),
             commit: commit.trim(),
@@ -956,15 +1191,60 @@ async function deployLatest(): Promise<DeploymentJob> {
         };
         writeDeploymentJob(restartScheduled);
         await scheduleRestartHealthCheck(restartScheduled);
-        return restartScheduled;
     } catch (error) {
         const failed: DeploymentJob = {
-            ...job,
+            ...currentJob,
             status: "failed",
             updatedAt: new Date().toISOString(),
             note: errorMessage(error, "Deploy failed"),
         };
-        writeDeploymentJob(failed);
+        try {
+            writeDeploymentJob(failed);
+        } finally {
+            releaseDeploymentLock(job.id);
+        }
+    }
+}
+
+/** Reports background deployment failures after the API response has returned. */
+function reportBackgroundDeploymentError(error: unknown): void {
+    console.error(
+        "[pullRequestsRoutes] Background deploy failed:",
+        errorMessage(error, "Deploy failed")
+    );
+}
+
+/** Starts deploy latest in the background. */
+function startDeployLatest(lockHeldBy?: string): DeploymentJob {
+    const now = new Date().toISOString();
+    const job: DeploymentJob = {
+        id: randomUUID(),
+        status: "building",
+        startedAt: now,
+        updatedAt: now,
+        note: "Deploy started",
+    };
+    if (lockHeldBy) {
+        const result = db
+            .prepare(
+                "UPDATE deployment_lock SET job_id = ?, updated_at = ? WHERE id = 1 AND job_id = ?"
+            )
+            .run(job.id, now, lockHeldBy);
+        if (result.changes !== 1) {
+            throw new Error("Dashboard deploy lock handoff failed");
+        }
+    } else {
+        acquireDeploymentLock(job.id);
+    }
+    try {
+        writeDeploymentJob(job);
+        void runDeploymentJob(job).catch(reportBackgroundDeploymentError);
+        return job;
+    } catch (error) {
+        releaseDeploymentLock(job.id);
+        if (lockHeldBy) {
+            releaseDeploymentLock(lockHeldBy);
+        }
         throw error;
     }
 }
@@ -974,53 +1254,64 @@ async function approvePullRequest(number: number, deploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
+    const lockId = `approve-${randomUUID()}`;
+    acquireDeploymentLock(lockId);
+    let releaseLock = true;
 
-    await runCommand(
-        "gh",
-        [
-            "pr",
-            "merge",
-            String(number),
-            "--squash",
-            "--delete-branch",
-            "--repo",
-            DASHBOARD_REPO,
-        ],
-        { timeoutMs: 120_000 }
-    );
-    const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
     let syncError: string | undefined;
-    let deployment: DeploymentJob | undefined;
     let deployError: string | undefined;
+    let deployment: DeploymentJob | undefined;
+    let cleanup: WorktreeCleanupResult;
 
     try {
-        await syncMain();
-    } catch (error) {
-        syncError = errorMessage(error, "Failed to sync main after merge");
-    }
+        await runCommand(
+            "gh",
+            [
+                "pr",
+                "merge",
+                String(number),
+                "--squash",
+                "--delete-branch",
+                "--repo",
+                DASHBOARD_REPO,
+            ],
+            { timeoutMs: 120_000 }
+        );
+        cleanup = await cleanupPullRequestWorktree(pr.headRefName);
 
-    if (deploy) {
         try {
-            deployment = await deployLatest();
+            await syncMain();
         } catch (error) {
-            deployError = errorMessage(error, "Deploy failed after merge");
+            syncError = errorMessage(error, "Failed to sync main after merge");
+        }
+
+        if (deploy && !syncError) {
+            try {
+                deployment = startDeployLatest(lockId);
+                releaseLock = false;
+            } catch (error) {
+                deployError = errorMessage(error, "Deploy failed to start");
+            }
+        }
+    } finally {
+        if (releaseLock) {
+            releaseDeploymentLock(lockId);
         }
     }
 
     return {
         ok: true,
-        message:
-            deploy && deployError
-                ? `PR #${number} merged; deploy failed`
-                : syncError
-                  ? `PR #${number} merged; production sync failed`
-                  : deploy
-                    ? `PR #${number} merged; deploy started`
-                    : `PR #${number} merged`,
+        message: syncError
+            ? `PR #${number} merged; production sync failed`
+            : deployError
+              ? `PR #${number} merged; deploy failed to start`
+              : deploy
+                ? `PR #${number} merged; deploy started`
+                : `PR #${number} merged`,
         deployment,
+        deployError,
         cleanup,
         syncError,
-        deployError,
     };
 }
 
@@ -1090,7 +1381,9 @@ export default function pullRequestsRoutes(app: express.Application): void {
         "/api/pull-requests/deploy",
         express.json(),
         asyncRoute(async (_req, res) => {
-            res.json({ ok: true, deployment: await deployLatest() });
+            await ensureProductionCheckout();
+            await ensureProductionReadyForDeploy();
+            res.json({ ok: true, deployment: startDeployLatest() });
         })
     );
 
@@ -1152,11 +1445,19 @@ export default function pullRequestsRoutes(app: express.Application): void {
 }
 
 export const __testing = {
+    acquireDeploymentLock,
     buildCommandEnv,
     buildReviewCommandEnv,
     clearForceKillTimerIfAllowed,
     parseGhJsonLine,
     parseRepoParts,
+    deploymentJobUpdateCommand,
+    isDeploymentJobStale,
+    readDeploymentLock,
+    readDeploymentJob,
+    reportBackgroundDeploymentError,
+    releaseDeploymentLock,
+    runDeploymentJob,
     isPathInsideRoot,
     parseGitWorktrees,
     runCommand,
@@ -1170,6 +1471,8 @@ export const __testing = {
     validateMiraPr,
     validateMiraPrForApproval,
     shellQuote,
+    startDeployLatest,
     trimOutput,
     getResolvedRoots,
+    writeDeploymentJob,
 };

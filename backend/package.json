@@ -12,8 +12,8 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
-        "test": "npm run build && node --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\"",
-        "test:coverage": "npm run build && c8 --all --src src --extension=.ts --extension=.js --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\""
+        "test": "npm run build && node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\"",
+        "test:coverage": "npm run build && c8 --all --src src --extension=.ts --extension=.js --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\""
     },
     "dependencies": {
         "@types/shell-quote": "^1.7.5",

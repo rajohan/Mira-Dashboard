@@ -235,6 +235,14 @@ describe("quota notifications", () => {
                 stopQuotaNotificationMonitor();
                 globalThis.setInterval = originalSetInterval;
             }
+            for (
+                let attempt = 0;
+                quotaTesting.isRunning() && attempt < 200;
+                attempt += 1
+            ) {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            assert.equal(quotaTesting.isRunning(), false);
         } finally {
             console.error = originalError;
         }

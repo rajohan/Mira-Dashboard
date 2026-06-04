@@ -2,12 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const dataDir = path.join(process.cwd(), "data");
+const configuredDbPath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
+export const miraDbPath = configuredDbPath
+    ? path.resolve(configuredDbPath)
+    : path.join(process.cwd(), "data", "mira-dashboard.db");
+const dataDir = path.dirname(miraDbPath);
 fs.mkdirSync(dataDir, { recursive: true });
 
-const dbPath = path.join(dataDir, "mira-dashboard.db");
 /** Defines db. */
-export const db = new DatabaseSync(dbPath);
+export const db = new DatabaseSync(miraDbPath);
+db.exec("PRAGMA busy_timeout = 5000");
 
 interface MigrationDatabase {
     exec(sql: string): unknown;
@@ -147,6 +151,25 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deployment_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    commit_sha TEXT,
+    note TEXT,
+    stdout TEXT,
+    stderr TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployment_jobs_updated_at ON deployment_jobs(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS deployment_lock (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    job_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 `);

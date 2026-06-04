@@ -273,4 +273,5 @@ export const __testing = {
     getProviderPercent,
     getState,
     handleQuotaBucket,
+    isRunning: () => running,
 };

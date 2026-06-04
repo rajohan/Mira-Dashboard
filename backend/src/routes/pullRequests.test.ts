@@ -4,7 +4,9 @@ import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import { after, before, describe, it, mock } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import express from "express";
 
@@ -19,6 +21,7 @@ const originalDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
 const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
 const originalRajohanToken = process.env.RAJOHAN_GITHUB_TOKEN;
 const originalFakeReviewStateFile = process.env.FAKE_GH_REVIEW_STATE_FILE;
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 
 function saveEnv(names: string[]): () => void {
     const previous = new Map(names.map((name) => [name, process.env[name]]));
@@ -36,6 +39,105 @@ function saveEnv(names: string[]): () => void {
 async function writeExecutable(filePath: string, content: string): Promise<void> {
     await writeFile(filePath, content, "utf8");
     await chmod(filePath, 0o755);
+}
+
+async function waitForDeploymentStatus(
+    jobId: string,
+    status: string,
+    tempDir: string
+): Promise<Record<string, unknown>> {
+    let lastJob = {} as Record<string, unknown>;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        try {
+            const job = readDeploymentJobFromDb(jobId, tempDir);
+            if (job) {
+                lastJob = job;
+                if (lastJob.status === status) {
+                    return lastJob;
+                }
+            }
+        } catch {
+            // Deployment status can be updated by the detached restart worker.
+        }
+        await delay(25);
+    }
+    assert.equal(lastJob.status, status);
+    return lastJob;
+}
+
+async function waitForDeploymentLockReleased(tempDir: string): Promise<void> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        try {
+            if (!readDeploymentLockFromDb(tempDir)) {
+                return;
+            }
+        } catch {
+            // The detached restart worker may briefly hold the SQLite write lock.
+        }
+        await delay(25);
+    }
+    assert.equal(readDeploymentLockFromDb(tempDir), undefined);
+}
+
+function releaseDeploymentLockInDb(jobId: string, tempDir: string): void {
+    withDeploymentDb(tempDir, (deploymentDb) => {
+        deploymentDb
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(jobId);
+    });
+}
+
+function withDeploymentDb<T>(tempDir: string, action: (db: DatabaseSync) => T): T {
+    const deploymentDb = new DatabaseSync(
+        path.join(tempDir, "data", "mira-dashboard.db")
+    );
+    try {
+        deploymentDb.exec("PRAGMA busy_timeout = 1000");
+        return action(deploymentDb);
+    } finally {
+        deploymentDb.close();
+    }
+}
+
+function readDeploymentJobFromDb(
+    jobId: string,
+    tempDir: string
+): Record<string, unknown> | undefined {
+    return withDeploymentDb(tempDir, (deploymentDb) =>
+        deploymentDb
+            .prepare(
+                `
+                SELECT
+                    id,
+                    status,
+                    started_at AS startedAt,
+                    updated_at AS updatedAt,
+                    commit_sha AS "commit",
+                    note,
+                    stdout,
+                    stderr
+                FROM deployment_jobs
+                WHERE id = ?
+                `
+            )
+            .get(jobId)
+    ) as Record<string, unknown> | undefined;
+}
+
+function readDeploymentLockFromDb(tempDir: string): string | undefined {
+    return withDeploymentDb(tempDir, (deploymentDb) => {
+        const row = deploymentDb
+            .prepare("SELECT job_id FROM deployment_lock WHERE id = 1")
+            .get() as { job_id: string } | undefined;
+        return row?.job_id;
+    });
+}
+
+function clearDeploymentState(tempDir: string): void {
+    withDeploymentDb(tempDir, (deploymentDb) => {
+        deploymentDb.prepare("DELETE FROM deployment_lock").run();
+        deploymentDb.prepare("DELETE FROM deployment_jobs").run();
+    });
 }
 
 async function waitForFile(filePath: string): Promise<void> {
@@ -525,9 +627,15 @@ process.stdout.write("npm " + process.argv.slice(2).join(" ") + "\n");
     );
 
     await writeExecutable(
-        path.join(binDir, "sudo"),
+        path.join(binDir, "systemd-run"),
         String.raw`#!${process.execPath}
-process.stdout.write("sudo " + process.argv.slice(2).join(" ") + "\n");
+const args = process.argv.slice(2);
+const script = args.at(-1) || "";
+if (!args.includes("--user") || !script.includes("systemctl --user restart mira-dashboard.service")) {
+  process.stderr.write("deploy restart should use user systemd service");
+  process.exit(1);
+}
+process.stdout.write("systemd-run " + args.join(" ") + "\n");
 `
     );
 
@@ -538,9 +646,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
     const previousCwd = process.cwd();
     const previousDashboardRoot = process.env.MIRA_DASHBOARD_ROOT;
     const previousWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
+    const previousDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     process.chdir(tempDir);
     process.env.MIRA_DASHBOARD_ROOT = tempDir;
     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
+    process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "data", "mira-dashboard.db");
     let server: http.Server | undefined;
     try {
         const { default: pullRequestsRoutes } = await import(
@@ -569,6 +679,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
                 } else {
                     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
                 }
+                if (previousDbPath === undefined) {
+                    delete process.env.MIRA_DASHBOARD_DB_PATH;
+                } else {
+                    process.env.MIRA_DASHBOARD_DB_PATH = previousDbPath;
+                }
                 reject(error);
             };
             server?.once("listening", onListening);
@@ -596,6 +711,11 @@ async function startServer(tempDir: string): Promise<TestServer> {
             delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = previousWorktreeRoot;
+        }
+        if (previousDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = previousDbPath;
         }
         throw error;
     }
@@ -627,22 +747,18 @@ describe("pull request routes", () => {
         process.env.FAKE_GH_REVIEW_STATE_FILE = path.join(tempDir, "review-state");
         await installFakeCommands(tempDir);
         process.env.RAJOHAN_GITHUB_TOKEN = "rajohan-review-token";
-        await mkdir(path.join(tempDir, "data", "deployments"), { recursive: true });
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
         });
-        await writeFile(
-            path.join(tempDir, "data", "deployments", "job-1.json"),
-            JSON.stringify({
-                id: "job-1",
-                status: "ok",
-                startedAt: "2026-05-11T00:00:00.000Z",
-                updatedAt: "2026-05-11T00:01:00.000Z",
-                commit: "abc1234",
-            }),
-            "utf8"
-        );
         server = await startServer(tempDir);
+        const { __testing } = await import(`./pullRequests.js?seed=${randomUUID()}`);
+        __testing.writeDeploymentJob({
+            id: "job-1",
+            status: "ok",
+            startedAt: "2026-05-11T00:00:00.000Z",
+            updatedAt: "2026-05-11T00:01:00.000Z",
+            commit: "abc1234",
+        });
     });
 
     after(async () => {
@@ -662,6 +778,11 @@ describe("pull request routes", () => {
             delete process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
         } else {
             process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
+        }
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
         }
         if (originalRajohanToken === undefined) {
             delete process.env.RAJOHAN_GITHUB_TOKEN;
@@ -818,7 +939,7 @@ describe("pull request routes", () => {
         ]);
     });
 
-    it("returns recent deployment jobs from the local deployment directory", async () => {
+    it("returns recent deployment jobs from the dashboard database", async () => {
         const response = await requestJson<{
             deployments: Array<{ id: string; status: string; commit: string }>;
         }>(server, "/api/pull-requests/deployments");
@@ -1158,7 +1279,292 @@ describe("pull request routes", () => {
             { message: "Pull request CI checks must pass before approval" }
         );
         assert.equal(__testing.shellQuote("can't"), String.raw`'can'\''t'`);
+        assert.ok(
+            __testing
+                .deploymentJobUpdateCommand({
+                    id: "path-check",
+                    status: "ok",
+                    startedAt: "2026-06-03T19:41:52.233Z",
+                    updatedAt: "2026-06-03T19:41:52.233Z",
+                })
+                .includes(`MIRA_DEPLOYMENT_DB='${process.env.MIRA_DASHBOARD_DB_PATH}'`)
+        );
+        assert.match(
+            __testing.deploymentJobUpdateCommand({
+                id: "busy-timeout-check",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+            }),
+            /PRAGMA busy_timeout = 5000/
+        );
+        assert.match(
+            __testing.deploymentJobUpdateCommand({
+                id: "transaction-check",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+            }),
+            /BEGIN IMMEDIATE[\s\S]*DELETE FROM deployment_lock[\s\S]*COMMIT[\s\S]*ROLLBACK/
+        );
         assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
+    });
+
+    it("covers deployment lock lifecycle helper edge cases", async () => {
+        const { __testing } = await import(`./pullRequests.js?locks=${randomUUID()}`);
+        const { db: deploymentDb } = await import("../db.js");
+        const freshTimestamp = new Date().toISOString();
+        clearDeploymentState(tempDir);
+
+        try {
+            assert.equal(__testing.readDeploymentJob("broken"), undefined);
+
+            __testing.writeDeploymentJob({
+                id: "finished",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+                note: "done",
+            });
+            __testing.acquireDeploymentLock("finished");
+            __testing.acquireDeploymentLock("next");
+            assert.equal(__testing.readDeploymentLock(), "next");
+
+            __testing.releaseDeploymentLock("other");
+            assert.equal(__testing.readDeploymentLock(), "next");
+            __testing.releaseDeploymentLock("next");
+            assert.equal(__testing.readDeploymentLock(), undefined);
+
+            __testing.writeDeploymentJob({
+                id: "active",
+                status: "restart-scheduled",
+                startedAt: freshTimestamp,
+                updatedAt: freshTimestamp,
+                note: "restart pending",
+            });
+            __testing.acquireDeploymentLock("active");
+            assert.throws(() => __testing.acquireDeploymentLock("blocked"), {
+                message: "Dashboard deploy already in progress (active)",
+            });
+            __testing.releaseDeploymentLock("active");
+
+            const staleJob = {
+                id: "stale",
+                status: "building",
+                startedAt: "2000-01-01T00:00:00.000Z",
+                updatedAt: "2000-01-01T00:00:00.000Z",
+                note: "stale deploy",
+            };
+            assert.equal(__testing.isDeploymentJobStale(staleJob), true);
+            assert.equal(
+                __testing.isDeploymentJobStale({
+                    ...staleJob,
+                    updatedAt: "",
+                }),
+                true
+            );
+            assert.equal(
+                __testing.isDeploymentJobStale({
+                    ...staleJob,
+                    startedAt: "not-a-date",
+                    updatedAt: "also-not-a-date",
+                }),
+                true
+            );
+            __testing.writeDeploymentJob(staleJob);
+            __testing.acquireDeploymentLock(staleJob.id);
+            __testing.acquireDeploymentLock("after-stale");
+            assert.equal(__testing.readDeploymentLock(), "after-stale");
+            __testing.releaseDeploymentLock("after-stale");
+
+            __testing.releaseDeploymentLock("missing");
+
+            const realPrepare = deploymentDb.prepare.bind(deploymentDb);
+            const releasePrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("DELETE FROM deployment_lock WHERE id = 1")) {
+                        throw new Error("release unavailable");
+                    }
+                    return realPrepare(sql);
+                }
+            );
+            try {
+                assert.doesNotThrow(() => __testing.releaseDeploymentLock("missing"));
+            } finally {
+                releasePrepareMock.mock.restore();
+            }
+
+            const constraintPrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_lock")) {
+                        return {
+                            run: () => {
+                                throw new Error("constraint failed");
+                            },
+                        };
+                    }
+                    return realPrepare(sql);
+                }
+            );
+            try {
+                assert.throws(() => __testing.acquireDeploymentLock("raced"), {
+                    message: "Dashboard deploy already in progress",
+                });
+            } finally {
+                constraintPrepareMock.mock.restore();
+            }
+
+            const failedLockPrepareMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_lock")) {
+                        return {
+                            run: () => {
+                                throw new Error("lock write unavailable");
+                            },
+                        };
+                    }
+                    return realPrepare(sql);
+                }
+            );
+            try {
+                assert.throws(() => __testing.acquireDeploymentLock("failed-lock"), {
+                    message: "lock write unavailable",
+                });
+            } finally {
+                failedLockPrepareMock.mock.restore();
+            }
+
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("missing-active", freshTimestamp);
+            });
+            assert.throws(() => __testing.acquireDeploymentLock("missing-blocked"), {
+                message: "Dashboard deploy already in progress (missing-active)",
+            });
+            __testing.releaseDeploymentLock("missing-active");
+
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("stale-missing-active", "2000-01-01T00:00:00.000Z");
+            });
+            __testing.acquireDeploymentLock("after-orphan-stale");
+            assert.equal(__testing.readDeploymentLock(), "after-orphan-stale");
+            __testing.releaseDeploymentLock("after-orphan-stale");
+
+            withDeploymentDb(tempDir, (deploymentDb) => {
+                deploymentDb
+                    .prepare(
+                        "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+                    )
+                    .run("malformed-missing-active", "not-a-date");
+            });
+            __testing.acquireDeploymentLock("after-malformed-orphan");
+            assert.equal(__testing.readDeploymentLock(), "after-malformed-orphan");
+            __testing.releaseDeploymentLock("after-malformed-orphan");
+
+            const job = {
+                id: "background-failed",
+                status: "building",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+                note: "Deploy started",
+            };
+            __testing.writeDeploymentJob(job);
+            __testing.acquireDeploymentLock(job.id);
+            const restoreGitEnv = saveEnv(["FAKE_GIT_PULL_FAIL"]);
+            process.env.FAKE_GIT_PULL_FAIL = "1";
+            try {
+                await __testing.runDeploymentJob(job);
+            } finally {
+                restoreGitEnv();
+            }
+            const failedJob = __testing.readDeploymentJob(job.id) as {
+                status: string;
+                note: string;
+            };
+            assert.equal(failedJob.status, "failed");
+            assert.match(failedJob.note, /pull failed/u);
+            assert.equal(__testing.readDeploymentLock(), undefined);
+
+            const startJob = __testing.startDeployLatest();
+            assert.equal(startJob.status, "building");
+            assert.equal(__testing.readDeploymentLock(), startJob.id);
+            await waitForDeploymentStatus(startJob.id, "restart-scheduled", tempDir);
+            __testing.releaseDeploymentLock(startJob.id);
+
+            const failedJobWriteMock = mock.method(
+                deploymentDb,
+                "prepare",
+                (sql: string) => {
+                    if (sql.includes("INSERT INTO deployment_jobs")) {
+                        throw new Error("job write failed");
+                    }
+                    return realPrepare(sql);
+                }
+            );
+            try {
+                assert.throws(() => __testing.startDeployLatest(), {
+                    message: "job write failed",
+                });
+                assert.equal(__testing.readDeploymentLock(), undefined);
+            } finally {
+                failedJobWriteMock.mock.restore();
+            }
+
+            assert.throws(() => __testing.startDeployLatest("missing-lock"), {
+                message: "Dashboard deploy lock handoff failed",
+            });
+            assert.equal(__testing.readDeploymentLock(), undefined);
+
+            const originalConsoleError = console.error;
+            const backgroundErrors: unknown[][] = [];
+            console.error = (...args: unknown[]) => {
+                backgroundErrors.push(args);
+            };
+            try {
+                __testing.reportBackgroundDeploymentError(
+                    new Error("floating deploy failed")
+                );
+            } finally {
+                console.error = originalConsoleError;
+            }
+            assert.deepEqual(backgroundErrors, [
+                [
+                    "[pullRequestsRoutes] Background deploy failed:",
+                    "floating deploy failed",
+                ],
+            ]);
+
+            for (let index = 0; index < 52; index += 1) {
+                __testing.writeDeploymentJob({
+                    id: `history-${index}`,
+                    status: "ok",
+                    startedAt: `2026-06-03T19:41:${String(index).padStart(2, "0")}.233Z`,
+                    updatedAt: `2026-06-03T19:41:${String(index).padStart(2, "0")}.233Z`,
+                    note: "done",
+                });
+            }
+            const response = await requestJson<{ deployments: unknown[] }>(
+                server,
+                "/api/pull-requests/deployments"
+            );
+            assert.equal(response.body.deployments.length, 10);
+        } finally {
+            mock.restoreAll();
+            clearDeploymentState(tempDir);
+        }
     });
 
     it("covers GitHub JSON-lines parser edge cases", async () => {
@@ -1589,16 +1995,25 @@ describe("pull request routes", () => {
 
         const deploy = await requestJson<{
             ok: boolean;
-            deployment: { status: string; commit: string; note: string };
+            deployment: { id: string; status: string; commit?: string; note: string };
         }>(server, "/api/pull-requests/deploy", { method: "POST", body: {} });
         assert.equal(deploy.status, 200);
         assert.equal(deploy.body.ok, true);
-        assert.equal(deploy.body.deployment.status, "restart-scheduled");
-        assert.equal(deploy.body.deployment.commit, "abc1234");
+        assert.equal(deploy.body.deployment.status, "building");
+        assert.equal(deploy.body.deployment.commit, undefined);
+        assert.equal(deploy.body.deployment.note, "Deploy started");
+        const finishedDeploy = await waitForDeploymentStatus(
+            deploy.body.deployment.id,
+            "restart-scheduled",
+            tempDir
+        );
+        assert.equal(finishedDeploy.commit, "abc1234");
         assert.equal(
-            deploy.body.deployment.note,
+            finishedDeploy.note,
             "Build passed; restart + health check scheduled"
         );
+        releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
+        await waitForDeploymentLockReleased(tempDir);
 
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
@@ -1609,14 +2024,21 @@ describe("pull request routes", () => {
             const approveAndDeploy = await requestJson<{
                 ok: boolean;
                 message: string;
-                deployment: { status: string };
+                deployment: { id: string; status: string };
             }>(server, "/api/pull-requests/10/approve", {
                 method: "POST",
                 body: { deploy: true },
             });
             assert.equal(approveAndDeploy.status, 200);
             assert.equal(approveAndDeploy.body.message, "PR #10 merged; deploy started");
-            assert.equal(approveAndDeploy.body.deployment.status, "restart-scheduled");
+            assert.equal(approveAndDeploy.body.deployment.status, "building");
+            await waitForDeploymentStatus(
+                approveAndDeploy.body.deployment.id,
+                "restart-scheduled",
+                tempDir
+            );
+            releaseDeploymentLockInDb(approveAndDeploy.body.deployment.id, tempDir);
+            await waitForDeploymentLockReleased(tempDir);
         } finally {
             restoreGitEnv();
         }
@@ -1664,20 +2086,109 @@ describe("pull request routes", () => {
                 ok: boolean;
                 message: string;
                 cleanup: { status: string };
+                deployment?: { id: string; status: string };
                 syncError: string;
-                deployError: string;
             }>(server, "/api/pull-requests/10/approve", {
                 method: "POST",
                 body: { deploy: true },
             });
             assert.equal(partialSuccess.status, 200);
             assert.equal(partialSuccess.body.ok, true);
-            assert.equal(partialSuccess.body.message, "PR #10 merged; deploy failed");
+            assert.equal(
+                partialSuccess.body.message,
+                "PR #10 merged; production sync failed"
+            );
             assert.equal(partialSuccess.body.cleanup.status, "removed");
+            assert.equal(partialSuccess.body.deployment, undefined);
             assert.match(partialSuccess.body.syncError, /pull failed/u);
-            assert.match(partialSuccess.body.deployError, /pull failed/u);
         } finally {
             restoreSyncFailureEnv();
+        }
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        const { db: deploymentDb } = await import("../db.js");
+        const realDeploymentPrepare = deploymentDb.prepare.bind(deploymentDb);
+        const failedDeployStartMock = mock.method(
+            deploymentDb,
+            "prepare",
+            (sql: string) => {
+                if (sql.includes("INSERT INTO deployment_jobs")) {
+                    throw new Error("job write failed");
+                }
+                return realDeploymentPrepare(sql);
+            }
+        );
+        try {
+            const deployStartFailure = await requestJson<{
+                ok: boolean;
+                message: string;
+                cleanup: { status: string };
+                deployment?: { id: string; status: string };
+                deployError: string;
+            }>(server, "/api/pull-requests/10/approve", {
+                method: "POST",
+                body: { deploy: true },
+            });
+            assert.equal(deployStartFailure.status, 200);
+            assert.equal(deployStartFailure.body.ok, true);
+            assert.equal(
+                deployStartFailure.body.message,
+                "PR #10 merged; deploy failed to start"
+            );
+            assert.equal(deployStartFailure.body.cleanup.status, "removed");
+            assert.equal(deployStartFailure.body.deployment, undefined);
+            assert.equal(deployStartFailure.body.deployError, "job write failed");
+        } finally {
+            failedDeployStartMock.mock.restore();
+        }
+
+        await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
+            recursive: true,
+        });
+        const { __testing } = await import(
+            `./pullRequests.js?merge-active=${randomUUID()}`
+        );
+        const activeUpdatedAt = new Date().toISOString();
+        __testing.writeDeploymentJob({
+            id: "merge-active-job",
+            status: "building",
+            startedAt: activeUpdatedAt,
+            updatedAt: activeUpdatedAt,
+            note: "Deploy started",
+        });
+        __testing.acquireDeploymentLock("merge-active-job");
+        try {
+            const activeDeployFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/10/approve",
+                {
+                    method: "POST",
+                    body: { deploy: true },
+                }
+            );
+            assert.equal(activeDeployFailure.status, 500);
+            assert.equal(
+                activeDeployFailure.body.error,
+                "Dashboard deploy already in progress (merge-active-job)"
+            );
+
+            const mergeOnlyFailure = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/10/approve",
+                {
+                    method: "POST",
+                    body: { deploy: false },
+                }
+            );
+            assert.equal(mergeOnlyFailure.status, 500);
+            assert.equal(
+                mergeOnlyFailure.body.error,
+                "Dashboard deploy already in progress (merge-active-job)"
+            );
+        } finally {
+            __testing.releaseDeploymentLock("merge-active-job");
         }
     });
 
@@ -1903,8 +2414,36 @@ describe("pull request routes", () => {
                 wrongBranch.body.error,
                 /Production checkout must be clean main before deploy/
             );
+            delete process.env.FAKE_GIT_BRANCH;
+
+            const { __testing } = await import(
+                `./pullRequests.js?active-deploy=${randomUUID()}`
+            );
+            const activeUpdatedAt = new Date().toISOString();
+            __testing.writeDeploymentJob({
+                id: "active-job",
+                status: "building",
+                startedAt: activeUpdatedAt,
+                updatedAt: activeUpdatedAt,
+                note: "Deploy started",
+            });
+            __testing.acquireDeploymentLock("active-job");
+            const activeDeploy = await requestJson<{ error: string }>(
+                server,
+                "/api/pull-requests/deploy",
+                { method: "POST", body: {} }
+            );
+            assert.equal(activeDeploy.status, 500);
+            assert.equal(
+                activeDeploy.body.error,
+                "Dashboard deploy already in progress (active-job)"
+            );
         } finally {
             restoreGitEnv();
+            const { __testing } = await import(
+                `./pullRequests.js?active-deploy-cleanup=${randomUUID()}`
+            );
+            __testing.releaseDeploymentLock("active-job");
             console.error = originalConsoleError;
         }
     });
