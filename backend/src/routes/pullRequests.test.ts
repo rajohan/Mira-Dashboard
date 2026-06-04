@@ -1298,6 +1298,15 @@ describe("pull request routes", () => {
             }),
             /PRAGMA busy_timeout = 5000/
         );
+        assert.match(
+            __testing.deploymentJobUpdateCommand({
+                id: "transaction-check",
+                status: "ok",
+                startedAt: "2026-06-03T19:41:52.233Z",
+                updatedAt: "2026-06-03T19:41:52.233Z",
+            }),
+            /BEGIN IMMEDIATE[\s\S]*DELETE FROM deployment_lock[\s\S]*COMMIT[\s\S]*ROLLBACK/
+        );
         assert.equal(__testing.trimOutput("x".repeat(20_010)).length, 20_000);
     });
 

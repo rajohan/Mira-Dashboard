@@ -1066,7 +1066,9 @@ const { DatabaseSync } = require("node:sqlite");
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
 const db = new DatabaseSync(process.env.MIRA_DEPLOYMENT_DB);
 db.exec("PRAGMA busy_timeout = 5000");
-db.prepare(\`
+try {
+    db.exec("BEGIN IMMEDIATE");
+    db.prepare(\`
     INSERT INTO deployment_jobs (
         id,
         status,
@@ -1096,8 +1098,16 @@ db.prepare(\`
     job.stdout ?? null,
     job.stderr ?? null
 );
-db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
-db.close();
+    db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
+    db.exec("COMMIT");
+} catch (error) {
+    try {
+        db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+} finally {
+    db.close();
+}
 `;
     return [
         `MIRA_DEPLOYMENT_DB=${shellQuote(miraDbPath)}`,
