@@ -10,14 +10,10 @@ export function formatTime(dateStr: string): string {
         return "Unknown";
     }
 
-    try {
-        return formatDistanceToNow(new Date(timestamp), {
-            addSuffix: true,
-            locale: enUS,
-        });
-    } catch {
-        return "Unknown";
-    }
+    return formatDistanceToNow(new Date(timestamp), {
+        addSuffix: true,
+        locale: enUS,
+    });
 }
 
 /** Performs truncate. */
