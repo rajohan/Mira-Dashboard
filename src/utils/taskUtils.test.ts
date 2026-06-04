@@ -74,6 +74,7 @@ describe("task utils", () => {
         expect(taskMatchesSearch(searchableTask, "30 9")).toBe(true);
         expect(taskMatchesSearch(searchableTask, "dashboard-autopilot")).toBe(true);
         expect(taskMatchesSearch(searchableTask, "#8")).toBe(true);
+        expect(taskMatchesSearch(searchableTask, "8")).toBe(true);
         expect(taskMatchesSearch(searchableTask, "missing")).toBe(false);
     });
 
