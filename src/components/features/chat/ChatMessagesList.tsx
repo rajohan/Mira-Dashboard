@@ -466,6 +466,7 @@ export function ChatMessagesList({
                                                         }
 
                                                         const imageUrl = `data:${imageMime};base64,${imageData}`;
+                                                        const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (
                                                             <button
@@ -482,6 +483,9 @@ export function ChatMessagesList({
                                                                 }
                                                                 className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
                                                                 title="Open image preview"
+                                                                aria-label={
+                                                                    imagePreviewLabel
+                                                                }
                                                             >
                                                                 <img
                                                                     src={imageUrl}
@@ -522,6 +526,7 @@ export function ChatMessagesList({
                                                             }}
                                                             className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
                                                             title={`Open ${attachment.fileName}`}
+                                                            aria-label={`Open ${attachment.fileName} preview`}
                                                         >
                                                             <img
                                                                 src={attachment.dataUrl}
