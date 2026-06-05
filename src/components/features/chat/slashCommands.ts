@@ -28,7 +28,7 @@ export const THINKING_CHOICES = [
     "adaptive",
 ];
 /** Defines mode choices. */
-export const MODE_CHOICES = ["status", "on", "off", "default"];
+export const MODE_CHOICES = ["status", "on", "off"];
 /** Defines verbose choices. */
 export const VERBOSE_CHOICES = ["off", "on", "full"];
 /** Defines trace choices. */
@@ -102,7 +102,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     {
         name: "/fast",
         description: "Show or set fast mode",
-        args: "[status|on|off|default]",
+        args: "[status|on|off]",
         choices: MODE_CHOICES,
     },
     {
@@ -122,7 +122,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     {
         name: "/exec",
         description: "Set exec defaults",
-        args: "host=<auto|sandbox|gateway|node> security=<deny|allowlist|full> ask=<off|on-miss|always>",
+        args: "host <auto|sandbox|gateway|node> security <deny|allowlist|full> ask <off|on-miss|always> [node]",
     },
     {
         name: "/queue",

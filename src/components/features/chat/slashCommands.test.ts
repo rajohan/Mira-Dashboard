@@ -71,6 +71,10 @@ describe("slash commands", () => {
                 title: "/trace [off|on|raw]",
             })
         );
+        expect(buildSlashCommandSuggestions("/exe", [])[0]).toMatchObject({
+            value: "/exec ",
+            title: "/exec host <auto|sandbox|gateway|node> security <deny|allowlist|full> ask <off|on-miss|always> [node]",
+        });
         expect(buildSlashCommandSuggestions("/bt", [])[0]).toMatchObject({
             value: "/btw ",
             title: "/btw <question>",
