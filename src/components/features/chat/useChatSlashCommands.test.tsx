@@ -12,7 +12,7 @@ type ChatRequest = <T = unknown>(
     params?: Record<string, unknown>
 ) => Promise<T>;
 
-const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/stop", "/steer"]);
+const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/stop"]);
 
 function makeAttachment(): ChatSendAttachment {
     return {
@@ -119,42 +119,25 @@ describe("useChatSlashCommands", () => {
         expect(result.current.sendError).toBeNull();
     });
 
-    it("steers the selected session through sessions.steer", async () => {
-        const { request, result } = renderSlashCommands({ initialIsSending: true });
-
-        await act(async () => {
-            await result.current.runCommand("/steer keep the patch small");
-            await result.current.runCommand("/tell summarize before the next tool call");
-        });
-
-        expect(request).toHaveBeenCalledWith("sessions.steer", {
-            key: "session-a",
-            message: "keep the patch small",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.steer", {
-            key: "session-a",
-            message: "summarize before the next tool call",
-        });
-        expect(result.current.messages.at(-1)?.text).toBe("Steering message sent.");
-        expect(result.current.isSending).toBe(true);
-    });
-
-    it("reports steer usage without sending empty guidance", async () => {
-        const { request, result } = renderSlashCommands();
-
-        await act(async () => {
-            await result.current.runCommand("/steer");
-        });
-
-        expect(request).not.toHaveBeenCalledWith("sessions.steer", expect.anything());
-        expect(result.current.messages.at(-1)?.text).toBe("Usage: /steer <message>");
-    });
-
     it("stops the selected session through chat.abort", async () => {
         const { request, result } = renderSlashCommands();
 
         await act(async () => {
             await result.current.runCommand("/stop");
+        });
+
+        expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "session-a" });
+        expect(result.current.draft).toBe("");
+        expect(result.current.isSending).toBe(false);
+        expect(result.current.messages.at(-1)?.text).toBe("Stopped current run.");
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+    });
+
+    it("stops the selected session through the abort alias", async () => {
+        const { request, result } = renderSlashCommands();
+
+        await act(async () => {
+            await result.current.runCommand("/abort");
         });
 
         expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "session-a" });
@@ -170,11 +153,11 @@ describe("useChatSlashCommands", () => {
         });
 
         await act(async () => {
-            await expect(result.current.runCommand("/steer update")).resolves.toBe(true);
+            await expect(result.current.runCommand("/stop")).resolves.toBe(true);
         });
 
         expect(request).not.toHaveBeenCalled();
         expect(result.current.draft).toBe("/steer keep going");
-        expect(result.current.sendError).toBe("/steer cannot include attachments.");
+        expect(result.current.sendError).toBe("/stop cannot include attachments.");
     });
 });

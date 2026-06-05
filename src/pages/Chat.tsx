@@ -42,10 +42,7 @@ import {
     messageDeleteKey,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtils";
-import {
-    buildSlashCommandSuggestions,
-    isActiveRunSlashCommand,
-} from "../components/features/chat/slashCommands";
+import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
 import { Card } from "../components/ui/Card";
@@ -1158,14 +1155,8 @@ export function Chat() {
     /** Responds to send events. */
     const handleSend = async () => {
         const text = draft.trim();
-        const isActiveRunCommand =
-            isActiveRunSlashCommand(text) && attachments.length === 0;
 
-        if (
-            !selectedSessionKey ||
-            (!isActiveRunCommand && isSending) ||
-            (!isActiveRunCommand && sendInFlightReference.current)
-        ) {
+        if (!selectedSessionKey || sendInFlightReference.current) {
             return;
         }
 
@@ -1173,14 +1164,23 @@ export function Chat() {
             return;
         }
 
+        sendInFlightReference.current = true;
+
         if (text.startsWith("/")) {
-            const handledCommand = await handleSlashCommand(text);
+            let handledCommand: boolean;
+            try {
+                handledCommand = await handleSlashCommand(text);
+            } catch (error_) {
+                setSendError(chatErrorMessage(error_, "Failed to run slash command"));
+                sendInFlightReference.current = false;
+                return;
+            }
+
             if (handledCommand) {
+                sendInFlightReference.current = false;
                 return;
             }
         }
-
-        sendInFlightReference.current = true;
 
         const messageText = text;
         const sendAttachments = attachments;
@@ -1216,7 +1216,10 @@ export function Chat() {
         }));
 
         try {
-            if (selectedSession?.verboseLevel !== "full") {
+            if (
+                !messageText.startsWith("/") &&
+                selectedSession?.verboseLevel !== "full"
+            ) {
                 try {
                     await request("sessions.patch", {
                         key: selectedSessionKey,
@@ -1276,8 +1279,6 @@ export function Chat() {
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
-        (!isSending ||
-            (isActiveRunSlashCommand(draft.trim()) && attachments.length === 0)) &&
         !isRecording &&
         !isTranscribing &&
         (draft.trim() || attachments.length > 0)

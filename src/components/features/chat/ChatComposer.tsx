@@ -304,7 +304,9 @@ export function ChatComposer({
 
                             if (shouldSendFromEnter(event)) {
                                 event.preventDefault();
-                                onSend();
+                                if (canSend) {
+                                    onSend();
+                                }
                             }
                         }}
                         enterKeyHint="enter"

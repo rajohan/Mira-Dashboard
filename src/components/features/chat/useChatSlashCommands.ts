@@ -39,40 +39,19 @@ export function useChatSlashCommands({
     };
 
     return async (commandText: string): Promise<boolean> => {
-        const [rawCommand = "", ...argumentParts] = commandText.trim().split(/\s+/);
+        const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
-        const argumentText = argumentParts.join(" ").trim();
 
         if (!command.startsWith("/")) {
             return false;
         }
 
-        if (command !== "/steer" && command !== "/stop") {
+        if (command !== "/stop") {
             return false;
         }
 
         if (attachments.length > 0) {
             setSendError(`${rawCommand} cannot include attachments.`);
-            return true;
-        }
-
-        if (command === "/steer") {
-            if (!argumentText) {
-                addSystemMessage("Usage: /steer <message>");
-                return true;
-            }
-
-            setDraft("");
-            setSendError(null);
-            try {
-                await request("sessions.steer", {
-                    key: selectedSessionKey,
-                    message: argumentText,
-                });
-                addSystemMessage("Steering message sent.");
-            } catch (error_) {
-                setSendError(chatErrorMessage(error_, "Failed to run /steer"));
-            }
             return true;
         }
 

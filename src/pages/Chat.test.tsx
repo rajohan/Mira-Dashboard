@@ -1922,11 +1922,11 @@ describe("Chat", () => {
         expect(screen.getByText("ack later")).toBeInTheDocument();
     });
 
-    it("allows active-run steering commands while a send is already in flight", async () => {
+    it("allows messages and stop commands while a run is active", async () => {
         const user = userEvent.setup();
         const sendResolvers: Array<(value: { runId: string }) => void> = [];
         mocks.slashCommand.mockImplementation(async (commandText: string) =>
-            commandText.startsWith("/steer")
+            commandText.startsWith("/stop")
         );
         mocks.request.mockImplementation((method: string) => {
             if (method === "models.list") {
@@ -1962,9 +1962,19 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
         await screen.findByText("start a long run");
         await waitFor(() => expect(sendResolvers).toHaveLength(1));
+        await act(async () => {
+            sendResolvers[0]?.({ runId: "run-start" });
+        });
+        expect(await screen.findByText("Thinking")).toBeInTheDocument();
         expect(screen.getByTestId("composer-state")).toHaveTextContent(
             "true:false:false:false"
         );
+
+        const verbosePatchCallsBeforeSteer = mocks.request.mock.calls.filter(
+            ([method, params]) =>
+                method === "sessions.patch" &&
+                (params as { verboseLevel?: string } | undefined)?.verboseLevel === "full"
+        ).length;
 
         await user.type(screen.getByLabelText("Draft"), "/steer keep the patch small");
         await waitFor(() =>
@@ -1975,25 +1985,44 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
 
         await waitFor(() =>
-            expect(mocks.slashCommand).toHaveBeenCalledWith("/steer keep the patch small")
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "/steer keep the patch small" })
+            )
         );
-        expect(sendResolvers).toHaveLength(1);
+        expect(
+            mocks.request.mock.calls.filter(
+                ([method, params]) =>
+                    method === "sessions.patch" &&
+                    (params as { verboseLevel?: string } | undefined)?.verboseLevel ===
+                        "full"
+            )
+        ).toHaveLength(verbosePatchCallsBeforeSteer);
+        expect(sendResolvers).toHaveLength(2);
+        await act(async () => {
+            sendResolvers[1]?.({ runId: "run-steer" });
+        });
 
         await user.clear(screen.getByLabelText("Draft"));
         await user.type(screen.getByLabelText("Draft"), "second normal send");
         expect(screen.getByTestId("composer-state")).toHaveTextContent(
-            "true:false:false:false"
+            "true:true:false:false"
         );
         await user.click(screen.getByRole("button", { name: "send" }));
-        expect(sendResolvers).toHaveLength(1);
-        expect(mocks.request).not.toHaveBeenCalledWith(
+        expect(sendResolvers).toHaveLength(3);
+        expect(mocks.request).toHaveBeenCalledWith(
             "chat.send",
             expect.objectContaining({ message: "second normal send" })
         );
-
         await act(async () => {
-            sendResolvers[0]?.({ runId: "run-start" });
+            sendResolvers[2]?.({ runId: "run-second" });
         });
+
+        await user.clear(screen.getByLabelText("Draft"));
+        await user.type(screen.getByLabelText("Draft"), "/stop");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() => expect(mocks.slashCommand).toHaveBeenCalledWith("/stop"));
     });
 
     it("ignores closed delete confirmations without a pending message", async () => {
