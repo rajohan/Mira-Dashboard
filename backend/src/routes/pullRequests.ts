@@ -107,6 +107,7 @@ interface DeploymentJob {
     startedAt: string;
     updatedAt: string;
     commit?: string;
+    commitUrl?: string;
     note?: string;
     stdout?: string;
     stderr?: string;
@@ -209,12 +210,16 @@ interface DeploymentJobRow {
 }
 
 function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
+    const commit = row.commit_sha ?? undefined;
     return {
         id: row.id,
         status: row.status,
         startedAt: row.started_at,
         updatedAt: row.updated_at,
-        commit: row.commit_sha ?? undefined,
+        commit,
+        commitUrl: commit
+            ? `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commit)}`
+            : undefined,
         note: row.note ?? undefined,
         stdout: row.stdout ?? undefined,
         stderr: row.stderr ?? undefined,
