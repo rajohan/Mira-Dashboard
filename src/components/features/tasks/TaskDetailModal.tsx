@@ -1,4 +1,14 @@
-import { Trash2, X } from "lucide-react";
+import {
+    ArrowRight,
+    Check,
+    Circle,
+    Pencil,
+    Plus,
+    Save,
+    Trash2,
+    UserPlus,
+    X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -309,6 +319,7 @@ export function TaskDetailModal({
                                                 }
                                                 onClick={() => setEditPriority(p)}
                                             >
+                                                <Circle size={14} />
                                                 {p}
                                             </Button>
                                         ))}
@@ -538,6 +549,7 @@ export function TaskDetailModal({
                                                         startEditUpdate(update)
                                                     }
                                                 >
+                                                    <Pencil size={14} />
                                                     Edit
                                                 </Button>
                                                 <Button
@@ -548,6 +560,7 @@ export function TaskDetailModal({
                                                         onDeleteUpdate(update.id)
                                                     }
                                                 >
+                                                    <Trash2 size={14} />
                                                     Delete
                                                 </Button>
                                             </div>
@@ -571,6 +584,7 @@ export function TaskDetailModal({
                                                         variant="primary"
                                                         onClick={saveUpdateEdit}
                                                     >
+                                                        <Save size={14} />
                                                         Save
                                                     </Button>
                                                     <Button
@@ -580,6 +594,7 @@ export function TaskDetailModal({
                                                             setEditingUpdateId(null)
                                                         }
                                                     >
+                                                        <X size={14} />
                                                         Cancel
                                                     </Button>
                                                 </div>
@@ -612,6 +627,7 @@ export function TaskDetailModal({
                             onClick={handleAddUpdate}
                             className="w-full sm:w-auto"
                         >
+                            <Plus className="h-4 w-4" />
                             Add Update
                         </Button>
                     </div>
@@ -624,6 +640,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("todo")}
                             >
+                                <ArrowRight className="h-4 w-4" />
                                 Move to New
                             </Button>
                         )}
@@ -632,6 +649,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("in-progress")}
                             >
+                                <ArrowRight className="h-4 w-4" />
                                 Move to In Progress
                             </Button>
                         )}
@@ -640,11 +658,13 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("blocked")}
                             >
+                                <ArrowRight className="h-4 w-4" />
                                 Move to Blocked
                             </Button>
                         )}
                         {currentColumn !== "done" && (
                             <Button variant="primary" onClick={() => handleMove("done")}>
+                                <Check className="h-4 w-4" />
                                 Mark Done
                             </Button>
                         )}
@@ -654,12 +674,14 @@ export function TaskDetailModal({
                         {isEditingTask ? (
                             <>
                                 <Button variant="primary" onClick={handleSaveTask}>
+                                    <Save className="h-4 w-4" />
                                     Save Changes
                                 </Button>
                                 <Button
                                     variant="secondary"
                                     onClick={() => setIsEditingTask(false)}
                                 >
+                                    <X className="h-4 w-4" />
                                     Cancel Edit
                                 </Button>
                             </>
@@ -668,6 +690,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => setIsEditingTask(true)}
                             >
+                                <Pencil className="h-4 w-4" />
                                 Edit
                             </Button>
                         )}
@@ -678,6 +701,7 @@ export function TaskDetailModal({
                                 onClick={() => handleAssign(TASK_ASSIGNEES.mira.id)}
                                 disabled={isAssigning}
                             >
+                                <UserPlus className="h-4 w-4" />
                                 Assign to Mira
                             </Button>
                         )}
@@ -687,6 +711,7 @@ export function TaskDetailModal({
                                 onClick={() => handleAssign(TASK_ASSIGNEES.raymond.id)}
                                 disabled={isAssigning}
                             >
+                                <UserPlus className="h-4 w-4" />
                                 Assign to Raymond
                             </Button>
                         )}

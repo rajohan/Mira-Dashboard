@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { Flame, MessageCircle, MessageSquare, Newspaper, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -15,14 +15,14 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { useMoltbookData } from "../hooks";
 
 const TAB_OPTIONS = [
-    { value: "feed", label: "Feed" },
-    { value: "posts", label: "Posts" },
-    { value: "comments", label: "Comments" },
+    { value: "feed", label: "Feed", icon: <Newspaper className="h-4 w-4" /> },
+    { value: "posts", label: "Posts", icon: <MessageSquare className="h-4 w-4" /> },
+    { value: "comments", label: "Comments", icon: <MessageCircle className="h-4 w-4" /> },
 ] as const;
 
 const SORT_OPTIONS = [
-    { value: "hot", label: "Hot" },
-    { value: "new", label: "New" },
+    { value: "hot", label: "Hot", icon: <Flame className="h-4 w-4" /> },
+    { value: "new", label: "New", icon: <Newspaper className="h-4 w-4" /> },
 ] as const;
 
 /** Renders the moltbook UI. */

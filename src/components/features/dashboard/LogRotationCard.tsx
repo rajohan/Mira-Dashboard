@@ -1,4 +1,4 @@
-import { RotateCw } from "lucide-react";
+import { FlaskConical, Play, RotateCw } from "lucide-react";
 
 import {
     useLogRotationStatus,
@@ -38,6 +38,7 @@ export function LogRotationCard() {
                             disabled={dryRun.isPending || realRun.isPending}
                             className="w-full sm:w-auto"
                         >
+                            <FlaskConical className="h-4 w-4" />
                             {dryRun.isPending ? "Running..." : "Run dry-run now"}
                         </Button>
                         <Button
@@ -47,6 +48,7 @@ export function LogRotationCard() {
                             disabled={dryRun.isPending || realRun.isPending}
                             className="w-full sm:w-auto"
                         >
+                            <Play className="h-4 w-4" />
                             {realRun.isPending ? "Running..." : "Run real now"}
                         </Button>
                     </div>
