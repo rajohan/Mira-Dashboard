@@ -366,7 +366,7 @@ export function Logs() {
                         onClick={handleExport}
                         disabled={filteredLogs.length === 0}
                     >
-                        <Download className="h-4 w-4" />
+                        <Download size={14} />
                         Export
                     </Button>
                     <Button
@@ -375,7 +375,7 @@ export function Logs() {
                         onClick={clearLogs}
                         disabled={liveLogs.length === 0}
                     >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 size={14} />
                         Clear
                     </Button>
                 </div>
