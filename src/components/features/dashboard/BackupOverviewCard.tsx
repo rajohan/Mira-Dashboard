@@ -165,12 +165,12 @@ export function BackupOverviewCard() {
                         >
                             {isWalgRunning ? (
                                 <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                     Running...
                                 </>
                             ) : (
                                 <>
-                                    <Play className="mr-2 h-4 w-4" />
+                                    <Play className="h-4 w-4" />
                                     Run Postgres backup
                                 </>
                             )}
@@ -198,12 +198,12 @@ export function BackupOverviewCard() {
                         >
                             {isRunning ? (
                                 <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                     Running...
                                 </>
                             ) : (
                                 <>
-                                    <Play className="mr-2 h-4 w-4" />
+                                    <Play className="h-4 w-4" />
                                     Run filesystem backup
                                 </>
                             )}

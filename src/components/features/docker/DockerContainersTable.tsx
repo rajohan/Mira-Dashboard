@@ -326,7 +326,7 @@ export function DockerContainersTable({
                     onClick={onRestartStack}
                     className="w-full sm:w-auto"
                 >
-                    <RotateCcw className="mr-2 h-4 w-4" />
+                    <RotateCcw className="h-4 w-4" />
                     Restart stack
                 </Button>
             </div>

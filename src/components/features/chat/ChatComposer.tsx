@@ -343,9 +343,9 @@ export function ChatComposer({
                         className="w-full px-2 sm:px-4"
                     >
                         {isRecording ? (
-                            <Square className="mr-1 h-4 w-4 sm:mr-2" />
+                            <Square className="h-4 w-4" />
                         ) : (
-                            <Mic className="mr-1 h-4 w-4 sm:mr-2" />
+                            <Mic className="h-4 w-4" />
                         )}
                         {isRecording ? "Stop" : isTranscribing ? "STT…" : "Voice"}
                     </Button>
@@ -363,7 +363,8 @@ export function ChatComposer({
                         title="Attach files"
                         className="w-full px-2 sm:px-4"
                     >
-                        <Paperclip className="mr-1 h-4 w-4 sm:mr-2" /> Attach
+                        <Paperclip className="h-4 w-4" />
+                        Attach
                     </Button>
                     <Button
                         variant="primary"
@@ -372,7 +373,8 @@ export function ChatComposer({
                         disabled={!canSend || isRecording || isTranscribing}
                         className="w-full px-2 sm:px-4"
                     >
-                        <Send className="mr-1 h-4 w-4 sm:mr-2" /> Send
+                        <Send className="h-4 w-4" />
+                        Send
                     </Button>
                 </div>
             </div>

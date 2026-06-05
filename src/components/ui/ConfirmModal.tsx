@@ -1,3 +1,5 @@
+import { Check, Loader2, X } from "lucide-react";
+
 import { Button } from "./Button";
 import { Modal } from "./Modal";
 
@@ -34,6 +36,7 @@ export function ConfirmModal({
                 </p>
                 <div className="flex justify-end gap-2">
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
+                        <X className="h-4 w-4" />
                         Cancel
                     </Button>
                     <Button
@@ -41,9 +44,17 @@ export function ConfirmModal({
                         onClick={onConfirm}
                         disabled={loading}
                     >
-                        {loading
-                            ? confirmLoadingLabel || `${confirmLabel}...`
-                            : confirmLabel}
+                        {loading ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                {confirmLoadingLabel || `${confirmLabel}...`}
+                            </>
+                        ) : (
+                            <>
+                                <Check className="h-4 w-4" />
+                                {confirmLabel}
+                            </>
+                        )}
                     </Button>
                 </div>
             </div>

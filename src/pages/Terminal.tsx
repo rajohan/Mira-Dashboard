@@ -1,4 +1,4 @@
-import { Send, Trash2 } from "lucide-react";
+import { Send, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
@@ -431,7 +431,8 @@ export function Terminal() {
                                         }
                                     }}
                                 >
-                                    ■ Stop
+                                    <Square size={16} />
+                                    Stop
                                 </Button>
                             ) : (
                                 <Button

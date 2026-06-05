@@ -25,7 +25,7 @@ export function PreviewToggle({
                 onClick={() => onToggle(true)}
                 className="rounded px-2 py-1 text-xs"
             >
-                <Eye size={14} className="mr-1 inline" />
+                <Eye size={14} />
                 <span>{previewLabel}</span>
             </Button>
             <Button
@@ -34,7 +34,7 @@ export function PreviewToggle({
                 onClick={() => onToggle(false)}
                 className="rounded px-2 py-1 text-xs"
             >
-                <Code size={14} className="mr-1 inline" />
+                <Code size={14} />
                 <span>{editLabel}</span>
             </Button>
         </div>

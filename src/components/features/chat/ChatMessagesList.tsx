@@ -352,8 +352,9 @@ export function ChatMessagesList({
             ) : null}
 
             {isLoadingHistory && chatRows.length === 0 ? (
-                <div className="text-primary-400 flex items-center justify-center py-10">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading chat…
+                <div className="text-primary-400 flex items-center justify-center gap-1.5 py-10">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading chat…
                 </div>
             ) : chatRows.length === 0 ? (
                 <EmptyState message="No chat history yet. Send the first message to this session." />

@@ -1,6 +1,6 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { logsCollection } from "../collections/logs";
@@ -366,7 +366,7 @@ export function Logs() {
                         onClick={handleExport}
                         disabled={filteredLogs.length === 0}
                     >
-                        <Download className="mr-1 h-4 w-4" />
+                        <Download className="h-4 w-4" />
                         Export
                     </Button>
                     <Button
@@ -375,6 +375,7 @@ export function Logs() {
                         onClick={clearLogs}
                         disabled={liveLogs.length === 0}
                     >
+                        <Trash2 className="h-4 w-4" />
                         Clear
                     </Button>
                 </div>

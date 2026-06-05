@@ -1,4 +1,4 @@
-import { Boxes, History, RefreshCw } from "lucide-react";
+import { Boxes, History, Play, RefreshCw, Square, X } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 
@@ -284,6 +284,7 @@ export function Docker() {
                             onClick={() => setActionOutput("")}
                             className="w-full sm:w-auto"
                         >
+                            <X className="h-4 w-4" />
                             Dismiss
                         </Button>
                     </div>
@@ -319,9 +320,17 @@ export function Docker() {
                             disabled={runDockerUpdater.isPending}
                             className="w-full sm:w-auto"
                         >
-                            {runDockerUpdater.isPending
-                                ? "Running..."
-                                : "Run updater now"}
+                            {runDockerUpdater.isPending ? (
+                                <>
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                    Running...
+                                </>
+                            ) : (
+                                <>
+                                    <Play className="h-4 w-4" />
+                                    Run updater now
+                                </>
+                            )}
                         </Button>
                     </div>
                 </div>
@@ -718,6 +727,7 @@ export function Docker() {
                         }
                         disabled={!selectedConsoleContainer || !consoleCommand.trim()}
                     >
+                        <Play className="h-4 w-4" />
                         Run
                     </Button>
                     {consoleJobId && execJobQuery.data?.status === "running" ? (
@@ -725,6 +735,7 @@ export function Docker() {
                             variant="danger"
                             onClick={() => void stopDockerExec(consoleJobId)}
                         >
+                            <Square className="h-4 w-4" />
                             Stop
                         </Button>
                     ) : null}

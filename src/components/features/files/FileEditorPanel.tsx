@@ -140,7 +140,7 @@ export function FileEditorPanel({
                                         (isJsonEditing && !jsonValidation.valid)
                                     }
                                 >
-                                    <Save size={14} className="mr-1" />
+                                    <Save size={14} />
                                     {savePending ? "Saving..." : "Save"}
                                 </Button>
                             )}
