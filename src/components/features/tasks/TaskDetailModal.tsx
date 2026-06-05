@@ -1,5 +1,5 @@
 import { Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -106,9 +106,11 @@ export function TaskDetailModal({
 
     const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
+    const previousTaskNumberRef = useRef<number | null>(task?.number ?? null);
 
     useEffect(() => {
         if (!task) {
+            previousTaskNumberRef.current = null;
             setIsEditingTask(false);
             setProgressMessage("");
             setEditingUpdateId(null);
@@ -116,13 +118,27 @@ export function TaskDetailModal({
             return;
         }
 
-        setEditTitle(task.title);
-        setEditBody(task.body || "");
-        setEditPriority(getPriority(task.labels));
-        setEditCronJobId(task.automation?.cronJobId || "");
-        setEditScheduleSummary(task.automation?.scheduleSummary || "");
-        setEditSessionTarget(task.automation?.sessionTarget || "");
-    }, [task]);
+        const previousTaskNumber = previousTaskNumberRef.current;
+        previousTaskNumberRef.current = task.number;
+
+        const isNewTask = previousTaskNumber !== task.number;
+
+        if (isNewTask) {
+            setIsEditingTask(false);
+            setProgressMessage("");
+            setEditingUpdateId(null);
+            setEditingUpdateMessage("");
+        }
+
+        if (isNewTask || !isEditingTask) {
+            setEditTitle(task.title);
+            setEditBody(task.body || "");
+            setEditPriority(getPriority(task.labels));
+            setEditCronJobId(task.automation?.cronJobId || "");
+            setEditScheduleSummary(task.automation?.scheduleSummary || "");
+            setEditSessionTarget(task.automation?.sessionTarget || "");
+        }
+    }, [isEditingTask, task]);
 
     if (!task) {
         return null;

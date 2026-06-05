@@ -109,6 +109,130 @@ describe("TaskDetailModal", () => {
         ).toBeInTheDocument();
     });
 
+    it("resets edit drafts when switching selected tasks", async () => {
+        const user = userEvent.setup();
+        const props: React.ComponentProps<typeof TaskDetailModal> = {
+            task: makeTask({ number: 88, title: "First task" }),
+            onClose: vi.fn(),
+            onMove: vi.fn(async () => {}),
+            onAssign: vi.fn(async () => {}),
+            onDelete: vi.fn(async () => {}),
+            onUpdate: vi.fn(async () => makeTask()),
+            updates,
+            onAddUpdate: vi.fn(async () => {}),
+            onEditUpdate: vi.fn(async () => {}),
+            onDeleteUpdate: vi.fn(async () => {}),
+        };
+        const { rerender } = render(<TaskDetailModal {...props} />);
+
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        await user.clear(screen.getByLabelText("Title"));
+        await user.type(screen.getByLabelText("Title"), "Unsaved draft");
+        const updateCard = screen
+            .getByText("Added component coverage.")
+            .closest("div")!.parentElement!;
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+
+        rerender(
+            <TaskDetailModal
+                {...props}
+                task={makeTask({ number: 89, title: "Second task" })}
+            />
+        );
+
+        expect(await screen.findByText("#89: Second task")).toBeInTheDocument();
+        expect(screen.queryByDisplayValue("Unsaved draft")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("textbox", {
+                name: "Message for progress update #31",
+            })
+        ).not.toBeInTheDocument();
+    });
+
+    it("preserves edit drafts when the same task refreshes while editing", async () => {
+        const user = userEvent.setup();
+        const task = makeTask({
+            number: 88,
+            title: "First task",
+            body: "Original body",
+            labels: [{ name: "in-progress" }, { name: "priority-medium" }],
+            automation: {
+                type: "cron",
+                recurring: true,
+                cronJobId: "job-original",
+                scheduleSummary: "Original schedule",
+                sessionTarget: "session:original",
+            },
+        });
+        const props: React.ComponentProps<typeof TaskDetailModal> = {
+            task,
+            onClose: vi.fn(),
+            onMove: vi.fn(async () => {}),
+            onAssign: vi.fn(async () => {}),
+            onDelete: vi.fn(async () => {}),
+            onUpdate: vi.fn(async () => task),
+            updates,
+            onAddUpdate: vi.fn(async () => {}),
+            onEditUpdate: vi.fn(async () => {}),
+            onDeleteUpdate: vi.fn(async () => {}),
+        };
+        const { rerender } = render(<TaskDetailModal {...props} />);
+
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        await user.clear(screen.getByLabelText("Title"));
+        await user.type(screen.getByLabelText("Title"), "Unsaved title");
+        fireEvent.change(screen.getByDisplayValue("Original body"), {
+            target: { value: "Unsaved body" },
+        });
+        await user.click(screen.getByRole("button", { name: "high" }));
+        fireEvent.change(screen.getByLabelText("Cron job ID"), {
+            target: { value: "job-draft" },
+        });
+        fireEvent.change(screen.getByLabelText("Schedule summary"), {
+            target: { value: "Draft schedule" },
+        });
+        fireEvent.change(screen.getByLabelText("Session target"), {
+            target: { value: "session:draft" },
+        });
+
+        rerender(
+            <TaskDetailModal
+                {...props}
+                task={makeTask({
+                    ...task,
+                    title: "Server refreshed title",
+                    body: "Server refreshed body",
+                    labels: [{ name: "in-progress" }, { name: "priority-low" }],
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "job-refreshed",
+                        scheduleSummary: "Refreshed schedule",
+                        sessionTarget: "session:refreshed",
+                    },
+                })}
+            />
+        );
+
+        expect(screen.getByLabelText("Title")).toHaveValue("Unsaved title");
+        expect(screen.getByDisplayValue("Unsaved body")).toBeInTheDocument();
+        expect(screen.getByLabelText("Cron job ID")).toHaveValue("job-draft");
+        expect(screen.getByLabelText("Schedule summary")).toHaveValue("Draft schedule");
+        expect(screen.getByLabelText("Session target")).toHaveValue("session:draft");
+
+        await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+        expect(props.onUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                labels: ["in-progress", "priority-high"],
+            })
+        );
+    });
+
     it("renders task details, markdown body, updates, and automation state", async () => {
         renderModal({
             task: makeTask({
