@@ -5,12 +5,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../../types/session";
 import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
+import { SLASH_COMMANDS, slashCommandCanonicalName } from "./slashCommands";
 import { useChatSlashCommands } from "./useChatSlashCommands";
 
 type ChatRequest = <T = unknown>(
     method: string,
     params?: Record<string, unknown>
 ) => Promise<T>;
+
+const LOCALLY_HANDLED_COMMANDS = new Set([
+    "/abort",
+    "/clear",
+    "/commands",
+    "/compact",
+    "/elevated",
+    "/exec",
+    "/fast",
+    "/help",
+    "/model",
+    "/models",
+    "/new",
+    "/reasoning",
+    "/reset",
+    "/status",
+    "/stop",
+    "/steer",
+    "/think",
+    "/usage",
+    "/verbose",
+]);
 
 function makeSession(overrides: Partial<Session> = {}): Session {
     return {
@@ -237,7 +260,7 @@ describe("useChatSlashCommands", () => {
         expect(systemText).toContain("Session usage:");
     });
 
-    it("covers fallback status/model text and unwired slash commands", async () => {
+    it("covers fallback status/model text and passes through gateway slash commands", async () => {
         const { request, result } = renderSlashCommands({
             chatModelOptions: [
                 { label: "Label-only" },
@@ -264,7 +287,6 @@ describe("useChatSlashCommands", () => {
             await result.current.runCommand("/model");
             await result.current.runCommand("/status");
             await result.current.runCommand("/fast off");
-            await result.current.runCommand("/unknown");
         });
 
         expect(request).toHaveBeenCalledWith("sessions.patch", {
@@ -281,7 +303,71 @@ describe("useChatSlashCommands", () => {
         expect(systemText).toContain("Status: unknown");
         expect(systemText).toContain("Model: default");
         expect(systemText).toContain("Fast mode disabled.");
-        expect(result.current.sendError).toContain("/unknown is visible in autocomplete");
+        expect(result.current.sendError).toBeNull();
+
+        await act(async () => {
+            await expect(result.current.runCommand("/queue collect")).resolves.toBe(
+                false
+            );
+            await expect(result.current.runCommand("/goal status")).resolves.toBe(false);
+            await expect(result.current.runCommand("/unknown")).resolves.toBe(false);
+        });
+
+        expect(result.current.sendError).toBeNull();
+    });
+
+    it("passes through catalog slash commands that are handled by OpenClaw", async () => {
+        const { result } = renderSlashCommands();
+        const passThroughCommands = SLASH_COMMANDS.flatMap((definition) => [
+            definition.name,
+            ...(definition.aliases || []),
+        ]).filter(
+            (command) => !LOCALLY_HANDLED_COMMANDS.has(slashCommandCanonicalName(command))
+        );
+
+        await act(async () => {
+            for (const command of passThroughCommands) {
+                await expect(result.current.runCommand(`${command} test`)).resolves.toBe(
+                    false
+                );
+            }
+        });
+
+        expect(passThroughCommands).not.toContain("/steer");
+        expect(passThroughCommands).not.toContain("/tell");
+        expect(passThroughCommands).toContain("/queue");
+        expect(passThroughCommands).toContain("/goal");
+        expect(result.current.sendError).toBeNull();
+    });
+
+    it("steers the selected session through the Gateway steer RPC", async () => {
+        const { request, result } = renderSlashCommands();
+
+        await act(async () => {
+            await result.current.runCommand("/steer keep the patch small");
+            await result.current.runCommand("/tell summarize before the next tool call");
+        });
+
+        expect(request).toHaveBeenCalledWith("sessions.steer", {
+            key: "session-a",
+            message: "keep the patch small",
+        });
+        expect(request).toHaveBeenCalledWith("sessions.steer", {
+            key: "session-a",
+            message: "summarize before the next tool call",
+        });
+        expect(result.current.messages.at(-1)?.text).toBe("Steering message sent.");
+    });
+
+    it("reports steer usage without sending empty guidance", async () => {
+        const { request, result } = renderSlashCommands();
+
+        await act(async () => {
+            await result.current.runCommand("/steer");
+        });
+
+        expect(request).not.toHaveBeenCalledWith("sessions.steer", expect.anything());
+        expect(result.current.messages.at(-1)?.text).toBe("Usage: /steer <message>");
     });
 
     it("covers fallback runtime status values and command errors", async () => {

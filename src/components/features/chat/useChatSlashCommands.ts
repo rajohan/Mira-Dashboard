@@ -427,9 +427,22 @@ export function useChatSlashCommands({
             return true;
         }
 
-        setSendError(
-            `${rawCommand} is visible in autocomplete, but is not wired in Mira Dashboard yet. Use the integrated OpenClaw chat for that command for now.`
-        );
-        return true;
+        if (command === "/steer") {
+            if (!argumentText) {
+                addSystemMessage("Usage: /steer <message>");
+                return true;
+            }
+
+            await runSimpleCommand(async () => {
+                await request("sessions.steer", {
+                    key: selectedSessionKey,
+                    message: argumentText,
+                });
+                addSystemMessage("Steering message sent.");
+            });
+            return true;
+        }
+
+        return false;
     };
 }
