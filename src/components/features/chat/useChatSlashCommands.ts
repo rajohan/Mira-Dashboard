@@ -74,12 +74,6 @@ export function useChatSlashCommands({
 
             setDraft("");
             setSendError(null);
-            setMessages([]);
-            updateActiveStreams((previous) => {
-                const next = { ...previous };
-                delete next[selectedSessionKey];
-                return next;
-            });
             return false;
         }
 

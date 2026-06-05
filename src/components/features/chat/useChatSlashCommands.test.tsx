@@ -124,7 +124,7 @@ describe("useChatSlashCommands", () => {
         expect(result.current.sendError).toBeNull();
     });
 
-    it("confirms reset commands before passing them through", async () => {
+    it("confirms reset commands before passing them through without clearing history", async () => {
         const { confirmResetSession, request, result } = renderSlashCommands();
 
         await act(async () => {
@@ -136,8 +136,10 @@ describe("useChatSlashCommands", () => {
         expect(request).not.toHaveBeenCalled();
         expect(result.current.sendError).toBeNull();
         expect(result.current.draft).toBe("");
-        expect(result.current.activeStreams["session-a"]).toBeUndefined();
-        expect(result.current.messages).toEqual([]);
+        expect(result.current.activeStreams["session-a"]).toBeDefined();
+        expect(result.current.messages).toEqual([
+            { content: "hello", role: "user", text: "hello" },
+        ]);
     });
 
     it("cancels reset commands locally when confirmation is denied", async () => {

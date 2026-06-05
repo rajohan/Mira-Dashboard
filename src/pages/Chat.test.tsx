@@ -2253,6 +2253,42 @@ describe("Chat", () => {
             )
         );
         expect(screen.queryByText("/reset")).not.toBeInTheDocument();
+        await waitFor(() =>
+            expect(screen.queryByText("old user message")).not.toBeInTheDocument()
+        );
+    });
+
+    it("keeps the transcript visible when reset slash command send fails", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(false);
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "chat.send") {
+                throw new Error("reset send failed");
+            }
+
+            return method === "chat.history"
+                ? {
+                      messages: [
+                          {
+                              content: "old user message",
+                              role: "user",
+                              text: "old user message",
+                              timestamp: "2026-05-11T00:00:00.000Z",
+                          },
+                      ],
+                  }
+                : { models: [] };
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/reset");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        expect(await screen.findByText("reset send failed")).toBeInTheDocument();
+        expect(screen.getByText("old user message")).toBeInTheDocument();
+        expect(screen.queryByText("/reset")).not.toBeInTheDocument();
     });
 
     it("reports slash command handler failures without forwarding", async () => {

@@ -1240,7 +1240,8 @@ export function Chat() {
 
         const messageText = text;
         const sendAttachments = attachments;
-        const shouldAppendOptimisticMessage = !isResetSlashCommand(messageText);
+        const isResetCommand = isResetSlashCommand(messageText);
+        const shouldAppendOptimisticMessage = !isResetCommand;
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: messageText,
@@ -1301,6 +1302,17 @@ export function Chat() {
                 attachments: gatewayAttachments(sendAttachments),
                 idempotencyKey,
             })) as { runId?: string } | undefined;
+
+            if (isResetCommand) {
+                setMessages([]);
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+                return;
+            }
+
             const acknowledgedRunId = result?.runId;
             if (acknowledgedRunId) {
                 updateActiveStreams((previous) => {
