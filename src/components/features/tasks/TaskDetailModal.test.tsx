@@ -109,6 +109,50 @@ describe("TaskDetailModal", () => {
         ).toBeInTheDocument();
     });
 
+    it("resets edit drafts when switching selected tasks", async () => {
+        const user = userEvent.setup();
+        const props: React.ComponentProps<typeof TaskDetailModal> = {
+            task: makeTask({ number: 88, title: "First task" }),
+            onClose: vi.fn(),
+            onMove: vi.fn(async () => {}),
+            onAssign: vi.fn(async () => {}),
+            onDelete: vi.fn(async () => {}),
+            onUpdate: vi.fn(async () => makeTask()),
+            updates,
+            onAddUpdate: vi.fn(async () => {}),
+            onEditUpdate: vi.fn(async () => {}),
+            onDeleteUpdate: vi.fn(async () => {}),
+        };
+        const { rerender } = render(<TaskDetailModal {...props} />);
+
+        await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
+        await user.clear(screen.getByLabelText("Title"));
+        await user.type(screen.getByLabelText("Title"), "Unsaved draft");
+        const updateCard = screen
+            .getByText("Added component coverage.")
+            .closest("div")!.parentElement!;
+        await user.click(
+            within(updateCard).getByRole("button", {
+                name: "Edit progress update #31",
+            })
+        );
+
+        rerender(
+            <TaskDetailModal
+                {...props}
+                task={makeTask({ number: 89, title: "Second task" })}
+            />
+        );
+
+        expect(await screen.findByText("#89: Second task")).toBeInTheDocument();
+        expect(screen.queryByDisplayValue("Unsaved draft")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("textbox", {
+                name: "Message for progress update #31",
+            })
+        ).not.toBeInTheDocument();
+    });
+
     it("renders task details, markdown body, updates, and automation state", async () => {
         renderModal({
             task: makeTask({

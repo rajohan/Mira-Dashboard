@@ -1,5 +1,5 @@
 import { Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -106,14 +106,26 @@ export function TaskDetailModal({
 
     const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
+    const previousTaskNumberRef = useRef<number | null>(task?.number ?? null);
 
     useEffect(() => {
         if (!task) {
+            previousTaskNumberRef.current = null;
             setIsEditingTask(false);
             setProgressMessage("");
             setEditingUpdateId(null);
             setEditingUpdateMessage("");
             return;
+        }
+
+        const previousTaskNumber = previousTaskNumberRef.current;
+        previousTaskNumberRef.current = task.number;
+
+        if (previousTaskNumber !== task.number) {
+            setIsEditingTask(false);
+            setProgressMessage("");
+            setEditingUpdateId(null);
+            setEditingUpdateMessage("");
         }
 
         setEditTitle(task.title);
