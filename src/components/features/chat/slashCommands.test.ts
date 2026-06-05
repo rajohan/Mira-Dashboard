@@ -58,6 +58,14 @@ describe("slash commands", () => {
         ]);
 
         expect(buildSlashCommandSuggestions("/status ", [])).toEqual([]);
+
+        expect(buildSlashCommandSuggestions("/queue c", [])).toEqual([
+            {
+                value: "/queue collect",
+                title: "collect",
+                description: "Manage active-run queue behavior",
+            },
+        ]);
     });
 
     it("suggests the documented OpenClaw command catalog", () => {

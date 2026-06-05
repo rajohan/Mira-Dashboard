@@ -43,6 +43,8 @@ export const USAGE_CHOICES = ["off", "tokens", "full", "cost"];
 export const ACTIVATION_CHOICES = ["mention", "always"];
 /** Defines send choices. */
 export const SEND_CHOICES = ["on", "off", "inherit"];
+/** Defines queue mode choices. */
+export const QUEUE_MODE_CHOICES = ["steer", "followup", "collect", "interrupt"];
 
 /** Defines slash commands. */
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [
@@ -127,7 +129,8 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     {
         name: "/queue",
         description: "Manage active-run queue behavior",
-        args: "<mode>",
+        args: "[steer|followup|collect|interrupt]",
+        choices: QUEUE_MODE_CHOICES,
     },
     {
         name: "/steer",
