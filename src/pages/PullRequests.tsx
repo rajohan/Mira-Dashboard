@@ -429,7 +429,18 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                             <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-primary-300 text-sm font-medium">
-                                        {deployment.commit || deployment.id}
+                                        {deployment.commitUrl ? (
+                                            <a
+                                                href={deployment.commitUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="hover:text-primary-100 break-all"
+                                            >
+                                                {deployment.commit || deployment.id}
+                                            </a>
+                                        ) : (
+                                            deployment.commit || deployment.id
+                                        )}
                                     </div>
                                     <div className="text-primary-500 text-xs">
                                         {formatDate(deployment.updatedAt)}

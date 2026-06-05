@@ -39,6 +39,7 @@ export interface DeploymentJob {
     startedAt: string;
     updatedAt: string;
     commit?: string;
+    commitUrl?: string;
     note?: string;
     stdout?: string;
     stderr?: string;

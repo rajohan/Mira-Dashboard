@@ -102,6 +102,7 @@ function mockPullRequests(overrides = {}) {
         data: [
             {
                 commit: "abc123",
+                commitUrl: "https://github.com/rajohan/Mira-Dashboard/commit/abc123",
                 id: "deploy-1",
                 note: "Service restart scheduled",
                 status: "restart-scheduled",
@@ -804,6 +805,8 @@ describe("PullRequests page", () => {
                 data: [
                     {
                         commit: "",
+                        commitUrl:
+                            "https://github.com/rajohan/Mira-Dashboard/commit/deploy-ok",
                         id: "deploy-ok",
                         note: "",
                         status: "ok",
@@ -811,6 +814,8 @@ describe("PullRequests page", () => {
                     },
                     {
                         commit: "badc0de",
+                        commitUrl:
+                            "https://github.com/rajohan/Mira-Dashboard/commit/badc0de",
                         id: "deploy-failed",
                         note: "Deploy failed",
                         status: "failed",
@@ -822,6 +827,13 @@ describe("PullRequests page", () => {
                         note: "Running deploy",
                         status: "running",
                         updatedAt: "2026-05-11T00:03:00.000Z",
+                    },
+                    {
+                        commit: "",
+                        id: "deploy-fallback",
+                        note: "Fallback deploy",
+                        status: "ok",
+                        updatedAt: "2026-05-11T00:04:00.000Z",
                     },
                 ],
             },
@@ -884,7 +896,15 @@ describe("PullRequests page", () => {
         expect(
             screen.getByText("Recent deploys").parentElement?.parentElement
         ).toHaveClass("xl:pt-[60px]");
-        expect(screen.getByText("deploy-ok")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "deploy-ok" })).toHaveAttribute(
+            "href",
+            "https://github.com/rajohan/Mira-Dashboard/commit/deploy-ok"
+        );
+        expect(screen.getByRole("link", { name: "badc0de" })).toHaveAttribute(
+            "href",
+            "https://github.com/rajohan/Mira-Dashboard/commit/badc0de"
+        );
+        expect(screen.getByText("deploy-fallback")).toBeInTheDocument();
         expect(screen.getByText("failed")).toBeInTheDocument();
         expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(1);
     });

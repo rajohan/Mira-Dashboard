@@ -759,6 +759,12 @@ describe("pull request routes", () => {
             updatedAt: "2026-05-11T00:01:00.000Z",
             commit: "abc1234",
         });
+        __testing.writeDeploymentJob({
+            id: "job-without-commit",
+            status: "ok",
+            startedAt: "2026-05-11T00:02:00.000Z",
+            updatedAt: "2026-05-11T00:03:00.000Z",
+        });
     });
 
     after(async () => {
@@ -941,17 +947,29 @@ describe("pull request routes", () => {
 
     it("returns recent deployment jobs from the dashboard database", async () => {
         const response = await requestJson<{
-            deployments: Array<{ id: string; status: string; commit: string }>;
+            deployments: Array<{
+                id: string;
+                status: string;
+                commit: string;
+                commitUrl: string;
+            }>;
         }>(server, "/api/pull-requests/deployments");
 
         assert.equal(response.status, 200);
         assert.deepEqual(response.body.deployments, [
+            {
+                id: "job-without-commit",
+                status: "ok",
+                startedAt: "2026-05-11T00:02:00.000Z",
+                updatedAt: "2026-05-11T00:03:00.000Z",
+            },
             {
                 id: "job-1",
                 status: "ok",
                 startedAt: "2026-05-11T00:00:00.000Z",
                 updatedAt: "2026-05-11T00:01:00.000Z",
                 commit: "abc1234",
+                commitUrl: "https://github.com/rajohan/Mira-Dashboard/commit/abc1234",
             },
         ]);
     });
