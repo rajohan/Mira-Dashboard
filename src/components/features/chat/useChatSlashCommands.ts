@@ -48,13 +48,13 @@ export function useChatSlashCommands({
             return false;
         }
 
-        if (command !== "/stop" && command !== "/reset" && command !== "/new") {
-            return false;
-        }
-
         if (attachments.length > 0) {
             setSendError(`${rawCommand} cannot include attachments.`);
             return true;
+        }
+
+        if (command !== "/stop" && command !== "/reset" && command !== "/new") {
+            return false;
         }
 
         if (command === "/reset" || command === "/new") {
@@ -72,6 +72,14 @@ export function useChatSlashCommands({
                 return true;
             }
 
+            setDraft("");
+            setSendError(null);
+            setMessages([]);
+            updateActiveStreams((previous) => {
+                const next = { ...previous };
+                delete next[selectedSessionKey];
+                return next;
+            });
             return false;
         }
 

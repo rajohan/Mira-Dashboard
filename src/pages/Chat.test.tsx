@@ -66,6 +66,7 @@ interface ChatTestMocks {
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
     slashCommand: ReturnType<typeof vi.fn>;
+    slashCommandOptions: { confirmResetSession: () => Promise<boolean> } | null;
     socketError: string | null;
     subscribe: ReturnType<typeof vi.fn>;
     virtualizerOptions: ChatVirtualizerOptions | null;
@@ -110,6 +111,7 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
     confirmModalHandlers: null,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
+    slashCommandOptions: null,
     virtualizerOptions: null,
 }));
 
@@ -195,7 +197,10 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
 }));
 
 vi.mock("../components/features/chat/useChatSlashCommands", () => ({
-    useChatSlashCommands: () => mocks.slashCommand,
+    useChatSlashCommands: (options: { confirmResetSession: () => Promise<boolean> }) => {
+        mocks.slashCommandOptions = options;
+        return mocks.slashCommand;
+    },
 }));
 
 vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
@@ -763,6 +768,7 @@ describe("Chat", () => {
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
         mocks.confirmModalHandlers = null;
+        mocks.slashCommandOptions = null;
         mocks.runtimeEventsOptions = null;
         mocks.skipComposerFileInputRef = false;
         mocks.skipMessagesContainerRef = false;
@@ -1188,6 +1194,22 @@ describe("Chat", () => {
             expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
         );
         expect(screen.getByTestId("loading-history")).toHaveTextContent("false");
+    });
+
+    it("does not send without a selected session", async () => {
+        mocks.liveSessions = [];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "hello" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.request).not.toHaveBeenCalledWith("chat.send", expect.anything());
     });
 
     it("uses an empty model list response fallback", async () => {
@@ -1962,6 +1984,13 @@ describe("Chat", () => {
         await user.click(screen.getByRole("button", { name: "send" }));
         await screen.findByText("start a long run");
         await waitFor(() => expect(sendResolvers).toHaveLength(1));
+        await user.type(screen.getByLabelText("Draft"), "second while pending");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:true:false:false"
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+        expect(sendResolvers).toHaveLength(1);
+        await user.clear(screen.getByLabelText("Draft"));
         await act(async () => {
             sendResolvers[0]?.({ runId: "run-start" });
         });
@@ -2047,6 +2076,44 @@ describe("Chat", () => {
 
         expect(screen.getByText("old user message")).toBeInTheDocument();
         expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
+    });
+
+    it("resolves reset confirmation choices from the app modal", async () => {
+        const user = userEvent.setup();
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        let cancelled: Promise<boolean>;
+        await act(async () => {
+            cancelled = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+        await user.click(screen.getByRole("button", { name: "cancel reset" }));
+        await expect(cancelled!).resolves.toBe(false);
+
+        let confirmed: Promise<boolean>;
+        await act(async () => {
+            confirmed = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+        await user.click(screen.getByRole("button", { name: "confirm reset" }));
+        await expect(confirmed!).resolves.toBe(true);
+    });
+
+    it("cancels pending reset confirmations on unmount", async () => {
+        const { unmount } = render(<Chat />);
+        await screen.findByText("old user message");
+
+        let pendingResetConfirmation: Promise<boolean>;
+        await act(async () => {
+            pendingResetConfirmation = mocks.slashCommandOptions!.confirmResetSession();
+        });
+        await screen.findByRole("dialog", { name: "Reset chat session" });
+
+        unmount();
+
+        await expect(pendingResetConfirmation!).resolves.toBe(false);
     });
 
     it("persists deleted message keys and can open attachment previews", async () => {
@@ -2167,6 +2234,77 @@ describe("Chat", () => {
             "chat.send",
             expect.objectContaining({ message: "/model codex" })
         );
+    });
+
+    it("does not append optimistic chat text for reset slash commands", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(false);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/reset");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "/reset" })
+            )
+        );
+        expect(screen.queryByText("/reset")).not.toBeInTheDocument();
+    });
+
+    it("reports slash command handler failures without forwarding", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockRejectedValueOnce(new Error("slash failed"));
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/stop");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        expect(await screen.findByText(/slash failed/)).toBeInTheDocument();
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "/stop" })
+        );
+    });
+
+    it("blocks duplicate slash submits while slash handling is in flight", async () => {
+        let resolveSlash: (handled: boolean) => void = () => {};
+        mocks.slashCommand.mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    resolveSlash = resolve;
+                })
+        );
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "/reset" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+        await waitFor(() => expect(mocks.slashCommand).toHaveBeenCalledWith("/reset"));
+
+        const slashCallsBeforeDuplicate = mocks.slashCommand.mock.calls.length;
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "/status" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.slashCommand).toHaveBeenCalledTimes(slashCallsBeforeDuplicate);
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "/status" })
+        );
+
+        await act(async () => {
+            resolveSlash(true);
+        });
     });
 
     it("ignores empty attachment and send submissions", async () => {

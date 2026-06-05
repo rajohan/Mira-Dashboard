@@ -101,6 +101,11 @@ function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
 }
 
+/** Returns whether text is a reset-like slash command. */
+function isResetSlashCommand(text: string): boolean {
+    return /^\/(?:new|reset)(?:\s|$)/i.test(text);
+}
+
 /** Performs read deleted message keys. */
 export function readDeletedMessageKeys(sessionKey: string): Set<string> {
     if (!sessionKey || typeof window === "undefined") {
@@ -1196,10 +1201,17 @@ export function Chat() {
     const handleSend = async () => {
         const text = draft.trim();
         const isSlashCommand = text.startsWith("/") && attachments.length === 0;
+        const hasActiveSelectedStream = Boolean(
+            activeStreamsReference.current[selectedSessionKey]
+        );
+
+        if (!selectedSessionKey) {
+            return;
+        }
 
         if (
-            !selectedSessionKey ||
-            (sendInFlightCountReference.current > 0 && !isSlashCommand)
+            sendInFlightCountReference.current > 0 &&
+            !(isSlashCommand && hasActiveSelectedStream)
         ) {
             return;
         }
@@ -1228,6 +1240,7 @@ export function Chat() {
 
         const messageText = text;
         const sendAttachments = attachments;
+        const shouldAppendOptimisticMessage = !isResetSlashCommand(messageText);
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: messageText,
@@ -1237,7 +1250,9 @@ export function Chat() {
             timestamp: new Date().toISOString(),
         };
 
-        setMessages((previous) => dedupeMessages([...previous, userMessage]));
+        if (shouldAppendOptimisticMessage) {
+            setMessages((previous) => dedupeMessages([...previous, userMessage]));
+        }
         setDraft("");
         setAttachments([]);
         setSendError(null);

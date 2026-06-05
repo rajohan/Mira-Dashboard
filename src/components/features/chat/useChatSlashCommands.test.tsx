@@ -12,7 +12,7 @@ type ChatRequest = <T = unknown>(
     params?: Record<string, unknown>
 ) => Promise<T>;
 
-const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/new", "/reset", "/stop"]);
+const LOCALLY_HANDLED_COMMANDS = new Set(["/new", "/reset", "/stop"]);
 
 function makeAttachment(): ChatSendAttachment {
     return {
@@ -135,6 +135,9 @@ describe("useChatSlashCommands", () => {
         expect(confirmResetSession).toHaveBeenCalledTimes(2);
         expect(request).not.toHaveBeenCalled();
         expect(result.current.sendError).toBeNull();
+        expect(result.current.draft).toBe("");
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
+        expect(result.current.messages).toEqual([]);
     });
 
     it("cancels reset commands locally when confirmation is denied", async () => {
@@ -147,6 +150,18 @@ describe("useChatSlashCommands", () => {
 
         expect(request).not.toHaveBeenCalled();
         expect(result.current.draft).toBe("");
+        expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
+    });
+
+    it("cancels reset commands when confirmation throws", async () => {
+        const confirmResetSession = vi.fn().mockRejectedValue(new Error("closed"));
+        const { request, result } = renderSlashCommands({ confirmResetSession });
+
+        await act(async () => {
+            await expect(result.current.runCommand("/reset")).resolves.toBe(true);
+        });
+
+        expect(request).not.toHaveBeenCalled();
         expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
     });
 
@@ -178,6 +193,18 @@ describe("useChatSlashCommands", () => {
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
 
+    it("reports stop command failures", async () => {
+        const request = vi.fn().mockRejectedValue(new Error("abort failed"));
+        const { result } = renderSlashCommands({ request });
+
+        await act(async () => {
+            await result.current.runCommand("/stop");
+        });
+
+        expect(result.current.isSending).toBe(false);
+        expect(result.current.sendError).toContain("abort failed");
+    });
+
     it("blocks local control commands with attachments", async () => {
         const { request, result } = renderSlashCommands({
             attachments: [makeAttachment()],
@@ -190,5 +217,18 @@ describe("useChatSlashCommands", () => {
         expect(request).not.toHaveBeenCalled();
         expect(result.current.draft).toBe("/steer keep going");
         expect(result.current.sendError).toBe("/stop cannot include attachments.");
+    });
+
+    it("blocks pass-through slash commands with attachments", async () => {
+        const { request, result } = renderSlashCommands({
+            attachments: [makeAttachment()],
+        });
+
+        await act(async () => {
+            await expect(result.current.runCommand("/model codex")).resolves.toBe(true);
+        });
+
+        expect(request).not.toHaveBeenCalled();
+        expect(result.current.sendError).toBe("/model cannot include attachments.");
     });
 });
