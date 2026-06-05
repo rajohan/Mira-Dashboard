@@ -1928,6 +1928,70 @@ describe("Chat", () => {
         expect(screen.getByText("ack later")).toBeInTheDocument();
     });
 
+    it("allows active-run steering commands while a send is already in flight", async () => {
+        const user = userEvent.setup();
+        const sendResolvers: Array<(value: { runId: string }) => void> = [];
+        mocks.request.mockImplementation((method: string) => {
+            if (method === "models.list") {
+                return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
+            }
+
+            if (method === "chat.history") {
+                return Promise.resolve({
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+
+            if (method === "chat.send") {
+                return new Promise((resolve) => {
+                    sendResolvers.push(resolve);
+                });
+            }
+
+            return Promise.resolve({});
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "start a long run");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await screen.findByText("start a long run");
+        await waitFor(() => expect(sendResolvers).toHaveLength(1));
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        await user.type(screen.getByLabelText("Draft"), "/steer keep the patch small");
+        await waitFor(() =>
+            expect(screen.getByTestId("composer-state")).toHaveTextContent(
+                "true:true:false:false"
+            )
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() => expect(sendResolvers).toHaveLength(2));
+        expect(mocks.request).toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({
+                message: "/steer keep the patch small",
+                sessionKey: "session-a",
+            })
+        );
+
+        await act(async () => {
+            sendResolvers[0]?.({ runId: "run-start" });
+            sendResolvers[1]?.({ runId: "run-steer" });
+        });
+    });
+
     it("ignores closed delete confirmations without a pending message", async () => {
         render(<Chat />);
         await screen.findByText("old user message");

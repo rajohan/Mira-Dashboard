@@ -42,7 +42,10 @@ import {
     messageDeleteKey,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtils";
-import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
+import {
+    buildSlashCommandSuggestions,
+    isActiveRunSlashCommand,
+} from "../components/features/chat/slashCommands";
 import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
 import { Card } from "../components/ui/Card";
@@ -1224,13 +1227,20 @@ export function Chat() {
 
     /** Responds to send events. */
     const handleSend = async () => {
-        if (!selectedSessionKey || isSending || sendInFlightReference.current) {
+        const text = draft.trim();
+        const isActiveRunCommand =
+            isActiveRunSlashCommand(text) && attachments.length === 0;
+
+        if (
+            !selectedSessionKey ||
+            (!isActiveRunCommand && isSending) ||
+            (!isActiveRunCommand && sendInFlightReference.current)
+        ) {
             return;
         }
 
         sendInFlightReference.current = true;
 
-        const text = draft.trim();
         if (!text && attachments.length === 0) {
             sendInFlightReference.current = false;
             return;
@@ -1338,7 +1348,8 @@ export function Chat() {
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
-        !isSending &&
+        (!isSending ||
+            (isActiveRunSlashCommand(draft.trim()) && attachments.length === 0)) &&
         !isRecording &&
         !isTranscribing &&
         (draft.trim() || attachments.length > 0)

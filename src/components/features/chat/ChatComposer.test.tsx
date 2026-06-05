@@ -360,6 +360,34 @@ describe("ChatComposer", () => {
         expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
     });
 
+    it("keeps active-run steering drafts editable while sending", () => {
+        const { props, rerender } = renderComposer({
+            canSend: false,
+            draft: "ordinary follow-up",
+            isSending: true,
+        });
+
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        expect(textarea).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...props}
+                canSend={true}
+                draft="/tell keep the current direction"
+                isSending={true}
+            />
+        );
+
+        expect(textarea).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Voice/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Attach/ })).toBeDisabled();
+    });
+
     it("disables controls without a selected connected session", () => {
         renderComposer({
             canSend: false,
