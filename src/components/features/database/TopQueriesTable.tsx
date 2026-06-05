@@ -138,7 +138,7 @@ export function TopQueriesTable({
                                 onClick={() => void handleCopy(selectedQuery.query)}
                                 className="w-full sm:w-auto"
                             >
-                                <Copy className="mr-2 h-4 w-4" />
+                                <Copy className="h-4 w-4" />
                                 {copied ? "Copied" : "Copy query"}
                             </Button>
                         </div>

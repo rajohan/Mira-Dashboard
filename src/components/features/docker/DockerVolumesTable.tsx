@@ -136,7 +136,7 @@ export function DockerVolumesTable({
                     disabled={isPruning}
                     className="w-full sm:w-auto"
                 >
-                    <Trash2 className="mr-2 h-4 w-4" />
+                    <Trash2 className="h-4 w-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
@@ -181,7 +181,7 @@ export function DockerVolumesTable({
                                 onClick={() => onDelete(volume.name)}
                                 className="mt-3 w-full"
                             >
-                                <Trash2 className="mr-2 h-4 w-4" />
+                                <Trash2 className="h-4 w-4" />
                                 Delete
                             </Button>
                         </Card>

@@ -1,3 +1,4 @@
+import { RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { CronJobDetails, CronJobList } from "../components/features/cron";
@@ -118,6 +119,7 @@ export function Cron() {
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
                     <p className="text-red-400">{error?.message}</p>
                     <Button variant="secondary" onClick={() => void refetch()}>
+                        <RotateCw className="h-4 w-4" />
                         Retry
                     </Button>
                 </div>

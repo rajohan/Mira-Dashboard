@@ -1,4 +1,4 @@
-import { Send, Trash2 } from "lucide-react";
+import { Send, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/Button";
@@ -431,7 +431,8 @@ export function Terminal() {
                                         }
                                     }}
                                 >
-                                    ■ Stop
+                                    <Square className="h-4 w-4" />
+                                    Stop
                                 </Button>
                             ) : (
                                 <Button
@@ -439,7 +440,7 @@ export function Terminal() {
                                     className="w-full sm:w-auto"
                                     disabled={!command.trim() || startCommand.isPending}
                                 >
-                                    <Send size={16} />
+                                    <Send className="h-4 w-4" />
                                     Run
                                 </Button>
                             )}
@@ -450,7 +451,7 @@ export function Terminal() {
                                 onClick={clearHistory}
                                 disabled={history.length === 0}
                             >
-                                <Trash2 size={16} />
+                                <Trash2 className="h-4 w-4" />
                                 Clear
                             </Button>
                         </div>

@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, RefreshCw, RotateCw } from "lucide-react";
 import type { FallbackProps } from "react-error-boundary";
 
 import { Button } from "./Button";
@@ -25,9 +25,11 @@ export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
 
                 <div className="flex gap-2">
                     <Button variant="secondary" onClick={resetErrorBoundary}>
+                        <RotateCw className="h-4 w-4" />
                         Try again
                     </Button>
                     <Button variant="ghost" onClick={() => window.location.reload()}>
+                        <RefreshCw className="h-4 w-4" />
                         Full reload
                     </Button>
                 </div>
