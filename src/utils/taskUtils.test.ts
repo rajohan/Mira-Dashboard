@@ -49,6 +49,9 @@ describe("task utils", () => {
             "in-progress"
         );
         expect(getColumnId(task({ labels: [{ name: "blocked" }] }))).toBe("blocked");
+        expect(
+            getColumnId(task({ labels: [{ name: "in-progress" }, { name: "blocked" }] }))
+        ).toBe("blocked");
         expect(getColumnId(task({ state: "CLOSED" }))).toBe("done");
     });
 
@@ -97,6 +100,7 @@ describe("task utils", () => {
             task({ number: 2, labels: [{ name: "in-progress" }] }),
             task({ number: 3, labels: [{ name: "blocked" }] }),
             task({ number: 4, state: "CLOSED" }),
+            task({ number: 5, labels: [{ name: "in-progress" }, { name: "blocked" }] }),
         ];
 
         for (const column of COLUMN_CONFIG) {
