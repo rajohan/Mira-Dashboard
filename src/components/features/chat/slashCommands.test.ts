@@ -73,7 +73,7 @@ describe("slash commands", () => {
         );
         expect(buildSlashCommandSuggestions("/exe", [])[0]).toMatchObject({
             value: "/exec ",
-            title: "/exec [auto|sandbox|gateway|node] [deny|allowlist|full] [off|on-miss|always] [node]",
+            title: "/exec [auto|sandbox|gateway|node] [deny|allowlist|full] [off|on-miss|always] [nodeId]",
         });
         expect(buildSlashCommandSuggestions("/bt", [])[0]).toMatchObject({
             value: "/btw ",
