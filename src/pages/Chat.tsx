@@ -294,6 +294,7 @@ export function Chat() {
     const previousSelectedStreamTextReference = useRef("");
     const bottomFollowFrameReference = useRef<number | null>(null);
     const sendInFlightCountReference = useRef(0);
+    const sendEpochReference = useRef(0);
     const resetConfirmResolverReference = useRef<((confirmed: boolean) => void) | null>(
         null
     );
@@ -452,6 +453,7 @@ export function Chat() {
 
     useEffect(() => {
         if (!isConnected) {
+            sendEpochReference.current += 1;
             sendInFlightCountReference.current = 0;
             setIsSending(false);
 
@@ -1187,10 +1189,15 @@ export function Chat() {
     const beginSend = () => {
         sendInFlightCountReference.current += 1;
         setIsSending(true);
+        return sendEpochReference.current;
     };
 
     /** Marks a chat submit request as completed. */
-    const endSend = () => {
+    const endSend = (sendEpoch: number) => {
+        if (sendEpoch !== sendEpochReference.current) {
+            return;
+        }
+
         sendInFlightCountReference.current = Math.max(
             0,
             sendInFlightCountReference.current - 1
@@ -1224,7 +1231,7 @@ export function Chat() {
             return;
         }
 
-        beginSend();
+        const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
             let handledCommand: boolean;
@@ -1232,12 +1239,12 @@ export function Chat() {
                 handledCommand = await handleSlashCommand(text);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
-                endSend();
+                endSend(sendEpoch);
                 return;
             }
 
             if (handledCommand) {
-                endSend();
+                endSend(sendEpoch);
                 return;
             }
         }
@@ -1349,7 +1356,7 @@ export function Chat() {
                 return next;
             });
         } finally {
-            endSend();
+            endSend(sendEpoch);
         }
     };
 

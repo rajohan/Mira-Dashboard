@@ -1944,6 +1944,75 @@ describe("Chat", () => {
         expect(screen.getByText("ack later")).toBeInTheDocument();
     });
 
+    it("ignores stale send completion after disconnect resets the in-flight epoch", async () => {
+        const user = userEvent.setup();
+        const sendResolvers: Array<(value: { runId: string }) => void> = [];
+        mocks.request.mockImplementation((method: string) => {
+            if (method === "models.list") {
+                return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
+            }
+
+            if (method === "chat.history") {
+                return Promise.resolve({
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+
+            if (method === "chat.send") {
+                return new Promise((resolve) => {
+                    sendResolvers.push(resolve);
+                });
+            }
+
+            return Promise.resolve({});
+        });
+
+        const { rerender } = render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "before disconnect");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await waitFor(() => expect(sendResolvers).toHaveLength(1));
+
+        mocks.isConnected = false;
+        rerender(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("composer-state")).toHaveTextContent(
+                "false:false:false:false"
+            )
+        );
+
+        mocks.isConnected = true;
+        rerender(<Chat />);
+        await user.type(screen.getByLabelText("Draft"), "after reconnect");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await waitFor(() => expect(sendResolvers).toHaveLength(2));
+
+        await user.type(screen.getByLabelText("Draft"), "blocked while pending");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        await act(async () => {
+            sendResolvers[0]?.({ runId: "old-run" });
+        });
+
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        await act(async () => {
+            sendResolvers[1]?.({ runId: "new-run" });
+        });
+    });
+
     it("allows messages and stop commands while a run is active", async () => {
         const user = userEvent.setup();
         const sendResolvers: Array<(value: { runId: string }) => void> = [];
