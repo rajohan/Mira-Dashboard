@@ -431,7 +431,7 @@ export function Terminal() {
                                         }
                                     }}
                                 >
-                                    <Square size={16} />
+                                    <Square className="h-4 w-4" />
                                     Stop
                                 </Button>
                             ) : (
@@ -440,7 +440,7 @@ export function Terminal() {
                                     className="w-full sm:w-auto"
                                     disabled={!command.trim() || startCommand.isPending}
                                 >
-                                    <Send size={16} />
+                                    <Send className="h-4 w-4" />
                                     Run
                                 </Button>
                             )}
@@ -451,7 +451,7 @@ export function Terminal() {
                                 onClick={clearHistory}
                                 disabled={history.length === 0}
                             >
-                                <Trash2 size={16} />
+                                <Trash2 className="h-4 w-4" />
                                 Clear
                             </Button>
                         </div>
