@@ -122,7 +122,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     {
         name: "/exec",
         description: "Set exec defaults",
-        args: "host <auto|sandbox|gateway|node> security <deny|allowlist|full> ask <off|on-miss|always> [node]",
+        args: "[auto|sandbox|gateway|node] [deny|allowlist|full] [off|on-miss|always] [node]",
     },
     {
         name: "/queue",
