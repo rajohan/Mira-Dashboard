@@ -35,6 +35,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         label: "in-progress",
         filter: (t: Task) =>
             t.state === "OPEN" &&
+            !t.labels.some((l: { name: string }) => l.name === "blocked") &&
             t.labels.some((l: { name: string }) => l.name === "in-progress"),
     },
     {
