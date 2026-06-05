@@ -101,6 +101,11 @@ function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
 }
 
+/** Returns whether text is a reset-like slash command. */
+function isResetSlashCommand(text: string): boolean {
+    return /^\/(?:new|reset)(?:\s|$)/i.test(text);
+}
+
 /** Performs read deleted message keys. */
 export function readDeletedMessageKeys(sessionKey: string): Set<string> {
     if (!sessionKey || typeof window === "undefined") {
@@ -288,7 +293,8 @@ export function Chat() {
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
     const bottomFollowFrameReference = useRef<number | null>(null);
-    const sendInFlightReference = useRef(false);
+    const sendInFlightCountReference = useRef(0);
+    const sendEpochReference = useRef(0);
     const resetConfirmResolverReference = useRef<((confirmed: boolean) => void) | null>(
         null
     );
@@ -447,7 +453,8 @@ export function Chat() {
 
     useEffect(() => {
         if (!isConnected) {
-            sendInFlightReference.current = false;
+            sendEpochReference.current += 1;
+            sendInFlightCountReference.current = 0;
             setIsSending(false);
 
             updateActiveStreams(() => ({}));
@@ -949,63 +956,27 @@ export function Chat() {
         setPendingDeleteMessageKey(null);
     };
 
-    /**
-     * Resolves a pending reset confirmation and hides the modal.
-     *
-     * @param confirmed - Whether the user accepted the reset.
-     */
+    /** Resolves a pending reset confirmation and hides the modal. */
     const closeResetConfirm = (confirmed: boolean) => {
         resetConfirmResolverReference.current?.(confirmed);
         resetConfirmResolverReference.current = null;
         setIsResetConfirmOpen(false);
     };
 
-    /**
-     * Opens the reset confirmation modal and resolves with the user's choice.
-     *
-     * @returns A promise that resolves to the user's reset decision.
-     */
+    /** Opens the reset confirmation modal and resolves with the user's choice. */
     const confirmResetSession = () =>
-        new Promise<boolean>(
-            /**
-             * Stores the reset-confirm resolver and opens the modal.
-             *
-             * @param resolve - Promise resolver for the reset decision.
-             */
-            (resolve) => {
-                resetConfirmResolverReference.current?.(false);
-                resetConfirmResolverReference.current = resolve;
-                setIsResetConfirmOpen(true);
-            }
-        );
+        new Promise<boolean>((resolve) => {
+            resetConfirmResolverReference.current?.(false);
+            resetConfirmResolverReference.current = resolve;
+            setIsResetConfirmOpen(true);
+        });
 
-    useEffect(
-        /**
-         * Registers cleanup for any reset confirmation left open on unmount.
-         *
-         * @returns Cleanup that cancels unresolved reset confirmation prompts.
-         */
-        () => {
-            /**
-             * Cancels a pending reset confirmation before the chat page unmounts.
-             */
-            return () => {
-                resetConfirmResolverReference.current?.(false);
-                resetConfirmResolverReference.current = null;
-            };
-        },
-        []
-    );
-
-    /**
-     * Responds to reset confirmation cancellation.
-     */
-    const handleCancelResetConfirm = () => closeResetConfirm(false);
-
-    /**
-     * Responds to reset confirmation acceptance.
-     */
-    const handleConfirmResetConfirm = () => closeResetConfirm(true);
+    useEffect(() => {
+        return () => {
+            resetConfirmResolverReference.current?.(false);
+            resetConfirmResolverReference.current = null;
+        };
+    }, []);
 
     /** Responds to files selected events. */
     const handleFilesSelected = async (files: FileList | null) => {
@@ -1205,47 +1176,83 @@ export function Chat() {
 
     const handleSlashCommand = useChatSlashCommands({
         request,
-        selectedSession,
         selectedSessionKey,
         attachments,
-        chatModelOptions,
-        showThinkingOutput,
-        showToolOutput,
         updateActiveStreams,
         setMessages,
         setDraft,
         setSendError,
-        setIsSending,
-        setIsAtBottom,
-        setHistoryLoadVersion,
-        shouldStickToBottomReference,
         confirmResetSession,
     });
 
+    /** Marks a chat submit request as in-flight. */
+    const beginSend = () => {
+        sendInFlightCountReference.current += 1;
+        setIsSending(true);
+        return sendEpochReference.current;
+    };
+
+    /** Marks a chat submit request as completed. */
+    const endSend = (sendEpoch: number) => {
+        if (sendEpoch !== sendEpochReference.current) {
+            return;
+        }
+
+        sendInFlightCountReference.current = Math.max(
+            0,
+            sendInFlightCountReference.current - 1
+        );
+        setIsSending(sendInFlightCountReference.current > 0);
+    };
+
+    /** Returns whether the current in-flight sends should block this draft. */
+    const isBlockedByInFlightSend = (text: string) => {
+        const isSlashCommand = text.startsWith("/") && attachments.length === 0;
+        const hasActiveSelectedStream = Boolean(activeStreams[selectedSessionKey]);
+        return (
+            sendInFlightCountReference.current > 0 &&
+            !(isSlashCommand && hasActiveSelectedStream)
+        );
+    };
+
     /** Responds to send events. */
     const handleSend = async () => {
-        if (!selectedSessionKey || isSending || sendInFlightReference.current) {
-            return;
-        }
-
-        sendInFlightReference.current = true;
-
         const text = draft.trim();
-        if (!text && attachments.length === 0) {
-            sendInFlightReference.current = false;
+
+        if (!selectedSessionKey) {
             return;
         }
+
+        if (isBlockedByInFlightSend(text)) {
+            return;
+        }
+
+        if (!text && attachments.length === 0) {
+            return;
+        }
+
+        const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
-            const handledCommand = await handleSlashCommand(text);
+            let handledCommand: boolean;
+            try {
+                handledCommand = await handleSlashCommand(text);
+            } catch (error_) {
+                setSendError(chatErrorMessage(error_, "Failed to run slash command"));
+                endSend(sendEpoch);
+                return;
+            }
+
             if (handledCommand) {
-                sendInFlightReference.current = false;
+                endSend(sendEpoch);
                 return;
             }
         }
 
         const messageText = text;
         const sendAttachments = attachments;
+        const isResetCommand = isResetSlashCommand(messageText);
+        const shouldAppendOptimisticMessage = !isResetCommand;
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: messageText,
@@ -1255,30 +1262,38 @@ export function Chat() {
             timestamp: new Date().toISOString(),
         };
 
-        setMessages((previous) => dedupeMessages([...previous, userMessage]));
+        if (shouldAppendOptimisticMessage) {
+            setMessages((previous) => dedupeMessages([...previous, userMessage]));
+        }
         setDraft("");
         setAttachments([]);
         setSendError(null);
-        setIsSending(true);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
         scheduleBottomFollow();
 
-        const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        updateActiveStreams((previous) => ({
-            ...previous,
-            [selectedSessionKey]: {
-                sessionKey: selectedSessionKey,
-                runId: idempotencyKey,
-                aliases: [idempotencyKey],
-                text: "",
-                statusText: "Thinking",
-                updatedAt: new Date().toISOString(),
-            },
-        }));
+        const idempotencyKey = isResetCommand
+            ? undefined
+            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        if (idempotencyKey) {
+            updateActiveStreams((previous) => ({
+                ...previous,
+                [selectedSessionKey]: {
+                    sessionKey: selectedSessionKey,
+                    runId: idempotencyKey,
+                    aliases: [idempotencyKey],
+                    text: "",
+                    statusText: "Thinking",
+                    updatedAt: new Date().toISOString(),
+                },
+            }));
+        }
 
         try {
-            if (selectedSession?.verboseLevel !== "full") {
+            if (
+                !messageText.startsWith("/") &&
+                selectedSession?.verboseLevel !== "full"
+            ) {
                 try {
                     await request("sessions.patch", {
                         key: selectedSessionKey,
@@ -1301,6 +1316,17 @@ export function Chat() {
                 attachments: gatewayAttachments(sendAttachments),
                 idempotencyKey,
             })) as { runId?: string } | undefined;
+
+            if (isResetCommand) {
+                setMessages([]);
+                updateActiveStreams((previous) => {
+                    const next = { ...previous };
+                    delete next[selectedSessionKey];
+                    return next;
+                });
+                return;
+            }
+
             const acknowledgedRunId = result?.runId;
             if (acknowledgedRunId) {
                 updateActiveStreams((previous) => {
@@ -1330,18 +1356,19 @@ export function Chat() {
                 return next;
             });
         } finally {
-            sendInFlightReference.current = false;
-            setIsSending(false);
+            endSend(sendEpoch);
         }
     };
 
+    const draftText = draft.trim();
+    const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
-        !isSending &&
         !isRecording &&
         !isTranscribing &&
-        (draft.trim() || attachments.length > 0)
+        !blockedByInFlightSend &&
+        (draftText || attachments.length > 0)
     );
 
     return (
@@ -1446,8 +1473,8 @@ export function Chat() {
                 message="Reset this chat session? This clears the session history/transcript for the selected target."
                 confirmLabel="Reset"
                 danger
-                onCancel={handleCancelResetConfirm}
-                onConfirm={handleConfirmResetConfirm}
+                onCancel={() => closeResetConfirm(false)}
+                onConfirm={() => closeResetConfirm(true)}
             />
         </div>
     );

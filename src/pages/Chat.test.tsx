@@ -1196,6 +1196,22 @@ describe("Chat", () => {
         expect(screen.getByTestId("loading-history")).toHaveTextContent("false");
     });
 
+    it("does not send without a selected session", async () => {
+        mocks.liveSessions = [];
+
+        render(<Chat />);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("selected-session")).toHaveTextContent("none")
+        );
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "hello" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    });
+
     it("uses an empty model list response fallback", async () => {
         mocks.request.mockImplementation(async (method: string) => {
             if (method === "models.list") {
@@ -1928,6 +1944,191 @@ describe("Chat", () => {
         expect(screen.getByText("ack later")).toBeInTheDocument();
     });
 
+    it("ignores stale send completion after disconnect resets the in-flight epoch", async () => {
+        const user = userEvent.setup();
+        const sendResolvers: Array<(value: { runId: string }) => void> = [];
+        mocks.request.mockImplementation((method: string) => {
+            if (method === "models.list") {
+                return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
+            }
+
+            if (method === "chat.history") {
+                return Promise.resolve({
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+
+            if (method === "chat.send") {
+                return new Promise((resolve) => {
+                    sendResolvers.push(resolve);
+                });
+            }
+
+            return Promise.resolve({});
+        });
+
+        const { rerender } = render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "before disconnect");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await waitFor(() => expect(sendResolvers).toHaveLength(1));
+
+        mocks.isConnected = false;
+        rerender(<Chat />);
+        await waitFor(() =>
+            expect(screen.getByTestId("composer-state")).toHaveTextContent(
+                "false:false:false:false"
+            )
+        );
+
+        mocks.isConnected = true;
+        rerender(<Chat />);
+        await user.type(screen.getByLabelText("Draft"), "after reconnect");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await waitFor(() => expect(sendResolvers).toHaveLength(2));
+
+        await user.type(screen.getByLabelText("Draft"), "blocked while pending");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        await act(async () => {
+            sendResolvers[0]?.({ runId: "old-run" });
+        });
+
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        await act(async () => {
+            sendResolvers[1]?.({ runId: "new-run" });
+        });
+    });
+
+    it("allows messages and stop commands while a run is active", async () => {
+        const user = userEvent.setup();
+        const sendResolvers: Array<(value: { runId: string }) => void> = [];
+        mocks.slashCommand.mockImplementation(async (commandText: string) =>
+            commandText.startsWith("/stop")
+        );
+        mocks.request.mockImplementation((method: string) => {
+            if (method === "models.list") {
+                return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
+            }
+
+            if (method === "chat.history") {
+                return Promise.resolve({
+                    messages: [
+                        {
+                            content: "old user message",
+                            role: "user",
+                            text: "old user message",
+                            timestamp: "2026-05-11T00:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+
+            if (method === "chat.send") {
+                return new Promise((resolve) => {
+                    sendResolvers.push(resolve);
+                });
+            }
+
+            return Promise.resolve({});
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "start a long run");
+        await user.click(screen.getByRole("button", { name: "send" }));
+        await screen.findByText("start a long run");
+        await waitFor(() => expect(sendResolvers).toHaveLength(1));
+        await user.type(screen.getByLabelText("Draft"), "second while pending");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+        expect(sendResolvers).toHaveLength(1);
+        await user.clear(screen.getByLabelText("Draft"));
+        await act(async () => {
+            sendResolvers[0]?.({ runId: "run-start" });
+        });
+        expect(await screen.findByText("Thinking")).toBeInTheDocument();
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+
+        const verbosePatchCallsBeforeSteer = mocks.request.mock.calls.filter(
+            ([method, params]) =>
+                method === "sessions.patch" &&
+                (params as { verboseLevel?: string } | undefined)?.verboseLevel === "full"
+        ).length;
+
+        await user.type(screen.getByLabelText("Draft"), "/steer keep the patch small");
+        await waitFor(() =>
+            expect(screen.getByTestId("composer-state")).toHaveTextContent(
+                "true:true:false:false"
+            )
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "/steer keep the patch small" })
+            )
+        );
+        expect(
+            mocks.request.mock.calls.filter(
+                ([method, params]) =>
+                    method === "sessions.patch" &&
+                    (params as { verboseLevel?: string } | undefined)?.verboseLevel ===
+                        "full"
+            )
+        ).toHaveLength(verbosePatchCallsBeforeSteer);
+        expect(sendResolvers).toHaveLength(2);
+        await act(async () => {
+            sendResolvers[1]?.({ runId: "run-steer" });
+        });
+
+        await user.clear(screen.getByLabelText("Draft"));
+        await user.type(screen.getByLabelText("Draft"), "second normal send");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:true:false:false"
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+        expect(sendResolvers).toHaveLength(3);
+        expect(mocks.request).toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "second normal send" })
+        );
+        await act(async () => {
+            sendResolvers[2]?.({ runId: "run-second" });
+        });
+
+        const chatSendCallsBeforeStop = mocks.request.mock.calls.filter(
+            ([method]) => method === "chat.send"
+        ).length;
+        await user.clear(screen.getByLabelText("Draft"));
+        await user.type(screen.getByLabelText("Draft"), "/stop");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() => expect(mocks.slashCommand).toHaveBeenCalledWith("/stop"));
+        expect(
+            mocks.request.mock.calls.filter(([method]) => method === "chat.send")
+        ).toHaveLength(chatSendCallsBeforeStop);
+    });
+
     it("ignores closed delete confirmations without a pending message", async () => {
         render(<Chat />);
         await screen.findByText("old user message");
@@ -2073,7 +2274,7 @@ describe("Chat", () => {
 
     it("reports attachment limits, voice fallback, and slash command handling", async () => {
         const user = userEvent.setup();
-        mocks.slashCommand.mockResolvedValueOnce(true);
+        mocks.slashCommand.mockResolvedValueOnce(false);
         const oversizedFile = new File(["x"], "huge.txt", {
             type: "text/plain",
         });
@@ -2098,10 +2299,118 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(mocks.slashCommand).toHaveBeenCalledWith("/model codex")
         );
-        expect(mocks.request).not.toHaveBeenCalledWith(
+        expect(mocks.request).toHaveBeenCalledWith(
             "chat.send",
             expect.objectContaining({ message: "/model codex" })
         );
+    });
+
+    it("does not append optimistic chat text for reset slash commands", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(false);
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/reset");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        await waitFor(() =>
+            expect(mocks.request).toHaveBeenCalledWith(
+                "chat.send",
+                expect.objectContaining({ message: "/reset" })
+            )
+        );
+        expect(screen.queryByText("/reset")).not.toBeInTheDocument();
+        expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+        await waitFor(() =>
+            expect(screen.queryByText("old user message")).not.toBeInTheDocument()
+        );
+    });
+
+    it("keeps the transcript visible when reset slash command send fails", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockResolvedValueOnce(false);
+        mocks.request.mockImplementation(async (method: string) => {
+            if (method === "chat.send") {
+                throw new Error("reset send failed");
+            }
+
+            return method === "chat.history"
+                ? {
+                      messages: [
+                          {
+                              content: "old user message",
+                              role: "user",
+                              text: "old user message",
+                              timestamp: "2026-05-11T00:00:00.000Z",
+                          },
+                      ],
+                  }
+                : { models: [] };
+        });
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/reset");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        expect(await screen.findByText("reset send failed")).toBeInTheDocument();
+        expect(screen.getByText("old user message")).toBeInTheDocument();
+        expect(screen.queryByText("/reset")).not.toBeInTheDocument();
+    });
+
+    it("reports slash command handler failures without forwarding", async () => {
+        const user = userEvent.setup();
+        mocks.slashCommand.mockRejectedValueOnce(new Error("slash failed"));
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        await user.type(screen.getByLabelText("Draft"), "/stop");
+        await user.click(screen.getByRole("button", { name: "send" }));
+
+        expect(await screen.findByText(/slash failed/)).toBeInTheDocument();
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "/stop" })
+        );
+    });
+
+    it("blocks duplicate slash submits while slash handling is in flight", async () => {
+        let resolveSlash: (handled: boolean) => void = () => {};
+        mocks.slashCommand.mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    resolveSlash = resolve;
+                })
+        );
+
+        render(<Chat />);
+        await screen.findByText("old user message");
+
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "/reset" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+        await waitFor(() => expect(mocks.slashCommand).toHaveBeenCalledWith("/reset"));
+
+        const slashCallsBeforeDuplicate = mocks.slashCommand.mock.calls.length;
+        fireEvent.change(screen.getByLabelText("Draft"), {
+            target: { value: "/status" },
+        });
+        fireEvent.submit(screen.getByRole("button", { name: "send" }).closest("form")!);
+
+        expect(mocks.slashCommand).toHaveBeenCalledTimes(slashCallsBeforeDuplicate);
+        expect(mocks.request).not.toHaveBeenCalledWith(
+            "chat.send",
+            expect.objectContaining({ message: "/status" })
+        );
+
+        await act(async () => {
+            resolveSlash(true);
+        });
     });
 
     it("ignores empty attachment and send submissions", async () => {

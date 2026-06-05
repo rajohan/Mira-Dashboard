@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSlashCommandSuggestions, slashCommandCanonicalName } from "./slashCommands";
+import {
+    buildSlashCommandSuggestions,
+    isActiveRunSlashCommand,
+    slashCommandCanonicalName,
+} from "./slashCommands";
 
 describe("slash commands", () => {
     it("normalizes aliases to canonical command names", () => {
@@ -10,6 +14,17 @@ describe("slash commands", () => {
         expect(slashCommandCanonicalName("/side")).toBe("/btw");
         expect(slashCommandCanonicalName("/plugin")).toBe("/plugins");
         expect(slashCommandCanonicalName("/unknown")).toBe("/unknown");
+    });
+
+    it("recognizes slash commands that can bypass active-run blocking", () => {
+        expect(isActiveRunSlashCommand("/steer keep going")).toBe(true);
+        expect(isActiveRunSlashCommand("/tell try the smaller patch")).toBe(true);
+        expect(isActiveRunSlashCommand(" /TELL try the smaller patch")).toBe(true);
+        expect(isActiveRunSlashCommand("/stop")).toBe(true);
+        expect(isActiveRunSlashCommand("/abort")).toBe(true);
+        expect(isActiveRunSlashCommand("/queue steer")).toBe(true);
+        expect(isActiveRunSlashCommand("/status")).toBe(true);
+        expect(isActiveRunSlashCommand("normal message")).toBe(false);
     });
 
     it("returns no suggestions for normal text", () => {

@@ -302,13 +302,13 @@ export function ChatComposer({
                                 return;
                             }
 
-                            if (shouldSendFromEnter(event)) {
+                            if (shouldSendFromEnter(event) && canSend) {
                                 event.preventDefault();
                                 onSend();
                             }
                         }}
                         enterKeyHint="enter"
-                        disabled={!selectedSessionKey || !isConnected || isSending}
+                        disabled={!selectedSessionKey || !isConnected}
                         placeholder={
                             selectedSessionKey
                                 ? "Message, attach files, or use / commands (try /help)"

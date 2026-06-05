@@ -74,6 +74,22 @@ describe("ChatComposer", () => {
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 
+    it("keeps Enter as a newline when sending is disabled", () => {
+        const onSend = vi.fn();
+
+        renderComposer({ canSend: false, draft: "hello", onSend });
+
+        const defaultWasAllowed = fireEvent.keyDown(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            { code: "Enter", key: "Enter" }
+        );
+
+        expect(defaultWasAllowed).toBe(true);
+        expect(onSend).not.toHaveBeenCalled();
+    });
+
     it("keeps Enter as newline on coarse pointer keyboards", async () => {
         const user = userEvent.setup();
         const onSend = vi.fn();
@@ -329,7 +345,7 @@ describe("ChatComposer", () => {
             screen.getByPlaceholderText(
                 "Message, attach files, or use / commands (try /help)"
             )
-        ).toBeDisabled();
+        ).toBeEnabled();
         expect(screen.getByRole("button", { name: /Voice/ })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Attach/ })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
@@ -358,6 +374,34 @@ describe("ChatComposer", () => {
         );
         expect(screen.getByRole("button", { name: /STT…/ })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+    });
+
+    it("keeps drafts editable while sending but only sends active-run steering commands", () => {
+        const { props, rerender } = renderComposer({
+            canSend: false,
+            draft: "ordinary follow-up",
+            isSending: true,
+        });
+
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        expect(textarea).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...props}
+                canSend={true}
+                draft="/tell keep the current direction"
+                isSending={true}
+            />
+        );
+
+        expect(textarea).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Send/ })).toBeEnabled();
+        expect(screen.getByRole("button", { name: /Voice/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Attach/ })).toBeDisabled();
     });
 
     it("disables controls without a selected connected session", () => {
