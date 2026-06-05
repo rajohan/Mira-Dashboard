@@ -2018,11 +2018,17 @@ describe("Chat", () => {
             sendResolvers[2]?.({ runId: "run-second" });
         });
 
+        const chatSendCallsBeforeStop = mocks.request.mock.calls.filter(
+            ([method]) => method === "chat.send"
+        ).length;
         await user.clear(screen.getByLabelText("Draft"));
         await user.type(screen.getByLabelText("Draft"), "/stop");
         await user.click(screen.getByRole("button", { name: "send" }));
 
         await waitFor(() => expect(mocks.slashCommand).toHaveBeenCalledWith("/stop"));
+        expect(
+            mocks.request.mock.calls.filter(([method]) => method === "chat.send")
+        ).toHaveLength(chatSendCallsBeforeStop);
     });
 
     it("ignores closed delete confirmations without a pending message", async () => {

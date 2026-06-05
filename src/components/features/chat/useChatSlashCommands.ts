@@ -20,6 +20,7 @@ interface UseChatSlashCommandsParams {
     setDraft: Dispatch<SetStateAction<string>>;
     setSendError: Dispatch<SetStateAction<string | null>>;
     setIsSending: Dispatch<SetStateAction<boolean>>;
+    confirmResetSession: () => Promise<boolean>;
 }
 
 /** Handles Dashboard control commands that need dedicated Gateway RPCs. */
@@ -32,6 +33,7 @@ export function useChatSlashCommands({
     setDraft,
     setSendError,
     setIsSending,
+    confirmResetSession,
 }: UseChatSlashCommandsParams) {
     /** Performs add system message. */
     const addSystemMessage = (text: string) => {
@@ -46,13 +48,31 @@ export function useChatSlashCommands({
             return false;
         }
 
-        if (command !== "/stop") {
+        if (command !== "/stop" && command !== "/reset" && command !== "/new") {
             return false;
         }
 
         if (attachments.length > 0) {
             setSendError(`${rawCommand} cannot include attachments.`);
             return true;
+        }
+
+        if (command === "/reset" || command === "/new") {
+            let confirmed: boolean;
+            try {
+                confirmed = await confirmResetSession();
+            } catch {
+                confirmed = false;
+            }
+
+            if (!confirmed) {
+                setDraft("");
+                setSendError(null);
+                addSystemMessage("Reset cancelled.");
+                return true;
+            }
+
+            return false;
         }
 
         setDraft("");

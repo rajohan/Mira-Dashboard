@@ -288,7 +288,10 @@ export function Chat() {
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
     const bottomFollowFrameReference = useRef<number | null>(null);
-    const sendInFlightReference = useRef(false);
+    const sendInFlightCountReference = useRef(0);
+    const resetConfirmResolverReference = useRef<((confirmed: boolean) => void) | null>(
+        null
+    );
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -303,6 +306,7 @@ export function Chat() {
     const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<string | null>(
         null
     );
+    const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -443,7 +447,7 @@ export function Chat() {
 
     useEffect(() => {
         if (!isConnected) {
-            sendInFlightReference.current = false;
+            sendInFlightCountReference.current = 0;
             setIsSending(false);
 
             updateActiveStreams(() => ({}));
@@ -945,6 +949,28 @@ export function Chat() {
         setPendingDeleteMessageKey(null);
     };
 
+    /** Resolves a pending reset confirmation and hides the modal. */
+    const closeResetConfirm = (confirmed: boolean) => {
+        resetConfirmResolverReference.current?.(confirmed);
+        resetConfirmResolverReference.current = null;
+        setIsResetConfirmOpen(false);
+    };
+
+    /** Opens the reset confirmation modal and resolves with the user's choice. */
+    const confirmResetSession = () =>
+        new Promise<boolean>((resolve) => {
+            resetConfirmResolverReference.current?.(false);
+            resetConfirmResolverReference.current = resolve;
+            setIsResetConfirmOpen(true);
+        });
+
+    useEffect(() => {
+        return () => {
+            resetConfirmResolverReference.current?.(false);
+            resetConfirmResolverReference.current = null;
+        };
+    }, []);
+
     /** Responds to files selected events. */
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) {
@@ -1150,13 +1176,31 @@ export function Chat() {
         setDraft,
         setSendError,
         setIsSending,
+        confirmResetSession,
     });
+
+    /** Marks a chat submit request as in-flight. */
+    const beginSend = () => {
+        sendInFlightCountReference.current += 1;
+    };
+
+    /** Marks a chat submit request as completed. */
+    const endSend = () => {
+        sendInFlightCountReference.current = Math.max(
+            0,
+            sendInFlightCountReference.current - 1
+        );
+    };
 
     /** Responds to send events. */
     const handleSend = async () => {
         const text = draft.trim();
+        const isSlashCommand = text.startsWith("/") && attachments.length === 0;
 
-        if (!selectedSessionKey || sendInFlightReference.current) {
+        if (
+            !selectedSessionKey ||
+            (sendInFlightCountReference.current > 0 && !isSlashCommand)
+        ) {
             return;
         }
 
@@ -1164,7 +1208,7 @@ export function Chat() {
             return;
         }
 
-        sendInFlightReference.current = true;
+        beginSend();
 
         if (text.startsWith("/")) {
             let handledCommand: boolean;
@@ -1172,12 +1216,12 @@ export function Chat() {
                 handledCommand = await handleSlashCommand(text);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
-                sendInFlightReference.current = false;
+                endSend();
                 return;
             }
 
             if (handledCommand) {
-                sendInFlightReference.current = false;
+                endSend();
                 return;
             }
         }
@@ -1271,7 +1315,7 @@ export function Chat() {
                 return next;
             });
         } finally {
-            sendInFlightReference.current = false;
+            endSend();
             setIsSending(false);
         }
     };
@@ -1378,6 +1422,16 @@ export function Chat() {
                 danger
                 onCancel={() => setPendingDeleteMessageKey(null)}
                 onConfirm={confirmDeleteMessage}
+            />
+
+            <ConfirmModal
+                isOpen={isResetConfirmOpen}
+                title="Reset chat session"
+                message="Reset this chat session? This clears the session history/transcript for the selected target."
+                confirmLabel="Reset"
+                danger
+                onCancel={() => closeResetConfirm(false)}
+                onConfirm={() => closeResetConfirm(true)}
             />
         </div>
     );

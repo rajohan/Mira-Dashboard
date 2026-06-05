@@ -12,7 +12,7 @@ type ChatRequest = <T = unknown>(
     params?: Record<string, unknown>
 ) => Promise<T>;
 
-const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/stop"]);
+const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/new", "/reset", "/stop"]);
 
 function makeAttachment(): ChatSendAttachment {
     return {
@@ -33,9 +33,12 @@ function renderSlashCommands(
         initialIsSending?: boolean;
         initialSendError?: string | null;
         selectedSessionKey?: string;
+        confirmResetSession?: () => Promise<boolean>;
     } = {}
 ) {
     const request = overrides.request || vi.fn().mockResolvedValue({});
+    const confirmResetSession =
+        overrides.confirmResetSession || vi.fn().mockResolvedValue(true);
 
     const hook = renderHook(() => {
         const [messages, setMessages] = useState<ChatHistoryMessage[]>([
@@ -65,6 +68,7 @@ function renderSlashCommands(
             setMessages,
             setSendError,
             updateActiveStreams: setActiveStreams,
+            confirmResetSession,
         });
 
         return {
@@ -77,7 +81,7 @@ function renderSlashCommands(
         };
     });
 
-    return { request, ...hook };
+    return { confirmResetSession, request, ...hook };
 }
 
 describe("useChatSlashCommands", () => {
@@ -114,9 +118,36 @@ describe("useChatSlashCommands", () => {
         expect(passThroughCommands).toContain("/model");
         expect(passThroughCommands).toContain("/queue");
         expect(passThroughCommands).toContain("/goal");
+        expect(passThroughCommands).toContain("/steer");
         expect(passThroughCommands).not.toContain("/clear");
         expect(request).not.toHaveBeenCalled();
         expect(result.current.sendError).toBeNull();
+    });
+
+    it("confirms reset commands before passing them through", async () => {
+        const { confirmResetSession, request, result } = renderSlashCommands();
+
+        await act(async () => {
+            await expect(result.current.runCommand("/reset")).resolves.toBe(false);
+            await expect(result.current.runCommand("/new")).resolves.toBe(false);
+        });
+
+        expect(confirmResetSession).toHaveBeenCalledTimes(2);
+        expect(request).not.toHaveBeenCalled();
+        expect(result.current.sendError).toBeNull();
+    });
+
+    it("cancels reset commands locally when confirmation is denied", async () => {
+        const confirmResetSession = vi.fn().mockResolvedValue(false);
+        const { request, result } = renderSlashCommands({ confirmResetSession });
+
+        await act(async () => {
+            await expect(result.current.runCommand("/reset")).resolves.toBe(true);
+        });
+
+        expect(request).not.toHaveBeenCalled();
+        expect(result.current.draft).toBe("");
+        expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
     });
 
     it("stops the selected session through chat.abort", async () => {

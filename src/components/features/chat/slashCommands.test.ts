@@ -16,11 +16,14 @@ describe("slash commands", () => {
         expect(slashCommandCanonicalName("/unknown")).toBe("/unknown");
     });
 
-    it("recognizes active-run steering commands", () => {
+    it("recognizes slash commands that can bypass active-run blocking", () => {
         expect(isActiveRunSlashCommand("/steer keep going")).toBe(true);
         expect(isActiveRunSlashCommand("/tell try the smaller patch")).toBe(true);
         expect(isActiveRunSlashCommand(" /TELL try the smaller patch")).toBe(true);
-        expect(isActiveRunSlashCommand("/queue steer")).toBe(false);
+        expect(isActiveRunSlashCommand("/stop")).toBe(true);
+        expect(isActiveRunSlashCommand("/abort")).toBe(true);
+        expect(isActiveRunSlashCommand("/queue steer")).toBe(true);
+        expect(isActiveRunSlashCommand("/status")).toBe(true);
         expect(isActiveRunSlashCommand("normal message")).toBe(false);
     });
 

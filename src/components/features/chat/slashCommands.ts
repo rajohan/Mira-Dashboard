@@ -296,10 +296,10 @@ export function slashCommandCanonicalName(rawCommand: string): string {
     );
 }
 
-/** Returns whether a draft can be sent while a run is already active. */
+/** Returns whether a slash draft can be sent while a run is already active. */
 export function isActiveRunSlashCommand(draft: string): boolean {
     const [rawCommand = ""] = draft.trim().split(/\s+/);
-    return slashCommandCanonicalName(rawCommand) === "/steer";
+    return rawCommand.startsWith("/");
 }
 
 /** Builds slash command suggestions. */
