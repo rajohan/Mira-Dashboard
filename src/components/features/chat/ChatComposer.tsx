@@ -12,7 +12,7 @@ import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import { base64ToText } from "./chatUtils";
-import { isActiveRunSlashCommand, type SlashCommandSuggestion } from "./slashCommands";
+import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
     "😀",
@@ -100,8 +100,6 @@ export function ChatComposer({
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const composerReference = useRef<HTMLDivElement | null>(null);
     const textareaReference = useRef<HTMLTextAreaElement | null>(null);
-    const canSteerActiveRun = isSending && isActiveRunSlashCommand(draft);
-    const isComposerLocked = isSending && !canSteerActiveRun;
 
     useEffect(() => {
         if (!showEmojiPicker) {
@@ -310,7 +308,7 @@ export function ChatComposer({
                             }
                         }}
                         enterKeyHint="enter"
-                        disabled={!selectedSessionKey || !isConnected || isComposerLocked}
+                        disabled={!selectedSessionKey || !isConnected}
                         placeholder={
                             selectedSessionKey
                                 ? "Message, attach files, or use / commands (try /help)"

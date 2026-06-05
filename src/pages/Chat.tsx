@@ -1239,20 +1239,18 @@ export function Chat() {
             return;
         }
 
-        sendInFlightReference.current = true;
-
         if (!text && attachments.length === 0) {
-            sendInFlightReference.current = false;
             return;
         }
 
         if (text.startsWith("/")) {
             const handledCommand = await handleSlashCommand(text);
             if (handledCommand) {
-                sendInFlightReference.current = false;
                 return;
             }
         }
+
+        sendInFlightReference.current = true;
 
         const messageText = text;
         const sendAttachments = attachments;

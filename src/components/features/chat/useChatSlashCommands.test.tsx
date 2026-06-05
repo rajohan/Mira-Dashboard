@@ -70,6 +70,7 @@ function renderSlashCommands(
         chatModelOptions?: Array<{ id?: string; label?: string; name?: string }>;
         confirmResetSession?: () => Promise<boolean>;
         initialSendError?: string | null;
+        initialIsSending?: boolean;
         selectedSession?: Session | null;
         selectedSessionKey?: string;
     } = {}
@@ -84,7 +85,7 @@ function renderSlashCommands(
         const [sendError, setSendError] = useState<string | null>(
             overrides.initialSendError ?? null
         );
-        const [isSending, setIsSending] = useState(false);
+        const [isSending, setIsSending] = useState(overrides.initialIsSending ?? false);
         const [isAtBottom, setIsAtBottom] = useState(false);
         const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
         const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({
@@ -341,7 +342,7 @@ describe("useChatSlashCommands", () => {
     });
 
     it("steers the selected session through the Gateway steer RPC", async () => {
-        const { request, result } = renderSlashCommands();
+        const { request, result } = renderSlashCommands({ initialIsSending: true });
 
         await act(async () => {
             await result.current.runCommand("/steer keep the patch small");
@@ -357,6 +358,7 @@ describe("useChatSlashCommands", () => {
             message: "summarize before the next tool call",
         });
         expect(result.current.messages.at(-1)?.text).toBe("Steering message sent.");
+        expect(result.current.isSending).toBe(true);
     });
 
     it("reports steer usage without sending empty guidance", async () => {

@@ -433,13 +433,17 @@ export function useChatSlashCommands({
                 return true;
             }
 
-            await runSimpleCommand(async () => {
+            setDraft("");
+            setSendError(null);
+            try {
                 await request("sessions.steer", {
                     key: selectedSessionKey,
                     message: argumentText,
                 });
                 addSystemMessage("Steering message sent.");
-            });
+            } catch (error_) {
+                setSendError(chatErrorMessage(error_, "Failed to run /steer"));
+            }
             return true;
         }
 

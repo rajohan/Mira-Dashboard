@@ -1931,6 +1931,9 @@ describe("Chat", () => {
     it("allows active-run steering commands while a send is already in flight", async () => {
         const user = userEvent.setup();
         const sendResolvers: Array<(value: { runId: string }) => void> = [];
+        mocks.slashCommand.mockImplementation(async (commandText: string) =>
+            commandText.startsWith("/steer")
+        );
         mocks.request.mockImplementation((method: string) => {
             if (method === "models.list") {
                 return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
@@ -1977,18 +1980,25 @@ describe("Chat", () => {
         );
         await user.click(screen.getByRole("button", { name: "send" }));
 
-        await waitFor(() => expect(sendResolvers).toHaveLength(2));
-        expect(mocks.request).toHaveBeenCalledWith(
+        await waitFor(() =>
+            expect(mocks.slashCommand).toHaveBeenCalledWith("/steer keep the patch small")
+        );
+        expect(sendResolvers).toHaveLength(1);
+
+        await user.clear(screen.getByLabelText("Draft"));
+        await user.type(screen.getByLabelText("Draft"), "second normal send");
+        expect(screen.getByTestId("composer-state")).toHaveTextContent(
+            "true:false:false:false"
+        );
+        await user.click(screen.getByRole("button", { name: "send" }));
+        expect(sendResolvers).toHaveLength(1);
+        expect(mocks.request).not.toHaveBeenCalledWith(
             "chat.send",
-            expect.objectContaining({
-                message: "/steer keep the patch small",
-                sessionKey: "session-a",
-            })
+            expect.objectContaining({ message: "second normal send" })
         );
 
         await act(async () => {
             sendResolvers[0]?.({ runId: "run-start" });
-            sendResolvers[1]?.({ runId: "run-steer" });
         });
     });
 
