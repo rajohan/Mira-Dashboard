@@ -1,8 +1,7 @@
 import { renderHook } from "@testing-library/react";
-import { act, useRef, useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, useState } from "react";
+import { describe, expect, it, vi } from "vitest";
 
-import type { Session } from "../../../types/session";
 import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { SLASH_COMMANDS, slashCommandCanonicalName } from "./slashCommands";
@@ -13,43 +12,7 @@ type ChatRequest = <T = unknown>(
     params?: Record<string, unknown>
 ) => Promise<T>;
 
-const LOCALLY_HANDLED_COMMANDS = new Set([
-    "/abort",
-    "/clear",
-    "/commands",
-    "/compact",
-    "/elevated",
-    "/exec",
-    "/fast",
-    "/help",
-    "/model",
-    "/models",
-    "/new",
-    "/reasoning",
-    "/reset",
-    "/status",
-    "/stop",
-    "/steer",
-    "/think",
-    "/usage",
-    "/verbose",
-]);
-
-function makeSession(overrides: Partial<Session> = {}): Session {
-    return {
-        displayLabel: "Main chat",
-        elevatedLevel: "off",
-        fastMode: false,
-        key: "session-a",
-        model: "codex",
-        reasoningLevel: "off",
-        status: "idle",
-        thinkingLevel: "medium",
-        type: "direct",
-        verboseLevel: "off",
-        ...overrides,
-    } as Session;
-}
+const LOCALLY_HANDLED_COMMANDS = new Set(["/abort", "/stop", "/steer"]);
 
 function makeAttachment(): ChatSendAttachment {
     return {
@@ -67,11 +30,8 @@ function renderSlashCommands(
     overrides: {
         attachments?: ChatSendAttachment[];
         request?: ReturnType<typeof vi.fn>;
-        chatModelOptions?: Array<{ id?: string; label?: string; name?: string }>;
-        confirmResetSession?: () => Promise<boolean>;
-        initialSendError?: string | null;
         initialIsSending?: boolean;
-        selectedSession?: Session | null;
+        initialSendError?: string | null;
         selectedSessionKey?: string;
     } = {}
 ) {
@@ -81,13 +41,11 @@ function renderSlashCommands(
         const [messages, setMessages] = useState<ChatHistoryMessage[]>([
             { content: "hello", role: "user", text: "hello" },
         ]);
-        const [draft, setDraft] = useState("/help");
+        const [draft, setDraft] = useState("/steer keep going");
         const [sendError, setSendError] = useState<string | null>(
             overrides.initialSendError ?? null
         );
         const [isSending, setIsSending] = useState(overrides.initialIsSending ?? false);
-        const [isAtBottom, setIsAtBottom] = useState(false);
-        const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
         const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({
             "session-a": {
                 aliases: ["run-1"],
@@ -98,42 +56,24 @@ function renderSlashCommands(
                 updatedAt: "2026-05-11T00:00:00.000Z",
             },
         });
-        const shouldStickToBottomReference = useRef(false);
         const runCommand = useChatSlashCommands({
             attachments: overrides.attachments || [],
-            chatModelOptions: overrides.chatModelOptions || [
-                { id: "codex", label: "Codex" },
-                { id: "kimi", label: "Kimi" },
-            ],
             request: request as unknown as ChatRequest,
-            selectedSession: Object.hasOwn(overrides, "selectedSession")
-                ? (overrides.selectedSession ?? null)
-                : makeSession(),
             selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
             setDraft,
-            setHistoryLoadVersion,
-            setIsAtBottom,
             setIsSending,
             setMessages,
             setSendError,
-            shouldStickToBottomReference,
-            showThinkingOutput: false,
-            showToolOutput: false,
             updateActiveStreams: setActiveStreams,
-            confirmResetSession:
-                overrides.confirmResetSession || vi.fn().mockResolvedValue(true),
         });
 
         return {
             activeStreams,
             draft,
-            historyLoadVersion,
-            isAtBottom,
             isSending,
             messages,
             runCommand,
             sendError,
-            shouldStickToBottom: shouldStickToBottomReference.current,
         };
     });
 
@@ -141,184 +81,20 @@ function renderSlashCommands(
 }
 
 describe("useChatSlashCommands", () => {
-    beforeEach(() => {
-        vi.unstubAllGlobals();
-    });
-
-    it("ignores non-slash text and blocks slash commands with attachments", async () => {
-        const { result } = renderSlashCommands({ attachments: [makeAttachment()] });
-
-        await act(async () => {
-            await expect(result.current.runCommand("hello")).resolves.toBe(false);
-            await expect(result.current.runCommand("/help")).resolves.toBe(true);
-        });
-
-        expect(result.current.sendError).toBe(
-            "Slash commands cannot include attachments yet."
-        );
-        expect(result.current.messages).toHaveLength(1);
-    });
-
-    it("renders local help, status, and model list messages", async () => {
-        const { result } = renderSlashCommands();
-
-        await act(async () => {
-            await result.current.runCommand("/help");
-            await result.current.runCommand("/status");
-            await result.current.runCommand("/models");
-        });
-
-        const systemText = result.current.messages
-            .map((message) => message.text)
-            .join("\n");
-        expect(systemText).toContain("Available slash commands:");
-        expect(systemText).toContain("Session: Main chat");
-        expect(systemText).toContain("Configured models:\n- codex\n- kimi");
-        expect(result.current.draft).toBe("");
-        expect(result.current.sendError).toBeNull();
-    });
-
-    it("patches session settings for model and runtime commands", async () => {
+    it("ignores non-slash text", async () => {
         const { request, result } = renderSlashCommands();
 
         await act(async () => {
-            await result.current.runCommand("/model kimi");
-            await result.current.runCommand("/fast on");
-            await result.current.runCommand("/reasoning summary");
-            await result.current.runCommand("/think high");
-            await result.current.runCommand("/verbose detailed");
-            await result.current.runCommand("/elevated ask");
-            await result.current.runCommand("/usage full");
-            await result.current.runCommand("/exec host allowlist always node-a");
-        });
-
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            key: "session-a",
-            model: "kimi",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            fastMode: true,
-            key: "session-a",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            key: "session-a",
-            reasoningLevel: "summary",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            key: "session-a",
-            thinkingLevel: "high",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            key: "session-a",
-            verboseLevel: "detailed",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            elevatedLevel: "ask",
-            key: "session-a",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            key: "session-a",
-            responseUsage: "full",
-        });
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            execAsk: "always",
-            execHost: "host",
-            execNode: "node-a",
-            execSecurity: "allowlist",
-            key: "session-a",
-        });
-        expect(result.current.isSending).toBe(false);
-        expect(result.current.messages.at(-1)?.text).toBe("Exec defaults updated.");
-    });
-
-    it("reports current runtime settings without patching", async () => {
-        const { request, result } = renderSlashCommands({
-            selectedSession: makeSession({ fastMode: true }),
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/model");
-            await result.current.runCommand("/think");
-            await result.current.runCommand("/verbose");
-            await result.current.runCommand("/fast status");
-            await result.current.runCommand("/status");
-            await result.current.runCommand("/reasoning");
-            await result.current.runCommand("/elevated");
-            await result.current.runCommand("/usage");
+            await expect(result.current.runCommand("hello")).resolves.toBe(false);
         });
 
         expect(request).not.toHaveBeenCalled();
-        const systemText = result.current.messages
-            .map((message) => message.text)
-            .join("\n");
-        expect(systemText).toContain("Current model: codex");
-        expect(systemText).toContain("Current thinking level: medium");
-        expect(systemText).toContain("Current verbose mode: off");
-        expect(systemText).toContain("Current fast mode: on");
-        expect(systemText).toContain("Fast mode: on");
-        expect(systemText).toContain("Current reasoning visibility: off");
-        expect(systemText).toContain("Current elevated mode: off");
-        expect(systemText).toContain("Session usage:");
-    });
-
-    it("covers fallback status/model text and passes through gateway slash commands", async () => {
-        const { request, result } = renderSlashCommands({
-            chatModelOptions: [
-                { label: "Label-only" },
-                { name: "Name-only" },
-                {},
-                ...Array.from({ length: 12 }, (_, index) => ({ id: `model-${index}` })),
-            ],
-            selectedSession: makeSession({
-                displayLabel: "",
-                elevatedLevel: "",
-                fastMode: false,
-                key: "session-a",
-                model: "",
-                reasoningLevel: "",
-                status: "",
-                thinkingLevel: "",
-                verboseLevel: "",
-            }),
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/commands");
-            await result.current.runCommand("/models");
-            await result.current.runCommand("/model");
-            await result.current.runCommand("/status");
-            await result.current.runCommand("/fast off");
-        });
-
-        expect(request).toHaveBeenCalledWith("sessions.patch", {
-            fastMode: false,
-            key: "session-a",
-        });
-        const systemText = result.current.messages
-            .map((message) => message.text)
-            .join("\n");
-        expect(systemText).toContain("Label-only");
-        expect(systemText).toContain("Name-only");
-        expect(systemText).toContain("+2 more");
-        expect(systemText).toContain("Session: session-a");
-        expect(systemText).toContain("Status: unknown");
-        expect(systemText).toContain("Model: default");
-        expect(systemText).toContain("Fast mode disabled.");
-        expect(result.current.sendError).toBeNull();
-
-        await act(async () => {
-            await expect(result.current.runCommand("/queue collect")).resolves.toBe(
-                false
-            );
-            await expect(result.current.runCommand("/goal status")).resolves.toBe(false);
-            await expect(result.current.runCommand("/unknown")).resolves.toBe(false);
-        });
-
+        expect(result.current.messages).toHaveLength(1);
         expect(result.current.sendError).toBeNull();
     });
 
-    it("passes through catalog slash commands that are handled by OpenClaw", async () => {
-        const { result } = renderSlashCommands();
+    it("passes OpenClaw commands through unless they need a dedicated Dashboard RPC", async () => {
+        const { request, result } = renderSlashCommands();
         const passThroughCommands = SLASH_COMMANDS.flatMap((definition) => [
             definition.name,
             ...(definition.aliases || []),
@@ -334,14 +110,16 @@ describe("useChatSlashCommands", () => {
             }
         });
 
-        expect(passThroughCommands).not.toContain("/steer");
-        expect(passThroughCommands).not.toContain("/tell");
+        expect(passThroughCommands).toContain("/help");
+        expect(passThroughCommands).toContain("/model");
         expect(passThroughCommands).toContain("/queue");
         expect(passThroughCommands).toContain("/goal");
+        expect(passThroughCommands).not.toContain("/clear");
+        expect(request).not.toHaveBeenCalled();
         expect(result.current.sendError).toBeNull();
     });
 
-    it("steers the selected session through the Gateway steer RPC", async () => {
+    it("steers the selected session through sessions.steer", async () => {
         const { request, result } = renderSlashCommands({ initialIsSending: true });
 
         await act(async () => {
@@ -372,183 +150,31 @@ describe("useChatSlashCommands", () => {
         expect(result.current.messages.at(-1)?.text).toBe("Usage: /steer <message>");
     });
 
-    it("covers fallback runtime status values and command errors", async () => {
-        const request = vi
-            .fn()
-            .mockResolvedValueOnce({})
-            .mockRejectedValueOnce("patch failed");
-        const { result } = renderSlashCommands({
-            request,
-            selectedSession: null,
-            selectedSessionKey: "",
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/reset");
-            await result.current.runCommand("/model kimi");
-        });
-
-        expect(request).toHaveBeenCalledWith("sessions.reset", { key: "" });
-        expect(result.current.sendError).toBe("Failed to run /model");
-
-        await act(async () => {
-            await result.current.runCommand("/think");
-            await result.current.runCommand("/verbose");
-            await result.current.runCommand("/fast");
-            await result.current.runCommand("/reasoning");
-            await result.current.runCommand("/elevated");
-        });
-        const systemText = result.current.messages
-            .map((message) => message.text)
-            .join("\n");
-        expect(systemText).toContain("Current thinking level: default");
-        expect(systemText).toContain("Current verbose mode: off");
-        expect(systemText).toContain("Current fast mode: off");
-        expect(systemText).toContain("Current reasoning visibility: off");
-        expect(systemText).toContain("Current elevated mode: off");
-    });
-
-    it("handles missing selected sessions and empty model lists", async () => {
-        const { request, result } = renderSlashCommands({
-            chatModelOptions: [],
-            selectedSession: null,
-            selectedSessionKey: "",
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/status");
-            await result.current.runCommand("/models");
-            await result.current.runCommand("/model");
-        });
-
-        expect(request).not.toHaveBeenCalled();
-        expect(result.current.messages.map((message) => message.text)).toEqual([
-            "hello",
-            "No selected session.",
-            "No configured models returned by the gateway.",
-            "Current model: default\nNo model list available.",
-        ]);
-    });
-
-    it("clears local chat view and stops active runs", async () => {
+    it("stops the selected session through chat.abort", async () => {
         const { request, result } = renderSlashCommands();
-
-        await act(async () => {
-            await result.current.runCommand("/clear");
-        });
-
-        expect(result.current.messages.map((message) => message.text)).toEqual([
-            "Local chat view cleared. Session history was not reset.",
-        ]);
-        expect(result.current.activeStreams["session-a"]).toBeUndefined();
 
         await act(async () => {
             await result.current.runCommand("/stop");
         });
 
         expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "session-a" });
-        expect(result.current.messages.at(-1)?.text).toBe("Stopped current run.");
-    });
-
-    it("cancels or confirms reset and reloads history", async () => {
-        const request = vi.fn().mockImplementation(async (method: string) => {
-            if (method === "chat.history") {
-                return {
-                    messages: [
-                        {
-                            content: "reloaded",
-                            role: "assistant",
-                            text: "reloaded",
-                        },
-                    ],
-                };
-            }
-
-            return {};
-        });
-        const confirmResetSession = vi
-            .fn()
-            .mockResolvedValueOnce(false)
-            .mockResolvedValueOnce(true);
-        const { result } = renderSlashCommands({
-            confirmResetSession,
-            initialSendError: "Old send error",
-            request,
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/reset");
-        });
-        expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
-        expect(result.current.sendError).toBeNull();
-        expect(request).not.toHaveBeenCalledWith("sessions.reset", expect.anything());
-
-        await act(async () => {
-            await result.current.runCommand("/new");
-        });
-
-        expect(confirmResetSession).toHaveBeenCalledTimes(2);
-        expect(request).toHaveBeenCalledWith("sessions.reset", { key: "session-a" });
-        expect(request).toHaveBeenCalledWith("chat.history", {
-            limit: 1000,
-            sessionKey: "session-a",
-        });
-        expect(result.current.messages.map((message) => message.text)).toContain(
-            "Session reset."
-        );
-        expect(result.current.historyLoadVersion).toBe(1);
-        expect(result.current.isAtBottom).toBe(true);
-        expect(result.current.shouldStickToBottom).toBe(true);
-    });
-
-    it("treats reset confirmation failures as cancellations", async () => {
-        const confirmResetSession = vi.fn().mockRejectedValue(new Error("closed"));
-        const { request, result } = renderSlashCommands({
-            confirmResetSession,
-            initialSendError: "Old send error",
-        });
-
-        await act(async () => {
-            await result.current.runCommand("/reset");
-        });
-
-        expect(confirmResetSession).toHaveBeenCalledTimes(1);
-        expect(request).not.toHaveBeenCalledWith("sessions.reset", expect.anything());
-        expect(result.current.messages.at(-1)?.text).toBe("Reset cancelled.");
         expect(result.current.draft).toBe("");
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.isSending).toBe(false);
+        expect(result.current.messages.at(-1)?.text).toBe("Stopped current run.");
+        expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
 
-    it("tracks compact progress and reports failures", async () => {
-        const request = vi
-            .fn()
-            .mockResolvedValueOnce({ compacted: false, reason: "too small" })
-            .mockResolvedValueOnce({ compacted: false })
-            .mockResolvedValueOnce({ compacted: true })
-            .mockRejectedValueOnce("compact failed");
-        const { result } = renderSlashCommands({ request });
-
-        await act(async () => {
-            await result.current.runCommand("/compact");
+    it("blocks local control commands with attachments", async () => {
+        const { request, result } = renderSlashCommands({
+            attachments: [makeAttachment()],
         });
 
-        expect(request).toHaveBeenCalledWith("sessions.compact", { key: "session-a" });
-        expect(result.current.messages.at(-1)?.text).toBe(
-            "Compaction skipped: too small"
-        );
-        expect(result.current.activeStreams["session-a"]).toBeUndefined();
-
         await act(async () => {
-            await result.current.runCommand("/compact");
-            await result.current.runCommand("/compact");
-            await result.current.runCommand("/compact");
+            await expect(result.current.runCommand("/steer update")).resolves.toBe(true);
         });
-        expect(result.current.sendError).toBe("Failed to run /compact");
-        expect(result.current.isSending).toBe(false);
-        const systemText = result.current.messages
-            .map((message) => message.text)
-            .join("\n");
-        expect(systemText).toContain("Compaction skipped.");
-        expect(systemText).toContain("Context compacted successfully.");
+
+        expect(request).not.toHaveBeenCalled();
+        expect(result.current.draft).toBe("/steer keep going");
+        expect(result.current.sendError).toBe("/steer cannot include attachments.");
     });
 });

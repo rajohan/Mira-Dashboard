@@ -61,7 +61,6 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     { name: "/new", description: "Start a fresh selected session" },
     { name: "/compact", description: "Compact the selected session context" },
     { name: "/stop", aliases: ["/abort"], description: "Stop the current run" },
-    { name: "/clear", description: "Clear only the local chat view" },
     {
         name: "/session",
         description: "Manage thread-binding session expiry",

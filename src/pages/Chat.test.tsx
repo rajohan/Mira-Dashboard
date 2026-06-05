@@ -66,7 +66,6 @@ interface ChatTestMocks {
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
     slashCommand: ReturnType<typeof vi.fn>;
-    slashCommandOptions: { confirmResetSession: () => Promise<boolean> } | null;
     socketError: string | null;
     subscribe: ReturnType<typeof vi.fn>;
     virtualizerOptions: ChatVirtualizerOptions | null;
@@ -111,7 +110,6 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
     confirmModalHandlers: null,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
-    slashCommandOptions: null,
     virtualizerOptions: null,
 }));
 
@@ -197,10 +195,7 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
 }));
 
 vi.mock("../components/features/chat/useChatSlashCommands", () => ({
-    useChatSlashCommands: (options: { confirmResetSession: () => Promise<boolean> }) => {
-        mocks.slashCommandOptions = options;
-        return mocks.slashCommand;
-    },
+    useChatSlashCommands: () => mocks.slashCommand,
 }));
 
 vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
@@ -768,7 +763,6 @@ describe("Chat", () => {
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
         mocks.confirmModalHandlers = null;
-        mocks.slashCommandOptions = null;
         mocks.runtimeEventsOptions = null;
         mocks.skipComposerFileInputRef = false;
         mocks.skipMessagesContainerRef = false;
@@ -2020,44 +2014,6 @@ describe("Chat", () => {
         expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
     });
 
-    it("resolves reset confirmation choices from the app modal", async () => {
-        const user = userEvent.setup();
-
-        render(<Chat />);
-        await screen.findByText("old user message");
-
-        let cancelled: Promise<boolean>;
-        await act(async () => {
-            cancelled = mocks.slashCommandOptions!.confirmResetSession();
-        });
-        await screen.findByRole("dialog", { name: "Reset chat session" });
-        await user.click(screen.getByRole("button", { name: "cancel reset" }));
-        await expect(cancelled!).resolves.toBe(false);
-
-        let confirmed: Promise<boolean>;
-        await act(async () => {
-            confirmed = mocks.slashCommandOptions!.confirmResetSession();
-        });
-        await screen.findByRole("dialog", { name: "Reset chat session" });
-        await user.click(screen.getByRole("button", { name: "confirm reset" }));
-        await expect(confirmed!).resolves.toBe(true);
-    });
-
-    it("cancels pending reset confirmations on unmount", async () => {
-        const { unmount } = render(<Chat />);
-        await screen.findByText("old user message");
-
-        let pendingResetConfirmation: Promise<boolean>;
-        await act(async () => {
-            pendingResetConfirmation = mocks.slashCommandOptions!.confirmResetSession();
-        });
-        await screen.findByRole("dialog", { name: "Reset chat session" });
-
-        unmount();
-
-        await expect(pendingResetConfirmation!).resolves.toBe(false);
-    });
-
     it("persists deleted message keys and can open attachment previews", async () => {
         const user = userEvent.setup();
 
@@ -2147,7 +2103,7 @@ describe("Chat", () => {
 
     it("reports attachment limits, voice fallback, and slash command handling", async () => {
         const user = userEvent.setup();
-        mocks.slashCommand.mockResolvedValueOnce(true);
+        mocks.slashCommand.mockResolvedValueOnce(false);
         const oversizedFile = new File(["x"], "huge.txt", {
             type: "text/plain",
         });
@@ -2172,7 +2128,7 @@ describe("Chat", () => {
         await waitFor(() =>
             expect(mocks.slashCommand).toHaveBeenCalledWith("/model codex")
         );
-        expect(mocks.request).not.toHaveBeenCalledWith(
+        expect(mocks.request).toHaveBeenCalledWith(
             "chat.send",
             expect.objectContaining({ message: "/model codex" })
         );
