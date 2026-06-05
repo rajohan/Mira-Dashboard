@@ -121,20 +121,24 @@ export function TaskDetailModal({
         const previousTaskNumber = previousTaskNumberRef.current;
         previousTaskNumberRef.current = task.number;
 
-        if (previousTaskNumber !== task.number) {
+        const isNewTask = previousTaskNumber !== task.number;
+
+        if (isNewTask) {
             setIsEditingTask(false);
             setProgressMessage("");
             setEditingUpdateId(null);
             setEditingUpdateMessage("");
         }
 
-        setEditTitle(task.title);
-        setEditBody(task.body || "");
-        setEditPriority(getPriority(task.labels));
-        setEditCronJobId(task.automation?.cronJobId || "");
-        setEditScheduleSummary(task.automation?.scheduleSummary || "");
-        setEditSessionTarget(task.automation?.sessionTarget || "");
-    }, [task]);
+        if (isNewTask || !isEditingTask) {
+            setEditTitle(task.title);
+            setEditBody(task.body || "");
+            setEditPriority(getPriority(task.labels));
+            setEditCronJobId(task.automation?.cronJobId || "");
+            setEditScheduleSummary(task.automation?.scheduleSummary || "");
+            setEditSessionTarget(task.automation?.sessionTarget || "");
+        }
+    }, [isEditingTask, task]);
 
     if (!task) {
         return null;
