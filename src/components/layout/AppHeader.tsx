@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 
 import { useHealth } from "../../hooks";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
@@ -105,6 +105,7 @@ export function AppHeader({
                                 .then(() => navigate({ to: "/login" }));
                         }}
                     >
+                        <LogOut className="h-4 w-4" />
                         Log out
                     </Button>
                     <NotificationBell />

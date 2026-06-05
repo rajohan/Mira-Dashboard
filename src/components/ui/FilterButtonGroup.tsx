@@ -1,9 +1,12 @@
+import type { ReactNode } from "react";
+
 import { Button } from "./Button";
 
 /** Represents filter option. */
 interface FilterOption<T extends string> {
     value: T;
     label: string;
+    icon?: ReactNode;
 }
 
 /** Provides props for filter button group. */
@@ -31,6 +34,7 @@ export function FilterButtonGroup<T extends string>({
                     aria-pressed={value === option.value}
                     onClick={() => onChange(option.value)}
                 >
+                    {option.icon}
                     {option.label}
                 </Button>
             ))}

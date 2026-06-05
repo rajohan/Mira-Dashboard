@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { Pencil, Play, Save, X } from "lucide-react";
 import { useId } from "react";
 
 import type { CronJob } from "../../../hooks";
@@ -187,6 +187,7 @@ export function CronJobDetails({
                                 onClick={() => onEditModeChange(false)}
                                 className="px-3"
                             >
+                                <X size={14} />
                                 Cancel
                             </Button>
                         ) : null}
@@ -204,6 +205,7 @@ export function CronJobDetails({
                                 onEditModeChange(true);
                             }}
                         >
+                            {isEditMode ? <Save size={14} /> : <Pencil size={14} />}
                             {isEditMode ? "Save edits" : "Edit"}
                         </Button>
                     </div>
