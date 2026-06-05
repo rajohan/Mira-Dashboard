@@ -1265,18 +1265,22 @@ export function Chat() {
         setIsAtBottom(true);
         scheduleBottomFollow();
 
-        const idempotencyKey = `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        updateActiveStreams((previous) => ({
-            ...previous,
-            [selectedSessionKey]: {
-                sessionKey: selectedSessionKey,
-                runId: idempotencyKey,
-                aliases: [idempotencyKey],
-                text: "",
-                statusText: "Thinking",
-                updatedAt: new Date().toISOString(),
-            },
-        }));
+        const idempotencyKey = isResetCommand
+            ? undefined
+            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        if (idempotencyKey) {
+            updateActiveStreams((previous) => ({
+                ...previous,
+                [selectedSessionKey]: {
+                    sessionKey: selectedSessionKey,
+                    runId: idempotencyKey,
+                    aliases: [idempotencyKey],
+                    text: "",
+                    statusText: "Thinking",
+                    updatedAt: new Date().toISOString(),
+                },
+            }));
+        }
 
         try {
             if (

@@ -2253,6 +2253,7 @@ describe("Chat", () => {
             )
         );
         expect(screen.queryByText("/reset")).not.toBeInTheDocument();
+        expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
         await waitFor(() =>
             expect(screen.queryByText("old user message")).not.toBeInTheDocument()
         );
