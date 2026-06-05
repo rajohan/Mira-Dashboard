@@ -1986,7 +1986,7 @@ describe("Chat", () => {
         await waitFor(() => expect(sendResolvers).toHaveLength(1));
         await user.type(screen.getByLabelText("Draft"), "second while pending");
         expect(screen.getByTestId("composer-state")).toHaveTextContent(
-            "true:true:false:false"
+            "true:false:false:false"
         );
         await user.click(screen.getByRole("button", { name: "send" }));
         expect(sendResolvers).toHaveLength(1);

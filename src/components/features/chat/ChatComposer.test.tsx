@@ -74,17 +74,19 @@ describe("ChatComposer", () => {
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 
-    it("does not send from Enter when sending is disabled", async () => {
-        const user = userEvent.setup();
+    it("keeps Enter as a newline when sending is disabled", () => {
         const onSend = vi.fn();
 
         renderComposer({ canSend: false, draft: "hello", onSend });
 
-        screen
-            .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
-            .focus();
-        await user.keyboard("{Enter}");
+        const defaultWasAllowed = fireEvent.keyDown(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            { code: "Enter", key: "Enter" }
+        );
 
+        expect(defaultWasAllowed).toBe(true);
         expect(onSend).not.toHaveBeenCalled();
     });
 

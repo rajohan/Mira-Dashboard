@@ -30,7 +30,6 @@ function renderSlashCommands(
     overrides: {
         attachments?: ChatSendAttachment[];
         request?: ReturnType<typeof vi.fn>;
-        initialIsSending?: boolean;
         initialSendError?: string | null;
         selectedSessionKey?: string;
         confirmResetSession?: () => Promise<boolean>;
@@ -48,7 +47,6 @@ function renderSlashCommands(
         const [sendError, setSendError] = useState<string | null>(
             overrides.initialSendError ?? null
         );
-        const [isSending, setIsSending] = useState(overrides.initialIsSending ?? false);
         const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({
             "session-a": {
                 aliases: ["run-1"],
@@ -64,7 +62,6 @@ function renderSlashCommands(
             request: request as unknown as ChatRequest,
             selectedSessionKey: overrides.selectedSessionKey ?? "session-a",
             setDraft,
-            setIsSending,
             setMessages,
             setSendError,
             updateActiveStreams: setActiveStreams,
@@ -74,7 +71,6 @@ function renderSlashCommands(
         return {
             activeStreams,
             draft,
-            isSending,
             messages,
             runCommand,
             sendError,
@@ -176,7 +172,6 @@ describe("useChatSlashCommands", () => {
 
         expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "session-a" });
         expect(result.current.draft).toBe("");
-        expect(result.current.isSending).toBe(false);
         expect(result.current.messages.at(-1)?.text).toBe("Stopped current run.");
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
@@ -190,7 +185,6 @@ describe("useChatSlashCommands", () => {
 
         expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "session-a" });
         expect(result.current.draft).toBe("");
-        expect(result.current.isSending).toBe(false);
         expect(result.current.messages.at(-1)?.text).toBe("Stopped current run.");
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
     });
@@ -203,7 +197,6 @@ describe("useChatSlashCommands", () => {
             await result.current.runCommand("/stop");
         });
 
-        expect(result.current.isSending).toBe(false);
         expect(result.current.sendError).toContain("abort failed");
     });
 

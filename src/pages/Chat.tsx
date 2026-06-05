@@ -1180,13 +1180,13 @@ export function Chat() {
         setMessages,
         setDraft,
         setSendError,
-        setIsSending,
         confirmResetSession,
     });
 
     /** Marks a chat submit request as in-flight. */
     const beginSend = () => {
         sendInFlightCountReference.current += 1;
+        setIsSending(true);
     };
 
     /** Marks a chat submit request as completed. */
@@ -1195,24 +1195,28 @@ export function Chat() {
             0,
             sendInFlightCountReference.current - 1
         );
+        setIsSending(sendInFlightCountReference.current > 0);
+    };
+
+    /** Returns whether the current in-flight sends should block this draft. */
+    const isBlockedByInFlightSend = (text: string) => {
+        const isSlashCommand = text.startsWith("/") && attachments.length === 0;
+        const hasActiveSelectedStream = Boolean(activeStreams[selectedSessionKey]);
+        return (
+            sendInFlightCountReference.current > 0 &&
+            !(isSlashCommand && hasActiveSelectedStream)
+        );
     };
 
     /** Responds to send events. */
     const handleSend = async () => {
         const text = draft.trim();
-        const isSlashCommand = text.startsWith("/") && attachments.length === 0;
-        const hasActiveSelectedStream = Boolean(
-            activeStreamsReference.current[selectedSessionKey]
-        );
 
         if (!selectedSessionKey) {
             return;
         }
 
-        if (
-            sendInFlightCountReference.current > 0 &&
-            !(isSlashCommand && hasActiveSelectedStream)
-        ) {
+        if (isBlockedByInFlightSend(text)) {
             return;
         }
 
@@ -1257,7 +1261,6 @@ export function Chat() {
         setDraft("");
         setAttachments([]);
         setSendError(null);
-        setIsSending(true);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
         scheduleBottomFollow();
@@ -1343,16 +1346,18 @@ export function Chat() {
             });
         } finally {
             endSend();
-            setIsSending(false);
         }
     };
 
+    const draftText = draft.trim();
+    const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
-        (draft.trim() || attachments.length > 0)
+        !blockedByInFlightSend &&
+        (draftText || attachments.length > 0)
     );
 
     return (

@@ -19,7 +19,6 @@ interface UseChatSlashCommandsParams {
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
     setSendError: Dispatch<SetStateAction<string | null>>;
-    setIsSending: Dispatch<SetStateAction<boolean>>;
     confirmResetSession: () => Promise<boolean>;
 }
 
@@ -32,7 +31,6 @@ export function useChatSlashCommands({
     setMessages,
     setDraft,
     setSendError,
-    setIsSending,
     confirmResetSession,
 }: UseChatSlashCommandsParams) {
     /** Performs add system message. */
@@ -79,7 +77,6 @@ export function useChatSlashCommands({
 
         setDraft("");
         setSendError(null);
-        setIsSending(true);
 
         try {
             await request("chat.abort", { sessionKey: selectedSessionKey });
@@ -91,8 +88,6 @@ export function useChatSlashCommands({
             addSystemMessage("Stopped current run.");
         } catch (error_) {
             setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
-        } finally {
-            setIsSending(false);
         }
 
         return true;
