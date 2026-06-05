@@ -28,15 +28,21 @@ export const THINKING_CHOICES = [
     "adaptive",
 ];
 /** Defines mode choices. */
-export const MODE_CHOICES = ["status", "on", "off"];
+export const MODE_CHOICES = ["status", "on", "off", "default"];
 /** Defines verbose choices. */
 export const VERBOSE_CHOICES = ["off", "on", "full"];
+/** Defines trace choices. */
+export const TRACE_CHOICES = ["off", "on", "raw"];
 /** Defines reasoning choices. */
 export const REASONING_CHOICES = ["off", "on", "stream"];
 /** Defines elevated choices. */
 export const ELEVATED_CHOICES = ["off", "on", "ask", "full"];
 /** Defines usage choices. */
 export const USAGE_CHOICES = ["off", "tokens", "full", "cost"];
+/** Defines activation choices. */
+export const ACTIVATION_CHOICES = ["mention", "always"];
+/** Defines send choices. */
+export const SEND_CHOICES = ["on", "off", "inherit"];
 
 /** Defines slash commands. */
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [
@@ -54,6 +60,23 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     { name: "/compact", description: "Compact the selected session context" },
     { name: "/stop", aliases: ["/abort"], description: "Stop the current run" },
     { name: "/clear", description: "Clear only the local chat view" },
+    {
+        name: "/session",
+        description: "Manage thread-binding session expiry",
+        args: "[idle|max-age] [duration|off]",
+    },
+    {
+        name: "/export-session",
+        aliases: ["/export"],
+        description: "Export the current session to HTML",
+        args: "[path]",
+    },
+    {
+        name: "/export-trajectory",
+        aliases: ["/trajectory"],
+        description: "Export the current trajectory bundle",
+        args: "[path]",
+    },
     { name: "/model", description: "Show or set the model", args: "[model]" },
     { name: "/models", description: "List configured models" },
     {
@@ -71,9 +94,15 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
         choices: VERBOSE_CHOICES,
     },
     {
+        name: "/trace",
+        description: "Show or set plugin trace output",
+        args: "[off|on|raw]",
+        choices: TRACE_CHOICES,
+    },
+    {
         name: "/fast",
         description: "Show or set fast mode",
-        args: "[status|on|off]",
+        args: "[status|on|off|default]",
         choices: MODE_CHOICES,
     },
     {
@@ -93,7 +122,12 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     {
         name: "/exec",
         description: "Set exec defaults",
-        args: "[sandbox|gateway|node] [deny|allowlist|full] [off|on-miss|always]",
+        args: "host=<auto|sandbox|gateway|node> security=<deny|allowlist|full> ask=<off|on-miss|always>",
+    },
+    {
+        name: "/queue",
+        description: "Manage active-run queue behavior",
+        args: "<mode>",
     },
     {
         name: "/steer",
@@ -110,9 +144,144 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
     },
     { name: "/tools", description: "List runtime tools", args: "[compact|verbose]" },
     {
+        name: "/goal",
+        description: "Manage the current session goal",
+        args: "[status|start|pause|resume|complete|block|clear]",
+    },
+    {
+        name: "/diagnostics",
+        description: "Create an owner support diagnostic report",
+        args: "[note]",
+    },
+    {
+        name: "/crestodian",
+        description: "Run the Crestodian setup and repair helper",
+        args: "<request>",
+    },
+    { name: "/tasks", description: "List active and recent background tasks" },
+    {
+        name: "/context",
+        description: "Explain current context assembly",
+        args: "[list|detail|map|json]",
+    },
+    {
+        name: "/whoami",
+        aliases: ["/id"],
+        description: "Show the sender id for this surface",
+    },
+    { name: "/skill", description: "Run a user-invocable skill", args: "<name> [input]" },
+    {
+        name: "/allowlist",
+        description: "Manage command allowlist entries",
+        args: "[list|add|remove]",
+    },
+    {
+        name: "/approve",
+        description: "Resolve exec or plugin approval prompts",
+        args: "<id> <decision>",
+    },
+    {
+        name: "/btw",
+        aliases: ["/side"],
+        description: "Ask a side question without changing session context",
+        args: "<question>",
+    },
+    {
+        name: "/acp",
+        description: "Manage ACP sessions and runtime options",
+        args: "[spawn|cancel|steer|close|sessions|status|set-mode|set|cwd|permissions|timeout|model|reset-options|doctor|install|help]",
+    },
+    {
+        name: "/focus",
+        description: "Bind the current thread to a session target",
+        args: "<target>",
+    },
+    { name: "/unfocus", description: "Remove the current thread binding" },
+    {
+        name: "/config",
+        description: "Read or write OpenClaw config",
+        args: "[show|get|set|unset]",
+    },
+    {
+        name: "/mcp",
+        description: "Read or write OpenClaw-managed MCP config",
+        args: "[show|get|set|unset]",
+    },
+    {
+        name: "/plugins",
+        aliases: ["/plugin"],
+        description: "Inspect or manage plugins",
+        args: "[list|inspect|show|get|install|enable|disable]",
+    },
+    {
+        name: "/debug",
+        description: "Manage runtime-only config overrides",
+        args: "[show|set|unset|reset]",
+    },
+    { name: "/restart", description: "Restart OpenClaw" },
+    {
+        name: "/send",
+        description: "Set send policy",
+        args: "[on|off|inherit]",
+        choices: SEND_CHOICES,
+    },
+    {
         name: "/tts",
         description: "Control text-to-speech",
-        args: "[on|off|status|provider|limit|summary|audio|help]",
+        args: "[on|off|status|chat|latest|provider|limit|summary|audio|help]",
+    },
+    {
+        name: "/activation",
+        description: "Set group activation mode",
+        args: "[mention|always]",
+        choices: ACTIVATION_CHOICES,
+    },
+    { name: "/bash", description: "Run a host shell command", args: "<command>" },
+    {
+        name: "/dock-discord",
+        aliases: ["/dock_discord"],
+        description: "Dock replies to Discord",
+    },
+    {
+        name: "/dock-mattermost",
+        aliases: ["/dock_mattermost"],
+        description: "Dock replies to Mattermost",
+    },
+    {
+        name: "/dock-slack",
+        aliases: ["/dock_slack"],
+        description: "Dock replies to Slack",
+    },
+    {
+        name: "/dock-telegram",
+        aliases: ["/dock_telegram"],
+        description: "Dock replies to Telegram",
+    },
+    {
+        name: "/dreaming",
+        description: "Toggle or inspect memory dreaming",
+        args: "[on|off|status|help]",
+    },
+    {
+        name: "/pair",
+        description: "Manage device pairing",
+        args: "[qr|status|pending|approve|cleanup|notify]",
+    },
+    {
+        name: "/phone",
+        description: "Temporarily arm high-risk phone node commands",
+        args: "[status|arm|disarm]",
+    },
+    {
+        name: "/voice",
+        description: "Manage Talk voice config",
+        args: "[status|list|set]",
+    },
+    { name: "/card", description: "Send LINE rich card presets", args: "[preset]" },
+    {
+        name: "/codex",
+        description: "Control the Codex app-server harness",
+        args: "[status|models|threads|resume|compact|review|diagnostics|account|mcp|skills]",
     },
 ];
 
