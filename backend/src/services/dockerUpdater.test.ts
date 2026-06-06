@@ -546,7 +546,7 @@ process.stdout.write("updated\n");
         );
     });
 
-    it("serializes concurrent compose updates for the same service", async () => {
+    it("serializes concurrent compose updates for services in the same file", async () => {
         const appDir = path.join(tempDir, "locked-apply");
         const binDir = path.join(tempDir, "bin");
         const seenPath = path.join(tempDir, "seen.txt");
@@ -555,7 +555,14 @@ process.stdout.write("updated\n");
         const composePath = path.join(appDir, "compose.yaml");
         await writeFile(
             composePath,
-            "services:\n  web:\n    image: repo/app:1\n",
+            [
+                "services:",
+                "  web:",
+                "    image: repo/app:1",
+                "  worker:",
+                "    image: repo/worker:1",
+                "",
+            ].join("\n"),
             "utf8"
         );
         await writeExecutable(
@@ -564,8 +571,10 @@ process.stdout.write("updated\n");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const composePath = args[args.indexOf("-f") + 1];
-const image = fs.readFileSync(composePath, "utf8").match(/image:\s*(.+)/)?.[1]?.trim() || "";
-fs.appendFileSync(process.env.SEEN_COMPOSE_IMAGES, image + "\n");
+const images = [...fs.readFileSync(composePath, "utf8").matchAll(/image:\s*(.+)/g)]
+  .map((match) => match[1].trim())
+  .join(",");
+fs.appendFileSync(process.env.SEEN_COMPOSE_IMAGES, images + "\n");
 setTimeout(() => process.exit(0), 30);
 `
         );
@@ -589,6 +598,14 @@ setTimeout(() => process.exit(0), 30);
             tag_match_pattern: null,
             enabled: 1,
         };
+        const workerService = {
+            ...baseService,
+            id: 2,
+            service_name: "worker",
+            image_repo: "repo/worker",
+            compose_image_ref: "repo/worker:1",
+            compose_image_field: "services.worker.image",
+        };
         db.prepare(
             `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
@@ -602,13 +619,23 @@ setTimeout(() => process.exit(0), 30);
                 @tag_match_pattern, @enabled, '{}'
             )`
         ).run(baseService);
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(workerService);
 
         await withEnv({ SEEN_COMPOSE_IMAGES: seenPath }, async () => {
             const first = updater.__testing.applyServiceUpdate(baseService, "manual");
-            const second = updater.__testing.applyServiceUpdate(
-                { ...baseService, latest_tag: "3" },
-                "manual"
-            );
+            const second = updater.__testing.applyServiceUpdate(workerService, "manual");
             const results = await Promise.all([first, second]);
 
             assert.deepEqual(
@@ -617,8 +644,13 @@ setTimeout(() => process.exit(0), 30);
             );
         });
 
-        assert.equal(await readFile(seenPath, "utf8"), "repo/app:2\nrepo/app:3\n");
-        assert.match(await readFile(composePath, "utf8"), /repo\/app:3/u);
+        assert.equal(
+            await readFile(seenPath, "utf8"),
+            "repo/app:2,repo/worker:1\nrepo/app:2,repo/worker:2\n"
+        );
+        const composeText = await readFile(composePath, "utf8");
+        assert.match(composeText, /repo\/app:2/u);
+        assert.match(composeText, /repo\/worker:2/u);
     });
 
     it("removes stale services after an empty successful compose scan", async () => {

@@ -525,8 +525,7 @@ function createNotification(
 }
 
 function composeUpdateLockKey(service: ManagedServiceRow): string {
-    // applyComposeUpdate validates compose_image_field before acquiring this lock.
-    return `${service.compose_path}:${service.compose_image_field!}`;
+    return service.compose_path;
 }
 
 async function withComposeUpdateLock<T>(
