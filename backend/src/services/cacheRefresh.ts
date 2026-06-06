@@ -1092,27 +1092,30 @@ async function refreshQuotasCache() {
 
 export async function refreshCacheProducer(key: string) {
     const refreshWithFailureRecord = async (
-        refresh: () => Promise<{ refreshed: string[] }>
+        refresh: () => Promise<{ refreshed: string[] }>,
+        failureKeys: string[] = [key]
     ) => {
         try {
             return await refresh();
         } catch (error) {
-            writeCacheFailure({
-                key,
-                source: "backend",
-                ttl: 15,
-                ttlUnit: "minutes",
-                error,
-                metadata: {
-                    producer: "refreshCacheProducer",
-                },
-            });
+            for (const failureKey of failureKeys) {
+                writeCacheFailure({
+                    key: failureKey,
+                    source: "backend",
+                    ttl: 15,
+                    ttlUnit: "minutes",
+                    error,
+                    metadata: {
+                        producer: "refreshCacheProducer",
+                    },
+                });
+            }
             throw error;
         }
     };
 
     if (key === "moltbook") {
-        return refreshWithFailureRecord(refreshMoltbookCache);
+        return refreshWithFailureRecord(refreshMoltbookCache, [...MOLTBOOK_CACHE_KEYS]);
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshWithFailureRecord(refreshMoltbookCache);

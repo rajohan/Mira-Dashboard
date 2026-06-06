@@ -216,6 +216,32 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         );
     });
 
+    it("records grouped Moltbook refresh failures on concrete cache keys", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
+            await assert.rejects(
+                () => refreshCacheProducer("moltbook"),
+                /MOLTBOOK_API_KEY/u
+            );
+        });
+
+        for (const key of [
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]) {
+            const row = cacheRow(key);
+            assert.equal(row.status, "error");
+            assert.match(row.error_message ?? "", /MOLTBOOK_API_KEY/u);
+            assert.equal(row.metadata.producer, "refreshCacheProducer");
+        }
+        const syntheticRows = db
+            .prepare("SELECT COUNT(*) AS count FROM cache_entries WHERE key = 'moltbook'")
+            .get() as { count: number };
+        assert.equal(syntheticRows.count, 0);
+    });
+
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
         await withFetch(
             (url) => {
