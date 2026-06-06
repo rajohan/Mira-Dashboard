@@ -614,7 +614,6 @@ export async function runLogRotationService(
         options.config || DEFAULT_CONFIG_PATH
     );
     validateConfig(config);
-    const state = readLogRotationState();
     const approvedRoots = config.approvedRoots || DEFAULT_APPROVED_ROOTS;
     const groups = config.groups
         .filter((group) => group.enabled !== false)
@@ -642,6 +641,7 @@ export async function runLogRotationService(
         summary.finishedAt = new Date().toISOString();
         return summary;
     }
+    const state = readLogRotationState();
     const now = new Date();
     const seenFiles = new Set<string>();
     try {

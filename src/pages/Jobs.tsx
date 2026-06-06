@@ -70,6 +70,7 @@ export function Jobs() {
     const isCronSchedule = selectedJob?.scheduleType === "cron";
 
     useEffect(() => {
+        setActionError("");
         if (selectedJob) {
             setIntervalDraft(String(selectedJob.intervalSeconds));
             setScheduleTypeDraft(

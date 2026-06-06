@@ -95,3 +95,58 @@ test("classifies duplicate-column migration errors", async () => {
         (result.db as { close(): void }).close();
     }
 });
+
+test("migrates cache updated_at to nullable while preserving rows", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const result = await import(`./db.js?cacheNullable=${randomUUID()}`);
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec(`
+            CREATE TABLE cache_entries (
+                key TEXT PRIMARY KEY,
+                data_json TEXT,
+                source TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_attempt_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_code TEXT,
+                error_message TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            INSERT INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, error_code, error_message, consecutive_failures, metadata_json
+            ) VALUES (
+                'cache.key', '{"ok":true}', 'test', '2026-06-06T00:00:00.000Z',
+                '2026-06-06T00:00:00.000Z', '2026-06-06T01:00:00.000Z',
+                'fresh', NULL, NULL, 0, '{}'
+            );
+        `);
+
+        result.__testing.ensureCacheEntriesUpdatedAtNullable(testDb);
+
+        const updatedAtColumn = testDb
+            .prepare("PRAGMA table_info(cache_entries)")
+            .all()
+            .find((column) => column.name === "updated_at");
+        assert.equal(updatedAtColumn?.notnull, 0);
+        assert.equal(
+            (
+                testDb
+                    .prepare("SELECT source FROM cache_entries WHERE key = 'cache.key'")
+                    .get() as { source: string }
+            ).source,
+            "test"
+        );
+        assert.equal(
+            testDb
+                .prepare("SELECT name FROM sqlite_master WHERE name = ?")
+                .get("idx_cache_entries_status") !== undefined,
+            true
+        );
+    } finally {
+        testDb.close();
+    }
+});

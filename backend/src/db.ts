@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     key TEXT PRIMARY KEY,
     data_json TEXT,
     source TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
+    updated_at TEXT,
     last_attempt_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -344,9 +344,47 @@ export async function ensureTaskAutomationColumn(
     throw lastError;
 }
 
+export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase): void {
+    const columns = targetDb.prepare("PRAGMA table_info(cache_entries)").all();
+    const updatedAt = columns.find((column) => column.name === "updated_at");
+    if (!updatedAt || Number(updatedAt.notnull || 0) === 0) {
+        return;
+    }
+
+    targetDb.exec(`
+        ALTER TABLE cache_entries RENAME TO cache_entries_old;
+        CREATE TABLE cache_entries (
+            key TEXT PRIMARY KEY,
+            data_json TEXT,
+            source TEXT NOT NULL,
+            updated_at TEXT,
+            last_attempt_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_code TEXT,
+            error_message TEXT,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT INTO cache_entries (
+            key, data_json, source, updated_at, last_attempt_at, expires_at,
+            status, error_code, error_message, consecutive_failures, metadata_json
+        )
+        SELECT
+            key, data_json, source, updated_at, last_attempt_at, expires_at,
+            status, error_code, error_message, consecutive_failures, metadata_json
+        FROM cache_entries_old;
+        DROP TABLE cache_entries_old;
+        CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
+        CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
+    `);
+}
+
+ensureCacheEntriesUpdatedAtNullable(db);
 await ensureTaskAutomationColumn(db);
 
 export const __testing = {
     assertDuplicateColumnError,
+    ensureCacheEntriesUpdatedAtNullable,
     isDuplicateColumnError,
 };

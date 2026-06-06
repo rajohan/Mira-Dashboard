@@ -16,6 +16,11 @@ import {
     refreshCacheKey,
 } from "./cache.js";
 
+function expectSingleRefresh(refreshed: Awaited<ReturnType<typeof refreshCacheKey>>) {
+    assert.ok(!Array.isArray(refreshed));
+    return refreshed;
+}
+
 const baseRow = {
     key: "quotas.summary",
     data: '{"usage":12}',
@@ -223,7 +228,9 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
         __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
         try {
-            const refreshed = await refreshCacheKey("quotas.summary");
+            const refreshed = expectSingleRefresh(
+                await refreshCacheKey("quotas.summary")
+            );
             assert.equal(refreshed.key, "quotas.summary");
 
             db.prepare(
@@ -289,7 +296,9 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             return { refreshed: [key] };
         });
         try {
-            const refreshed = await refreshCacheKey("custom.injected");
+            const refreshed = expectSingleRefresh(
+                await refreshCacheKey("custom.injected")
+            );
             assert.equal(refreshed.key, "custom.injected");
             assert.equal(refreshed.source, "injected");
         } finally {
@@ -297,7 +306,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
     });
 
-    it("falls back to the requested cache key when refresh output is scalar", async () => {
+    it("rejects refresh output without a refreshed key list", async () => {
         __testing.setCacheRefreshRunnerForTests(async (key) => {
             db.prepare(
                 `INSERT OR REPLACE INTO cache_entries (
@@ -313,10 +322,9 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             return { refreshed: key } as unknown as { refreshed: string[] };
         });
         try {
-            const refreshed = await refreshCacheKey("custom.scalar");
-
-            assert.equal(refreshed.key, "custom.scalar");
-            assert.equal(refreshed.source, "scalar");
+            await assert.rejects(() => refreshCacheKey("custom.scalar"), {
+                message: "Cache key not found after refresh: custom.scalar",
+            });
         } finally {
             __testing.resetCacheRefreshForTests();
         }
@@ -342,8 +350,12 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             const refreshed = await refreshCacheKey("moltbook");
 
-            assert.equal(refreshed.key, "moltbook.home");
-            assert.equal(refreshed.source, "aggregate");
+            assert.ok(Array.isArray(refreshed));
+            assert.deepEqual(
+                refreshed.map((entry) => entry.key),
+                ["moltbook.home", "moltbook.feed.hot"]
+            );
+            assert.equal(refreshed[0]?.source, "aggregate");
         } finally {
             __testing.resetCacheRefreshForTests();
         }
@@ -383,7 +395,9 @@ process.stdout.write(JSON.stringify([
         const originalPath = process.env.PATH;
         process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
         try {
-            const refreshed = await refreshCacheKey("backup.walg.status");
+            const refreshed = expectSingleRefresh(
+                await refreshCacheKey("backup.walg.status")
+            );
 
             assert.equal(refreshed.key, "backup.walg.status");
             assert.equal(refreshed.source, "backend");

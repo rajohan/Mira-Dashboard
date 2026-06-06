@@ -1957,7 +1957,9 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(success.body.success, true);
         assert.deepEqual(success.body.result, {
             serviceId: 1,
-            summary: { updated: [1], failed: [] },
+            summary: { updated: 1, failed: 0 },
+            updated: [1],
+            failed: [],
         });
         assert.equal(success.body.stderr, "");
 

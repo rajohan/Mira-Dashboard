@@ -327,6 +327,7 @@ process.stdout.write("updated\n");
       - mira.updater.track=tag
   digest:
     image: repo/app@sha256:old
+    platform: linux/amd64
     labels:
       mira.updater.autoUpdate: "yes"
 `,
@@ -346,9 +347,11 @@ process.stdout.write("updated\n");
                 const services = updater.__testing.servicesFromCompose(
                     path.join(appDir, "compose.yaml")
                 );
-                assert.equal(services[0].imageRepo, "postgres");
-                assert.equal(services[0].currentTag, "latest");
-                assert.equal(services[1].pinMode, "digest");
+                assert.equal(services.ok, true);
+                assert.equal(services.services[0].imageRepo, "postgres");
+                assert.equal(services.services[0].currentTag, "latest");
+                assert.equal(services.services[1].pinMode, "digest");
+                assert.equal(services.services[1].metadata.platform, "linux/amd64");
                 const steps = await updater.runDockerUpdaterService(123);
                 assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");
@@ -720,7 +723,11 @@ process.stdout.write("updated\n");
         );
         const emptyCompose = path.join(tempDir, "empty-compose.yaml");
         await writeFile(emptyCompose, "name: empty\n", "utf8");
-        assert.deepEqual(updater.__testing.servicesFromCompose(emptyCompose), []);
+        assert.deepEqual(updater.__testing.servicesFromCompose(emptyCompose), {
+            appSlug: path.basename(tempDir),
+            ok: true,
+            services: [],
+        });
         const nestedTarget = { services: { app: "bad" } };
         updater.__testing.setNestedValue(
             nestedTarget,
@@ -932,12 +939,99 @@ process.stdout.write("updated\n");
                 ...baseService,
                 tag_match_type: "regex",
                 tag_match_pattern: String.raw`^\d$`,
+                metadata_json: JSON.stringify({ platform: "linux/arm64/v8" }),
             }),
             {
                 latestTag: "3",
                 latestDigest: "sha256:v8",
             }
         );
+
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.includes("/tags?page_size=100")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({
+                        results: [{ name: "3" }],
+                        next: null,
+                    }),
+                } as Response;
+            }
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({
+                    images: [
+                        { architecture: "arm64", variant: "v8", digest: "sha256:v8" },
+                        { os: "linux", architecture: "amd64", digest: "sha256:amd64" },
+                    ],
+                }),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupDockerHub({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+                metadata_json: JSON.stringify({ platform: "linux/amd64" }),
+            }),
+            {
+                latestTag: "3",
+                latestDigest: "sha256:amd64",
+            }
+        );
+        assert.deepEqual(
+            await updater.__testing.lookupDockerHub({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+                metadata_json: "{bad json",
+            }),
+            {
+                latestTag: "3",
+                latestDigest: process.arch === "x64" ? "sha256:amd64" : "sha256:old",
+            }
+        );
+        const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch");
+        Object.defineProperty(process, "arch", {
+            configurable: true,
+            enumerable: true,
+            value: "x64",
+        });
+        try {
+            assert.deepEqual(
+                await updater.__testing.lookupDockerHub({
+                    ...baseService,
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                    metadata_json: undefined,
+                }),
+                {
+                    latestTag: "3",
+                    latestDigest: "sha256:amd64",
+                }
+            );
+        } finally {
+            if (archDescriptor) {
+                Object.defineProperty(process, "arch", archDescriptor);
+            }
+        }
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+        assert.deepEqual(
+            await updater.__testing.lookupDockerHub({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+                metadata_json: undefined,
+            }),
+            {
+                latestTag: "3",
+                latestDigest: "sha256:amd64",
+            }
+        );
+        delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();

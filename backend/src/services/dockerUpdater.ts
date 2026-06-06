@@ -71,6 +71,7 @@ interface ManagedServiceRow {
     tag_match_type: string;
     tag_match_pattern: string | null;
     enabled: number;
+    metadata_json?: string;
     last_status: string | null;
 }
 
@@ -80,6 +81,7 @@ interface ComposeService {
     image?: unknown;
     labels?: unknown;
     container_name?: unknown;
+    platform?: unknown;
 }
 
 interface RegistryFetchOptions {
@@ -164,7 +166,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} for ${url}`);
         }
-        return response.json() as Promise<JsonRecord>;
+        return (await response.json()) as JsonRecord;
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ${url}`, { cause: error });
@@ -243,11 +245,29 @@ async function fetchRegistryResponse(
 }
 
 async function fetchRegistryJson(url: string): Promise<JsonRecord> {
-    const response = await fetchRegistryResponse(url);
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${url}`);
+    const { body } = await fetchRegistryJsonWithHeaders(url);
+    return body;
+}
+
+async function fetchRegistryJsonWithHeaders(
+    url: string,
+    options: RegistryFetchOptions = {}
+): Promise<{ body: JsonRecord; headers: Headers }> {
+    try {
+        const response = await fetchRegistryResponse(url, options);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} for ${url}`);
+        }
+        return {
+            body: asRecord(await response.json()),
+            headers: response.headers,
+        };
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`Request timeout for ${url}`, { cause: error });
+        }
+        throw error;
     }
-    return response.json() as Promise<JsonRecord>;
 }
 
 function isGhcrRepo(repo: string): boolean {
@@ -295,6 +315,33 @@ function compareTags(a: string, b: string): number {
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
 
+function hostDockerPlatform(): string {
+    const arch = process.arch === "x64" ? "amd64" : process.arch;
+    return `linux/${arch}`;
+}
+
+function servicePlatform(service: ManagedServiceRow): string {
+    let metadata: JsonRecord;
+    try {
+        metadata = asRecord(
+            service.metadata_json ? JSON.parse(service.metadata_json) : {}
+        );
+    } catch {
+        metadata = {};
+    }
+    return typeof metadata.platform === "string" && metadata.platform
+        ? metadata.platform
+        : process.env.MIRA_DOCKER_UPDATER_PLATFORM || hostDockerPlatform();
+}
+
+function imageMatchesPlatform(image: JsonRecord, platform: string): boolean {
+    const [os = "linux", architecture = "", variant] = platform.split("/");
+    const imageOs = typeof image.os === "string" ? image.os : "linux";
+    if (imageOs !== os || image.architecture !== architecture) return false;
+    if (!variant) return image.variant === null || image.variant === undefined;
+    return image.variant === variant;
+}
+
 async function lookupDockerHub(service: ManagedServiceRow) {
     const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
     const tags: unknown[] = [];
@@ -318,16 +365,9 @@ async function lookupDockerHub(service: ManagedServiceRow) {
         const tagData = await fetchJson(
             `https://hub.docker.com/v2/repositories/${repo}/tags/${encodeURIComponent(latestTag)}`
         );
+        const platform = servicePlatform(service);
         const image = (Array.isArray(tagData.images) ? tagData.images : []).find(
-            (candidate) => {
-                const image = asRecord(candidate);
-                return (
-                    image.architecture === "arm64" &&
-                    (image.variant === null ||
-                        image.variant === undefined ||
-                        image.variant === "v8")
-                );
-            }
+            (candidate) => imageMatchesPlatform(asRecord(candidate), platform)
         );
         latestDigest = String(asRecord(image).digest ?? tagData.digest ?? latestDigest);
     }
@@ -348,30 +388,16 @@ async function lookupGhcr(service: ManagedServiceRow) {
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
     }
-    let response: Response;
-    try {
-        response = await fetchRegistryResponse(
-            `https://ghcr.io/v2/${repo}/manifests/${tag}`,
-            {
-                accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
-            }
-        );
-    } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Request timeout for ghcr.io/${repo}:${tag}`, {
-                cause: error,
-            });
+    const { body, headers } = await fetchRegistryJsonWithHeaders(
+        `https://ghcr.io/v2/${repo}/manifests/${tag}`,
+        {
+            accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
         }
-        throw error;
-    }
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ghcr.io/${repo}:${tag}`);
-    }
-    const body = asRecord(await response.json());
+    );
     return {
         latestTag: tag,
         latestDigest:
-            response.headers.get("docker-content-digest") ||
+            headers.get("docker-content-digest") ||
             (typeof body.digest === "string" ? body.digest : service.latest_digest),
     };
 }
@@ -525,62 +551,72 @@ function servicesFromCompose(composePath: string) {
         const parsed = YAML.parse(fs.readFileSync(composePath, "utf8")) as {
             services?: Record<string, ComposeService>;
         } | null;
-        return Object.entries(parsed?.services ?? {})
-            .filter(([, service]) => service?.image)
-            .map(([serviceName, service]) => {
-                const imageRef = String(service.image);
-                const labels = normalizeLabels(service.labels);
-                const image = parseImageRef(imageRef);
-                const configuredPinMode = labels
-                    .get("mira.updater.track")
-                    ?.trim()
-                    .toLowerCase();
-                const tagPattern = labels.get("mira.updater.tagPattern") || null;
-                const currentTag = image.tag ?? (image.digest ? null : "latest");
-                return {
-                    appSlug,
-                    serviceName,
-                    composePath,
-                    imageRepo: image.repo,
-                    composeImageRef: imageRef,
-                    composeImageField: `services.${serviceName}.image`,
-                    currentTag,
-                    currentDigest: image.digest,
-                    policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
-                        ? "auto"
-                        : "notify",
-                    pinMode:
-                        configuredPinMode === "digest" || configuredPinMode === "tag"
-                            ? configuredPinMode
-                            : image.pinMode,
-                    tagMatchType: tagPattern ? "regex" : "exact",
-                    tagMatchPattern: tagPattern ?? currentTag,
-                    enabled: labels.has("mira.updater.enabled")
-                        ? booleanLabel(labels.get("mira.updater.enabled"), true)
-                        : true,
-                    metadata: {
-                        discoveredBy: "dashboard-docker-updater",
-                        discoveredAt: nowIso(),
-                        containerName:
-                            typeof service.container_name === "string"
-                                ? service.container_name
-                                : null,
-                        labels: Object.fromEntries(labels),
-                    },
-                };
-            });
+        return {
+            appSlug,
+            ok: true,
+            services: Object.entries(parsed?.services ?? {})
+                .filter(([, service]) => service?.image)
+                .map(([serviceName, service]) => {
+                    const imageRef = String(service.image);
+                    const labels = normalizeLabels(service.labels);
+                    const image = parseImageRef(imageRef);
+                    const configuredPinMode = labels
+                        .get("mira.updater.track")
+                        ?.trim()
+                        .toLowerCase();
+                    const tagPattern = labels.get("mira.updater.tagPattern") || null;
+                    const currentTag = image.tag ?? (image.digest ? null : "latest");
+                    return {
+                        appSlug,
+                        serviceName,
+                        composePath,
+                        imageRepo: image.repo,
+                        composeImageRef: imageRef,
+                        composeImageField: `services.${serviceName}.image`,
+                        currentTag,
+                        currentDigest: image.digest,
+                        policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
+                            ? "auto"
+                            : "notify",
+                        pinMode:
+                            configuredPinMode === "digest" || configuredPinMode === "tag"
+                                ? configuredPinMode
+                                : image.pinMode,
+                        tagMatchType: tagPattern ? "regex" : "exact",
+                        tagMatchPattern: tagPattern ?? currentTag,
+                        enabled: labels.has("mira.updater.enabled")
+                            ? booleanLabel(labels.get("mira.updater.enabled"), true)
+                            : true,
+                        metadata: {
+                            discoveredBy: "dashboard-docker-updater",
+                            discoveredAt: nowIso(),
+                            containerName:
+                                typeof service.container_name === "string"
+                                    ? service.container_name
+                                    : null,
+                            platform:
+                                typeof service.platform === "string"
+                                    ? service.platform
+                                    : null,
+                            labels: Object.fromEntries(labels),
+                        },
+                    };
+                }),
+        };
     } catch (error) {
         console.error("[DockerUpdater] Failed to discover compose services", {
             composePath,
             error,
         });
-        return [];
+        return { appSlug, ok: false, services: [] };
     }
 }
 
 export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStepResult> {
     const composeFiles = listComposeFiles();
-    const services = composeFiles.flatMap(servicesFromCompose);
+    const discoveries = composeFiles.map(servicesFromCompose);
+    const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
+    const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
     const upsert = db.prepare(
         `INSERT INTO docker_managed_services (
@@ -607,7 +643,9 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     );
     db.exec("BEGIN");
     try {
-        for (const appSlug of new Set(services.map((service) => service.appSlug))) {
+        for (const appSlug of new Set(
+            successfulDiscoveries.map((item) => item.appSlug)
+        )) {
             const serviceNames = new Set(
                 services
                     .filter((service) => service.appSlug === appSlug)
@@ -625,7 +663,9 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 }
             }
         }
-        const currentAppSlugs = new Set(services.map((service) => service.appSlug));
+        const currentAppSlugs = new Set(
+            successfulDiscoveries.map((discovery) => discovery.appSlug)
+        );
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {

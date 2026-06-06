@@ -169,6 +169,9 @@ export function Docker() {
         showActionOutput("Running manual Docker update...");
         try {
             const result = await dockerManualUpdate.mutateAsync(serviceId);
+            if (result.success === false) {
+                throw new Error(result.stderr || "Manual update reported success=false");
+            }
             const updated = result.result?.summary?.updated;
             const failed = result.result?.summary?.failed;
             const updatedCount = Array.isArray(updated) ? updated.length : (updated ?? 0);

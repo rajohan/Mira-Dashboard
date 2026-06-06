@@ -84,18 +84,20 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
     const result = (await cacheRefreshRunner(key)) as { refreshed?: unknown };
-    const refreshedKeys = Array.isArray(result.refreshed)
-        ? result.refreshed.filter((entry): entry is string => typeof entry === "string")
-        : [key];
-    const refreshedRows = await Promise.all(
-        refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
-    );
-    const rows = refreshedRows.filter((row): row is CacheEntryRow => row !== null);
-    const row = rows.find((candidate) => candidate.key === key) ?? rows[0];
-    if (!row) {
+    if (!Array.isArray(result.refreshed) || result.refreshed.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
-    return mapCacheRowForResponse(row);
+    const refreshedRows = await Promise.all(
+        result.refreshed
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((refreshKey) => getCacheEntry(refreshKey))
+    );
+    const rows = refreshedRows.filter((row): row is CacheEntryRow => row !== null);
+    if (rows.length === 0) {
+        throw new Error(`Cache key not found after refresh: ${key}`);
+    }
+    const mapped = rows.map(mapCacheRowForResponse);
+    return mapped.length === 1 ? mapped[0] : mapped;
 }
 
 /** Registers cache API routes. */

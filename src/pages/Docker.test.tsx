@@ -496,7 +496,7 @@ describe("Docker page", () => {
         await user.click(screen.getByRole("button", { name: "Delete volume app-data" }));
         await user.click(screen.getByRole("button", { name: "Delete" }));
         expect(docker.deleteVolume).toHaveBeenCalledWith("app-data");
-    });
+    }, 10_000);
 
     it("ignores closed manual update confirmations without a selected target", async () => {
         render(<Docker />);

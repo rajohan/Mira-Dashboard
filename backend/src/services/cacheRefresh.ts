@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+    closeSync,
+    mkdirSync,
+    openSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
@@ -136,7 +144,7 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
         `INSERT INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
             status, error_code, error_message, consecutive_failures, metadata_json
-         ) VALUES (?, NULL, ?, ?, ?, ?, 'error', 'check_failed', ?, ?, ?)
+         ) VALUES (?, NULL, ?, NULL, ?, ?, 'error', 'check_failed', ?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET
             last_attempt_at = excluded.last_attempt_at,
             expires_at = excluded.expires_at,
@@ -148,7 +156,6 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
     ).run(
         options.key,
         options.source,
-        timestamp,
         timestamp,
         ttlDate(options.ttl, options.ttlUnit),
         errorMessage(options.error),
@@ -894,8 +901,11 @@ function ensureCodexTrustConfig(codexHome: string) {
         return;
     }
     codexTrustConfigLocks.add(codexHome);
+    const lockPath = `${codexHome}/config.toml.lock`;
+    let lockHandle: number | null = null;
     try {
         mkdirSync(codexHome, { recursive: true });
+        lockHandle = openSync(lockPath, "wx", 0o600);
         const configPath = `${codexHome}/config.toml`;
         let existing = "";
         try {
@@ -920,6 +930,10 @@ function ensureCodexTrustConfig(codexHome: string) {
             renameSync(tempPath, configPath);
         }
     } finally {
+        if (lockHandle !== null) {
+            closeSync(lockHandle);
+            rmSync(lockPath, { force: true });
+        }
         codexTrustConfigLocks.delete(codexHome);
     }
 }
