@@ -398,7 +398,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
     const { body, headers } = await fetchRegistryJsonWithHeaders(
         `https://ghcr.io/v2/${repo}/manifests/${tag}`,
         {
-            accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
+            accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
         }
     );
     return {
@@ -430,8 +430,7 @@ function hasUpdate(service: ManagedServiceRow): boolean {
     if (service.pin_mode === "digest") {
         return Boolean(
             service.latest_digest &&
-            service.current_digest &&
-            service.latest_digest !== service.current_digest
+            (!service.current_digest || service.latest_digest !== service.current_digest)
         );
     }
     return Boolean(
@@ -702,15 +701,13 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const discoveredAppSlugs = new Set(
             discoveries.map((discovery) => discovery.appSlug)
         );
-        if (discoveries.length > 0) {
-            for (const row of db
-                .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
-                .all() as Array<{ app_slug: string }>) {
-                if (!discoveredAppSlugs.has(row.app_slug)) {
-                    db.prepare(
-                        "DELETE FROM docker_managed_services WHERE app_slug = ?"
-                    ).run(row.app_slug);
-                }
+        for (const row of db
+            .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
+            .all() as Array<{ app_slug: string }>) {
+            if (!discoveredAppSlugs.has(row.app_slug)) {
+                db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
+                    row.app_slug
+                );
             }
         }
         for (const service of services) {

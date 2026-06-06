@@ -5,6 +5,7 @@ import {
     getScheduledJob,
     listScheduledJobs,
     runScheduledJob,
+    type ScheduledJobScheduleType,
     updateScheduledJob,
 } from "../services/scheduledJobs.js";
 
@@ -21,6 +22,35 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
         fallback: "Scheduled jobs route failed",
         logLabel: "[jobsRoutes]",
     });
+}
+
+const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily", "cron"]);
+
+function invalidPatchField(patch: Record<string, unknown>): string | null {
+    if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
+        return "enabled";
+    }
+    if (
+        patch.intervalSeconds !== undefined &&
+        typeof patch.intervalSeconds !== "number"
+    ) {
+        return "intervalSeconds";
+    }
+    if (
+        patch.scheduleType !== undefined &&
+        (typeof patch.scheduleType !== "string" ||
+            !scheduleTypes.has(patch.scheduleType as ScheduledJobScheduleType))
+    ) {
+        return "scheduleType";
+    }
+    if (
+        patch.timeOfDay !== undefined &&
+        patch.timeOfDay !== null &&
+        typeof patch.timeOfDay !== "string"
+    ) {
+        return "timeOfDay";
+    }
+    return null;
 }
 
 /** Registers backend-native scheduled job routes. */
@@ -51,6 +81,13 @@ export default function jobsRoutes(app: express.Application): void {
             const patch = req.body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
                 res.status(400).json({ error: "patch must be an object" });
+                return;
+            }
+            const invalidField = invalidPatchField(patch as Record<string, unknown>);
+            if (invalidField) {
+                res.status(400).json({
+                    error: `invalid patch field: ${invalidField}`,
+                });
                 return;
             }
 
@@ -103,4 +140,5 @@ export default function jobsRoutes(app: express.Application): void {
 
 export const __testing = {
     httpStatusCode,
+    invalidPatchField,
 };

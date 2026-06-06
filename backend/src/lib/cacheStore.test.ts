@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { db } from "../db.js";
-import { __testing, parseJsonField, parseTable } from "./cacheStore.js";
-import { getCacheEntry } from "./cacheStore.js";
+import { __testing, getCacheEntry, parseJsonField, parseTable } from "./cacheStore.js";
 
 describe("cacheStore utilities", () => {
     it("parses tab-delimited psql output into keyed rows", () => {
@@ -53,13 +52,19 @@ describe("cacheStore utilities", () => {
             `INSERT OR REPLACE INTO cache_entries (
                 key, data_json, source, updated_at, last_attempt_at, expires_at,
                 status, error_code, error_message, consecutive_failures, metadata_json
-            ) VALUES ('cache.expired', '{}', 'test', '', '', '2020-01-01T00:00:00.000Z', 'fresh', NULL, NULL, 0, '{}')`
+            ) VALUES
+                ('cache.expired', '{}', 'test', '', '', '2020-01-01T00:00:00.000Z', 'fresh', NULL, NULL, 0, '{}'),
+                ('cache.invalid-expiry', '{}', 'test', '', '', 'not a date', 'fresh', NULL, NULL, 0, '{}')`
         ).run();
         try {
-            const entry = await getCacheEntry("cache.expired");
-            assert.equal(entry?.status, "stale");
+            const expired = await getCacheEntry("cache.expired");
+            const invalidExpiry = await getCacheEntry("cache.invalid-expiry");
+            assert.equal(expired?.status, "stale");
+            assert.equal(invalidExpiry?.status, "fresh");
         } finally {
-            db.prepare("DELETE FROM cache_entries WHERE key = 'cache.expired'").run();
+            db.prepare(
+                "DELETE FROM cache_entries WHERE key IN ('cache.expired', 'cache.invalid-expiry')"
+            ).run();
         }
     });
 });

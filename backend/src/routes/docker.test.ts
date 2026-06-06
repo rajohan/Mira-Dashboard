@@ -19,13 +19,14 @@ interface TestServer {
 function dockerNotifications() {
     return db
         .prepare(
-            `SELECT title, type, dedupe_key, metadata_json
+            `SELECT title, type, dedupe_key, metadata_json, is_read
              FROM notifications
              WHERE source IN ('docker', 'docker-updater')
              ORDER BY dedupe_key`
         )
         .all() as Array<{
         dedupe_key: string;
+        is_read: number;
         metadata_json: string;
         title: string;
         type: string;
@@ -1940,6 +1941,25 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(failedRun.body.steps[2]?.ok, false);
             assert.match(failedRun.body.steps[2]?.stderr || "", /compose failed/u);
+            const failedNotification = dockerNotifications().find((notification) =>
+                notification.dedupe_key.includes(":failed:auto-update:media/app")
+            );
+            assert.ok(failedNotification);
+            assert.equal(failedNotification?.is_read, 0);
+            db.prepare("UPDATE notifications SET is_read = 1 WHERE dedupe_key = ?").run(
+                failedNotification.dedupe_key
+            );
+            const failedAgain = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(failedAgain.status, 200);
+            assert.equal(failedAgain.body.success, false);
+            const reopenedNotification = dockerNotifications().find((notification) =>
+                notification.dedupe_key.includes(":failed:auto-update:media/app")
+            );
+            assert.equal(reopenedNotification?.is_read, 0);
         });
     });
 

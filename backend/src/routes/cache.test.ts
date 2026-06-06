@@ -35,6 +35,17 @@ const baseRow = {
     meta: '{"job":"quotas"}',
 };
 
+const ownedCacheKeys = [
+    "backup.walg.status",
+    "custom.injected",
+    "custom.scalar",
+    "moltbook.feed.hot",
+    "moltbook.home",
+    "partial.one",
+    "partial.two",
+    "quotas.summary",
+];
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -57,6 +68,13 @@ function seedCacheRow(): void {
         2,
         '{"job":"quotas"}'
     );
+}
+
+function clearOwnedCacheRows(): void {
+    db.prepare(
+        `DELETE FROM cache_entries
+         WHERE key IN (${ownedCacheKeys.map(() => "?").join(", ")})`
+    ).run(...ownedCacheKeys);
 }
 
 async function startServer(): Promise<TestServer> {
@@ -97,7 +115,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-route-"));
         __testing.setCacheRefreshCwdForTests(tempDir);
-        db.exec("DELETE FROM cache_entries;");
+        clearOwnedCacheRows();
         seedCacheRow();
         server = await startServer();
     });
@@ -108,7 +126,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
         __testing.setCacheRefreshCwdForTests(undefined);
         __testing.resetCacheRefreshForTests();
-        db.exec("DELETE FROM cache_entries;");
+        clearOwnedCacheRows();
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }

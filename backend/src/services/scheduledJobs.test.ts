@@ -88,16 +88,18 @@ test("computes next daily run for today or tomorrow", () => {
 });
 
 test("updates enable state, interval schedules, and daily schedules", () => {
+    const original = getScheduledJob("cache.weather");
     const disabled = updateScheduledJob("cache.weather", {
         enabled: false,
-        intervalSeconds: 3600,
+        intervalSeconds: 7200,
     });
     assert.equal(disabled?.enabled, false);
-    assert.ok(disabled?.nextRunAt);
+    assert.equal(disabled?.nextRunAt, null);
 
     const reenabled = updateScheduledJob("cache.weather", { enabled: true });
     assert.equal(reenabled?.enabled, true);
-    assert.equal(reenabled?.nextRunAt, disabled?.nextRunAt);
+    assert.ok(reenabled?.nextRunAt);
+    assert.notEqual(reenabled?.nextRunAt, original?.nextRunAt);
 
     const daily = updateScheduledJob("cache.weather", {
         enabled: true,

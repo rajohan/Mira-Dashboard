@@ -430,6 +430,31 @@ process.stdout.write("updated\n");
         );
     });
 
+    it("removes stale services after an empty successful compose scan", async () => {
+        const appsRoot = path.join(tempDir, "empty-apps");
+        await mkdir(appsRoot);
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json,
+                last_checked_at, last_status
+            ) VALUES (
+                'removed-empty-app', 'web', '/removed/compose.yaml', 'nginx',
+                'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
+                'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
+            )`
+        ).run();
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?empty-root=${Date.now()}`);
+            const result = await updater.registerDockerUpdaterServices();
+
+            assert.equal(result.ok, true);
+            assert.equal(serviceRows().length, 0);
+        });
+    });
+
     it("preserves registered services when the compose apps root is unavailable", async () => {
         db.prepare(
             `INSERT INTO docker_managed_services (
@@ -884,6 +909,15 @@ process.stdout.write("updated\n");
             updater.__testing.hasUpdate({
                 ...baseService,
                 pin_mode: "digest",
+                latest_digest: "sha256:new",
+            }),
+            true
+        );
+        assert.equal(
+            updater.__testing.hasUpdate({
+                ...baseService,
+                pin_mode: "digest",
+                current_digest: null,
                 latest_digest: "sha256:new",
             }),
             true
@@ -1406,16 +1440,24 @@ process.stdout.write("updated\n");
             { latestTag: "1", latestDigest: "sha256:old" }
         );
 
-        globalThis.fetch = (async () =>
-            ({
+        const acceptHeaders: string[] = [];
+        globalThis.fetch = (async (_input, init) => {
+            acceptHeaders.push(String((init?.headers as Record<string, string>).Accept));
+            return {
                 ok: true,
                 headers: new Headers(),
                 json: async () => ({}),
-            }) as Response) as typeof fetch;
+            } as Response;
+        }) as typeof fetch;
         assert.deepEqual(await updater.__testing.lookupGhcr(baseService), {
             latestTag: "1",
             latestDigest: "sha256:new",
         });
+        assert.ok(
+            acceptHeaders.some((header) =>
+                header.includes("application/vnd.docker.distribution.manifest.v2+json")
+            )
+        );
         globalThis.fetch = (async () =>
             ({
                 ok: true,

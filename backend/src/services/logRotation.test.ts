@@ -131,6 +131,29 @@ describe("log rotation service", { concurrency: false }, () => {
             () => __testing.assertSafePath(tempDir, [tempDir]),
             /Refusing non-file path/u
         );
+        const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "mira-log-outside-"));
+        const outsideFile = path.join(outsideRoot, "outside.log");
+        await writeFile(outsideFile, "outside", "utf8");
+        const outsideStat = await fsPromises.stat(outsideFile);
+        await assert.rejects(
+            () =>
+                __testing.assertFileIdentity(
+                    outsideFile,
+                    { dev: outsideStat.dev, ino: outsideStat.ino },
+                    [tempDir]
+                ),
+            /Unsafe path outside approved roots/u
+        );
+        await assert.rejects(
+            () =>
+                __testing.assertFileIdentity(
+                    path.join(tempDir, "missing-before-mutation.log"),
+                    { dev: 1, ino: 1 },
+                    [tempDir]
+                ),
+            /Unsafe path outside approved roots/u
+        );
+        await rm(outsideRoot, { recursive: true, force: true });
         const globRoot = path.join(tempDir, "glob");
         const globChild = path.join(globRoot, "child");
         const globFile = path.join(globRoot, "file.txt");
@@ -157,6 +180,13 @@ describe("log rotation service", { concurrency: false }, () => {
             /lstat crashed/u
         );
         mock.restoreAll();
+        const gzipSource = path.join(tempDir, "gzip-source.log");
+        await writeFile(gzipSource, "source", "utf8");
+        await writeFile(`${gzipSource}.gz`, "already exists", "utf8");
+        await assert.rejects(
+            () => __testing.gzipFile(gzipSource, [tempDir]),
+            /EEXIST|file already exists/u
+        );
         mock.method(fsPromises, "realpath", async () => {
             throw new Error("realpath crashed");
         });
@@ -196,6 +226,17 @@ describe("log rotation service", { concurrency: false }, () => {
             [{ version: 1, groups: "bad" }, /groups must be an array/u],
             [{ version: 1, groups: [{ paths: ["x"] }] }, /string name/u],
             [{ version: 1, groups: [{ name: "empty" }] }, /needs at least/u],
+            [
+                { version: 1, groups: [{ name: "archive-only", archiveOnly: true }] },
+                /needs at least one archivePaths/u,
+            ],
+            [
+                {
+                    version: 1,
+                    groups: [{ name: "archive-paths-only", archivePaths: ["x"] }],
+                },
+                /needs at least one path pattern/u,
+            ],
             [
                 { version: 1, groups: [{ name: "bad", paths: ["x"], strategy: "move" }] },
                 /unsupported strategy/u,
@@ -620,6 +661,8 @@ describe("log rotation service", { concurrency: false }, () => {
                 },
                 {
                     name: "archive-pattern-only",
+                    paths: [path.join(root, "missing-pattern.log")],
+                    missingOk: true,
                     archivePaths: [path.join(archiveRoot, "none.*")],
                 },
             ],

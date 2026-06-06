@@ -67,10 +67,11 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
     if (!row) {
         return null;
     }
+    const expiresAtMs = row.expires_at === "" ? Number.NaN : Date.parse(row.expires_at);
     const expired =
         row.status === "fresh" &&
-        row.expires_at !== "" &&
-        Date.parse(row.expires_at) <= Date.now();
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs <= Date.now();
 
     return {
         key: row.key,

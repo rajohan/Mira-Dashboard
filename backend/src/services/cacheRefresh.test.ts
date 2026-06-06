@@ -676,15 +676,17 @@ if (args.includes("capture-pane")) {
                 "?? untracked.ts",
                 "R  old.ts -> new.ts",
                 "UU conflict.ts",
+                " M dir/README_DELETED.md",
+                "",
             ]),
             {
                 staged: 3,
-                modified: 1,
+                modified: 2,
                 deleted: 1,
                 untracked: 1,
                 renamed: 1,
                 conflicted: 1,
-                total: 6,
+                total: 8,
             }
         );
     });

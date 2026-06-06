@@ -20,13 +20,28 @@ async function startServer(): Promise<TestServer> {
     jobsRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const onListening = () => {
+            server.off("error", onError);
+            resolve();
+        };
+        const onError = (error: Error) => {
+            server.off("listening", onListening);
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise<void>((resolve, reject) =>
+                server.close((error) => (error ? reject(error) : resolve()))
+            ),
     };
 }
 
@@ -129,19 +144,19 @@ test("returns validation and missing job errors", async () => {
                 body: { patch: { scheduleType: "cron", timeOfDay: null } },
             }
         );
-        const ignoredPatchFields = await requestJson<{
-            job: { enabled: boolean; intervalSeconds: number; scheduleType: string };
-        }>(server, "/api/jobs/cache.weather", {
-            method: "PATCH",
-            body: {
-                patch: {
-                    enabled: "true",
-                    intervalSeconds: "3600",
-                    scheduleType: "unknown",
-                    timeOfDay: 123,
-                },
-            },
-        });
+        const invalidPatchFields = await Promise.all(
+            [
+                { enabled: "true" },
+                { intervalSeconds: "3600" },
+                { scheduleType: "unknown" },
+                { timeOfDay: 123 },
+            ].map((patch) =>
+                requestJson<{ error: string }>(server, "/api/jobs/cache.weather", {
+                    method: "PATCH",
+                    body: { patch },
+                })
+            )
+        );
 
         assert.equal(missingJob.status, 404);
         assert.equal(invalidPatch.status, 400);
@@ -149,10 +164,15 @@ test("returns validation and missing job errors", async () => {
         assert.equal(missingPatch.status, 404);
         assert.equal(cronPatch.status, 500);
         assert.equal(cronPatch.body.error, "cron schedule is not implemented yet");
-        assert.equal(ignoredPatchFields.status, 200);
-        assert.equal(ignoredPatchFields.body.job.enabled, true);
-        assert.equal(ignoredPatchFields.body.job.intervalSeconds, 3600);
-        assert.equal(ignoredPatchFields.body.job.scheduleType, "interval");
+        assert.deepEqual(
+            invalidPatchFields.map((response) => [response.status, response.body.error]),
+            [
+                [400, "invalid patch field: enabled"],
+                [400, "invalid patch field: intervalSeconds"],
+                [400, "invalid patch field: scheduleType"],
+                [400, "invalid patch field: timeOfDay"],
+            ]
+        );
     } finally {
         await server.close();
     }

@@ -123,10 +123,13 @@ function validateConfig(config: LogRotationConfig): void {
         const hasPaths = Array.isArray(group.paths) && group.paths.length > 0;
         const hasArchivePaths =
             Array.isArray(group.archivePaths) && group.archivePaths.length > 0;
-        if (!hasPaths && !hasArchivePaths) {
+        if (group.archiveOnly === true && !hasArchivePaths) {
             throw new Error(
-                `Group ${group.name} needs at least one path pattern or archivePaths pattern`
+                `Archive-only group ${group.name} needs at least one archivePaths pattern`
             );
+        }
+        if (group.archiveOnly !== true && !hasPaths) {
+            throw new Error(`Group ${group.name} needs at least one path pattern`);
         }
         if (
             group.strategy !== undefined &&
@@ -254,7 +257,15 @@ async function openVerifiedLogFile(
     filePath: string,
     approvedRoots: string[]
 ): Promise<VerifiedLogFile> {
-    const handle = await fs.open(filePath, constants.O_RDWR | constants.O_NOFOLLOW);
+    return openVerifiedFile(filePath, approvedRoots, constants.O_RDWR);
+}
+
+async function openVerifiedFile(
+    filePath: string,
+    approvedRoots: string[],
+    flags: number
+): Promise<VerifiedLogFile> {
+    const handle = await fs.open(filePath, flags | constants.O_NOFOLLOW);
     try {
         const stat = await handle.stat();
         if (!stat.isFile()) {
@@ -277,13 +288,71 @@ async function openVerifiedLogFile(
         if (!realRoots.some((root) => isUnderRoot(realFilePath, root))) {
             throw new Error(`Unsafe path outside approved roots: ${filePath}`);
         }
-        const currentStat = await fs.stat(filePath);
-        if (stat.dev !== currentStat.dev || stat.ino !== currentStat.ino) {
-            throw new Error(`Unsafe path changed before rotation: ${filePath}`);
-        }
+        await assertFileIdentity(filePath, stat, approvedRoots);
         return { handle, stat };
     } catch (error) {
         await handle.close();
+        throw error;
+    }
+}
+
+async function assertFileIdentity(
+    filePath: string,
+    expected: { dev: number; ino: number },
+    approvedRoots: string[]
+): Promise<void> {
+    const safe = await assertSafePath(filePath, approvedRoots);
+    if (!safe) {
+        throw new Error(`Unsafe path outside approved roots: ${filePath}`);
+    }
+    const currentStat = await fs.stat(filePath);
+    if (expected.dev !== currentStat.dev || expected.ino !== currentStat.ino) {
+        throw new Error(`Unsafe path changed before rotation: ${filePath}`);
+    }
+}
+
+async function unlinkVerified(filePath: string, approvedRoots: string[]): Promise<void> {
+    const file = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
+    try {
+        await assertFileIdentity(filePath, file.stat, approvedRoots);
+    } finally {
+        await file.handle.close();
+    }
+    await fs.unlink(filePath);
+}
+
+async function createNoFollowFile(filePath: string, mode: number): Promise<void> {
+    const handle = await fs.open(
+        filePath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        mode
+    );
+    await handle.close();
+}
+
+async function gzipFile(filePath: string, approvedRoots: string[]): Promise<string> {
+    const source = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
+    let closed = false;
+    try {
+        const gzPath = `${filePath}.gz`;
+        await pipeline(
+            createReadStream("", {
+                fd: source.handle.fd,
+                autoClose: false,
+                start: 0,
+            }),
+            createGzip(),
+            createWriteStream(gzPath, { flags: "wx" })
+        );
+        await assertFileIdentity(filePath, source.stat, approvedRoots);
+        await source.handle.close();
+        closed = true;
+        await fs.unlink(filePath);
+        return gzPath;
+    } catch (error) {
+        if (!closed) {
+            await source.handle.close().catch(() => {});
+        }
         throw error;
     }
 }
@@ -296,39 +365,31 @@ function archiveBasePath(filePath: string, now: Date): string {
     return `${filePath}.${stamp}`;
 }
 
-async function gzipFile(filePath: string): Promise<string> {
-    const gzPath = `${filePath}.gz`;
-    await pipeline(
-        createReadStream(filePath),
-        createGzip(),
-        createWriteStream(gzPath, { flags: "wx" })
-    );
-    await fs.unlink(filePath);
-    return gzPath;
-}
-
 async function rotateCopyTruncate(
     file: VerifiedLogFile,
     archivePath: string,
-    compress: boolean
+    compress: boolean,
+    approvedRoots: string[]
 ): Promise<string> {
     await pipeline(
         createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
         createWriteStream(archivePath, { flags: "wx" })
     );
     await file.handle.truncate(0);
-    return compress ? gzipFile(archivePath) : archivePath;
+    return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
 
 async function rotateRename(
     filePath: string,
     file: VerifiedLogFile,
     archivePath: string,
-    compress: boolean
+    compress: boolean,
+    approvedRoots: string[]
 ): Promise<string> {
+    await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
-    await fs.writeFile(filePath, "", { mode: file.stat.mode & 0o777 });
-    return compress ? gzipFile(archivePath) : archivePath;
+    await createNoFollowFile(filePath, file.stat.mode & 0o777);
+    return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
 
 function managedArchiveRegexFor(filePath: string): RegExp {
@@ -367,7 +428,8 @@ async function listArchives(
 
 async function compressArchiveIfNeeded(
     archive: { path: string; mtimeMs: number; compress: boolean },
-    dryRun: boolean
+    dryRun: boolean,
+    approvedRoots: string[]
 ) {
     if (!archive.compress || archive.path.endsWith(".gz")) {
         return { archive, compressed: false };
@@ -377,7 +439,7 @@ async function compressArchiveIfNeeded(
         return { archive: { ...archive, path: gzPath }, compressed: true };
     }
     return {
-        archive: { ...archive, path: await gzipFile(archive.path) },
+        archive: { ...archive, path: await gzipFile(archive.path, approvedRoots) },
         compressed: true,
     };
 }
@@ -391,7 +453,7 @@ async function applyRetention(
     const archives: Array<{ path: string; mtimeMs: number; compress: boolean }> = [];
     const compressed: string[] = [];
     for (const archive of await listArchives(filePath, policy, approvedRoots)) {
-        const result = await compressArchiveIfNeeded(archive, dryRun);
+        const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
         archives.push(result.archive);
         if (result.compressed) compressed.push(result.archive.path);
     }
@@ -411,7 +473,7 @@ async function applyRetention(
     const deleted: string[] = [];
     for (const archive of deleteSet.values()) {
         deleted.push(archive.path);
-        if (!dryRun) await fs.unlink(archive.path);
+        if (!dryRun) await unlinkVerified(archive.path, approvedRoots);
     }
     return { deleted, compressed };
 }
@@ -474,7 +536,7 @@ async function applyArchiveOnlyRetention(
 
     for (const archive of await listArchiveOnlyArchives(policy, approvedRoots)) {
         checked += 1;
-        const result = await compressArchiveIfNeeded(archive, dryRun);
+        const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
         if (result.compressed) compressed.push(result.archive.path);
         const key = archiveRetentionKey(result.archive.path, policy);
         const scoped = archivesByScope.get(key) || [];
@@ -498,7 +560,7 @@ async function applyArchiveOnlyRetention(
         }
         for (const archive of deleteSet.values()) {
             deleted.push(archive.path);
-            if (!dryRun) await fs.unlink(archive.path);
+            if (!dryRun) await unlinkVerified(archive.path, approvedRoots);
         }
     }
 
@@ -711,7 +773,7 @@ export async function runLogRotationService(
                 continue;
             }
             const matched = new Set<string>();
-            for (const pattern of group.paths ?? []) {
+            for (const pattern of group.paths!) {
                 for (const file of await resolveGlob(pattern)) matched.add(file);
             }
             const excluded = new Set<string>();
@@ -778,12 +840,14 @@ export async function runLogRotationService(
                                           filePath,
                                           verified,
                                           archivePath,
-                                          policy.compress !== false
+                                          policy.compress !== false,
+                                          approvedRoots
                                       )
                                     : await rotateCopyTruncate(
                                           verified,
                                           archivePath,
-                                          policy.compress !== false
+                                          policy.compress !== false,
+                                          approvedRoots
                                       );
                         } finally {
                             await verified.handle.close();
@@ -869,9 +933,11 @@ export async function runElevatedLogRotationService(options: {
 export const __testing = {
     acquireLogRotationLock,
     archiveRetentionKey,
+    assertFileIdentity,
     assertSafePath,
     byteLimitFromMb,
     defaultConfigPath: DEFAULT_CONFIG_PATH,
+    gzipFile,
     globToRegex,
     hasRotatedInCadence,
     listArchives,

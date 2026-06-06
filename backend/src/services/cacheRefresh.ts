@@ -181,7 +181,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} for ${url}`);
         }
-        return response.json() as Promise<unknown>;
+        return (await response.json()) as unknown;
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ${url}`, { cause: error });
@@ -463,13 +463,22 @@ async function safeGit(repoPath: string, args: string[]) {
 }
 
 function summarizeStatus(lines: string[]) {
+    const chars = lines.map((line) => ({
+        index: line[0] ?? " ",
+        workTree: line[1] ?? " ",
+        line,
+    }));
     return {
-        staged: lines.filter((line) => /^(?:[MACR]|[ MADRCU][MACR])/u.test(line)).length,
-        modified: lines.filter((line) => line[1] === "M").length,
-        deleted: lines.filter((line) => line.includes("D")).length,
-        untracked: lines.filter((line) => line.startsWith("??")).length,
-        renamed: lines.filter((line) => line.includes("R")).length,
-        conflicted: lines.filter((line) => line.includes("U")).length,
+        staged: chars.filter(({ index }) => index !== " " && index !== "?").length,
+        modified: chars.filter(({ workTree }) => workTree === "M").length,
+        deleted: chars.filter(({ index, workTree }) => index === "D" || workTree === "D")
+            .length,
+        untracked: chars.filter(({ line }) => line.startsWith("??")).length,
+        renamed: chars.filter(({ index, workTree }) => index === "R" || workTree === "R")
+            .length,
+        conflicted: chars.filter(
+            ({ index, workTree }) => index === "U" || workTree === "U"
+        ).length,
         total: lines.length,
     };
 }
