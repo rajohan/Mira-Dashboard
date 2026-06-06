@@ -81,6 +81,10 @@ interface ComposeService {
     container_name?: unknown;
 }
 
+interface RegistryFetchOptions {
+    accept?: string;
+}
+
 function nowIso(): string {
     return new Date().toISOString();
 }
@@ -170,6 +174,81 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
     }
 }
 
+function parseBearerChallenge(header: string | null): Record<string, string> | null {
+    if (!header?.toLowerCase().startsWith("bearer ")) return null;
+    const params = new Map<string, string>();
+    for (const match of header
+        .slice("bearer ".length)
+        .matchAll(/([a-z_]+)="([^"]*)"/giu)) {
+        params.set(match[1].toLowerCase(), match[2]);
+    }
+    const realm = params.get("realm");
+    if (!realm) return null;
+    return Object.fromEntries(params);
+}
+
+async function fetchRegistryResponse(
+    url: string,
+    options: RegistryFetchOptions = {}
+): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const headers = {
+        Accept: options.accept || "application/json",
+        "User-Agent": "mira-dashboard-docker-updater/1.0",
+    };
+    try {
+        const response = await fetch(url, { headers, signal: controller.signal });
+        if (response.status !== 401) {
+            return response;
+        }
+        const challenge = parseBearerChallenge(response.headers.get("www-authenticate"));
+        if (!challenge?.realm) {
+            return response;
+        }
+        const tokenUrl = new URL(challenge.realm);
+        if (challenge.service) tokenUrl.searchParams.set("service", challenge.service);
+        if (challenge.scope) tokenUrl.searchParams.set("scope", challenge.scope);
+        const tokenResponse = await fetch(tokenUrl, {
+            headers: {
+                Accept: "application/json",
+                "User-Agent": "mira-dashboard-docker-updater/1.0",
+            },
+            signal: controller.signal,
+        });
+        if (!tokenResponse.ok) {
+            return response;
+        }
+        const tokenBody = asRecord(await tokenResponse.json());
+        const token =
+            typeof tokenBody.token === "string"
+                ? tokenBody.token
+                : typeof tokenBody.access_token === "string"
+                  ? tokenBody.access_token
+                  : null;
+        if (!token) {
+            return response;
+        }
+        return fetch(url, {
+            headers: {
+                ...headers,
+                Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function fetchRegistryJson(url: string): Promise<JsonRecord> {
+    const response = await fetchRegistryResponse(url);
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status} for ${url}`);
+    }
+    return response.json() as Promise<JsonRecord>;
+}
+
 function isGhcrRepo(repo: string): boolean {
     return repo.startsWith("ghcr.io/");
 }
@@ -249,7 +328,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
     let tag = service.current_tag || service.tag_match_pattern;
     if (service.tag_match_pattern) {
-        const tagsData = await fetchJson(`https://ghcr.io/v2/${repo}/tags/list`);
+        const tagsData = await fetchRegistryJson(`https://ghcr.io/v2/${repo}/tags/list`);
         const candidates = (Array.isArray(tagsData.tags) ? tagsData.tags : [])
             .filter((item): item is string => typeof item === "string")
             .filter((candidate) => candidate && tagMatches(service, candidate))
@@ -259,17 +338,14 @@ async function lookupGhcr(service: ManagedServiceRow) {
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
     let response: Response;
     try {
-        response = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
-            signal: controller.signal,
-            headers: {
-                Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
-                "User-Agent": "mira-dashboard-docker-updater/1.0",
-            },
-        });
+        response = await fetchRegistryResponse(
+            `https://ghcr.io/v2/${repo}/manifests/${tag}`,
+            {
+                accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
+            }
+        );
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ghcr.io/${repo}:${tag}`, {
@@ -277,8 +353,6 @@ async function lookupGhcr(service: ManagedServiceRow) {
             });
         }
         throw error;
-    } finally {
-        clearTimeout(timeout);
     }
     if (!response.ok) {
         throw new Error(`HTTP ${response.status} for ghcr.io/${repo}:${tag}`);
@@ -437,52 +511,61 @@ function listComposeFiles(root = APPS_ROOT): string[] {
 
 function servicesFromCompose(composePath: string) {
     const appSlug = path.basename(path.dirname(composePath));
-    const parsed = YAML.parse(fs.readFileSync(composePath, "utf8")) as {
-        services?: Record<string, ComposeService>;
-    } | null;
-    return Object.entries(parsed?.services ?? {})
-        .filter(([, service]) => service?.image)
-        .map(([serviceName, service]) => {
-            const imageRef = String(service.image);
-            const labels = normalizeLabels(service.labels);
-            const image = parseImageRef(imageRef);
-            const configuredPinMode = labels
-                .get("mira.updater.track")
-                ?.trim()
-                .toLowerCase();
-            const tagPattern = labels.get("mira.updater.tagPattern") || null;
-            return {
-                appSlug,
-                serviceName,
-                composePath,
-                imageRepo: image.repo,
-                composeImageRef: imageRef,
-                composeImageField: `services.${serviceName}.image`,
-                currentTag: image.tag,
-                currentDigest: image.digest,
-                policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
-                    ? "auto"
-                    : "notify",
-                pinMode:
-                    configuredPinMode === "digest" || configuredPinMode === "tag"
-                        ? configuredPinMode
-                        : image.pinMode,
-                tagMatchType: tagPattern ? "regex" : "exact",
-                tagMatchPattern: tagPattern ?? image.tag,
-                enabled: labels.has("mira.updater.enabled")
-                    ? booleanLabel(labels.get("mira.updater.enabled"), true)
-                    : true,
-                metadata: {
-                    discoveredBy: "dashboard-docker-updater",
-                    discoveredAt: nowIso(),
-                    containerName:
-                        typeof service.container_name === "string"
-                            ? service.container_name
-                            : null,
-                    labels: Object.fromEntries(labels),
-                },
-            };
+    try {
+        const parsed = YAML.parse(fs.readFileSync(composePath, "utf8")) as {
+            services?: Record<string, ComposeService>;
+        } | null;
+        return Object.entries(parsed?.services ?? {})
+            .filter(([, service]) => service?.image)
+            .map(([serviceName, service]) => {
+                const imageRef = String(service.image);
+                const labels = normalizeLabels(service.labels);
+                const image = parseImageRef(imageRef);
+                const configuredPinMode = labels
+                    .get("mira.updater.track")
+                    ?.trim()
+                    .toLowerCase();
+                const tagPattern = labels.get("mira.updater.tagPattern") || null;
+                const currentTag = image.tag ?? (image.digest ? null : "latest");
+                return {
+                    appSlug,
+                    serviceName,
+                    composePath,
+                    imageRepo: image.repo,
+                    composeImageRef: imageRef,
+                    composeImageField: `services.${serviceName}.image`,
+                    currentTag,
+                    currentDigest: image.digest,
+                    policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
+                        ? "auto"
+                        : "notify",
+                    pinMode:
+                        configuredPinMode === "digest" || configuredPinMode === "tag"
+                            ? configuredPinMode
+                            : image.pinMode,
+                    tagMatchType: tagPattern ? "regex" : "exact",
+                    tagMatchPattern: tagPattern ?? currentTag,
+                    enabled: labels.has("mira.updater.enabled")
+                        ? booleanLabel(labels.get("mira.updater.enabled"), true)
+                        : true,
+                    metadata: {
+                        discoveredBy: "dashboard-docker-updater",
+                        discoveredAt: nowIso(),
+                        containerName:
+                            typeof service.container_name === "string"
+                                ? service.container_name
+                                : null,
+                        labels: Object.fromEntries(labels),
+                    },
+                };
+            });
+    } catch (error) {
+        console.error("[DockerUpdater] Failed to discover compose services", {
+            composePath,
+            error,
         });
+        return [];
+    }
 }
 
 export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStepResult> {
@@ -570,13 +653,22 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     };
 }
 
-export async function pollDockerUpdaterRegistries(): Promise<DockerUpdaterStepResult> {
+export async function pollDockerUpdaterRegistries(
+    serviceId?: number
+): Promise<DockerUpdaterStepResult> {
     const timestamp = nowIso();
-    const services = db
-        .prepare(
-            "SELECT * FROM docker_managed_services WHERE enabled = 1 ORDER BY app_slug, service_name"
-        )
-        .all() as unknown as ManagedServiceRow[];
+    const services =
+        serviceId === undefined
+            ? (db
+                  .prepare(
+                      "SELECT * FROM docker_managed_services WHERE enabled = 1 ORDER BY app_slug, service_name"
+                  )
+                  .all() as unknown as ManagedServiceRow[])
+            : (db
+                  .prepare(
+                      "SELECT * FROM docker_managed_services WHERE id = ? ORDER BY app_slug, service_name"
+                  )
+                  .all(serviceId) as unknown as ManagedServiceRow[]);
     const checked: string[] = [];
     const updates: string[] = [];
     const failures: Array<{ service: string; error: string }> = [];
@@ -716,7 +808,7 @@ export async function runDockerUpdaterService(
         const service = db
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(serviceId) as ManagedServiceRow | undefined;
-        const poll = service ? await pollDockerUpdaterRegistries() : undefined;
+        const poll = service ? await pollDockerUpdaterRegistries(service.id) : undefined;
         if (!service) {
             return [
                 register,
@@ -776,7 +868,10 @@ export const __testing = {
     normalizeDockerHubRepo,
     normalizeLabels,
     caughtMessage,
+    fetchRegistryJson,
     isSafeTagRegexPattern,
+    lookupLatest,
+    parseBearerChallenge,
     setNestedValue,
     servicesFromCompose,
     stripRegistry,

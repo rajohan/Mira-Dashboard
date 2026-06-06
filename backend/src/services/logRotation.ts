@@ -457,8 +457,10 @@ async function applyArchiveOnlyRetention(
     >();
     const compressed: string[] = [];
     const deleted: string[] = [];
+    let checked = 0;
 
     for (const archive of await listArchiveOnlyArchives(policy, approvedRoots)) {
+        checked += 1;
         const result = await compressArchiveIfNeeded(archive, dryRun);
         if (result.compressed) compressed.push(result.archive.path);
         const key = archiveRetentionKey(result.archive.path, policy);
@@ -487,7 +489,7 @@ async function applyArchiveOnlyRetention(
         }
     }
 
-    return { checked: compressed.length + deleted.length, compressed, deleted };
+    return { checked, compressed, deleted };
 }
 
 function hasRotatedInCadence(

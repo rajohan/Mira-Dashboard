@@ -325,13 +325,41 @@ process.stdout.write("updated\n");
                     path.join(appDir, "compose.yaml")
                 );
                 assert.equal(services[0].imageRepo, "postgres");
-                assert.equal(services[0].currentTag, null);
+                assert.equal(services[0].currentTag, "latest");
                 assert.equal(services[1].pinMode, "digest");
                 const steps = await updater.runDockerUpdaterService(123);
                 assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");
             }
         );
+    });
+
+    it("continues discovery after malformed compose files and treats bare images as latest", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const goodDir = path.join(appsRoot, "good");
+        const badDir = path.join(appsRoot, "bad");
+        await mkdir(goodDir, { recursive: true });
+        await mkdir(badDir, { recursive: true });
+        await writeFile(
+            path.join(goodDir, "compose.yaml"),
+            "services:\n  web:\n    image: nginx\n",
+            "utf8"
+        );
+        await writeFile(path.join(badDir, "compose.yaml"), "services:\n  [", "utf8");
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
+            const result = await updater.registerDockerUpdaterServices();
+            assert.equal(result.ok, true);
+        });
+
+        const web = db
+            .prepare(
+                "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
+            )
+            .get() as { current_tag: string; tag_match_pattern: string };
+        assert.equal(web.current_tag, "latest");
+        assert.equal(web.tag_match_pattern, "latest");
     });
 
     it("skips unsupported registries and applies refreshed manual targets", async () => {
@@ -392,12 +420,10 @@ process.stdout.write("updated\n");
             fetchUrls.some((url) => url.includes("linuxserver")),
             false
         );
-        const external = db
-            .prepare(
-                "SELECT latest_tag FROM docker_managed_services WHERE service_name = 'external'"
-            )
-            .get() as { latest_tag: string };
-        assert.equal(external.latest_tag, "latest");
+        assert.equal(
+            fetchUrls.some((url) => url.includes("linuxserver")),
+            false
+        );
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(
@@ -434,6 +460,68 @@ process.stdout.write("updated\n");
         });
     });
 
+    it("does not block a manual update on unrelated registry failures", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "manual-scope");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.tagPattern: "^[0-9]+$"
+  broken:
+    image: busybox:1
+`,
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.exit(0);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.includes("busybox")) {
+                return {
+                    ok: false,
+                    status: 500,
+                    headers: new Headers(),
+                    json: async () => ({}),
+                } as Response;
+            }
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/2")
+                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
+                        : { results: [{ name: "1" }, { name: "2" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?manual-scope=${Date.now()}`);
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
+                )
+                .get() as { id: number };
+            const steps = await updater.runDockerUpdaterService(service.id);
+            assert.equal(
+                (steps as StepResult[]).every((step) => step.ok),
+                true
+            );
+        });
+
+        assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
+    });
+
     it("covers updater helper fallback branches directly", async () => {
         const updater = await import(`./dockerUpdater.js?helpers=${Date.now()}`);
         assert.equal(
@@ -453,6 +541,18 @@ process.stdout.write("updated\n");
         );
         assert.equal(updater.__testing.normalizeDockerHubRepo("owner/app"), "owner/app");
         assert.equal(updater.__testing.normalizeDockerHubRepo("redis"), "library/redis");
+        assert.equal(updater.__testing.parseBearerChallenge(null), null);
+        assert.equal(updater.__testing.parseBearerChallenge("Basic realm=ghcr"), null);
+        assert.equal(
+            updater.__testing.parseBearerChallenge('Bearer service="ghcr.io"'),
+            null
+        );
+        assert.deepEqual(
+            updater.__testing.parseBearerChallenge(
+                'Bearer realm="https://ghcr.io/token",service="ghcr.io"'
+            ),
+            { realm: "https://ghcr.io/token", service: "ghcr.io" }
+        );
         assert.equal(
             updater.__testing.stripRegistry("docker.io/library/redis"),
             "library/redis"
@@ -702,6 +802,76 @@ process.stdout.write("updated\n");
             /network down/u
         );
 
+        globalThis.fetch = (async () =>
+            ({
+                ok: false,
+                status: 401,
+                headers: new Headers(),
+                json: async () => ({}),
+            }) as Response) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.fetchRegistryJson(
+                    "https://ghcr.io/v2/owner/app/tags/list"
+                ),
+            /HTTP 401/u
+        );
+
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.startsWith("https://ghcr.io/token")) {
+                return {
+                    ok: false,
+                    status: 503,
+                    headers: new Headers(),
+                    json: async () => ({}),
+                } as Response;
+            }
+            return {
+                ok: false,
+                status: 401,
+                headers: new Headers({
+                    "www-authenticate":
+                        'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                }),
+                json: async () => ({}),
+            } as Response;
+        }) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.fetchRegistryJson(
+                    "https://ghcr.io/v2/owner/app/tags/list"
+                ),
+            /HTTP 401/u
+        );
+
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.startsWith("https://ghcr.io/token")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ access_token: 123 }),
+                } as Response;
+            }
+            return {
+                ok: false,
+                status: 401,
+                headers: new Headers({
+                    "www-authenticate":
+                        'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                }),
+                json: async () => ({}),
+            } as Response;
+        }) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.fetchRegistryJson(
+                    "https://ghcr.io/v2/owner/app/tags/list"
+                ),
+            /HTTP 401/u
+        );
+
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
             if (url.endsWith("/tags?page_size=100")) {
@@ -765,6 +935,81 @@ process.stdout.write("updated\n");
             }
         );
 
+        const authFetchUrls: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input.toString();
+            authFetchUrls.push(url);
+            const authorization = new Headers(init?.headers).get("authorization");
+            if (url.endsWith("/tags/list") && !authorization) {
+                return {
+                    ok: false,
+                    status: 401,
+                    headers: new Headers({
+                        "www-authenticate":
+                            'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/app:pull"',
+                    }),
+                    json: async () => ({}),
+                } as Response;
+            }
+            if (url.startsWith("https://ghcr.io/token")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ token: "registry-token" }),
+                } as Response;
+            }
+            return {
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:authed" }),
+                json: async () =>
+                    url.endsWith("/tags/list") ? { tags: ["1", "2"] } : {},
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+            }),
+            { latestTag: "2", latestDigest: "sha256:authed" }
+        );
+        assert.ok(authFetchUrls.some((url) => url.startsWith("https://ghcr.io/token")));
+
+        globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.startsWith("https://ghcr.io/token")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ access_token: "registry-access-token" }),
+                } as Response;
+            }
+            const authorization = new Headers(init?.headers).get("authorization");
+            if (!authorization) {
+                return {
+                    ok: false,
+                    status: 401,
+                    headers: new Headers({
+                        "www-authenticate":
+                            'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                    }),
+                    json: async () => ({}),
+                } as Response;
+            }
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({ tags: ["1"] }),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.fetchRegistryJson(
+                "https://ghcr.io/v2/owner/app/tags/list"
+            ),
+            { tags: ["1"] }
+        );
+
         globalThis.fetch = (async () =>
             ({
                 ok: true,
@@ -777,6 +1022,22 @@ process.stdout.write("updated\n");
                 current_tag: null,
             }),
             { latestTag: null, latestDigest: "sha256:old" }
+        );
+        assert.deepEqual(
+            await updater.__testing.lookupLatest({
+                ...baseService,
+                image_repo: "lscr.io/linuxserver/swag",
+            }),
+            { latestTag: "2", latestDigest: "sha256:new" }
+        );
+        assert.deepEqual(
+            await updater.__testing.lookupLatest({
+                ...baseService,
+                image_repo: "lscr.io/linuxserver/swag",
+                latest_tag: null,
+                latest_digest: null,
+            }),
+            { latestTag: "1", latestDigest: "sha256:old" }
         );
 
         globalThis.fetch = (async () =>

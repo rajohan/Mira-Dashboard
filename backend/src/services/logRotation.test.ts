@@ -406,6 +406,7 @@ describe("log rotation service", { concurrency: false }, () => {
         );
 
         assert.equal(summary.ok, false);
+        assert.equal(summary.groups[0]?.checkedFiles, 2);
         assert.equal(summary.groups[0]?.compressedFiles, 2);
         assert.ok(summary.groups[0]?.deletedArchives);
         assert.ok(

@@ -238,6 +238,29 @@ describe("Jobs page", () => {
         });
     });
 
+    it("shows cron schedules without allowing schedule edits", async () => {
+        const user = userEvent.setup();
+        hooks.updateJob.mockClear();
+        mockJobs([
+            createJob({
+                cronExpression: "15 4 * * *",
+                id: "cache.cron",
+                name: "Cron",
+                scheduleType: "cron",
+            }),
+        ]);
+        render(<Jobs />);
+
+        expect(screen.getByText("Cron: 15 4 * * *")).toBeInTheDocument();
+        expect(
+            screen.getByText("Cron schedules are read-only in the dashboard.")
+        ).toBeInTheDocument();
+        const save = screen.getByRole("button", { name: /Save schedule/u });
+        expect(save).toBeDisabled();
+        await user.click(save);
+        expect(hooks.updateJob).not.toHaveBeenCalled();
+    });
+
     it("shows schedule validation messages", async () => {
         const user = userEvent.setup();
         render(<Jobs />);

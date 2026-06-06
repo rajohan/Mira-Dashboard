@@ -13,6 +13,8 @@ import { useRunScheduledJob, useScheduledJobs, useUpdateScheduledJob } from "../
 import type { ScheduledJob } from "../hooks/useJobs";
 import { formatDate } from "../utils/format";
 
+type EditableScheduleType = "interval" | "daily";
+
 const SCHEDULE_TYPE_OPTIONS = [
     { value: "interval", label: "Interval", description: "Run every N seconds" },
     { value: "daily", label: "Daily time", description: "Run once per day at HH:mm" },
@@ -41,6 +43,16 @@ function sortJobs(jobs: ScheduledJob[]): ScheduledJob[] {
     return [...jobs].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function formatSchedule(job: ScheduledJob): string {
+    if (job.scheduleType === "daily" && job.timeOfDay) {
+        return `Daily at ${job.timeOfDay}`;
+    }
+    if (job.scheduleType === "cron") {
+        return job.cronExpression ? `Cron: ${job.cronExpression}` : "Cron schedule";
+    }
+    return `Every ${formatInterval(job.intervalSeconds)}`;
+}
+
 /** Renders backend-native scheduled jobs UI. */
 export function Jobs() {
     const { data: jobs = [], isLoading, error } = useScheduledJobs();
@@ -51,10 +63,10 @@ export function Jobs() {
     const selectedJob =
         sortedJobs.find((job) => job.id === selectedJobId) || sortedJobs[0] || null;
     const [intervalDraft, setIntervalDraft] = useState("");
-    const [scheduleTypeDraft, setScheduleTypeDraft] = useState<"interval" | "daily">(
-        "interval"
-    );
+    const [scheduleTypeDraft, setScheduleTypeDraft] =
+        useState<EditableScheduleType>("interval");
     const [timeOfDayDraft, setTimeOfDayDraft] = useState("");
+    const isCronSchedule = selectedJob?.scheduleType === "cron";
 
     useEffect(() => {
         if (selectedJob) {
@@ -73,6 +85,7 @@ export function Jobs() {
         scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
 
     async function saveSchedule() {
+        if (!selectedJob || isCronSchedule) return;
         const patch = {
             scheduleType: scheduleTypeDraft,
             ...(scheduleTypeDraft === "interval"
@@ -80,7 +93,7 @@ export function Jobs() {
                 : { timeOfDay: timeOfDayDraft }),
         };
         await updateJob.mutateAsync({
-            id: selectedJob!.id,
+            id: selectedJob.id,
             patch,
         });
     }
@@ -161,9 +174,7 @@ export function Jobs() {
                                         </Badge>
                                     </div>
                                     <div className="text-primary-400 mt-2 text-xs">
-                                        {job.scheduleType === "daily" && job.timeOfDay
-                                            ? `Daily at ${job.timeOfDay}`
-                                            : `Every ${formatInterval(job.intervalSeconds)}`}
+                                        {formatSchedule(job)}
                                     </div>
                                 </button>
                             ))}
@@ -267,7 +278,11 @@ export function Jobs() {
                                     <Button
                                         className="self-end"
                                         variant="secondary"
-                                        disabled={!scheduleIsValid || updateJob.isPending}
+                                        disabled={
+                                            isCronSchedule ||
+                                            !scheduleIsValid ||
+                                            updateJob.isPending
+                                        }
                                         onClick={() => {
                                             void saveSchedule();
                                         }}
@@ -285,6 +300,11 @@ export function Jobs() {
                                 {scheduleTypeDraft === "daily" && !timeOfDayIsValid ? (
                                     <p className="text-xs text-red-400">
                                         Time of day must use HH:mm, for example 02:40.
+                                    </p>
+                                ) : null}
+                                {isCronSchedule ? (
+                                    <p className="text-primary-400 text-xs">
+                                        Cron schedules are read-only in the dashboard.
                                     </p>
                                 ) : null}
                             </div>

@@ -52,6 +52,14 @@ test("uses configured db path when provided", async () => {
             db = result.db;
 
             assert.equal(result.miraDbPath, configuredPath);
+            assert.equal(
+                (
+                    result.db.prepare("PRAGMA foreign_keys").get() as {
+                        foreign_keys: number;
+                    }
+                ).foreign_keys,
+                1
+            );
         } finally {
             db?.close();
         }
@@ -67,19 +75,23 @@ test("uses configured db path when provided", async () => {
 
 test("classifies duplicate-column migration errors", async () => {
     const result = await import(`./db.js?migrationHelpers=${randomUUID()}`);
-    assert.equal(
-        result.__testing.isDuplicateColumnError(
-            new Error("duplicate column name: schedule_type")
-        ),
-        true
-    );
-    assert.doesNotThrow(() =>
-        result.__testing.assertDuplicateColumnError(
-            new Error("duplicate column name: automation_json")
-        )
-    );
-    assert.throws(
-        () => result.__testing.assertDuplicateColumnError(new Error("syntax error")),
-        /syntax error/u
-    );
+    try {
+        assert.equal(
+            result.__testing.isDuplicateColumnError(
+                new Error("duplicate column name: schedule_type")
+            ),
+            true
+        );
+        assert.doesNotThrow(() =>
+            result.__testing.assertDuplicateColumnError(
+                new Error("duplicate column name: automation_json")
+            )
+        );
+        assert.throws(
+            () => result.__testing.assertDuplicateColumnError(new Error("syntax error")),
+            /syntax error/u
+        );
+    } finally {
+        (result.db as { close(): void }).close();
+    }
 });
