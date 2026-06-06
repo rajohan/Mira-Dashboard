@@ -824,6 +824,12 @@ if (args.includes("capture-pane")) {
             status: "error",
             note: "Could not parse Codex /status output",
         });
+        const badCodexHome = path.join(tempDir, "quota-codex-home-file");
+        await writeFile(badCodexHome, "not a directory", "utf8");
+        await withEnv({ QUOTAS_CODEX_HOME: badCodexHome }, async () => {
+            const quota = await __testing.checkOpenAiQuota();
+            assert.equal(quota.status, "error");
+        });
         assert.deepEqual(
             __testing.parseOpenAiQuotaOutput(
                 "Account: raymond@example.test\nModel: gpt-5.5 (high)\n5h limit: 80% left (resets 12:00)\nWeekly limit: 50% left (resets Monday)\n"
