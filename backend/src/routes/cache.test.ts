@@ -256,7 +256,6 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             db.prepare(
                 "DELETE FROM cache_entries WHERE key = 'backup.walg.status'"
             ).run();
-            __testing.setCacheRefreshCommandForTests("weather.spydeberg", refreshCommand);
             const originalPath = process.env.PATH;
             process.env.PATH = tempDir;
             try {
@@ -266,7 +265,6 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 );
             } finally {
                 process.env.PATH = originalPath;
-                __testing.setCacheRefreshCommandForTests("weather.spydeberg", undefined);
             }
 
             __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);

@@ -1875,13 +1875,13 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(disabled.status, 400);
         assert.equal(disabled.body.error, "Updater service is disabled");
 
-        const noUpdate = await requestJson<{ error: string }>(
-            server,
-            "/api/docker/updater/services/3/update",
-            { method: "POST", body: {} }
-        );
-        assert.equal(noUpdate.status, 400);
-        assert.equal(noUpdate.body.error, "No update available for this service");
+        const noUpdate = await requestJson<{
+            result: { summary: { failed: number; updated: number } };
+            success: boolean;
+        }>(server, "/api/docker/updater/services/3/update", { method: "POST", body: {} });
+        assert.equal(noUpdate.status, 200);
+        assert.equal(noUpdate.body.success, true);
+        assert.deepEqual(noUpdate.body.result.summary, { updated: 0, failed: 0 });
     });
 
     it("runs updater pipelines and reports step failures", async () => {

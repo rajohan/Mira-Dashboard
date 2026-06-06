@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { seedCacheEntry } from "../testUtils/cacheEntries.js";
 import { __testing, getCacheEntry, parseJsonField, parseTable } from "./cacheStore.js";
 
 describe("cacheStore utilities", () => {
@@ -33,12 +34,7 @@ describe("cacheStore utilities", () => {
     });
 
     it("maps nullable SQLite cache payloads to legacy empty fields", async () => {
-        db.prepare(
-            `INSERT OR REPLACE INTO cache_entries (
-                key, data_json, source, updated_at, last_attempt_at, expires_at,
-                status, error_code, error_message, consecutive_failures, metadata_json
-            ) VALUES ('cache.null', NULL, 'test', '', '', '', 'fresh', NULL, NULL, 0, '{}')`
-        ).run();
+        seedCacheEntry({ key: "cache.null", data: undefined, source: "test" });
         try {
             const entry = await getCacheEntry("cache.null");
             assert.equal(entry?.data, "");

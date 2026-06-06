@@ -355,9 +355,8 @@ function parseJsonField<T>(value: string | undefined): T | null {
 function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     if (service.pin_mode === "digest") {
         return Boolean(
-            service.current_digest &&
             service.latest_digest &&
-            service.current_digest !== service.latest_digest
+            (!service.current_digest || service.current_digest !== service.latest_digest)
         );
     }
 
@@ -1270,11 +1269,6 @@ export default function dockerRoutes(app: express.Application): void {
 
             if (!service.enabled) {
                 res.status(400).json({ error: "Updater service is disabled" });
-                return;
-            }
-
-            if (!service.updateAvailable) {
-                res.status(400).json({ error: "No update available for this service" });
                 return;
             }
 

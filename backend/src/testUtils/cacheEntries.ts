@@ -16,6 +16,12 @@ interface SeedCacheEntryOptions {
 
 export function seedCacheEntry(options: SeedCacheEntryOptions): void {
     const updatedAt = options.updatedAt ?? "2026-05-11T00:00:00.000Z";
+    const dataJson =
+        typeof options.data === "string"
+            ? options.data
+            : options.data === undefined
+              ? null
+              : JSON.stringify(options.data);
     db.prepare(
         `INSERT OR REPLACE INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
@@ -23,7 +29,7 @@ export function seedCacheEntry(options: SeedCacheEntryOptions): void {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
         options.key,
-        typeof options.data === "string" ? options.data : JSON.stringify(options.data),
+        dataJson,
         options.source,
         updatedAt,
         options.lastAttemptAt ?? updatedAt,

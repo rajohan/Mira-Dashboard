@@ -278,10 +278,18 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("runs elevated log rotation through the CLI wrapper", async () => {
-        const commands: Array<{ args: readonly string[]; file: string }> = [];
+        const commands: Array<{
+            args: readonly string[];
+            env: NodeJS.ProcessEnv;
+            file: string;
+        }> = [];
         __testing.setElevatedLogRotationExecFileRunner(
-            async (file: string, args: readonly string[] | undefined) => {
-                commands.push({ args: args ?? [], file });
+            async (
+                file: string,
+                args: readonly string[] | undefined,
+                options: { env: NodeJS.ProcessEnv; maxBuffer: number }
+            ) => {
+                commands.push({ args: args ?? [], env: options.env, file });
                 return {
                     stderr: "helper warning",
                     stdout: JSON.stringify({ ok: true }),
@@ -306,6 +314,8 @@ describe("log rotation service", { concurrency: false }, () => {
             assert.match(commands[0]?.args[3] ?? "", /services\/logRotation\.js$/u);
             assert.equal(commands[0]?.args.includes("--dry-run"), false);
             assert.equal(commands[1]?.args.includes("--dry-run"), true);
+            assert.equal(commands[0]?.env.PATH, process.env.PATH);
+            assert.equal(commands[0]?.env.MIRA_GITHUB_TOKEN, undefined);
         } finally {
             __testing.resetElevatedLogRotationExecFileRunner();
         }

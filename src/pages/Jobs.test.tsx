@@ -60,8 +60,6 @@ function mockJobs(jobs: ScheduledJob[]) {
 
 describe("Jobs page", () => {
     beforeEach(() => {
-        hooks.runJob.mockClear();
-        hooks.updateJob.mockClear();
         hooks.runJob.mockReset();
         hooks.updateJob.mockReset();
         hooks.useRunScheduledJob.mockReset();

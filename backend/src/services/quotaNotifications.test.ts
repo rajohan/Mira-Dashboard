@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
@@ -7,40 +7,8 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { db } from "../db.js";
 import { seedCacheEntry } from "../testUtils/cacheEntries.js";
 
-const originalPath = process.env.PATH;
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
 const originalQuotasJson = process.env.FAKE_QUOTAS_JSON;
-
-async function installFakeDocker(tempDir: string): Promise<void> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-const percent = Number(process.env.FAKE_OPENROUTER_PERCENT || "91");
-const checkedAt = 1_800_000_000_000;
-const data = process.env.FAKE_QUOTAS_JSON
-  ? JSON.parse(process.env.FAKE_QUOTAS_JSON)
-  : {
-      openrouter: { usage: 9, totalCredits: 10, remaining: 1.23, usageMonthly: 9, percentUsed: percent },
-      elevenlabs: { status: "not_configured" },
-      synthetic: { status: "not_configured" },
-      openai: { status: "not_configured" },
-      checkedAt,
-      cacheAgeMs: 0,
-    };
-process.stdout.write([
-  "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "quotas.summary\t" + JSON.stringify(data) + "\tquotas\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2099-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
-  "",
-].join("\n"));
-`,
-        "utf8"
-    );
-    await chmod(dockerPath, 0o755);
-    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-}
 
 function quotaNotifications(): Array<{
     title: string;
@@ -88,7 +56,6 @@ describe("quota notifications", () => {
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-quota-notifications-"));
-        await installFakeDocker(tempDir);
         ({
             runQuotaNotificationCheck,
             startQuotaNotificationMonitor,
@@ -111,7 +78,6 @@ describe("quota notifications", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
         if (originalPercent === undefined) {
             delete process.env.FAKE_OPENROUTER_PERCENT;
         } else {

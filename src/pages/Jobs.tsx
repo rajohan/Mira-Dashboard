@@ -91,6 +91,9 @@ export function Jobs() {
     }
 
     async function saveSchedule() {
+        if (!selectedJob) {
+            return;
+        }
         const patch = {
             scheduleType: scheduleTypeDraft,
             ...(scheduleTypeDraft === "interval"
@@ -100,7 +103,7 @@ export function Jobs() {
         setActionError("");
         try {
             await updateJob.mutateAsync({
-                id: selectedJob!.id,
+                id: selectedJob.id,
                 patch,
             });
         } catch (error) {
@@ -109,10 +112,13 @@ export function Jobs() {
     }
 
     async function toggleSelected(enabled: boolean) {
+        if (!selectedJob) {
+            return;
+        }
         setActionError("");
         try {
             await updateJob.mutateAsync({
-                id: selectedJob!.id,
+                id: selectedJob.id,
                 patch: { enabled },
             });
         } catch (error) {
@@ -121,9 +127,12 @@ export function Jobs() {
     }
 
     async function runSelected() {
+        if (!selectedJob) {
+            return;
+        }
         setActionError("");
         try {
-            await runJob.mutateAsync({ id: selectedJob!.id });
+            await runJob.mutateAsync({ id: selectedJob.id });
         } catch (error) {
             handleActionError(error);
         }

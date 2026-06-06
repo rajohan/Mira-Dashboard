@@ -972,13 +972,25 @@ export async function runElevatedLogRotationService(options: {
         args.push("--dry-run");
     }
     const { stdout, stderr } = await elevatedLogRotationExecFileRunner("sudo", args, {
-        env: process.env,
+        env: elevatedLogRotationEnvironment(),
         maxBuffer: 10 * 1024 * 1024,
     });
     return {
         result: JSON.parse(stdout || "{}") as Record<string, unknown>,
         stderr,
     };
+}
+
+function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
+    const allowed = ["PATH", "HOME", "LANG", "NODE_ENV", "MIRA_LOG_ROTATION_CONFIG"];
+    const env: NodeJS.ProcessEnv = {};
+    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and config path.
+    for (const key of allowed) {
+        if (process.env[key] !== undefined) {
+            env[key] = process.env[key];
+        }
+    }
+    return env;
 }
 
 export const __testing = {
