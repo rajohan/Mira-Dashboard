@@ -67,9 +67,9 @@ let running = false;
 let monitorTimer: NodeJS.Timeout | undefined;
 
 /** Performs run OpenClaw notification check. */
-export async function runOpenClawNotificationCheck(): Promise<void> {
+export async function runOpenClawNotificationCheck(): Promise<boolean> {
     if (running) {
-        return;
+        return true;
     }
 
     running = true;
@@ -99,8 +99,10 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
                 last_latest: version.latest,
             });
         }
+        return true;
     } catch (error) {
         console.error("[OpenClawNotifications] check failed", error);
+        return false;
     } finally {
         running = false;
     }

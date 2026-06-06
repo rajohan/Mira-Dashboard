@@ -67,6 +67,10 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
     if (!row) {
         return null;
     }
+    const expired =
+        row.status === "fresh" &&
+        row.expires_at !== "" &&
+        Date.parse(row.expires_at) <= Date.now();
 
     return {
         key: row.key,
@@ -75,7 +79,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
         updated_at: row.updated_at,
         last_attempt_at: row.last_attempt_at,
         expires_at: row.expires_at,
-        status: row.status,
+        status: expired ? "stale" : row.status,
         error_code: row.error_code ?? "",
         error_message: row.error_message ?? "",
         consecutive_failures: String(row.consecutive_failures),

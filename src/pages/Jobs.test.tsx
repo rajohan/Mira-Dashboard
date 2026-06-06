@@ -60,8 +60,8 @@ function mockJobs(jobs: ScheduledJob[]) {
 
 describe("Jobs page", () => {
     beforeEach(() => {
-        hooks.runJob.mockResolvedValue(Promise.resolve({}));
-        hooks.updateJob.mockResolvedValue(Promise.resolve({}));
+        hooks.runJob.mockResolvedValue({});
+        hooks.updateJob.mockResolvedValue({});
         hooks.useRunScheduledJob.mockReturnValue({
             isPending: false,
             mutateAsync: hooks.runJob,
@@ -109,9 +109,10 @@ describe("Jobs page", () => {
             isLoading: false,
         });
 
-        const { container } = render(<Jobs />);
+        render(<Jobs />);
 
-        expect(container).toBeEmptyDOMElement();
+        expect(screen.getByText("Scheduled jobs unavailable")).toBeInTheDocument();
+        expect(screen.getByText("jobs unavailable")).toBeInTheDocument();
     });
 
     it("shows jobs and runs the selected job manually", async () => {

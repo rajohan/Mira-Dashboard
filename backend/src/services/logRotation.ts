@@ -324,7 +324,11 @@ function managedArchiveRegexFor(filePath: string): RegExp {
     );
 }
 
-async function listArchives(filePath: string, policy: LogRotationPolicy) {
+async function listArchives(
+    filePath: string,
+    policy: LogRotationPolicy,
+    approvedRoots: string[]
+) {
     const dir = path.dirname(filePath);
     const managedRegex = managedArchiveRegexFor(filePath);
     const archives: Array<{ path: string; mtimeMs: number; compress: boolean }> = [];
@@ -337,6 +341,8 @@ async function listArchives(filePath: string, policy: LogRotationPolicy) {
     for (const pattern of policy.archivePaths ?? []) {
         for (const archivePath of await resolveGlob(pattern)) {
             if (path.dirname(archivePath) !== dir) continue;
+            const safe = await assertSafePath(archivePath, approvedRoots);
+            if (!safe) continue;
             const stat = await fs.stat(archivePath);
             archives.push({ path: archivePath, mtimeMs: stat.mtimeMs, compress: true });
         }
@@ -366,11 +372,12 @@ async function compressArchiveIfNeeded(
 async function applyRetention(
     filePath: string,
     policy: LogRotationPolicy,
+    approvedRoots: string[],
     dryRun: boolean
 ) {
     const archives: Array<{ path: string; mtimeMs: number; compress: boolean }> = [];
     const compressed: string[] = [];
-    for (const archive of await listArchives(filePath, policy)) {
+    for (const archive of await listArchives(filePath, policy, approvedRoots)) {
         const result = await compressArchiveIfNeeded(archive, dryRun);
         archives.push(result.archive);
         if (result.compressed) compressed.push(result.archive.path);
@@ -652,7 +659,7 @@ export async function runLogRotationService(
                 if (!safe) continue;
                 const stat = await fs.stat(filePath);
                 const retention = async () =>
-                    applyRetention(filePath, policy, options.dryRun);
+                    applyRetention(filePath, policy, approvedRoots, options.dryRun);
                 if (policy.skipEmpty && stat.size === 0) {
                     const retained = await retention();
                     groupSummary.deletedArchives += retained.deleted.length;
@@ -762,6 +769,7 @@ export const __testing = {
     byteLimitFromMb,
     globToRegex,
     hasRotatedInCadence,
+    listArchives,
     mergePolicy,
     openVerifiedLogFile,
     readLogRotationState,

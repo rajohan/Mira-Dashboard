@@ -12,6 +12,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 const APPS_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
+const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
 
 function getDockerComposeWrapper(): string {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
@@ -169,6 +170,13 @@ function isGhcrRepo(repo: string): boolean {
     return repo.startsWith("ghcr.io/");
 }
 
+function imageRegistry(repo: string): string {
+    const first = repo.split("/")[0] || "";
+    return first.includes(".") || first.includes(":") || first === "localhost"
+        ? first
+        : "docker.io";
+}
+
 function stripRegistry(repo: string) {
     if (isGhcrRepo(repo)) {
         return repo.replace(/^ghcr\.io\//u, "");
@@ -279,9 +287,14 @@ async function lookupLatest(service: ManagedServiceRow) {
             latestDigest: service.latest_digest || service.current_digest,
         };
     }
-    return isGhcrRepo(service.image_repo)
-        ? lookupGhcr(service)
-        : lookupDockerHub(service);
+    const registry = imageRegistry(service.image_repo);
+    if (!SUPPORTED_REGISTRIES.has(registry)) {
+        return {
+            latestTag: service.latest_tag || service.current_tag,
+            latestDigest: service.latest_digest || service.current_digest,
+        };
+    }
+    return registry === "ghcr.io" ? lookupGhcr(service) : lookupDockerHub(service);
 }
 
 function hasUpdate(service: ManagedServiceRow): boolean {
@@ -708,7 +721,22 @@ export async function runDockerUpdaterService(
                 (step): step is DockerUpdaterStepResult => step !== undefined
             );
         }
-        return [register, poll, await applyServiceUpdate(service, "manual")];
+        const refreshedService = db
+            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+            .get(serviceId) as ManagedServiceRow | undefined;
+        if (!refreshedService) {
+            return [
+                register,
+                poll,
+                {
+                    step: "manual-update",
+                    ok: false,
+                    stdout: "",
+                    stderr: "Docker updater service not found after registry poll",
+                },
+            ];
+        }
+        return [register, poll, await applyServiceUpdate(refreshedService, "manual")];
     }
     const poll = await pollDockerUpdaterRegistries();
     const autoServices = db
@@ -728,6 +756,7 @@ export const __testing = {
     buildTargetImageRef,
     fetchJson,
     getComposeCommand,
+    imageRegistry,
     hasUpdate,
     listComposeFiles,
     lookupDockerHub,

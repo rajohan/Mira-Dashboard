@@ -319,6 +319,33 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(notDue.rotatedFiles, 0);
     });
 
+    it("skips archive paths that fail approved-root validation during retention", async () => {
+        const root = path.join(tempDir, "logs");
+        await mkdir(root);
+        const file = path.join(root, "app.log");
+        const archive = path.join(root, "other.log.2020-01-01T00-00-00Z");
+        await writeFile(file, "log", "utf8");
+        await writeFile(archive, "archive", "utf8");
+        const realpathMock = mock.method(
+            fsPromises,
+            "realpath",
+            async (target: unknown) => {
+                if (target === archive) {
+                    throw Object.assign(new Error("vanished"), { code: "ENOENT" });
+                }
+                return target as string;
+            }
+        );
+        try {
+            assert.deepEqual(
+                await __testing.listArchives(file, { archivePaths: [archive] }, [root]),
+                []
+            );
+        } finally {
+            realpathMock.mock.restore();
+        }
+    });
+
     it("applies archive-only retention scopes and records group/file errors", async () => {
         const root = path.join(tempDir, "logs");
         const outside = path.join(tempDir, "outside");

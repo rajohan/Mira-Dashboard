@@ -95,7 +95,7 @@ type CacheRefreshRunner = (key: string) => Promise<unknown>;
 type DockerUpdaterStep = { step: string; ok: boolean; stderr?: string };
 type DockerUpdaterRunner = () => Promise<DockerUpdaterStep[]>;
 type LogRotationRunner = (options: { dryRun: boolean }) => Promise<unknown>;
-type NotificationRunner = () => Promise<void>;
+type NotificationRunner = () => Promise<boolean | void>;
 
 const defaultJobs: ReadonlyArray<DefaultScheduledJob> = [
     {
@@ -239,6 +239,15 @@ let dockerUpdaterRunner: DockerUpdaterRunner = runDockerUpdaterService;
 let logRotationRunner: LogRotationRunner = runLogRotationService;
 let openClawNotificationRunner: NotificationRunner = runOpenClawNotificationCheck;
 let quotaNotificationRunner: NotificationRunner = runQuotaNotificationCheck;
+
+function isOkFalse(value: unknown): boolean {
+    return Boolean(
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        (value as { ok?: unknown }).ok === false
+    );
+}
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -512,16 +521,24 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
         return { steps };
     }
     if (job.actionType === "notification.openclaw") {
-        await openClawNotificationRunner();
+        if ((await openClawNotificationRunner()) === false) {
+            throw new Error("OpenClaw notification check failed");
+        }
         return { checked: true };
     }
     if (job.actionType === "notification.quota") {
-        await quotaNotificationRunner();
+        if ((await quotaNotificationRunner()) === false) {
+            throw new Error("Quota notification check failed");
+        }
         return { checked: true };
     }
     if (job.actionType === "ops.logRotation") {
         const dryRun = job.settings.dryRun === true;
-        return { logRotation: await logRotationRunner({ dryRun }) };
+        const logRotation = await logRotationRunner({ dryRun });
+        if (isOkFalse(logRotation)) {
+            throw new Error("Log rotation failed");
+        }
+        return { logRotation };
     }
     throw new Error(`Unsupported scheduled job action: ${job.actionType}`);
 }

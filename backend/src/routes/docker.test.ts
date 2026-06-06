@@ -1782,6 +1782,9 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("returns updater services, events, and validates manual update state", async () => {
+        db.prepare(
+            "UPDATE docker_managed_services SET last_status = 'registry_check_failed' WHERE id = 3"
+        ).run();
         const services = await requestJson<{
             services: Array<{
                 id: number;
@@ -1790,12 +1793,18 @@ describe("docker routes", { concurrency: false }, () => {
                 updateAvailable: boolean;
                 metadata: Record<string, unknown>;
             }>;
-            summary: { total: number; enabled: number; updateAvailable: number };
+            summary: {
+                total: number;
+                enabled: number;
+                updateAvailable: number;
+                failed: number;
+            };
         }>(server, "/api/docker/updater/services");
         assert.equal(services.status, 200);
         assert.equal(services.body.summary.total, 3);
         assert.equal(services.body.summary.enabled, 2);
         assert.equal(services.body.summary.updateAvailable, 2);
+        assert.equal(services.body.summary.failed, 1);
         assert.deepEqual(services.body.services[0]?.metadata, { owner: "mira" });
         assert.deepEqual(services.body.services[2]?.metadata, {});
 

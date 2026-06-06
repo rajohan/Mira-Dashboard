@@ -190,6 +190,18 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     const failedDockerFallback = await runScheduledJob("docker.updater");
     assert.equal(failedDockerFallback.status, "failed");
     assert.match(failedDockerFallback.message ?? "", /poll failed/u);
+
+    __testing.setActionRunnersForTests({
+        openClawNotification: async () => false,
+        quotaNotification: async () => false,
+        logRotation: async () => ({ ok: false }),
+    });
+    const failedOpenClaw = await runScheduledJob("notification.openclaw");
+    const failedQuotas = await runScheduledJob("notification.quotas");
+    const failedLogRotation = await runScheduledJob("ops.log-rotation");
+    assert.equal(failedOpenClaw.status, "failed");
+    assert.equal(failedQuotas.status, "failed");
+    assert.equal(failedLogRotation.status, "failed");
 });
 
 test("runs due scheduled jobs and skips jobs already running", async () => {

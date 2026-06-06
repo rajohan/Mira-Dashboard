@@ -1206,8 +1206,12 @@ export default function dockerRoutes(app: express.Application): void {
                     .length,
                 notifyPolicy: services.filter((service) => service.policy === "notify")
                     .length,
-                failed: services.filter(
-                    (service) => service.lastStatus === "auto_update_failed"
+                failed: services.filter((service) =>
+                    [
+                        "auto_update_failed",
+                        "manual_update_failed",
+                        "registry_check_failed",
+                    ].includes(service.lastStatus || "")
                 ).length,
             };
             res.json({ services, summary });

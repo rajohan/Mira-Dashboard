@@ -81,7 +81,7 @@ function seedQuotasCache(): void {
 
 describe("quota notifications", () => {
     let tempDir: string;
-    let runQuotaNotificationCheck: () => Promise<void>;
+    let runQuotaNotificationCheck: () => Promise<boolean>;
     let startQuotaNotificationMonitor: (intervalMs?: number) => void;
     let stopQuotaNotificationMonitor: () => void;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;

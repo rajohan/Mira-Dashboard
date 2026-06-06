@@ -101,6 +101,18 @@ export function Jobs() {
             isLoading={isLoading}
             loading={<LoadingState size="lg" />}
             error={error?.message ?? null}
+            errorView={
+                error ? (
+                    <div className="p-3 sm:p-6">
+                        <Card variant="bordered">
+                            <CardTitle>Scheduled jobs unavailable</CardTitle>
+                            <p className="text-primary-300 mt-2 text-sm">
+                                {error.message}
+                            </p>
+                        </Card>
+                    </div>
+                ) : null
+            }
             isEmpty={sortedJobs.length === 0}
             empty={
                 <div className="p-3 sm:p-6">

@@ -47,4 +47,19 @@ describe("cacheStore utilities", () => {
             db.prepare("DELETE FROM cache_entries WHERE key = 'cache.null'").run();
         }
     });
+
+    it("marks expired fresh cache rows as stale", async () => {
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, error_code, error_message, consecutive_failures, metadata_json
+            ) VALUES ('cache.expired', '{}', 'test', '', '', '2020-01-01T00:00:00.000Z', 'fresh', NULL, NULL, 0, '{}')`
+        ).run();
+        try {
+            const entry = await getCacheEntry("cache.expired");
+            assert.equal(entry?.status, "stale");
+        } finally {
+            db.prepare("DELETE FROM cache_entries WHERE key = 'cache.expired'").run();
+        }
+    });
 });

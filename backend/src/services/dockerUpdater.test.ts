@@ -334,8 +334,114 @@ process.stdout.write("updated\n");
         );
     });
 
+    it("skips unsupported registries and applies refreshed manual targets", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "manual");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  web:
+    image: nginx:1
+    labels:
+      mira.updater.enabled: "true"
+      mira.updater.tagPattern: "^[0-9]+$"
+  external:
+    image: lscr.io/linuxserver/swag:latest
+    labels:
+      mira.updater.enabled: "true"
+`,
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.exit(0);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const fetchUrls: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            fetchUrls.push(url);
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/3")
+                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
+                        : { results: [{ name: "1" }, { name: "2" }, { name: "3" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?manual=${Date.now()}`);
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
+                )
+                .get() as { id: number };
+            const steps = await updater.runDockerUpdaterService(service.id);
+            assert.equal(steps.at(-1)?.ok, true);
+        });
+
+        assert.match(await readFile(composePath, "utf8"), /image: nginx:3/u);
+        assert.equal(
+            fetchUrls.some((url) => url.includes("linuxserver")),
+            false
+        );
+        const external = db
+            .prepare(
+                "SELECT latest_tag FROM docker_managed_services WHERE service_name = 'external'"
+            )
+            .get() as { latest_tag: string };
+        assert.equal(external.latest_tag, "latest");
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?manual-fallback=${Date.now()}`
+            );
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
+                )
+                .get() as { id: number };
+            let deleted = false;
+            globalThis.fetch = (async () => {
+                if (!deleted) {
+                    deleted = true;
+                    db.prepare(
+                        "DELETE FROM docker_update_events WHERE managed_service_id = ?"
+                    ).run(service.id);
+                    db.prepare("DELETE FROM docker_managed_services WHERE id = ?").run(
+                        service.id
+                    );
+                }
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ results: [{ name: "3" }] }),
+                } as Response;
+            }) as typeof fetch;
+            const missingAfterPoll = await updater.runDockerUpdaterService(service.id);
+            assert.equal(
+                missingAfterPoll.at(-1)?.stderr,
+                "Docker updater service not found after registry poll"
+            );
+        });
+    });
+
     it("covers updater helper fallback branches directly", async () => {
         const updater = await import(`./dockerUpdater.js?helpers=${Date.now()}`);
+        assert.equal(
+            updater.__testing.imageRegistry("lscr.io/linuxserver/swag"),
+            "lscr.io"
+        );
+        assert.equal(updater.__testing.imageRegistry("nginx"), "docker.io");
+        assert.equal(updater.__testing.imageRegistry(""), "docker.io");
         assert.deepEqual([...updater.__testing.normalizeLabels(null)], []);
         assert.deepEqual(
             [...updater.__testing.normalizeLabels(["flag"])],

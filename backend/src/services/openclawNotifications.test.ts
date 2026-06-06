@@ -94,7 +94,7 @@ function seedSystemHostCache({
 
 describe("OpenClaw update notifications", () => {
     let tempDir: string;
-    let runOpenClawNotificationCheck: () => Promise<void>;
+    let runOpenClawNotificationCheck: () => Promise<boolean>;
     let startOpenClawNotificationMonitor: (intervalMs?: number) => void;
     let getState: () => { is_armed: number; last_latest: string | null };
     let stopOpenClawNotificationMonitorForTest: () => void;
