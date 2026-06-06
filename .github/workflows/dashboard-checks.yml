@@ -62,6 +62,7 @@ jobs:
                   flags: frontend
                   name: frontend
                   fail_ci_if_error: true
+                  use_pypi: true
 
     backend-checks:
         name: backend-checks
@@ -123,6 +124,7 @@ jobs:
                   flags: backend
                   name: backend
                   fail_ci_if_error: true
+                  use_pypi: true
 
     e2e-smoke:
         name: e2e-smoke
