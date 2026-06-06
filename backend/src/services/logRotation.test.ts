@@ -107,6 +107,15 @@ describe("log rotation service", { concurrency: false }, () => {
             ),
             true
         );
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        assert.equal(
+            __testing.hasRotatedInCadence(
+                { lastRotatedAt: yesterday.toISOString() },
+                "daily"
+            ),
+            false
+        );
         assert.equal(__testing.hasRotatedInCadence(undefined, null), false);
         assert.deepEqual(
             await __testing.resolveGlob(path.join(tempDir, "missing", "*.log")),
@@ -116,6 +125,25 @@ describe("log rotation service", { concurrency: false }, () => {
             await __testing.resolveGlob(path.join(tempDir, "missing.log")),
             []
         );
+        const noOwnerFile = path.join(tempDir, "no-owner.log");
+        await __testing.createNoFollowFile(noOwnerFile, 0o600);
+        assert.equal(await readFile(noOwnerFile, "utf8"), "");
+        const ownerFile = path.join(tempDir, "owner.log");
+        const chownCalls: Array<{ uid: number; gid: number }> = [];
+        const closeCalls: string[] = [];
+        mock.method(fsPromises, "open", async () => ({
+            chown: async (uid: number, gid: number) => {
+                chownCalls.push({ uid, gid });
+            },
+            close: async () => {
+                closeCalls.push(ownerFile);
+            },
+            stat: async () => ({ uid: 0, gid: 0 }),
+        }));
+        await __testing.createNoFollowFile(ownerFile, 0o600, { uid: 123, gid: 456 });
+        assert.deepEqual(chownCalls, [{ uid: 123, gid: 456 }]);
+        assert.deepEqual(closeCalls, [ownerFile]);
+        mock.restoreAll();
         assert.equal(
             await __testing.assertSafePath(path.join(tempDir, "missing.log"), [tempDir]),
             false
@@ -247,7 +275,7 @@ describe("log rotation service", { concurrency: false }, () => {
             __testing.shouldRotate({
                 stat: { size: 10 },
                 policy: { daily: true },
-                stateEntry: { lastRotatedAt: "2020-01-01T00:00:00.000Z" },
+                stateEntry: { lastRotatedAt: yesterday.toISOString() },
             }),
             { rotate: true, reason: "daily" }
         );

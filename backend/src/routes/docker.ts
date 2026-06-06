@@ -1262,7 +1262,7 @@ export default function dockerRoutes(app: express.Application): void {
 
             const result = await runManualUpdaterForService(service);
             const updatedService = result.success
-                ? await getDockerUpdaterServiceById(service.id)
+                ? ((await getDockerUpdaterServiceById(service.id)) ?? service)
                 : service;
             res.status(result.success ? 200 : 500).json({
                 success: result.success,

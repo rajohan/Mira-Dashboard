@@ -345,6 +345,7 @@ process.stdout.write("updated\n");
                 assert.deepEqual(updater.__testing.listComposeFiles(), [
                     path.join(appDir, "compose.yaml"),
                 ]);
+                assert.equal(updater.__testing.getDockerAppsRoot(), appsRoot);
                 const services = updater.__testing.servicesFromCompose(
                     path.join(appDir, "compose.yaml")
                 );
@@ -358,6 +359,29 @@ process.stdout.write("updated\n");
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");
             }
         );
+    });
+
+    it("resolves the default apps root at call time", async () => {
+        const firstRoot = path.join(tempDir, "apps-a");
+        const secondRoot = path.join(tempDir, "apps-b");
+        const firstApp = path.join(firstRoot, "first");
+        const secondApp = path.join(secondRoot, "second");
+        await mkdir(firstApp, { recursive: true });
+        await mkdir(secondApp, { recursive: true });
+        await writeFile(path.join(firstApp, "compose.yaml"), "services: {}\n", "utf8");
+        await writeFile(path.join(secondApp, "compose.yaml"), "services: {}\n", "utf8");
+        const updater = await import(`./dockerUpdater.js?dynamic-root=${Date.now()}`);
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: firstRoot }, async () => {
+            assert.deepEqual(updater.__testing.listComposeFiles(), [
+                path.join(firstApp, "compose.yaml"),
+            ]);
+        });
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: secondRoot }, async () => {
+            assert.deepEqual(updater.__testing.listComposeFiles(), [
+                path.join(secondApp, "compose.yaml"),
+            ]);
+        });
     });
 
     it("fails registration after malformed compose files without pruning existing rows", async () => {

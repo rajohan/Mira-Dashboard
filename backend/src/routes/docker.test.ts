@@ -2028,6 +2028,36 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);
+        db.exec(`
+            CREATE TEMP TRIGGER delete_updated_manual_service_after_event
+            AFTER INSERT ON docker_update_events
+            WHEN NEW.managed_service_id = 1 AND NEW.event_type = 'manual_update_succeeded'
+            BEGIN
+                DELETE FROM docker_managed_services WHERE id = NEW.managed_service_id;
+            END;
+        `);
+        try {
+            const fallback = await requestJson<{
+                success: boolean;
+                service: {
+                    id: number;
+                    currentTag: string | null;
+                    lastStatus: string | null;
+                };
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(fallback.status, 200);
+            assert.equal(fallback.body.success, true);
+            assert.equal(fallback.body.service.id, 1);
+            assert.equal(fallback.body.service.currentTag, "1.0.0");
+            assert.equal(fallback.body.service.lastStatus, "update_available");
+        } finally {
+            db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
+        }
+
+        await seedDockerUpdaterState(tempDir);
         const previousFetch = globalThis.fetch;
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();

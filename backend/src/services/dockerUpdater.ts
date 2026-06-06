@@ -9,7 +9,6 @@ import YAML from "yaml";
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 
-const APPS_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
@@ -25,6 +24,10 @@ function getDockerComposeWrapper(): string {
         "MIRA_DOCKER_COMPOSE_WRAPPER",
         `${dockerRoot}/bin/docker-compose-doppler`
     );
+}
+
+function getDockerAppsRoot(): string {
+    return nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
 
 function getComposeCommand(composePath: string, serviceName: string) {
@@ -591,7 +594,7 @@ function booleanLabel(value: string | undefined, fallback = false): boolean {
     return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-function listComposeFiles(root = APPS_ROOT): string[] {
+function listComposeFiles(root = getDockerAppsRoot()): string[] {
     if (!fs.existsSync(root)) return [];
     return fs
         .readdirSync(root, { withFileTypes: true })
@@ -670,7 +673,8 @@ function servicesFromCompose(composePath: string) {
 export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStepResult> {
     let composeFiles: string[];
     try {
-        if (!fs.existsSync(APPS_ROOT)) {
+        const appsRoot = getDockerAppsRoot();
+        if (!fs.existsSync(appsRoot)) {
             return {
                 ok: false,
                 step: "register-services",
@@ -680,13 +684,13 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                     failed: [
                         {
                             appSlug: "*",
-                            error: `Compose apps root not found: ${APPS_ROOT}`,
+                            error: `Compose apps root not found: ${appsRoot}`,
                         },
                     ],
                 }),
             };
         }
-        composeFiles = listComposeFiles();
+        composeFiles = listComposeFiles(appsRoot);
     } catch (error) {
         return {
             ok: false,
@@ -1040,6 +1044,7 @@ export const __testing = {
     applyServiceUpdate,
     buildTargetImageRef,
     fetchJson,
+    getDockerAppsRoot,
     getComposeCommand,
     imageRegistry,
     imageMatchesPlatform,

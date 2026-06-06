@@ -338,13 +338,26 @@ async function unlinkVerified(filePath: string, approvedRoots: string[]): Promis
     await fs.unlink(filePath);
 }
 
-async function createNoFollowFile(filePath: string, mode: number): Promise<void> {
+async function createNoFollowFile(
+    filePath: string,
+    mode: number,
+    owner?: { uid: number; gid: number }
+): Promise<void> {
     const handle = await fs.open(
         filePath,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         mode
     );
-    await handle.close();
+    try {
+        if (owner) {
+            const created = await handle.stat();
+            if (created.uid !== owner.uid || created.gid !== owner.gid) {
+                await handle.chown(owner.uid, owner.gid);
+            }
+        }
+    } finally {
+        await handle.close();
+    }
 }
 
 async function gzipFile(filePath: string, approvedRoots: string[]): Promise<string> {
@@ -418,7 +431,10 @@ async function rotateRename(
 ): Promise<string> {
     await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
-    await createNoFollowFile(filePath, file.stat.mode & 0o777);
+    await createNoFollowFile(filePath, file.stat.mode & 0o777, {
+        uid: file.stat.uid,
+        gid: file.stat.gid,
+    });
     return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
 
@@ -602,9 +618,18 @@ function hasRotatedInCadence(
     cadence: "daily" | "weekly" | null
 ): boolean {
     if (!cadence || !stateEntry?.lastRotatedAt) return false;
-    const last = new Date(stateEntry.lastRotatedAt).getTime();
+    const lastDate = new Date(stateEntry.lastRotatedAt);
+    const last = lastDate.getTime();
     if (!Number.isFinite(last)) return false;
-    const windowMs = cadence === "weekly" ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    if (cadence === "daily") {
+        const now = new Date();
+        return (
+            lastDate.getFullYear() === now.getFullYear() &&
+            lastDate.getMonth() === now.getMonth() &&
+            lastDate.getDate() === now.getDate()
+        );
+    }
+    const windowMs = 7 * 24 * 60 * 60 * 1000;
     return Date.now() - last < windowMs;
 }
 
@@ -1025,6 +1050,7 @@ export const __testing = {
     assertSafePath,
     byteLimitFromMb,
     defaultConfigPath: DEFAULT_CONFIG_PATH,
+    createNoFollowFile,
     gzipFile,
     globToRegex,
     hasRotatedInCadence,
