@@ -1019,6 +1019,29 @@ process.stdout.write("updated\n");
                 Object.defineProperty(process, "arch", archDescriptor);
             }
         }
+        Object.defineProperty(process, "arch", {
+            configurable: true,
+            enumerable: true,
+            value: "arm64",
+        });
+        try {
+            assert.deepEqual(
+                await updater.__testing.lookupDockerHub({
+                    ...baseService,
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                    metadata_json: undefined,
+                }),
+                {
+                    latestTag: "3",
+                    latestDigest: "sha256:old",
+                }
+            );
+        } finally {
+            if (archDescriptor) {
+                Object.defineProperty(process, "arch", archDescriptor);
+            }
+        }
         process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         assert.deepEqual(
             await updater.__testing.lookupDockerHub({
