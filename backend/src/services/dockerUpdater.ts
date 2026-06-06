@@ -247,7 +247,15 @@ async function lookupDockerHub(service: ManagedServiceRow) {
 
 async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
-    const tag = service.current_tag || service.tag_match_pattern;
+    let tag = service.current_tag || service.tag_match_pattern;
+    if (service.tag_match_pattern) {
+        const tagsData = await fetchJson(`https://ghcr.io/v2/${repo}/tags/list`);
+        const candidates = (Array.isArray(tagsData.tags) ? tagsData.tags : [])
+            .filter((item): item is string => typeof item === "string")
+            .filter((candidate) => candidate && tagMatches(service, candidate))
+            .sort(compareTags);
+        tag = candidates.at(-1) || tag;
+    }
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
     }

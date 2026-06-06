@@ -736,6 +736,35 @@ process.stdout.write("updated\n");
             }
         );
 
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.endsWith("/tags/list")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ tags: ["1.0.0", "2.0.0", "dev"] }),
+                } as Response;
+            }
+            return {
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:ghcr-2" }),
+                json: async () => ({}),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                current_tag: "1.0.0",
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d+\.\d+\.\d+$`,
+            }),
+            {
+                latestTag: "2.0.0",
+                latestDigest: "sha256:ghcr-2",
+            }
+        );
+
         globalThis.fetch = (async () =>
             ({
                 ok: true,

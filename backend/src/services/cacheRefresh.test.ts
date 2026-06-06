@@ -1037,6 +1037,55 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         );
     });
 
+    it("uses the configured Docker binary for backup cache producers", async () => {
+        const binDir = path.join(tempDir, "configured-docker-bin");
+        await mkdir(binDir);
+        const dockerBin = path.join(binDir, "configured-docker");
+        await writeExecutable(
+            dockerBin,
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(process.env.MIRA_DOCKER_BIN_LOG, process.argv.slice(2).join(" ") + "\n");
+if (process.argv.includes("kopia")) {
+  console.log("[]");
+} else {
+  console.log("[]");
+}
+`
+        );
+        const logPath = path.join(tempDir, "docker-bin.log");
+
+        await withEnv(
+            { MIRA_DOCKER_BIN: dockerBin, MIRA_DOCKER_BIN_LOG: logPath },
+            async () => {
+                await refreshCacheProducer("backup.kopia.status");
+                await refreshCacheProducer("backup.walg.status");
+            }
+        );
+
+        const log = await import("node:fs/promises").then((fs) =>
+            fs.readFile(logPath, "utf8")
+        );
+        assert.match(log, /exec kopia kopia snapshot list --all --json/u);
+        assert.match(log, /exec walg wal-g backup-list --detail --json/u);
+    });
+
+    it("records cache producer failures before rethrowing", async () => {
+        globalThis.fetch = (async () => {
+            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+        }) as typeof fetch;
+
+        await assert.rejects(
+            () => refreshCacheProducer("weather.spydeberg"),
+            /Request timeout/u
+        );
+
+        const row = cacheRow("weather.spydeberg");
+        assert.equal(row.status, "error");
+        assert.match(row.error_message ?? "", /Request timeout/u);
+        assert.equal(row.consecutive_failures, 1);
+    });
+
     it("covers additional producer fallback branches", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             await withFetch(

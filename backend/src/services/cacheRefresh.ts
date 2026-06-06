@@ -157,17 +157,29 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
 }
 
 async function fetchJson(url: string, headers: Record<string, string> = {}) {
-    const response = await fetch(url, {
-        headers: {
-            Accept: "application/json",
-            "User-Agent": "mira-dashboard-cache/1.0",
-            ...headers,
-        },
-    });
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${url}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                Accept: "application/json",
+                "User-Agent": "mira-dashboard-cache/1.0",
+                ...headers,
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} for ${url}`);
+        }
+        return response.json() as Promise<unknown>;
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`Request timeout for ${url}`, { cause: error });
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
     }
-    return response.json() as Promise<unknown>;
 }
 
 async function fetchMoltbookJson(path: string) {
@@ -597,7 +609,7 @@ function summarizeKopiaSnapshot(value: unknown) {
 }
 
 async function refreshKopiaBackupCache() {
-    const output = await runCommand("docker", [
+    const output = await runCommand(getDockerBin(), [
         "exec",
         "kopia",
         "kopia",
@@ -690,7 +702,7 @@ function getWalgBackupTime(backup: { modified: string | null }) {
 }
 
 async function refreshWalgBackupCache() {
-    const output = await runCommand("docker", [
+    const output = await runCommand(getDockerBin(), [
         "exec",
         "walg",
         "wal-g",
@@ -866,6 +878,10 @@ function getQuotaCodexHome() {
 
 function getOpenclawBin() {
     return process.env.OPENCLAW_BIN || "/home/ubuntu/.npm-global/bin/openclaw";
+}
+
+function getDockerBin() {
+    return process.env.MIRA_DOCKER_BIN || "docker";
 }
 
 function getCodexBin() {
@@ -1118,6 +1134,7 @@ export const __testing = {
     fetchSpydebergWeather,
     getSnapshotTime,
     getWalgBackupTime,
+    getDockerBin,
     getOpenclawBin,
     getCodexBin,
     getQuotaCodexHome,
