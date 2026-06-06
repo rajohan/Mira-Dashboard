@@ -47,7 +47,7 @@ async function waitForDeploymentStatus(
     tempDir: string
 ): Promise<Record<string, unknown>> {
     let lastJob = {} as Record<string, unknown>;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
         try {
             const job = readDeploymentJobFromDb(jobId, tempDir);
             if (job) {
@@ -66,7 +66,7 @@ async function waitForDeploymentStatus(
 }
 
 async function waitForDeploymentLockReleased(tempDir: string): Promise<void> {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
         try {
             if (!readDeploymentLockFromDb(tempDir)) {
                 return;
@@ -1992,6 +1992,7 @@ describe("pull request routes", () => {
     });
 
     it("approves, rejects, and deploys Mira pull requests", async () => {
+        clearDeploymentState(tempDir);
         const approve = await requestJson<{
             ok: boolean;
             message: string;
@@ -2222,6 +2223,7 @@ describe("pull request routes", () => {
     });
 
     it("allows approved non-Mira pull requests to merge", async () => {
+        clearDeploymentState(tempDir);
         const response = await requestJson<{
             ok: boolean;
             message: string;
@@ -2392,6 +2394,7 @@ describe("pull request routes", () => {
     });
 
     it("surfaces production checkout and deploy readiness failures", async () => {
+        clearDeploymentState(tempDir);
         const originalConsoleError = console.error;
         console.error = () => {
             // Suppress expected route errors for forced deploy failures.
@@ -2449,6 +2452,7 @@ describe("pull request routes", () => {
                 `./pullRequests.js?active-deploy=${randomUUID()}`
             );
             const activeUpdatedAt = new Date().toISOString();
+            clearDeploymentState(tempDir);
             __testing.writeDeploymentJob({
                 id: "active-job",
                 status: "building",

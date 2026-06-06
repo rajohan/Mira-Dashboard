@@ -73,9 +73,6 @@ export function Jobs() {
         scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
 
     async function saveSchedule() {
-        if (!selectedJob || !scheduleIsValid) {
-            return;
-        }
         const patch = {
             scheduleType: scheduleTypeDraft,
             ...(scheduleTypeDraft === "interval"
@@ -83,26 +80,20 @@ export function Jobs() {
                 : { timeOfDay: timeOfDayDraft }),
         };
         await updateJob.mutateAsync({
-            id: selectedJob.id,
+            id: selectedJob!.id,
             patch,
         });
     }
 
     async function toggleSelected(enabled: boolean) {
-        if (!selectedJob) {
-            return;
-        }
         await updateJob.mutateAsync({
-            id: selectedJob.id,
+            id: selectedJob!.id,
             patch: { enabled },
         });
     }
 
     async function runSelected() {
-        if (!selectedJob) {
-            return;
-        }
-        await runJob.mutateAsync({ id: selectedJob.id });
+        await runJob.mutateAsync({ id: selectedJob!.id });
     }
 
     return (

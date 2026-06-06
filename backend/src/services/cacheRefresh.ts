@@ -1049,6 +1049,9 @@ async function refreshQuotasCache() {
 }
 
 export async function refreshCacheProducer(key: string) {
+    if (key === "moltbook") {
+        return refreshMoltbookCache();
+    }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshMoltbookCache();
     }

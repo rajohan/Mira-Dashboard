@@ -240,14 +240,32 @@ async function assertSafePath(
 async function openVerifiedLogFile(
     filePath: string,
     approvedRoots: string[]
-): Promise<VerifiedLogFile | null> {
-    const safe = await assertSafePath(filePath, approvedRoots);
-    if (!safe) return null;
-    const lstat = await fs.lstat(filePath);
+): Promise<VerifiedLogFile> {
     const handle = await fs.open(filePath, constants.O_RDWR | constants.O_NOFOLLOW);
     try {
         const stat = await handle.stat();
-        if (stat.dev !== lstat.dev || stat.ino !== lstat.ino) {
+        if (!stat.isFile()) {
+            throw new Error(`Refusing non-file path: ${filePath}`);
+        }
+        const realFilePath = await fs.realpath(filePath);
+        const resolvedRoots = await Promise.all(
+            approvedRoots.map(async (root) => {
+                try {
+                    return await fs.realpath(root);
+                } catch {
+                    return null;
+                }
+            })
+        );
+        const realRoots = resolvedRoots.filter((root): root is string => root !== null);
+        if (realRoots.length === 0) {
+            throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
+        }
+        if (!realRoots.some((root) => isUnderRoot(realFilePath, root))) {
+            throw new Error(`Unsafe path outside approved roots: ${filePath}`);
+        }
+        const currentStat = await fs.stat(filePath);
+        if (stat.dev !== currentStat.dev || stat.ino !== currentStat.ino) {
             throw new Error(`Unsafe path changed before rotation: ${filePath}`);
         }
         return { handle, stat };
@@ -666,7 +684,6 @@ export async function runLogRotationService(
                     finalArchive = policy.compress ? `${archivePath}.gz` : archivePath;
                 } else {
                     const verified = await openVerifiedLogFile(filePath, approvedRoots);
-                    if (!verified) continue;
                     try {
                         finalArchive =
                             policy.strategy === "rename"
@@ -746,6 +763,7 @@ export const __testing = {
     globToRegex,
     hasRotatedInCadence,
     mergePolicy,
+    openVerifiedLogFile,
     readLogRotationState,
     resolveGlob,
     shouldRotate,

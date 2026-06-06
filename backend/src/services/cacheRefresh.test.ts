@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -153,6 +153,15 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     };
                 },
                 async () => {
+                    assert.deepEqual(await refreshCacheProducer("moltbook"), {
+                        refreshed: [
+                            "moltbook.home",
+                            "moltbook.feed.hot",
+                            "moltbook.feed.new",
+                            "moltbook.profile",
+                            "moltbook.my-content",
+                        ],
+                    });
                     assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
                         refreshed: [
                             "moltbook.home",
@@ -179,6 +188,10 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
             await assert.rejects(() => refreshMoltbookCache(), /MOLTBOOK_API_KEY/u);
         });
+        await assert.rejects(
+            () => refreshCacheProducer("moltbook.unknown"),
+            /Unsupported Moltbook cache key/u
+        );
     });
 
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
@@ -715,6 +728,13 @@ if (args.includes("capture-pane")) {
                 fs.readFile(noNewlineConfigPath, "utf8")
             ),
             /model = "codex"\n\n\[projects/u
+        );
+
+        const codexHomeBadConfig = path.join(tempDir, "codex-home-bad-config");
+        await mkdir(path.join(codexHomeBadConfig, "config.toml"), { recursive: true });
+        assert.throws(
+            () => __testing.ensureCodexTrustConfig(codexHomeBadConfig),
+            /EISDIR|illegal operation/u
         );
 
         await withEnv(

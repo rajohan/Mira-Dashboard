@@ -153,6 +153,18 @@ process.stdout.write("updated\n");
                 const { runDockerUpdaterService } = await import(
                     `./dockerUpdater.js?auto=${Date.now()}`
                 );
+                db.prepare(
+                    `INSERT INTO docker_managed_services (
+                        app_slug, service_name, compose_path, image_repo,
+                        compose_image_ref, compose_image_field, current_tag,
+                        current_digest, policy, pin_mode, tag_match_type,
+                        tag_match_pattern, enabled, metadata_json
+                    ) VALUES (
+                        'demo', 'removed', ?, 'busybox', 'busybox:1',
+                        'services.removed.image', '1', NULL, 'notify', 'tag',
+                        'exact', '1', 1, '{}'
+                    )`
+                ).run(composePath);
                 const steps = (await runDockerUpdaterService()) as StepResult[];
                 assert.equal(
                     steps.every((step) => step.ok),
@@ -178,6 +190,10 @@ process.stdout.write("updated\n");
         assert.equal(web?.current_tag, "1.2.1");
         assert.equal(web?.latest_digest, "sha256:new");
         assert.equal(web?.last_status, "updated");
+        assert.equal(
+            rows.some((row) => row.service_name === "removed"),
+            false
+        );
         assert.ok(
             fetchUrls.some((url) => url.includes("repositories/library/nginx/tags"))
         );
@@ -237,6 +253,22 @@ process.stdout.write("updated\n");
                 const firstRun = await runDockerUpdaterService();
                 assert.equal(firstRun[1]?.ok, false);
                 assert.match(firstRun[1]?.stderr ?? "", /bad-registry/u);
+                const badRegistry = db
+                    .prepare(
+                        "SELECT * FROM docker_managed_services WHERE service_name = 'bad-registry'"
+                    )
+                    .get() as { id: number };
+                const manualPollFailure = await runDockerUpdaterService(badRegistry.id);
+                assert.deepEqual(
+                    (manualPollFailure as StepResult[]).map((step) => [
+                        step.step,
+                        step.ok,
+                    ]),
+                    [
+                        ["register", true],
+                        ["poll", false],
+                    ]
+                );
 
                 db.prepare(
                     `UPDATE docker_managed_services
@@ -296,7 +328,7 @@ process.stdout.write("updated\n");
                 assert.equal(services[0].currentTag, null);
                 assert.equal(services[1].pinMode, "digest");
                 const steps = await updater.runDockerUpdaterService(123);
-                assert.equal(steps[1].ok, true);
+                assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");
             }
         );
@@ -320,6 +352,38 @@ process.stdout.write("updated\n");
             "library/redis"
         );
         assert.equal(updater.__testing.stripRegistry("ghcr.io/owner/app"), "owner/app");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand("/srv/app/compose.yaml", "web"),
+                    {
+                        file: "/tmp/mira-compose-wrapper",
+                        args: ["-f", "/srv/app/compose.yaml", "up", "-d", "web"],
+                    }
+                );
+            }
+        );
+        const dockerRoot = path.join(tempDir, "docker-root");
+        const wrapperPath = path.join(dockerRoot, "bin", "docker-compose-doppler");
+        await mkdir(path.dirname(wrapperPath), { recursive: true });
+        await writeFile(wrapperPath, "#!/bin/sh\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_ROOT: dockerRoot,
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        path.join(dockerRoot, "apps/app/compose.yaml"),
+                        "web"
+                    ).file,
+                    wrapperPath
+                );
+            }
+        );
         assert.equal(
             updater.__testing.isSafeTagRegexPattern(String.raw`^1\.2\.[0-9]+$`),
             true
@@ -420,11 +484,26 @@ process.stdout.write("updated\n");
             "repo/app:3"
         );
         assert.deepEqual(nestedTarget, { services: { app: { image: "repo/app:3" } } });
+        const dottedTarget = { services: {} };
+        updater.__testing.setNestedValue(
+            dottedTarget,
+            "services.api.worker.image",
+            "repo/dotted:1"
+        );
+        assert.deepEqual(dottedTarget, {
+            services: { "api.worker": { image: "repo/dotted:1" } },
+        });
         assert.equal(updater.__testing.caughtMessage("plain failure"), "plain failure");
         assert.equal(
             updater.__testing.caughtMessage(new Error("typed failure")),
             "typed failure"
         );
+        globalThis.fetch = (async () =>
+            ({
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:new" }),
+                json: async () => ({}),
+            }) as Response) as typeof fetch;
         assert.deepEqual(
             await updater.__testing.lookupGhcr({
                 ...baseService,
@@ -433,6 +512,20 @@ process.stdout.write("updated\n");
                 tag_match_pattern: null,
             }),
             { latestTag: "2", latestDigest: "sha256:new" }
+        );
+        globalThis.fetch = (async () =>
+            ({
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({}),
+            }) as Response) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                latest_digest: null,
+            }),
+            { latestTag: "1", latestDigest: null }
         );
 
         globalThis.fetch = (async () =>
@@ -458,8 +551,27 @@ process.stdout.write("updated\n");
             throw Object.assign(new Error("aborted"), { name: "AbortError" });
         }) as typeof fetch;
         await assert.rejects(
+            () =>
+                updater.__testing.lookupGhcr({
+                    ...baseService,
+                    image_repo: "ghcr.io/owner/app",
+                }),
+            /Request timeout/u
+        );
+        await assert.rejects(
             () => updater.__testing.fetchJson("https://hub.docker.com/timeout"),
             /Request timeout/u
+        );
+        globalThis.fetch = (async () => {
+            throw new Error("network down");
+        }) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.lookupGhcr({
+                    ...baseService,
+                    image_repo: "ghcr.io/owner/app",
+                }),
+            /network down/u
         );
 
         globalThis.fetch = (async (input: string | URL | Request) => {
@@ -519,6 +631,77 @@ process.stdout.write("updated\n");
         assert.deepEqual(await updater.__testing.lookupGhcr(baseService), {
             latestTag: "1",
             latestDigest: "sha256:new",
+        });
+        globalThis.fetch = (async () =>
+            ({
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({ digest: "sha256:body" }),
+            }) as Response) as typeof fetch;
+        assert.deepEqual(await updater.__testing.lookupGhcr(baseService), {
+            latestTag: "1",
+            latestDigest: "sha256:body",
+        });
+
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                policy, pin_mode, tag_match_type, tag_match_pattern, enabled,
+                metadata_json
+            ) VALUES (
+                'fallbacks', 'nulls', '/tmp/compose.yaml', 'repo/app',
+                'repo/app', 'services.nulls.image', NULL, NULL, 'notify', 'tag',
+                'exact', NULL, 1, '{}'
+            )`
+        ).run();
+        await withEnv({ MIRA_DOCKER_UPDATER_SKIP_REGISTRY: "1" }, async () => {
+            const result = await updater.pollDockerUpdaterRegistries();
+            assert.equal(result.ok, true);
+        });
+        const nullFallback = db
+            .prepare(
+                "SELECT latest_tag, latest_digest FROM docker_managed_services WHERE service_name = 'nulls'"
+            )
+            .get() as { latest_tag: string | null; latest_digest: string | null };
+        assert.equal(nullFallback.latest_tag, null);
+        assert.equal(nullFallback.latest_digest, null);
+    });
+
+    it("rolls back service registration transaction failures", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "rollback-register");
+        await mkdir(appDir, { recursive: true });
+        await writeFile(
+            path.join(appDir, "compose.yaml"),
+            "services:\n  web:\n    image: nginx:1\n",
+            "utf8"
+        );
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?register-rollback=${Date.now()}`
+            );
+            const originalExec = db.exec.bind(db);
+            const calls: string[] = [];
+            const execMock = mock.method(db, "exec", (sql: string) => {
+                calls.push(sql);
+                if (sql === "COMMIT") {
+                    throw new Error("commit failed");
+                }
+                return originalExec(sql);
+            });
+            try {
+                await assert.rejects(
+                    () => updater.registerDockerUpdaterServices(),
+                    /commit failed/u
+                );
+                assert.deepEqual(
+                    calls.filter((sql) => sql === "ROLLBACK"),
+                    ["ROLLBACK"]
+                );
+            } finally {
+                execMock.mock.restore();
+            }
         });
     });
 

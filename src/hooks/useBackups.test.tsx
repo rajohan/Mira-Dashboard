@@ -66,6 +66,21 @@ describe("backup hooks", () => {
         await waitFor(() => expect(result.current.data?.job?.status).toBe("running"));
     });
 
+    it("uses short polling while walg backup is running", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ job: { id: "walg", status: "running" } }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useWalgBackup(), {
+            wrapper: createQueryWrapper(),
+        });
+
+        await waitFor(() => expect(result.current.data?.job?.status).toBe("running"));
+    });
+
     it("runs kopia backup and invalidates status caches", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,

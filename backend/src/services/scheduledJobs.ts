@@ -92,7 +92,8 @@ interface DefaultScheduledJob {
 }
 
 type CacheRefreshRunner = (key: string) => Promise<unknown>;
-type DockerUpdaterRunner = () => Promise<unknown>;
+type DockerUpdaterStep = { step: string; ok: boolean; stderr?: string };
+type DockerUpdaterRunner = () => Promise<DockerUpdaterStep[]>;
 type LogRotationRunner = (options: { dryRun: boolean }) => Promise<unknown>;
 type NotificationRunner = () => Promise<void>;
 
@@ -231,6 +232,7 @@ const obsoleteDefaultJobIds = [
 
 const runningJobs = new Set<string>();
 let scheduler: NodeJS.Timeout | null = null;
+let schedulerTickRunning = false;
 let actionExecutor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined;
 let cacheRefreshRunner: CacheRefreshRunner = refreshCacheProducer;
 let dockerUpdaterRunner: DockerUpdaterRunner = runDockerUpdaterService;
@@ -499,6 +501,14 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
     }
     if (job.actionType === "docker.updater") {
         const steps = await dockerUpdaterRunner();
+        if (steps.some((step) => !step.ok)) {
+            throw new Error(
+                steps
+                    .filter((step) => !step.ok)
+                    .map((step) => step.stderr || `${step.step} failed`)
+                    .join("\n")
+            );
+        }
         return { steps };
     }
     if (job.actionType === "notification.openclaw") {
@@ -571,7 +581,11 @@ async function runDueJobs(): Promise<void> {
         if (runningJobs.has(row.id)) {
             continue;
         }
-        await runScheduledJob(row.id, "schedule");
+        const latest = getScheduledJob(row.id);
+        if (!latest?.nextRunAt || latest.nextRunAt > nowIso()) {
+            continue;
+        }
+        await runScheduledJob(latest.id, "schedule");
     }
 }
 
@@ -582,9 +596,17 @@ export function startScheduledJobScheduler(): void {
     }
     ensureDefaultScheduledJobs();
     scheduler = setInterval(() => {
-        runDueJobs().catch((error) => {
-            console.error("[scheduledJobs] runDueJobs failed", error);
-        });
+        if (schedulerTickRunning) {
+            return;
+        }
+        schedulerTickRunning = true;
+        runDueJobs()
+            .catch((error) => {
+                console.error("[scheduledJobs] runDueJobs failed", error);
+            })
+            .finally(() => {
+                schedulerTickRunning = false;
+            });
     }, schedulerTickMs);
     scheduler.unref();
 }
@@ -596,6 +618,7 @@ export function stopScheduledJobScheduler(): void {
     }
     clearInterval(scheduler);
     scheduler = null;
+    schedulerTickRunning = false;
 }
 
 export const __testing = {

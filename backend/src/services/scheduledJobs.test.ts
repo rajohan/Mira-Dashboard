@@ -164,6 +164,22 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
         "notification.openclaw",
         "notification.quotas",
     ]);
+
+    __testing.setActionRunnersForTests({
+        dockerUpdater: async () => [
+            { ok: false, step: "poll", stderr: "registry unavailable" },
+        ],
+    });
+    const failedDocker = await runScheduledJob("docker.updater");
+    assert.equal(failedDocker.status, "failed");
+    assert.match(failedDocker.message ?? "", /registry unavailable/u);
+
+    __testing.setActionRunnersForTests({
+        dockerUpdater: async () => [{ ok: false, step: "poll", stderr: "" }],
+    });
+    const failedDockerFallback = await runScheduledJob("docker.updater");
+    assert.equal(failedDockerFallback.status, "failed");
+    assert.match(failedDockerFallback.message ?? "", /poll failed/u);
 });
 
 test("runs due scheduled jobs and skips jobs already running", async () => {
@@ -194,6 +210,36 @@ test("runs due scheduled jobs and skips jobs already running", async () => {
         ["cache.weather"]
     );
     assert.ok(ran.includes("cache.git"));
+
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = NULL WHERE id = ?").run(
+        "cache.git"
+    );
+    await __testing.runDueJobs();
+
+    const staleRow = db
+        .prepare("SELECT * FROM scheduled_jobs WHERE id = ?")
+        .get("cache.git");
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2999-01-01T00:00:00.000Z",
+        "cache.git"
+    );
+    const originalPrepare = db.prepare.bind(db);
+    const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
+        if (
+            sql.includes(
+                "WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?"
+            )
+        ) {
+            return { all: () => [staleRow] };
+        }
+        return originalPrepare(sql);
+    });
+    try {
+        await __testing.runDueJobs();
+        assert.equal(ran.filter((id) => id === "cache.git").length, 1);
+    } finally {
+        prepareMock.mock.restore();
+    }
 });
 
 test("covers scheduled job mapping and unsupported-action edge cases", async () => {
@@ -213,6 +259,34 @@ test("covers scheduled job mapping and unsupported-action edge cases", async () 
     const failedMany = await runScheduledJob("custom.bad-json");
     assert.equal(failedMany.status, "failed");
     assert.equal(failedMany.message, "cache.refreshMany requires settings.keys");
+
+    db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds,
+            action_type, action_target, settings_json, next_run_at, created_at, updated_at
+        ) VALUES (
+            'custom.refresh-many', 'Refresh many', 'Refresh many', 1, 'interval', 60,
+            'cache.refreshMany', 'many', ?, ?, ?, ?
+        )`
+    ).run(
+        JSON.stringify({ keys: ["cache.weather", 42, "cache.git"] }),
+        new Date().toISOString(),
+        new Date().toISOString(),
+        new Date().toISOString()
+    );
+    const refreshed: string[] = [];
+    __testing.setActionRunnersForTests({
+        cacheRefresh: async (key) => {
+            refreshed.push(key);
+            return { key };
+        },
+    });
+    const refreshMany = await runScheduledJob("custom.refresh-many");
+    assert.deepEqual(refreshed, ["cache.weather", "cache.git"]);
+    assert.equal(
+        (refreshMany.output.entries as Array<{ key: string }>)[1]?.key,
+        "cache.git"
+    );
 
     db.prepare(
         `INSERT INTO scheduled_jobs (
@@ -252,30 +326,50 @@ test("rejects duplicate manual runs and starts the scheduler tick", async () => 
     const originalClearInterval = globalThis.clearInterval;
     let intervalMs = 0;
     let cleared = false;
+    let tick: (() => void) | undefined;
+    const loggedErrors: unknown[][] = [];
+    const originalConsoleError = console.error;
     __testing.setActionExecutorForTests(
-        () => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 25))
+        () =>
+            new Promise((_resolve, reject) =>
+                setTimeout(() => reject(new Error("tick failed")), 25)
+            )
     );
     const first = runScheduledJob("cache.weather");
     await assert.rejects(() => runScheduledJob("cache.weather"), /already running/u);
-    await first;
+    const failedRun = await first;
+    assert.equal(failedRun.status, "failed");
+    assert.match(failedRun.message ?? "", /tick failed/u);
 
     globalThis.setInterval = ((callback: () => void, ms?: number) => {
         intervalMs = ms ?? 0;
-        callback();
+        tick = callback;
         return { unref: () => {} } as unknown as NodeJS.Timeout;
     }) as typeof setInterval;
     globalThis.clearInterval = ((_timer?: NodeJS.Timeout | number | string) => {
         cleared = true;
     }) as typeof clearInterval;
+    console.error = (...args: unknown[]) => {
+        loggedErrors.push(args);
+    };
     try {
         startScheduledJobScheduler();
         startScheduledJobScheduler();
+        const prepareMock = test.mock.method(db, "prepare", () => {
+            throw new Error("runDueJobs unavailable");
+        });
+        tick?.();
+        tick?.();
+        await new Promise((resolve) => setTimeout(resolve, 35));
+        prepareMock.mock.restore();
         stopScheduledJobScheduler();
         assert.equal(intervalMs > 0, true);
         assert.equal(cleared, true);
+        assert.equal(loggedErrors[0]?.[0], "[scheduledJobs] runDueJobs failed");
     } finally {
         stopScheduledJobScheduler();
         globalThis.setInterval = originalSetInterval;
         globalThis.clearInterval = originalClearInterval;
+        console.error = originalConsoleError;
     }
 });

@@ -239,13 +239,36 @@ async function lookupGhcr(service: ManagedServiceRow) {
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
     }
-    const response = await fetchJson(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
-        Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+        response = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
+            signal: controller.signal,
+            headers: {
+                Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
+                "User-Agent": "mira-dashboard-docker-updater/1.0",
+            },
+        });
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`Request timeout for ghcr.io/${repo}:${tag}`, {
+                cause: error,
+            });
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status} for ghcr.io/${repo}:${tag}`);
+    }
+    const body = asRecord(await response.json());
     return {
         latestTag: tag,
         latestDigest:
-            typeof response.digest === "string" ? response.digest : service.latest_digest,
+            response.headers.get("docker-content-digest") ||
+            (typeof body.digest === "string" ? body.digest : service.latest_digest),
     };
 }
 
@@ -664,15 +687,14 @@ export async function runDockerUpdaterService(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult[]> {
     const register = await registerDockerUpdaterServices();
-    const poll = await pollDockerUpdaterRegistries();
     if (serviceId !== undefined) {
         const service = db
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(serviceId) as ManagedServiceRow | undefined;
+        const poll = service ? await pollDockerUpdaterRegistries() : undefined;
         if (!service) {
             return [
                 register,
-                poll,
                 {
                     step: "manual-update",
                     ok: false,
@@ -681,8 +703,14 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
+        if (!register.ok || !poll?.ok) {
+            return [register, poll].filter(
+                (step): step is DockerUpdaterStepResult => step !== undefined
+            );
+        }
         return [register, poll, await applyServiceUpdate(service, "manual")];
     }
+    const poll = await pollDockerUpdaterRegistries();
     const autoServices = db
         .prepare(
             "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"
@@ -699,6 +727,7 @@ export const __testing = {
     applyServiceUpdate,
     buildTargetImageRef,
     fetchJson,
+    getComposeCommand,
     hasUpdate,
     listComposeFiles,
     lookupDockerHub,

@@ -211,6 +211,24 @@ describe("ops routes", () => {
             "/api/ops/log-rotation/status"
         );
         assert.deepEqual(withoutLastRun.body, { success: true, lastRun: null });
+
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, consecutive_failures, metadata_json
+            ) VALUES (?, ?, 'backend', ?, ?, ?, 'fresh', 0, '{}')`
+        ).run(
+            "log_rotation.state",
+            JSON.stringify({ lastRun: { ok: true, finishedAt: 42 } }),
+            "2026-05-11T01:00:00.000Z",
+            "2026-05-11T01:00:00.000Z",
+            "2026-08-11T01:00:00.000Z"
+        );
+        const partialLastRun = await requestJson<{
+            success: boolean;
+            lastRun: { finishedAt: null };
+        }>(server, "/api/ops/log-rotation/status");
+        assert.equal(partialLastRun.body.lastRun.finishedAt, null);
     });
 
     it("runs dry-run log rotation without changing files or state", async () => {

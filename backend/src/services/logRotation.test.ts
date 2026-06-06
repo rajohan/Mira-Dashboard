@@ -492,4 +492,58 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.rotatedFiles, 2);
         assert.equal(summary.compressedFiles, 1);
     });
+
+    it("verifies opened log file identity before rotation", async () => {
+        const root = path.join(tempDir, "verified-logs");
+        const outside = path.join(tempDir, "verified-outside");
+        await mkdir(root);
+        await mkdir(outside);
+        const file = path.join(root, "app.log");
+        const outsideFile = path.join(outside, "app.log");
+        await writeFile(file, "log", "utf8");
+        await writeFile(outsideFile, "log", "utf8");
+
+        const verified = await __testing.openVerifiedLogFile(file, [root]);
+        assert.ok(verified);
+        await verified.handle.close();
+
+        await assert.rejects(
+            () => __testing.openVerifiedLogFile(root, [root]),
+            /EISDIR|Refusing non-file path/u
+        );
+        const realOpen = fsPromises.open.bind(fsPromises);
+        const fakeHandle = {
+            close: async () => {},
+            stat: async () => ({ isFile: () => false }),
+        };
+        mock.method(fsPromises, "open", async () => fakeHandle);
+        await assert.rejects(
+            () => __testing.openVerifiedLogFile(file, [root]),
+            /Refusing non-file path/u
+        );
+        (fsPromises.open as unknown as { mock: { restore(): void } }).mock.restore();
+        assert.equal(await realOpen(file).then((handle) => handle.close()), undefined);
+        await assert.rejects(
+            () =>
+                __testing.openVerifiedLogFile(file, [path.join(tempDir, "missing-root")]),
+            /No approved roots exist/u
+        );
+        await assert.rejects(
+            () => __testing.openVerifiedLogFile(outsideFile, [root]),
+            /Unsafe path outside approved roots/u
+        );
+
+        const realStat = fsPromises.stat.bind(fsPromises);
+        mock.method(fsPromises, "stat", async (filePath: string | Buffer | URL) => {
+            const stat = await realStat(filePath);
+            if (String(filePath) === file) {
+                return { ...stat, ino: stat.ino + 1 };
+            }
+            return stat;
+        });
+        await assert.rejects(
+            () => __testing.openVerifiedLogFile(file, [root]),
+            /Unsafe path changed before rotation/u
+        );
+    });
 });

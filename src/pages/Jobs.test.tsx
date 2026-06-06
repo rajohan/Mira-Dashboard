@@ -102,6 +102,18 @@ describe("Jobs page", () => {
         expect(screen.getByText("No scheduled jobs found")).toBeInTheDocument();
     });
 
+    it("renders backend errors", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [],
+            error: new Error("jobs unavailable"),
+            isLoading: false,
+        });
+
+        const { container } = render(<Jobs />);
+
+        expect(container).toBeEmptyDOMElement();
+    });
+
     it("shows jobs and runs the selected job manually", async () => {
         const user = userEvent.setup();
         render(<Jobs />);
@@ -113,6 +125,73 @@ describe("Jobs page", () => {
         await user.click(screen.getByRole("button", { name: /Run now/u }));
 
         expect(hooks.runJob).toHaveBeenCalledWith({ id: "cache.git" });
+    });
+
+    it("renders disabled, failed, running, and unscheduled job states", async () => {
+        const user = userEvent.setup();
+        mockJobs([
+            createJob({
+                enabled: false,
+                id: "cache.alpha",
+                intervalSeconds: 90,
+                lastRun: {
+                    finishedAt: "2026-06-05T00:01:00.000Z",
+                    id: 2,
+                    jobId: "cache.alpha",
+                    message: "",
+                    output: {},
+                    startedAt: "2026-06-05T00:00:00.000Z",
+                    status: "failed",
+                    triggerType: "manual",
+                },
+                name: "Alpha",
+                nextRunAt: null,
+            }),
+            createJob({
+                id: "cache.minutes",
+                intervalSeconds: 120,
+                lastRun: null,
+                name: "Minutes",
+            }),
+            createJob({
+                id: "cache.beta",
+                intervalSeconds: 75,
+                isRunning: true,
+                lastRun: {
+                    finishedAt: null,
+                    id: 3,
+                    jobId: "cache.beta",
+                    message: "Still running",
+                    output: { progress: true },
+                    startedAt: "2026-06-05T00:00:00.000Z",
+                    status: "running",
+                    triggerType: "schedule",
+                },
+                name: "Beta",
+            }),
+        ]);
+        render(<Jobs />);
+
+        expect(screen.getByText("Disabled")).toBeInTheDocument();
+        expect(screen.getByText("Every 90s")).toBeInTheDocument();
+        expect(screen.getByText("Every 2m")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Alpha.*Every 90s/u }));
+
+        expect(screen.getByText("failed")).toBeInTheDocument();
+        expect(screen.getByText("Not scheduled")).toBeInTheDocument();
+        expect(screen.getByText("No message")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Minutes.*Every 2m/u }));
+
+        expect(screen.getByText("never run")).toBeInTheDocument();
+        expect(screen.getByText("Never")).toBeInTheDocument();
+        expect(screen.queryByText("Last run output")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Beta.*Every 75s/u }));
+
+        expect(screen.getByText("running")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Running/u })).toBeDisabled();
     });
 
     it("updates enable state and interval schedules", async () => {
@@ -176,5 +255,9 @@ describe("Jobs page", () => {
         expect(
             await screen.findByText("Time of day must use HH:mm, for example 02:40.")
         ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Schedule type/u }));
+        await user.click(screen.getByRole("menuitem", { name: /Interval/u }));
+        expect(screen.getByLabelText("Interval seconds")).toBeInTheDocument();
     });
 });
