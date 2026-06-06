@@ -67,6 +67,18 @@ describe("log rotation service", { concurrency: false }, () => {
             __testing.defaultConfigPath,
             path.resolve("config/log-rotation.json")
         );
+        const originalConfig = process.env.MIRA_LOG_ROTATION_CONFIG;
+        const runtimeConfig = path.join(tempDir, "runtime-log-rotation.json");
+        try {
+            process.env.MIRA_LOG_ROTATION_CONFIG = runtimeConfig;
+            assert.equal(__testing.defaultConfigPath, runtimeConfig);
+        } finally {
+            if (originalConfig === undefined) {
+                delete process.env.MIRA_LOG_ROTATION_CONFIG;
+            } else {
+                process.env.MIRA_LOG_ROTATION_CONFIG = originalConfig;
+            }
+        }
         assert.equal(__testing.byteLimitFromMb("2"), 2 * 1024 * 1024);
         assert.equal(__testing.byteLimitFromMb(0), null);
         assert.ok(

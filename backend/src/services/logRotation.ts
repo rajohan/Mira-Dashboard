@@ -13,9 +13,8 @@ import { writeCacheSuccess } from "./cacheRefresh.js";
 
 const STATE_CACHE_KEY = "log_rotation.state";
 const execFileAsync = promisify(execFile);
-const DEFAULT_CONFIG_PATH = nonEmptyEnvFallback(
-    "MIRA_LOG_ROTATION_CONFIG",
-    fileURLToPath(new URL("../../config/log-rotation.json", import.meta.url))
+const BUNDLED_CONFIG_PATH = fileURLToPath(
+    new URL("../../config/log-rotation.json", import.meta.url)
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
@@ -31,6 +30,10 @@ let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFil
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function defaultConfigPath(): string {
+    return nonEmptyEnvFallback("MIRA_LOG_ROTATION_CONFIG", BUNDLED_CONFIG_PATH);
 }
 
 interface LogRotationOptions {
@@ -767,7 +770,7 @@ export async function runLogRotationService(
 ): Promise<LogRotationSummary> {
     const startedAt = new Date();
     const config = await loadJsonFile<LogRotationConfig>(
-        options.config || DEFAULT_CONFIG_PATH
+        options.config || defaultConfigPath()
     );
     validateConfig(config);
     const groups = config.groups
@@ -1049,7 +1052,9 @@ export const __testing = {
     assertFileIdentity,
     assertSafePath,
     byteLimitFromMb,
-    defaultConfigPath: DEFAULT_CONFIG_PATH,
+    get defaultConfigPath() {
+        return defaultConfigPath();
+    },
     createNoFollowFile,
     gzipFile,
     globToRegex,
