@@ -534,6 +534,26 @@ describe("Docker page", () => {
         expect(screen.getByTestId("confirm-modal")).toBeInTheDocument();
     });
 
+    it("reports manual update success=false responses", async () => {
+        const user = userEvent.setup();
+        docker.manualUpdate
+            .mockResolvedValueOnce({ stderr: "registry refused update", success: false })
+            .mockResolvedValueOnce({ stderr: "", success: false });
+
+        render(<Docker />);
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(await screen.findByText(/Manual update failed/)).toBeInTheDocument();
+        expect(screen.getByText(/registry refused update/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(
+            await screen.findByText(/Manual update reported success=false/)
+        ).toBeInTheDocument();
+    });
+
     it("opens details, logs, and console modals", async () => {
         const user = userEvent.setup();
         const refetchLogs = vi.fn();
