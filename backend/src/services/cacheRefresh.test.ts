@@ -761,7 +761,7 @@ if (args.includes("capture-pane")) {
             '[projects."/home/ubuntu/.openclaw"]\ntrust_level = "trusted"\n',
             "utf8"
         );
-        __testing.ensureCodexTrustConfig(codexHome);
+        await __testing.ensureCodexTrustConfig(codexHome);
         assert.match(
             await import("node:fs/promises").then((fs) =>
                 fs.readFile(configPath, "utf8")
@@ -773,28 +773,36 @@ if (args.includes("capture-pane")) {
         await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeNoNewline));
         const noNewlineConfigPath = path.join(codexHomeNoNewline, "config.toml");
         await writeFile(noNewlineConfigPath, '[profile]\nmodel = "codex"', "utf8");
-        __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+        await __testing.ensureCodexTrustConfig(codexHomeNoNewline);
         assert.match(
             await import("node:fs/promises").then((fs) =>
                 fs.readFile(noNewlineConfigPath, "utf8")
             ),
             /model = "codex"\n\n\[projects/u
         );
-        __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+        await __testing.ensureCodexTrustConfig(codexHomeNoNewline);
         const noNewlineUpdatedConfig = await import("node:fs/promises").then((fs) =>
             fs.readFile(noNewlineConfigPath, "utf8")
         );
         assert.equal(noNewlineUpdatedConfig.match(/\[projects\./gu)?.length, 3);
-        __testing.codexTrustConfigLocks.add(codexHomeNoNewline);
+        let unlocked = false;
+        const locked = new Promise<void>((resolve) => {
+            setTimeout(() => {
+                unlocked = true;
+                resolve();
+            }, 1);
+        });
+        __testing.codexTrustConfigLocks.set(codexHomeNoNewline, locked);
         try {
-            __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+            await __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+            assert.equal(unlocked, true);
         } finally {
             __testing.codexTrustConfigLocks.delete(codexHomeNoNewline);
         }
 
         const codexHomeBadConfig = path.join(tempDir, "codex-home-bad-config");
         await mkdir(path.join(codexHomeBadConfig, "config.toml"), { recursive: true });
-        assert.throws(
+        await assert.rejects(
             () => __testing.ensureCodexTrustConfig(codexHomeBadConfig),
             /EISDIR|illegal operation/u
         );

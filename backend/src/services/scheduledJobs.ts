@@ -234,6 +234,7 @@ const runningJobs = new Set<string>();
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
 let actionExecutor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined;
+let staleRunningRunsReconciled = false;
 let cacheRefreshRunner: CacheRefreshRunner = refreshCacheProducer;
 let dockerUpdaterRunner: DockerUpdaterRunner = runDockerUpdaterService;
 let logRotationRunner: LogRotationRunner = runElevatedLogRotationService;
@@ -374,6 +375,20 @@ function updateNextRunFromLatestJob(jobId: string): void {
     ).run(freshJob.enabled ? computeNextRunIso(freshJob) : null, nowIso(), freshJob.id);
 }
 
+function reconcileStaleRunningRuns(): void {
+    if (staleRunningRunsReconciled) {
+        return;
+    }
+    staleRunningRunsReconciled = true;
+    db.prepare(
+        `UPDATE scheduled_job_runs
+         SET status = 'failed',
+             finished_at = COALESCE(finished_at, ?),
+             message = COALESCE(message, 'Job was abandoned after backend restart')
+         WHERE status = 'running'`
+    ).run(nowIso());
+}
+
 function getDefaultActionTarget(job: DefaultScheduledJob): string {
     const target = job.actionTarget ?? job.cacheKey;
     if (!target) {
@@ -384,6 +399,7 @@ function getDefaultActionTarget(job: DefaultScheduledJob): string {
 
 /** Ensures built-in scheduled jobs exist in SQLite. */
 export function ensureDefaultScheduledJobs(): void {
+    reconcileStaleRunningRuns();
     const deleteJob = db.prepare(`DELETE FROM scheduled_jobs WHERE id = ?`);
     for (const id of obsoleteDefaultJobIds) {
         deleteJob.run(id);
@@ -631,8 +647,35 @@ async function runDueJobs(): Promise<void> {
         if (!latest?.nextRunAt || latest.nextRunAt > nowIso()) {
             continue;
         }
-        await runScheduledJob(latest.id, "schedule");
+        try {
+            await runScheduledJob(latest.id, "schedule");
+        } catch (error) {
+            if (isScheduledJobRaceError(error)) {
+                console.debug("[scheduledJobs] skipped raced due job", {
+                    latestId: latest.id,
+                    rowId: row.id,
+                    error: errorMessage(error, "Scheduled job race"),
+                });
+                continue;
+            }
+            throw error;
+        }
     }
+}
+
+function isScheduledJobRaceError(error: unknown): boolean {
+    const value = error as {
+        code?: unknown;
+        message?: unknown;
+        status?: unknown;
+        statusCode?: unknown;
+    };
+    const status = Number(value.status ?? value.statusCode ?? value.code);
+    if (status === 404 || status === 409) {
+        return true;
+    }
+    const message = typeof value.message === "string" ? value.message : "";
+    return /not found|already running/iu.test(message);
 }
 
 /** Starts the backend-native scheduled job loop. */
@@ -675,12 +718,16 @@ export const __testing = {
     nextIntervalRunIso,
     parseObjectJson,
     requireRecordedRun,
+    reconcileStaleRunningRuns,
     runDueJobs,
     updateNextRunFromLatestJob,
     setActionExecutorForTests(
         executor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined
     ): void {
         actionExecutor = executor;
+    },
+    resetStaleRunningRunReconciliationForTests(): void {
+        staleRunningRunsReconciled = false;
     },
     setActionRunnersForTests(runners?: {
         cacheRefresh?: CacheRefreshRunner;

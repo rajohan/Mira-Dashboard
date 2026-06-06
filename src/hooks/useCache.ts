@@ -24,6 +24,12 @@ export interface CacheHeartbeatResponse {
     entries: CacheEnvelope<unknown>[];
 }
 
+interface CacheRefreshResponse {
+    ok: boolean;
+    entry?: CacheEnvelope<unknown>;
+    entries?: CacheEnvelope<unknown>[];
+}
+
 /** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
@@ -65,7 +71,7 @@ export function useRefreshCacheEntry() {
 
             const results = await Promise.all(
                 keys.map((key) =>
-                    apiPostRequired<{ ok: boolean; entry: CacheEnvelope<unknown> }>(
+                    apiPostRequired<CacheRefreshResponse>(
                         `/cache/${encodeURIComponent(key)}/refresh`
                     )
                 )

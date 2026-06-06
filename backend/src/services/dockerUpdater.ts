@@ -784,7 +784,7 @@ export async function pollDockerUpdaterRegistries(
                   .all() as unknown as ManagedServiceRow[])
             : (db
                   .prepare(
-                      "SELECT * FROM docker_managed_services WHERE id = ? ORDER BY app_slug, service_name"
+                      "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 ORDER BY app_slug, service_name"
                   )
                   .all(serviceId) as unknown as ManagedServiceRow[]);
     const checked: string[] = [];
@@ -927,7 +927,9 @@ export async function runDockerUpdaterService(
     }
     if (serviceId !== undefined) {
         const service = db
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+            .prepare(
+                "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 LIMIT 1"
+            )
             .get(serviceId) as ManagedServiceRow | undefined;
         const poll = service ? await pollDockerUpdaterRegistries(service.id) : undefined;
         if (!service) {
@@ -947,7 +949,9 @@ export async function runDockerUpdaterService(
             );
         }
         const refreshedService = db
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+            .prepare(
+                "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 LIMIT 1"
+            )
             .get(serviceId) as ManagedServiceRow | undefined;
         if (!refreshedService) {
             return [

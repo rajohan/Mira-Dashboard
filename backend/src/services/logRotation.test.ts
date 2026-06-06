@@ -772,6 +772,44 @@ describe("log rotation service", { concurrency: false }, () => {
         );
     });
 
+    it("honors group-specific approved roots during policy execution", async () => {
+        const root = path.join(tempDir, "group-root");
+        await mkdir(root);
+        const logPath = path.join(root, "group.log");
+        await writeFile(logPath, "rotate me", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [path.join(tempDir, "global-root")],
+            groups: [
+                {
+                    name: "group-root",
+                    approvedRoots: [root],
+                    paths: [logPath],
+                    maxSizeMb: 0.000001,
+                    strategy: "copytruncate",
+                    compress: false,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: true, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.rotatedFiles, 1);
+    });
+
+    it("forwards dashboard DB path to elevated log rotation", () => {
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "dashboard.sqlite");
+        try {
+            assert.equal(
+                __testing.elevatedLogRotationEnvironment().MIRA_DASHBOARD_DB_PATH,
+                process.env.MIRA_DASHBOARD_DB_PATH
+            );
+        } finally {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        }
+    });
+
     it("covers copytruncate compression and disappearing safe-path races", async () => {
         const root = path.join(tempDir, "race-logs");
         const archiveRoot = path.join(tempDir, "race-archives");

@@ -78,6 +78,26 @@ interface DockerUpdaterServiceRow {
     metadata: string;
 }
 
+interface DockerUpdaterService {
+    id: number;
+    appSlug: string;
+    serviceName: string;
+    composeImageRef: string | null;
+    imageRepo: string;
+    currentTag: string | null;
+    currentDigest: string | null;
+    latestTag: string | null;
+    latestDigest: string | null;
+    policy: string;
+    pinMode: string;
+    enabled: boolean;
+    lastCheckedAt: string | null;
+    lastUpdatedAt: string | null;
+    lastStatus: string | null;
+    updateAvailable: boolean;
+    metadata: Record<string, unknown>;
+}
+
 /** Represents docker manual update request. */
 interface DockerManualUpdateRequest {
     serviceId?: number;
@@ -752,8 +772,13 @@ async function getDockerUpdaterServiceById(serviceId: number) {
 }
 
 /** Performs run manual updater for service. */
-async function runManualUpdaterForService(serviceId: number) {
-    const service = await getDockerUpdaterServiceById(serviceId);
+async function runManualUpdaterForService(
+    serviceIdOrService: number | DockerUpdaterService
+) {
+    const service =
+        typeof serviceIdOrService === "number"
+            ? await getDockerUpdaterServiceById(serviceIdOrService)
+            : serviceIdOrService;
     if (!service) {
         return {
             success: false,
@@ -769,6 +794,22 @@ async function runManualUpdaterForService(serviceId: number) {
             ],
         };
     }
+    if (!service.enabled) {
+        return {
+            success: false,
+            output: {},
+            stderr: "Docker updater service is disabled",
+            steps: [
+                {
+                    step: "manual-update",
+                    ok: false,
+                    stdout: "",
+                    stderr: "Docker updater service is disabled",
+                },
+            ],
+        };
+    }
+    const serviceId = service.id;
     const steps = await runDockerUpdaterService(serviceId);
     if (steps.some((step) => !step.ok)) {
         return {
@@ -1219,7 +1260,7 @@ export default function dockerRoutes(app: express.Application): void {
                 return;
             }
 
-            const result = await runManualUpdaterForService(serviceId);
+            const result = await runManualUpdaterForService(service);
             res.status(result.success ? 200 : 500).json({
                 success: result.success,
                 service,

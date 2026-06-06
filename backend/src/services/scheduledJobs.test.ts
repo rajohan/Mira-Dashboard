@@ -17,6 +17,7 @@ test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
     __testing.setActionExecutorForTests(undefined);
     __testing.setActionRunnersForTests(undefined);
+    __testing.resetStaleRunningRunReconciliationForTests();
 });
 
 test.afterEach(() => {
@@ -328,6 +329,72 @@ test("runs due scheduled jobs and skips jobs already running", async () => {
     } finally {
         prepareMock.mock.restore();
     }
+});
+
+test("reconciles stale persisted running runs once on scheduler initialization", () => {
+    const timestamp = new Date().toISOString();
+    db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds,
+            action_type, action_target, settings_json, next_run_at, created_at, updated_at
+        ) VALUES (
+            'custom.stale', 'Stale', 'Stale run', 1, 'interval', 60,
+            'cache.refresh', 'weather.spydeberg', '{}', ?, ?, ?
+        )`
+    ).run(timestamp, timestamp, timestamp);
+    db.prepare(
+        `INSERT INTO scheduled_job_runs (
+            job_id, status, trigger_type, started_at, output_json
+        ) VALUES ('custom.stale', 'running', 'schedule', ?, '{}')`
+    ).run(timestamp);
+
+    const job = getScheduledJob("custom.stale");
+
+    assert.equal(job?.lastRun?.status, "failed");
+    assert.equal(job?.lastRun?.message, "Job was abandoned after backend restart");
+    assert.ok(job?.lastRun?.finishedAt);
+});
+
+test("continues due-job tick across expected per-job races", async () => {
+    const timestamp = "2000-01-01T00:00:00.000Z";
+    for (const [id, target] of [
+        ["custom.race", "race"],
+        ["custom.next", "next"],
+    ] as const) {
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                action_type, action_target, settings_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, 'Due', 1, 'interval', 60, 'cache.refresh', ?, '{}', ?, ?, ?)`
+        ).run(id, id, target, timestamp, timestamp, timestamp);
+    }
+    const originalGet = db.prepare.bind(db);
+    const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1")) {
+            return {
+                get: (id: string) => {
+                    if (id === "custom.race") {
+                        return;
+                    }
+                    return originalGet(sql).get(id);
+                },
+            };
+        }
+        return originalGet(sql);
+    });
+    const refreshed: string[] = [];
+    __testing.setActionRunnersForTests({
+        cacheRefresh: async (key) => {
+            refreshed.push(key);
+        },
+    });
+    try {
+        await __testing.runDueJobs();
+    } finally {
+        prepareMock.mock.restore();
+    }
+
+    assert.deepEqual(refreshed, ["next"]);
 });
 
 test("covers scheduled job mapping and unsupported-action edge cases", async () => {

@@ -53,6 +53,27 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
+/** Refreshes backup status cache with a bounded best-effort timeout. */
+async function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
+    let timeout: NodeJS.Timeout | null = null;
+    try {
+        await Promise.race([
+            refreshBackupCache(key),
+            new Promise((_, reject) => {
+                timeout = setTimeout(
+                    () => reject(new Error("Status refresh timed out")),
+                    timeoutMs
+                );
+                timeout.unref();
+            }),
+        ]);
+    } finally {
+        if (timeout) {
+            clearTimeout(timeout);
+        }
+    }
+}
+
 /** Returns current job. */
 function getCurrentJob(activeJobId: string | null, clear: () => void) {
     if (!activeJobId) {
@@ -156,31 +177,30 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.stderr = trimOutput(job.stderr + String(data));
     });
 
-    child.on("close", async (code, signal) => {
+    child.on("close", (code, signal) => {
         if (!signal && code === 0) {
             const cacheKey =
                 type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
             job.refreshPending = true;
-            try {
-                await refreshBackupCache(cacheKey);
-            } catch (error: unknown) {
-                const refreshMessage = errorMessage(error, "Unknown error");
-                job.stderr = trimOutput(
-                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                );
-            } finally {
-                job.refreshPending = false;
-                job.status = "done";
-                job.code = code;
-                job.endedAt = Date.now();
-            }
+            job.status = "done";
+            job.code = code;
+            job.endedAt = Date.now();
+            void refreshBackupCacheWithTimeout(cacheKey)
+                .catch((error: unknown) => {
+                    const refreshMessage = errorMessage(error, "Unknown error");
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                    );
+                })
+                .finally(() => {
+                    job.refreshPending = false;
+                });
             return;
         }
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
     });
-
     child.on("error", (error) => {
         job.status = "done";
         job.code = 1;

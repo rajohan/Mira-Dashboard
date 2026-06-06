@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import { db } from "../db.js";
 
 const execFileAsync = promisify(execFile);
-const codexTrustConfigLocks = new Set<string>();
+const codexTrustConfigLocks = new Map<string, Promise<void>>();
 
 type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
@@ -915,11 +915,22 @@ function getCodexBin() {
     return process.env.CODEX_BIN || "/home/ubuntu/.npm-global/bin/codex";
 }
 
-function ensureCodexTrustConfig(codexHome: string) {
-    if (codexTrustConfigLocks.has(codexHome)) {
+async function ensureCodexTrustConfig(codexHome: string) {
+    const existing = codexTrustConfigLocks.get(codexHome);
+    if (existing) {
+        await existing;
         return;
     }
-    codexTrustConfigLocks.add(codexHome);
+    const update = Promise.resolve().then(() => updateCodexTrustConfig(codexHome));
+    codexTrustConfigLocks.set(codexHome, update);
+    try {
+        await update;
+    } finally {
+        codexTrustConfigLocks.delete(codexHome);
+    }
+}
+
+function updateCodexTrustConfig(codexHome: string) {
     const lockPath = `${codexHome}/config.toml.lock`;
     let lockHandle: number | null = null;
     try {
@@ -953,7 +964,6 @@ function ensureCodexTrustConfig(codexHome: string) {
             closeSync(lockHandle);
             rmSync(lockPath, { force: true });
         }
-        codexTrustConfigLocks.delete(codexHome);
     }
 }
 
@@ -1017,7 +1027,7 @@ async function checkOpenAiQuota() {
     try {
         const codexPath = getCodexBin();
         const codexHome = getQuotaCodexHome();
-        ensureCodexTrustConfig(codexHome);
+        await ensureCodexTrustConfig(codexHome);
         const command = String.raw`set -e
 SESSION="codex_quota_$$_$(date +%s)"
 cleanup(){ tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; }

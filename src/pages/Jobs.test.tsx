@@ -314,7 +314,6 @@ describe("Jobs page", () => {
     });
 
     it("shows cron schedules without allowing schedule edits", async () => {
-        const user = userEvent.setup();
         hooks.updateJob.mockClear();
         mockJobs([
             createJob({
@@ -330,9 +329,10 @@ describe("Jobs page", () => {
         expect(
             screen.getByText("Cron schedules are read-only in the dashboard.")
         ).toBeInTheDocument();
-        const save = screen.getByRole("button", { name: /Save schedule/u });
-        expect(save).toBeDisabled();
-        await user.click(save);
+        expect(
+            screen.queryByRole("button", { name: /Save schedule/u })
+        ).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Interval seconds")).not.toBeInTheDocument();
         expect(hooks.updateJob).not.toHaveBeenCalled();
     });
 
@@ -348,7 +348,8 @@ describe("Jobs page", () => {
 
         render(<Jobs />);
 
-        expect(screen.getByText("Cron schedule")).toBeInTheDocument();
+        expect(screen.getAllByText("Cron schedule")).toHaveLength(2);
+        expect(screen.getByText("Configured by backend")).toBeInTheDocument();
     });
 
     it("shows schedule validation messages", async () => {

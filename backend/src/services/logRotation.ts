@@ -745,7 +745,6 @@ export async function runLogRotationService(
         options.config || DEFAULT_CONFIG_PATH
     );
     validateConfig(config);
-    const approvedRoots = config.approvedRoots || DEFAULT_APPROVED_ROOTS;
     const groups = config.groups
         .filter((group) => group.enabled !== false)
         .filter((group) => !options.group || group.name === options.group);
@@ -778,13 +777,15 @@ export async function runLogRotationService(
     try {
         for (const group of groups) {
             const policy = mergePolicy(config.defaults || {}, group);
+            const effectiveApprovedRoots =
+                policy.approvedRoots ?? config.approvedRoots ?? DEFAULT_APPROVED_ROOTS;
             const groupSummary = summarizeGroup(group.name as string);
             summary.groups.push(groupSummary);
             if (policy.archiveOnly) {
                 try {
                     const retained = await applyArchiveOnlyRetention(
                         policy,
-                        approvedRoots,
+                        effectiveApprovedRoots,
                         options.dryRun
                     );
                     groupSummary.checkedFiles += retained.checked;
@@ -831,14 +832,17 @@ export async function runLogRotationService(
                     groupSummary.checkedFiles += 1;
                     summary.checkedFiles += 1;
                     try {
-                        const safe = await assertSafePath(filePath, approvedRoots);
+                        const safe = await assertSafePath(
+                            filePath,
+                            effectiveApprovedRoots
+                        );
                         if (!safe) continue;
                         const stat = await fs.stat(filePath);
                         const retention = async () =>
                             applyRetention(
                                 filePath,
                                 policy,
-                                approvedRoots,
+                                effectiveApprovedRoots,
                                 options.dryRun
                             );
                         if (policy.skipEmpty && stat.size === 0) {
@@ -875,7 +879,7 @@ export async function runLogRotationService(
                         } else {
                             const verified = await openVerifiedLogFile(
                                 filePath,
-                                approvedRoots
+                                effectiveApprovedRoots
                             );
                             try {
                                 finalArchive =
@@ -885,13 +889,13 @@ export async function runLogRotationService(
                                               verified,
                                               archivePath,
                                               policy.compress !== false,
-                                              approvedRoots
+                                              effectiveApprovedRoots
                                           )
                                         : await rotateCopyTruncate(
                                               verified,
                                               archivePath,
                                               policy.compress !== false,
-                                              approvedRoots
+                                              effectiveApprovedRoots
                                           );
                             } finally {
                                 await verified.handle.close();
@@ -996,7 +1000,14 @@ export async function runElevatedLogRotationService(options: {
 }
 
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
-    const allowed = ["PATH", "HOME", "LANG", "NODE_ENV", "MIRA_LOG_ROTATION_CONFIG"];
+    const allowed = [
+        "PATH",
+        "HOME",
+        "LANG",
+        "NODE_ENV",
+        "MIRA_DASHBOARD_DB_PATH",
+        "MIRA_LOG_ROTATION_CONFIG",
+    ];
     const env: NodeJS.ProcessEnv = {};
     // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and config path.
     for (const key of allowed) {
@@ -1017,6 +1028,7 @@ export const __testing = {
     gzipFile,
     globToRegex,
     hasRotatedInCadence,
+    elevatedLogRotationEnvironment,
     listArchives,
     mergePolicy,
     openVerifiedLogFile,

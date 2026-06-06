@@ -689,6 +689,34 @@ process.stdout.write("updated\n");
                 missingAfterPoll.at(-1)?.stderr,
                 "Docker updater service not found after registry poll"
             );
+
+            await updater.registerDockerUpdaterServices();
+            const toggledService = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
+                )
+                .get() as { id: number };
+            let toggled = false;
+            globalThis.fetch = (async () => {
+                if (!toggled) {
+                    toggled = true;
+                    db.prepare(
+                        "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
+                    ).run(toggledService.id);
+                }
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ results: [{ name: "3" }] }),
+                } as Response;
+            }) as typeof fetch;
+            const disabledAfterPoll = await updater.runDockerUpdaterService(
+                toggledService.id
+            );
+            assert.equal(
+                disabledAfterPoll.at(-1)?.stderr,
+                "Docker updater service not found after registry poll"
+            );
         });
     });
 
