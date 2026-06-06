@@ -319,6 +319,49 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(notDue.rotatedFiles, 0);
     });
 
+    it("returns a failed summary when non-dry-run rotation is already locked", async () => {
+        const root = path.join(tempDir, "locked-logs");
+        await mkdir(root);
+        const file = path.join(root, "app.log");
+        await writeFile(file, "log", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [{ name: "locked", paths: [file], maxSizeMb: 0 }],
+        });
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "123\n", "utf8");
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, false);
+            assert.match(
+                (summary.errors[0] as { message?: string } | undefined)?.message ?? "",
+                /already running/u
+            );
+            assert.equal(await readFile(file, "utf8"), "log");
+        } finally {
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("rethrows unexpected log rotation lock acquisition errors", async () => {
+        const openMock = mock.method(fsPromises, "open", () => {
+            const error = new Error("lock open failed") as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+        });
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /lock open failed/u
+            );
+        } finally {
+            openMock.mock.restore();
+        }
+    });
+
     it("skips archive paths that fail approved-root validation during retention", async () => {
         const root = path.join(tempDir, "logs");
         await mkdir(root);

@@ -297,6 +297,58 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
     });
 
+    it("falls back to the requested cache key when refresh output is scalar", async () => {
+        __testing.setCacheRefreshRunnerForTests(async (key) => {
+            db.prepare(
+                `INSERT OR REPLACE INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES (?, '{"ok":true}', 'scalar', ?, ?, ?, 'fresh', NULL, NULL, 0, '{}')`
+            ).run(
+                key,
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T01:00:00.000Z"
+            );
+            return { refreshed: key } as unknown as { refreshed: string[] };
+        });
+        try {
+            const refreshed = await refreshCacheKey("custom.scalar");
+
+            assert.equal(refreshed.key, "custom.scalar");
+            assert.equal(refreshed.source, "scalar");
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
+    it("uses aggregate refresh results when the producer returns multiple keys", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            for (const key of ["moltbook.home", "moltbook.feed.hot"]) {
+                db.prepare(
+                    `INSERT INTO cache_entries (
+                        key, data_json, source, updated_at, last_attempt_at, expires_at,
+                        status, error_code, error_message, consecutive_failures, metadata_json
+                    ) VALUES (?, '{"ok":true}', 'aggregate', ?, ?, ?, 'fresh', NULL, NULL, 0, '{}')`
+                ).run(
+                    key,
+                    "2026-06-06T00:00:00.000Z",
+                    "2026-06-06T00:00:00.000Z",
+                    "2026-06-06T01:00:00.000Z"
+                );
+            }
+            return { refreshed: ["moltbook.home", "moltbook.feed.hot"] };
+        });
+        try {
+            const refreshed = await refreshCacheKey("moltbook");
+
+            assert.equal(refreshed.key, "moltbook.home");
+            assert.equal(refreshed.source, "aggregate");
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
     it("refreshes WAL-G backup status through backend SQLite cache", async () => {
         const binDir = await mkdtemp(path.join(tempDir, "fake-bin-"));
         const dockerPath = path.join(binDir, "docker");

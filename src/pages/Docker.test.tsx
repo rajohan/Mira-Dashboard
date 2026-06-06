@@ -387,7 +387,7 @@ describe("Docker page", () => {
         docker.deleteImage.mockResolvedValue(Promise.resolve());
         docker.deleteVolume.mockResolvedValue(Promise.resolve());
         docker.manualUpdate.mockResolvedValue({
-            result: { summary: { failed: 0, updated: 1 } },
+            result: { summary: { failed: [], updated: ["web"] } },
             stderr: "",
         });
         docker.prune.mockResolvedValue({ output: "pruned" });

@@ -11,6 +11,7 @@ import {
     refreshCacheProducer,
     refreshMoltbookCache,
     writeCacheFailure,
+    writeCacheSuccess,
 } from "./cacheRefresh.js";
 
 const originalFetch = globalThis.fetch;
@@ -24,6 +25,7 @@ function cacheRow(key: string) {
               data_json: string | null;
               source: string;
               status: string;
+              updated_at: string | null;
               error_message: string | null;
               consecutive_failures: number;
               metadata_json: string;
@@ -84,6 +86,17 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     });
 
     it("records cache refresh failures with incrementing failure counts", () => {
+        writeCacheSuccess({
+            key: "weather.spydeberg",
+            data: { ok: true },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "weather" },
+        });
+        const successfulUpdatedAt = cacheRow("weather.spydeberg").updated_at;
+        assert.equal(typeof successfulUpdatedAt, "string");
+
         writeCacheFailure({
             key: "weather.spydeberg",
             source: "backend-test",
@@ -103,6 +116,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
         const row = cacheRow("weather.spydeberg");
         assert.equal(row.status, "error");
+        assert.equal(row.updated_at, successfulUpdatedAt);
         assert.equal(row.error_message, "second failure");
         assert.equal(row.consecutive_failures, 2);
         assert.equal(row.metadata.producer, "weather");
@@ -737,6 +751,17 @@ if (args.includes("capture-pane")) {
             ),
             /model = "codex"\n\n\[projects/u
         );
+        __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+        const noNewlineUpdatedConfig = await import("node:fs/promises").then((fs) =>
+            fs.readFile(noNewlineConfigPath, "utf8")
+        );
+        assert.equal(noNewlineUpdatedConfig.match(/\[projects\./gu)?.length, 3);
+        __testing.codexTrustConfigLocks.add(codexHomeNoNewline);
+        try {
+            __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+        } finally {
+            __testing.codexTrustConfigLocks.delete(codexHomeNoNewline);
+        }
 
         const codexHomeBadConfig = path.join(tempDir, "codex-home-bad-config");
         await mkdir(path.join(codexHomeBadConfig, "config.toml"), { recursive: true });

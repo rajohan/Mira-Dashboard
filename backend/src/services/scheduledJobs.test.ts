@@ -91,6 +91,11 @@ test("updates enable state, interval schedules, and daily schedules", () => {
         intervalSeconds: 3600,
     });
     assert.equal(disabled?.enabled, false);
+    assert.ok(disabled?.nextRunAt);
+
+    const reenabled = updateScheduledJob("cache.weather", { enabled: true });
+    assert.equal(reenabled?.enabled, true);
+    assert.equal(reenabled?.nextRunAt, disabled?.nextRunAt);
 
     const daily = updateScheduledJob("cache.weather", {
         enabled: true,

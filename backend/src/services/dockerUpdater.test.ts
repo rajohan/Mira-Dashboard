@@ -165,6 +165,18 @@ process.stdout.write("updated\n");
                         'exact', '1', 1, '{}'
                     )`
                 ).run(composePath);
+                db.prepare(
+                    `INSERT INTO docker_managed_services (
+                        app_slug, service_name, compose_path, image_repo,
+                        compose_image_ref, compose_image_field, current_tag,
+                        current_digest, policy, pin_mode, tag_match_type,
+                        tag_match_pattern, enabled, metadata_json
+                    ) VALUES (
+                        'stale-app', 'old', ?, 'busybox', 'busybox:1',
+                        'services.old.image', '1', NULL, 'notify', 'tag',
+                        'exact', '1', 1, '{}'
+                    )`
+                ).run(composePath);
                 const steps = (await runDockerUpdaterService()) as StepResult[];
                 assert.equal(
                     steps.every((step) => step.ok),
@@ -192,6 +204,10 @@ process.stdout.write("updated\n");
         assert.equal(web?.last_status, "updated");
         assert.equal(
             rows.some((row) => row.service_name === "removed"),
+            false
+        );
+        assert.equal(
+            rows.some((row) => row.app_slug === "stale-app"),
             false
         );
         assert.ok(
@@ -257,7 +273,13 @@ process.stdout.write("updated\n");
                     .prepare(
                         "SELECT * FROM docker_managed_services WHERE service_name = 'bad-registry'"
                     )
-                    .get() as { id: number };
+                    .get() as {
+                    id: number;
+                    latest_tag: string | null;
+                    latest_digest: string | null;
+                };
+                assert.equal(badRegistry.latest_tag, null);
+                assert.equal(badRegistry.latest_digest, null);
                 const manualPollFailure = await runDockerUpdaterService(badRegistry.id);
                 assert.deepEqual(
                     (manualPollFailure as StepResult[]).map((step) => [
@@ -880,6 +902,17 @@ process.stdout.write("updated\n");
                     headers: new Headers(),
                     json: async () => ({
                         results: [{}, { name: "1" }, { name: "2" }],
+                        next: "https://hub.docker.com/v2/repositories/library/nginx/tags?page=2",
+                    }),
+                } as Response;
+            }
+            if (url.endsWith("/tags?page=2")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({
+                        results: [{ name: "3" }],
+                        next: null,
                     }),
                 } as Response;
             }
@@ -901,7 +934,7 @@ process.stdout.write("updated\n");
                 tag_match_pattern: String.raw`^\d$`,
             }),
             {
-                latestTag: "2",
+                latestTag: "3",
                 latestDigest: "sha256:v8",
             }
         );

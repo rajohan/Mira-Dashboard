@@ -15,6 +15,7 @@ const DEFAULT_CONFIG_PATH = nonEmptyEnvFallback(
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
+const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -580,6 +581,31 @@ export interface LogRotationSummary {
     files?: unknown[];
 }
 
+async function acquireLogRotationLock(dryRun: boolean) {
+    if (dryRun) return null;
+    await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
+    try {
+        const handle = await fs.open(LOCK_FILE, "wx");
+        await handle.writeFile(`${process.pid}\n`);
+        return handle;
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            "code" in error &&
+            (error as NodeJS.ErrnoException).code === "EEXIST"
+        ) {
+            return null;
+        }
+        throw error;
+    }
+}
+
+async function releaseLogRotationLock(handle: fs.FileHandle | null) {
+    if (!handle) return;
+    await handle.close();
+    await fs.unlink(LOCK_FILE).catch(() => {});
+}
+
 export async function runLogRotationService(
     options: LogRotationOptions
 ): Promise<LogRotationSummary> {
@@ -609,163 +635,180 @@ export async function runLogRotationService(
         groups: [],
         ...(options.verbose ? { files: [] } : {}),
     };
+    const lock = await acquireLogRotationLock(options.dryRun);
+    if (!options.dryRun && !lock) {
+        summary.ok = false;
+        summary.errors.push({ message: "Log rotation is already running" });
+        summary.finishedAt = new Date().toISOString();
+        return summary;
+    }
     const now = new Date();
     const seenFiles = new Set<string>();
-    for (const group of groups) {
-        const policy = mergePolicy(config.defaults || {}, group);
-        const groupSummary = summarizeGroup(group.name as string);
-        summary.groups.push(groupSummary);
-        if (policy.archiveOnly) {
-            try {
-                const retained = await applyArchiveOnlyRetention(
-                    policy,
-                    approvedRoots,
-                    options.dryRun
-                );
-                groupSummary.checkedFiles += retained.checked;
-                summary.checkedFiles += retained.checked;
-                groupSummary.deletedArchives += retained.deleted.length;
-                summary.deletedArchives += retained.deleted.length;
-                groupSummary.compressedFiles += retained.compressed.length;
-                summary.compressedFiles += retained.compressed.length;
-            } catch (error) {
-                summary.ok = false;
-                summary.errors.push({
-                    group: group.name,
-                    message: caughtMessage(error),
-                });
-            }
-            continue;
-        }
-        const matched = new Set<string>();
-        for (const pattern of group.paths ?? []) {
-            for (const file of await resolveGlob(pattern)) matched.add(file);
-        }
-        const excluded = new Set<string>();
-        for (const pattern of group.excludePaths || []) {
-            for (const file of await resolveGlob(pattern)) excluded.add(file);
-        }
-        for (const filePath of [...matched].sort()) {
-            if (
-                seenFiles.has(filePath) ||
-                excluded.has(filePath) ||
-                ROTATED_SUFFIX_RE.test(filePath)
-            ) {
+    try {
+        for (const group of groups) {
+            const policy = mergePolicy(config.defaults || {}, group);
+            const groupSummary = summarizeGroup(group.name as string);
+            summary.groups.push(groupSummary);
+            if (policy.archiveOnly) {
+                try {
+                    const retained = await applyArchiveOnlyRetention(
+                        policy,
+                        approvedRoots,
+                        options.dryRun
+                    );
+                    groupSummary.checkedFiles += retained.checked;
+                    summary.checkedFiles += retained.checked;
+                    groupSummary.deletedArchives += retained.deleted.length;
+                    summary.deletedArchives += retained.deleted.length;
+                    groupSummary.compressedFiles += retained.compressed.length;
+                    summary.compressedFiles += retained.compressed.length;
+                } catch (error) {
+                    summary.ok = false;
+                    summary.errors.push({
+                        group: group.name,
+                        message: caughtMessage(error),
+                    });
+                }
                 continue;
             }
-            seenFiles.add(filePath);
-            groupSummary.checkedFiles += 1;
-            summary.checkedFiles += 1;
-            try {
-                const safe = await assertSafePath(filePath, approvedRoots);
-                if (!safe) continue;
-                const stat = await fs.stat(filePath);
-                const retention = async () =>
-                    applyRetention(filePath, policy, approvedRoots, options.dryRun);
-                if (policy.skipEmpty && stat.size === 0) {
-                    const retained = await retention();
-                    groupSummary.deletedArchives += retained.deleted.length;
-                    summary.deletedArchives += retained.deleted.length;
-                    groupSummary.compressedFiles += retained.compressed.length;
-                    summary.compressedFiles += retained.compressed.length;
-                    groupSummary.skippedFiles += 1;
-                    summary.skippedFiles += 1;
+            const matched = new Set<string>();
+            for (const pattern of group.paths ?? []) {
+                for (const file of await resolveGlob(pattern)) matched.add(file);
+            }
+            const excluded = new Set<string>();
+            for (const pattern of group.excludePaths || []) {
+                for (const file of await resolveGlob(pattern)) excluded.add(file);
+            }
+            for (const filePath of [...matched].sort()) {
+                if (
+                    seenFiles.has(filePath) ||
+                    excluded.has(filePath) ||
+                    ROTATED_SUFFIX_RE.test(filePath)
+                ) {
                     continue;
                 }
-                const decision = shouldRotate({
-                    stat,
-                    policy,
-                    stateEntry: state.files[filePath],
-                });
-                if (!decision.rotate) {
-                    const retained = await retention();
-                    groupSummary.deletedArchives += retained.deleted.length;
-                    summary.deletedArchives += retained.deleted.length;
-                    groupSummary.compressedFiles += retained.compressed.length;
-                    summary.compressedFiles += retained.compressed.length;
-                    groupSummary.skippedFiles += 1;
-                    summary.skippedFiles += 1;
-                    continue;
-                }
-                const archivePath = archiveBasePath(filePath, now);
-                let finalArchive: string;
-                if (options.dryRun) {
-                    finalArchive = policy.compress ? `${archivePath}.gz` : archivePath;
-                } else {
-                    const verified = await openVerifiedLogFile(filePath, approvedRoots);
-                    try {
-                        finalArchive =
-                            policy.strategy === "rename"
-                                ? await rotateRename(
-                                      filePath,
-                                      verified,
-                                      archivePath,
-                                      policy.compress !== false
-                                  )
-                                : await rotateCopyTruncate(
-                                      verified,
-                                      archivePath,
-                                      policy.compress !== false
-                                  );
-                    } finally {
-                        await verified.handle.close();
+                seenFiles.add(filePath);
+                groupSummary.checkedFiles += 1;
+                summary.checkedFiles += 1;
+                try {
+                    const safe = await assertSafePath(filePath, approvedRoots);
+                    if (!safe) continue;
+                    const stat = await fs.stat(filePath);
+                    const retention = async () =>
+                        applyRetention(filePath, policy, approvedRoots, options.dryRun);
+                    if (policy.skipEmpty && stat.size === 0) {
+                        const retained = await retention();
+                        groupSummary.deletedArchives += retained.deleted.length;
+                        summary.deletedArchives += retained.deleted.length;
+                        groupSummary.compressedFiles += retained.compressed.length;
+                        summary.compressedFiles += retained.compressed.length;
+                        groupSummary.skippedFiles += 1;
+                        summary.skippedFiles += 1;
+                        continue;
                     }
-                    state.files[filePath] = {
-                        lastRotatedAt: now.toISOString(),
-                        lastSizeBytes: stat.size,
-                        lastArchive: finalArchive,
-                    };
+                    const decision = shouldRotate({
+                        stat,
+                        policy,
+                        stateEntry: state.files[filePath],
+                    });
+                    if (!decision.rotate) {
+                        const retained = await retention();
+                        groupSummary.deletedArchives += retained.deleted.length;
+                        summary.deletedArchives += retained.deleted.length;
+                        groupSummary.compressedFiles += retained.compressed.length;
+                        summary.compressedFiles += retained.compressed.length;
+                        groupSummary.skippedFiles += 1;
+                        summary.skippedFiles += 1;
+                        continue;
+                    }
+                    const archivePath = archiveBasePath(filePath, now);
+                    let finalArchive: string;
+                    if (options.dryRun) {
+                        finalArchive = policy.compress
+                            ? `${archivePath}.gz`
+                            : archivePath;
+                    } else {
+                        const verified = await openVerifiedLogFile(
+                            filePath,
+                            approvedRoots
+                        );
+                        try {
+                            finalArchive =
+                                policy.strategy === "rename"
+                                    ? await rotateRename(
+                                          filePath,
+                                          verified,
+                                          archivePath,
+                                          policy.compress !== false
+                                      )
+                                    : await rotateCopyTruncate(
+                                          verified,
+                                          archivePath,
+                                          policy.compress !== false
+                                      );
+                        } finally {
+                            await verified.handle.close();
+                        }
+                        state.files[filePath] = {
+                            lastRotatedAt: now.toISOString(),
+                            lastSizeBytes: stat.size,
+                            lastArchive: finalArchive,
+                        };
+                    }
+                    groupSummary.rotatedFiles += 1;
+                    summary.rotatedFiles += 1;
+                    if (policy.compress !== false) {
+                        groupSummary.compressedFiles += 1;
+                        summary.compressedFiles += 1;
+                    }
+                    const retained = await retention();
+                    groupSummary.deletedArchives += retained.deleted.length;
+                    summary.deletedArchives += retained.deleted.length;
+                    groupSummary.compressedFiles += retained.compressed.length;
+                    summary.compressedFiles += retained.compressed.length;
+                } catch (error) {
+                    summary.ok = false;
+                    summary.errors.push({
+                        filePath,
+                        message: caughtMessage(error),
+                    });
                 }
-                groupSummary.rotatedFiles += 1;
-                summary.rotatedFiles += 1;
-                if (policy.compress !== false) {
-                    groupSummary.compressedFiles += 1;
-                    summary.compressedFiles += 1;
-                }
-                const retained = await retention();
-                groupSummary.deletedArchives += retained.deleted.length;
-                summary.deletedArchives += retained.deleted.length;
-                groupSummary.compressedFiles += retained.compressed.length;
-                summary.compressedFiles += retained.compressed.length;
-            } catch (error) {
-                summary.ok = false;
-                summary.errors.push({
-                    filePath,
-                    message: caughtMessage(error),
-                });
             }
         }
-    }
-    summary.finishedAt = new Date().toISOString();
-    if (!options.dryRun) {
-        state.lastRun = {
-            ok: summary.ok,
-            dryRun: false,
-            startedAt: summary.startedAt,
-            finishedAt: summary.finishedAt,
-            checkedGroups: summary.checkedGroups,
-            checkedFiles: summary.checkedFiles,
-            rotatedFiles: summary.rotatedFiles,
-            compressedFiles: summary.compressedFiles,
-            deletedArchives: summary.deletedArchives,
-            skippedFiles: summary.skippedFiles,
-            warnings: summary.warnings,
-            errors: summary.errors,
-            groups: summary.groups,
-        };
-        writeCacheSuccess({
-            key: STATE_CACHE_KEY,
-            data: state,
-            source: "backend",
-            ttl: 90 * 24,
-            ttlUnit: "hours",
-            metadata: { workflow: "Log Rotation - Foundation" },
-        });
+        summary.finishedAt = new Date().toISOString();
+        if (!options.dryRun) {
+            state.lastRun = {
+                ok: summary.ok,
+                dryRun: false,
+                startedAt: summary.startedAt,
+                finishedAt: summary.finishedAt,
+                checkedGroups: summary.checkedGroups,
+                checkedFiles: summary.checkedFiles,
+                rotatedFiles: summary.rotatedFiles,
+                compressedFiles: summary.compressedFiles,
+                deletedArchives: summary.deletedArchives,
+                skippedFiles: summary.skippedFiles,
+                warnings: summary.warnings,
+                errors: summary.errors,
+                groups: summary.groups,
+            };
+            writeCacheSuccess({
+                key: STATE_CACHE_KEY,
+                data: state,
+                source: "backend",
+                ttl: 90 * 24,
+                ttlUnit: "hours",
+                metadata: { workflow: "Log Rotation - Foundation" },
+            });
+        }
+    } finally {
+        await releaseLogRotationLock(lock);
     }
     return summary;
 }
 
 export const __testing = {
+    acquireLogRotationLock,
     archiveRetentionKey,
     assertSafePath,
     byteLimitFromMb,
@@ -775,6 +818,7 @@ export const __testing = {
     mergePolicy,
     openVerifiedLogFile,
     readLogRotationState,
+    releaseLogRotationLock,
     resolveGlob,
     shouldRotate,
     caughtMessage,

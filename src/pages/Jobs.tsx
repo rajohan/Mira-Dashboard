@@ -66,6 +66,7 @@ export function Jobs() {
     const [scheduleTypeDraft, setScheduleTypeDraft] =
         useState<EditableScheduleType>("interval");
     const [timeOfDayDraft, setTimeOfDayDraft] = useState("");
+    const [actionError, setActionError] = useState("");
     const isCronSchedule = selectedJob?.scheduleType === "cron";
 
     useEffect(() => {
@@ -84,29 +85,47 @@ export function Jobs() {
     const scheduleIsValid =
         scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
 
+    function handleActionError(error: unknown) {
+        setActionError(error instanceof Error ? error.message : String(error));
+    }
+
     async function saveSchedule() {
-        if (!selectedJob || isCronSchedule) return;
         const patch = {
             scheduleType: scheduleTypeDraft,
             ...(scheduleTypeDraft === "interval"
                 ? { intervalSeconds: intervalNumber, timeOfDay: null }
                 : { timeOfDay: timeOfDayDraft }),
         };
-        await updateJob.mutateAsync({
-            id: selectedJob.id,
-            patch,
-        });
+        setActionError("");
+        try {
+            await updateJob.mutateAsync({
+                id: selectedJob!.id,
+                patch,
+            });
+        } catch (error) {
+            handleActionError(error);
+        }
     }
 
     async function toggleSelected(enabled: boolean) {
-        await updateJob.mutateAsync({
-            id: selectedJob!.id,
-            patch: { enabled },
-        });
+        setActionError("");
+        try {
+            await updateJob.mutateAsync({
+                id: selectedJob!.id,
+                patch: { enabled },
+            });
+        } catch (error) {
+            handleActionError(error);
+        }
     }
 
     async function runSelected() {
-        await runJob.mutateAsync({ id: selectedJob!.id });
+        setActionError("");
+        try {
+            await runJob.mutateAsync({ id: selectedJob!.id });
+        } catch (error) {
+            handleActionError(error);
+        }
     }
 
     return (
@@ -183,6 +202,12 @@ export function Jobs() {
 
                     {selectedJob ? (
                         <Card variant="bordered" className="min-w-0 space-y-4 p-4">
+                            {actionError ? (
+                                <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                                    {actionError}
+                                </p>
+                            ) : null}
+
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
                                     <CardTitle className="text-lg">

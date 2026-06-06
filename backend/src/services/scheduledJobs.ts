@@ -444,6 +444,15 @@ export function updateScheduledJob(
     }
 
     const timestamp = nowIso();
+    const shouldRecomputeNextRun =
+        enabled &&
+        (existing.nextRunAt == null ||
+            scheduleType !== existing.scheduleType ||
+            intervalSeconds !== existing.intervalSeconds ||
+            timeOfDay !== existing.timeOfDay);
+    const nextRunAt = shouldRecomputeNextRun
+        ? computeNextRunIso({ scheduleType, intervalSeconds, timeOfDay })
+        : existing.nextRunAt;
     db.prepare(
         `UPDATE scheduled_jobs
          SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?,
@@ -454,9 +463,7 @@ export function updateScheduledJob(
         scheduleType,
         intervalSeconds,
         timeOfDay,
-        enabled
-            ? computeNextRunIso({ scheduleType, intervalSeconds, timeOfDay })
-            : existing.nextRunAt,
+        nextRunAt,
         timestamp,
         id
     );

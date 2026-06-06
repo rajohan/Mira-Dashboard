@@ -60,6 +60,11 @@ function mockJobs(jobs: ScheduledJob[]) {
 
 describe("Jobs page", () => {
     beforeEach(() => {
+        hooks.runJob.mockReset();
+        hooks.updateJob.mockReset();
+        hooks.useRunScheduledJob.mockReset();
+        hooks.useUpdateScheduledJob.mockReset();
+
         hooks.runJob.mockResolvedValue({});
         hooks.updateJob.mockResolvedValue({});
         hooks.useRunScheduledJob.mockReturnValue({
@@ -219,6 +224,24 @@ describe("Jobs page", () => {
         });
     });
 
+    it("shows action errors from failed job mutations", async () => {
+        const user = userEvent.setup();
+        hooks.runJob.mockRejectedValueOnce(new Error("run failed"));
+        render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: /Run now/u }));
+
+        expect(await screen.findByText("run failed")).toBeInTheDocument();
+
+        hooks.updateJob.mockRejectedValueOnce("toggle failed");
+        await user.click(screen.getByRole("switch", { name: "Enabled" }));
+        expect(await screen.findByText("toggle failed")).toBeInTheDocument();
+
+        hooks.updateJob.mockRejectedValueOnce(new Error("save failed"));
+        await user.click(screen.getByRole("button", { name: /Save schedule/u }));
+        expect(await screen.findByText("save failed")).toBeInTheDocument();
+    });
+
     it("updates daily schedules with precise clock times", async () => {
         const user = userEvent.setup();
         render(<Jobs />);
@@ -259,6 +282,21 @@ describe("Jobs page", () => {
         expect(save).toBeDisabled();
         await user.click(save);
         expect(hooks.updateJob).not.toHaveBeenCalled();
+    });
+
+    it("shows cron schedules without an expression", () => {
+        mockJobs([
+            createJob({
+                cronExpression: null,
+                id: "cache.cron",
+                name: "Cron",
+                scheduleType: "cron",
+            }),
+        ]);
+
+        render(<Jobs />);
+
+        expect(screen.getByText("Cron schedule")).toBeInTheDocument();
     });
 
     it("shows schedule validation messages", async () => {

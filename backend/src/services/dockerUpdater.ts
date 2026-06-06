@@ -71,6 +71,7 @@ interface ManagedServiceRow {
     tag_match_type: string;
     tag_match_pattern: string | null;
     enabled: number;
+    last_status: string | null;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -296,9 +297,18 @@ function compareTags(a: string, b: string): number {
 
 async function lookupDockerHub(service: ManagedServiceRow) {
     const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
-    const tagsUrl = `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
-    const tagsData = await fetchJson(tagsUrl);
-    const candidates = (Array.isArray(tagsData.results) ? tagsData.results : [])
+    const tags: unknown[] = [];
+    let tagsUrl: string | null =
+        `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
+    while (tagsUrl) {
+        const tagsData = await fetchJson(tagsUrl);
+        if (Array.isArray(tagsData.results)) {
+            tags.push(...tagsData.results);
+        }
+        const next = typeof tagsData.next === "string" ? tagsData.next : "";
+        tagsUrl = next || null;
+    }
+    const candidates = tags
         .map((item) => String(asRecord(item).name || ""))
         .filter((tag: string) => tag && tagMatches(service, tag))
         .sort(compareTags);
@@ -615,6 +625,16 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 }
             }
         }
+        const currentAppSlugs = new Set(services.map((service) => service.appSlug));
+        for (const row of db
+            .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
+            .all() as Array<{ app_slug: string }>) {
+            if (!currentAppSlugs.has(row.app_slug)) {
+                db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
+                    row.app_slug
+                );
+            }
+        }
         for (const service of services) {
             upsert.run(
                 service.appSlug,
@@ -710,7 +730,8 @@ export async function pollDockerUpdaterRegistries(
             });
             db.prepare(
                 `UPDATE docker_managed_services
-                 SET last_checked_at = ?, last_status = 'registry_check_failed'
+                 SET latest_tag = NULL, latest_digest = NULL,
+                     last_checked_at = ?, last_status = 'registry_check_failed'
                  WHERE id = ?`
             ).run(timestamp, service.id);
         }
@@ -849,7 +870,10 @@ export async function runDockerUpdaterService(
         )
         .all() as unknown as ManagedServiceRow[];
     const applyResults: DockerUpdaterStepResult[] = [];
-    for (const service of autoServices.filter(hasUpdate)) {
+    for (const service of autoServices.filter(
+        (candidate) =>
+            candidate.last_status === "update_available" && hasUpdate(candidate)
+    )) {
         applyResults.push(await applyServiceUpdate(service, "auto"));
     }
     return [register, poll, ...applyResults];

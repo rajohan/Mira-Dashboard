@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
 
 const execFileAsync = promisify(execFile);
+const codexTrustConfigLocks = new Set<string>();
 
 type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
@@ -889,26 +890,37 @@ function getCodexBin() {
 }
 
 function ensureCodexTrustConfig(codexHome: string) {
-    mkdirSync(codexHome, { recursive: true });
-    const configPath = `${codexHome}/config.toml`;
-    let existing = "";
-    try {
-        existing = readFileSync(configPath, "utf8");
-    } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-            throw error;
-        }
+    if (codexTrustConfigLocks.has(codexHome)) {
+        return;
     }
-    const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
-        const header = `[projects.${JSON.stringify(dir)}]`;
-        return existing.includes(header) ? [] : [`${header}\ntrust_level = "trusted"\n`];
-    });
-    if (additions.length > 0) {
-        const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
-        const separator = existing ? "\n" : "";
-        appendFileSync(configPath, `${prefix}${separator}${additions.join("\n")}`, {
-            mode: 0o600,
+    codexTrustConfigLocks.add(codexHome);
+    try {
+        mkdirSync(codexHome, { recursive: true });
+        const configPath = `${codexHome}/config.toml`;
+        let existing = "";
+        try {
+            existing = readFileSync(configPath, "utf8");
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+                throw error;
+            }
+        }
+        const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
+            const header = `[projects.${JSON.stringify(dir)}]`;
+            return existing.includes(header)
+                ? []
+                : [`${header}\ntrust_level = "trusted"\n`];
         });
+        if (additions.length > 0) {
+            const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
+            const separator = existing ? "\n" : "";
+            const next = `${existing}${prefix}${separator}${additions.join("\n")}`;
+            const tempPath = `${configPath}.${process.pid}.tmp`;
+            writeFileSync(tempPath, next, { mode: 0o600 });
+            renameSync(tempPath, configPath);
+        }
+    } finally {
+        codexTrustConfigLocks.delete(codexHome);
     }
 }
 
@@ -1129,6 +1141,7 @@ export const __testing = {
     checkSyntheticQuota,
     buildQuotaMissingProviders,
     cleanPanelText,
+    codexTrustConfigLocks,
     ensureCodexTrustConfig,
     errorMessage,
     fetchSpydebergWeather,

@@ -34,6 +34,7 @@ function dockerNotifications() {
 
 const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
+const originalDockerAppsRoot = process.env.MIRA_DOCKER_APPS_ROOT;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 const originalUpdaterSkipRegistry = process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
 const fakeEnvKeys = [
@@ -502,7 +503,9 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         [
             "services:",
             "  app:",
-            "    image: repo/app:1.0.0",
+            "    image: repo/app:1.0.0@sha256:old",
+            "    labels:",
+            '      mira.updater.autoUpdate: "true"',
             "  disabled:",
             "    image: repo/disabled:1",
             "  current:",
@@ -608,6 +611,7 @@ describe("docker routes", { concurrency: false }, () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-routes-"));
         await installFakeDocker(tempDir);
         process.env.MIRA_DOCKER_ROOT = tempDir;
+        process.env.MIRA_DOCKER_APPS_ROOT = path.join(tempDir, "apps");
         process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
         await seedDockerUpdaterState(tempDir);
         server = await startServer(tempDir);
@@ -641,6 +645,11 @@ describe("docker routes", { concurrency: false }, () => {
             delete process.env.MIRA_DOCKER_ROOT;
         } else {
             process.env.MIRA_DOCKER_ROOT = originalDockerRoot;
+        }
+        if (originalDockerAppsRoot === undefined) {
+            delete process.env.MIRA_DOCKER_APPS_ROOT;
+        } else {
+            process.env.MIRA_DOCKER_APPS_ROOT = originalDockerAppsRoot;
         }
         if (originalDockerBin === undefined) {
             delete process.env.MIRA_DOCKER_BIN;
