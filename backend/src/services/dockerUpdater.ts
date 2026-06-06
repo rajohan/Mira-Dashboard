@@ -412,8 +412,8 @@ async function lookupLatest(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
     if (!SUPPORTED_REGISTRIES.has(registry)) {
         return {
-            latestTag: service.latest_tag || service.current_tag,
-            latestDigest: service.latest_digest || service.current_digest,
+            latestTag: service.current_tag,
+            latestDigest: service.current_digest,
         };
     }
     return registry === "ghcr.io" ? lookupGhcr(service) : lookupDockerHub(service);

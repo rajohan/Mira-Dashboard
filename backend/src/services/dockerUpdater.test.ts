@@ -1243,7 +1243,7 @@ process.stdout.write("updated\n");
                 ...baseService,
                 image_repo: "lscr.io/linuxserver/swag",
             }),
-            { latestTag: "2", latestDigest: "sha256:new" }
+            { latestTag: "1", latestDigest: "sha256:old" }
         );
         assert.deepEqual(
             await updater.__testing.lookupLatest({

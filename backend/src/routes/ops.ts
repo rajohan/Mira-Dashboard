@@ -1,14 +1,22 @@
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
 import { runLogRotationService } from "../services/logRotation.js";
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
+const execFileAsync = promisify(execFile);
 
 interface LogRotationResult {
     result: Record<string, unknown>;
     stderr: string;
 }
+
+type LogRotationRunner = (options: { dryRun: boolean }) => Promise<LogRotationResult>;
+type ExecFileRunner = typeof execFileAsync;
 
 function normalizeLastRun(value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -76,10 +84,34 @@ async function readLogRotationStatus() {
 export async function runLogRotation(options: {
     dryRun: boolean;
 }): Promise<LogRotationResult> {
+    if (!options.dryRun) {
+        return elevatedLogRotationRunner(options);
+    }
     const result = await runLogRotationService({ dryRun: options.dryRun });
     return {
         result: result as unknown as Record<string, unknown>,
         stderr: "",
+    };
+}
+
+let elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotation;
+let execFileRunner: ExecFileRunner = execFileAsync;
+
+async function runElevatedLogRotation(): Promise<LogRotationResult> {
+    const modulePath = fileURLToPath(
+        new URL("../services/logRotation.js", import.meta.url)
+    );
+    const { stdout, stderr } = await execFileRunner(
+        "sudo",
+        ["-n", process.execPath, modulePath, "--json"],
+        {
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+        }
+    );
+    return {
+        result: JSON.parse(stdout || "{}") as Record<string, unknown>,
+        stderr,
     };
 }
 
@@ -118,3 +150,16 @@ export default function opsRoutes(app: express.Application): void {
         })
     );
 }
+
+export const __testing = {
+    resetLogRotationRunner() {
+        elevatedLogRotationRunner = runElevatedLogRotation;
+        execFileRunner = execFileAsync;
+    },
+    setElevatedLogRotationRunner(runner: LogRotationRunner) {
+        elevatedLogRotationRunner = runner;
+    },
+    setLogRotationExecFileRunner(runner: ExecFileRunner) {
+        execFileRunner = runner;
+    },
+};

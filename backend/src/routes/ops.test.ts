@@ -24,7 +24,17 @@ interface TestServer {
 
 async function startServer(configPath: string): Promise<TestServer> {
     process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
-    const { default: opsRoutes } = await import(`./ops.js?test=${Date.now()}`);
+    const { __testing, default: opsRoutes } = await import(`./ops.js?test=${Date.now()}`);
+    const { runLogRotationService } = await import(
+        `../services/logRotation.js?test=${Date.now()}`
+    );
+    __testing.setElevatedLogRotationRunner(async () => ({
+        result: (await runLogRotationService({ dryRun: false })) as unknown as Record<
+            string,
+            unknown
+        >,
+        stderr: "",
+    }));
     const app = express();
     app.use(express.json());
     opsRoutes(app);
@@ -245,6 +255,47 @@ describe("ops routes", () => {
         assert.equal(response.body.result.rotatedFiles, 1);
         assert.equal(response.body.stderr, "");
         assert.equal(await readFile(logPath, "utf8"), before);
+    });
+
+    it("runs real log rotation through the elevated helper", async () => {
+        const { __testing, runLogRotation } = await import(
+            `./ops.js?elevated=${Date.now()}`
+        );
+        const command: { current?: { args: readonly string[]; file: string } } = {};
+        __testing.resetLogRotationRunner();
+        __testing.setLogRotationExecFileRunner(
+            async (file: string, args: readonly string[] | undefined) => {
+                command.current = { args: args ?? [], file };
+                return {
+                    stderr: "helper warning",
+                    stdout: JSON.stringify({ dryRun: false, ok: true }),
+                };
+            }
+        );
+        try {
+            const result = await runLogRotation({ dryRun: false });
+
+            assert.deepEqual(result, {
+                result: { dryRun: false, ok: true },
+                stderr: "helper warning",
+            });
+            assert.equal(command.current?.file, "sudo");
+            assert.equal(command.current?.args[0], "-n");
+            assert.equal(command.current?.args[1], process.execPath);
+            assert.match(command.current?.args[2] ?? "", /services\/logRotation\.js$/u);
+            assert.equal(command.current?.args[3], "--json");
+
+            __testing.setLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: "",
+            }));
+            assert.deepEqual(await runLogRotation({ dryRun: false }), {
+                result: {},
+                stderr: "",
+            });
+        } finally {
+            __testing.resetLogRotationRunner();
+        }
     });
 
     it("runs real log rotation and records lastRun in SQLite", async () => {

@@ -52,6 +52,10 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("validates config shape and policy helpers", async () => {
+        assert.equal(
+            __testing.defaultConfigPath,
+            path.resolve("config/log-rotation.json")
+        );
         assert.equal(__testing.byteLimitFromMb("2"), 2 * 1024 * 1024);
         assert.equal(__testing.byteLimitFromMb(0), null);
         assert.ok(

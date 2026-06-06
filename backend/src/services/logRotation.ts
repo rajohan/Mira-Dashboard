@@ -2,6 +2,7 @@ import { constants, createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGzip } from "node:zlib";
 
 import { db } from "../db.js";
@@ -11,7 +12,7 @@ import { writeCacheSuccess } from "./cacheRefresh.js";
 const STATE_CACHE_KEY = "log_rotation.state";
 const DEFAULT_CONFIG_PATH = nonEmptyEnvFallback(
     "MIRA_LOG_ROTATION_CONFIG",
-    path.resolve(process.cwd(), "config/log-rotation.json")
+    fileURLToPath(new URL("../../config/log-rotation.json", import.meta.url))
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
@@ -834,6 +835,7 @@ export const __testing = {
     archiveRetentionKey,
     assertSafePath,
     byteLimitFromMb,
+    defaultConfigPath: DEFAULT_CONFIG_PATH,
     globToRegex,
     hasRotatedInCadence,
     listArchives,
@@ -845,3 +847,23 @@ export const __testing = {
     shouldRotate,
     caughtMessage,
 };
+
+/* c8 ignore start */
+async function runCli(): Promise<void> {
+    try {
+        const summary = await runLogRotationService({
+            dryRun: process.argv.includes("--dry-run"),
+        });
+        if (process.argv.includes("--json")) {
+            process.stdout.write(`${JSON.stringify(summary)}\n`);
+        }
+    } catch (error) {
+        console.error(caughtMessage(error));
+        process.exitCode = 1;
+    }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    await runCli();
+}
+/* c8 ignore stop */
