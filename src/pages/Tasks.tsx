@@ -78,6 +78,7 @@ export function Tasks() {
         const matchesSearch = taskMatchesSearch(task, search);
         return matchesFilter && matchesSearch;
     });
+    const hasActiveFilters = search.trim().length > 0 || filter !== "all";
 
     const tasksByColumn: Record<ColumnId, Task[]> = {
         todo: [],
@@ -328,6 +329,36 @@ export function Tasks() {
                             />
                         </div>
                     </div>
+
+                    {filteredTasks.length === 0 && (
+                        <div className="border-primary-700 bg-primary-800/60 mb-4 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <p className="text-primary-100 text-sm font-medium">
+                                    {hasActiveFilters
+                                        ? "No tasks match the current filters."
+                                        : "No tasks yet."}
+                                </p>
+                                <p className="text-primary-300 mt-1 text-xs">
+                                    {hasActiveFilters
+                                        ? "Clear search and assignee filters to return to the full board."
+                                        : "Create a task when there is new work to track."}
+                                </p>
+                            </div>
+                            {hasActiveFilters && (
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => {
+                                        setSearch("");
+                                        setFilter("all");
+                                    }}
+                                    className="w-full sm:w-auto"
+                                >
+                                    Clear filters
+                                </Button>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex flex-1 flex-col gap-4 overflow-y-auto pb-4 lg:flex-row lg:overflow-x-auto">
                         {COLUMN_CONFIG.map((column) => (
