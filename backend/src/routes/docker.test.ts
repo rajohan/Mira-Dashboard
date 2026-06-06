@@ -1964,6 +1964,48 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);
+        const previousFetch = globalThis.fetch;
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/1.0.0")
+                        ? { digest: "sha256:old" }
+                        : { results: [{ name: "1.0.0" }] },
+            } as Response;
+        }) as typeof fetch;
+        try {
+            await withEnvValue(
+                "MIRA_DOCKER_UPDATER_SKIP_REGISTRY",
+                undefined,
+                async () => {
+                    const { __testing } = await import(
+                        `./docker.js?manual-skip=${randomUUID()}`
+                    );
+                    const skipped = await __testing.runManualUpdaterForService(1);
+                    assert.equal(skipped.success, true);
+                    assert.deepEqual(skipped.output, {
+                        serviceId: 1,
+                        summary: { updated: 0, failed: 0 },
+                        updated: [],
+                        failed: [],
+                    });
+                    const skippedSteps = skipped.steps as Array<{ step: string }>;
+                    assert.equal(
+                        skippedSteps.some((step) =>
+                            step.step.startsWith("manual-update-skipped:")
+                        ),
+                        true
+                    );
+                }
+            );
+        } finally {
+            globalThis.fetch = previousFetch;
+        }
+
+        await seedDockerUpdaterState(tempDir);
         await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
             const manualFailure = await requestJson<{
                 success: boolean;

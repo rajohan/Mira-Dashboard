@@ -832,17 +832,21 @@ async function runManualUpdaterForService(serviceId: number) {
         };
     }
 
+    const updated = steps.some((step) => step.step.startsWith("manual-update:"))
+        ? [serviceId]
+        : [];
+
     return {
         success: true,
         output: {
             serviceId,
-            summary: { updated: 1, failed: 0 },
-            updated: [serviceId],
+            summary: { updated: updated.length, failed: 0 },
+            updated,
             failed: [],
         },
         stderr: "",
-        summary: { updated: 1, failed: 0 },
-        updated: [serviceId],
+        summary: { updated: updated.length, failed: 0 },
+        updated,
         failed: [],
         steps,
     };

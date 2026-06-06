@@ -654,6 +654,84 @@ process.stdout.write("updated\n");
         assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
     });
 
+    it("skips manual apply when a fresh poll finds no tag update", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "manual-current");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.tagPattern: "^[0-9]+$"
+`,
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stdout.write('unexpected apply\\n');\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/1")
+                        ? { digest: "sha256:same-tag" }
+                        : { results: [{ name: "1" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?manual-current=${Date.now()}`
+            );
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
+                )
+                .get() as { id: number };
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET latest_tag = '2', latest_digest = 'sha256:stale',
+                     last_status = 'update_available'
+                 WHERE id = ?`
+            ).run(service.id);
+
+            const steps = (await updater.runDockerUpdaterService(
+                service.id
+            )) as StepResult[];
+            assert.deepEqual(
+                steps.map((step) => step.step),
+                ["register", "poll", "manual-update-skipped:manual-current/target"]
+            );
+            const row = db
+                .prepare(
+                    `SELECT last_status, latest_tag, latest_digest, current_tag
+                     FROM docker_managed_services WHERE id = ?`
+                )
+                .get(service.id) as {
+                current_tag: string | null;
+                last_status: string | null;
+                latest_digest: string | null;
+                latest_tag: string | null;
+            };
+            assert.equal(row.current_tag, "1");
+            assert.equal(row.latest_tag, "1");
+            assert.equal(row.latest_digest, "sha256:same-tag");
+            assert.equal(row.last_status, "current");
+        });
+
+        assert.match(await readFile(composePath, "utf8"), /image: nginx:1/u);
+    });
+
     it("covers updater helper fallback branches directly", async () => {
         const updater = await import(`./dockerUpdater.js?helpers=${Date.now()}`);
         assert.equal(
@@ -792,6 +870,16 @@ process.stdout.write("updated\n");
             true
         );
         assert.equal(updater.__testing.hasUpdate(baseService), true);
+        assert.equal(
+            updater.__testing.hasUpdate({
+                ...baseService,
+                current_tag: "1",
+                latest_tag: "1",
+                current_digest: "sha256:old",
+                latest_digest: "sha256:new",
+            }),
+            false
+        );
         assert.equal(
             updater.__testing.hasUpdate({
                 ...baseService,

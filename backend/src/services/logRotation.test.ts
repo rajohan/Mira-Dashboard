@@ -231,8 +231,12 @@ describe("log rotation service", { concurrency: false }, () => {
                 stderr: "helper warning",
             });
             assert.equal(commands[0]?.file, "sudo");
-            assert.deepEqual(commands[0]?.args.slice(0, 2), ["-n", process.execPath]);
-            assert.match(commands[0]?.args[2] ?? "", /services\/logRotation\.js$/u);
+            assert.deepEqual(commands[0]?.args.slice(0, 3), [
+                "-n",
+                "-E",
+                process.execPath,
+            ]);
+            assert.match(commands[0]?.args[3] ?? "", /services\/logRotation\.js$/u);
             assert.equal(commands[0]?.args.includes("--dry-run"), false);
             assert.equal(commands[1]?.args.includes("--dry-run"), true);
         } finally {

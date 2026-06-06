@@ -218,6 +218,12 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.equal(failedOpenClaw.status, "failed");
     assert.equal(failedQuotas.status, "failed");
     assert.equal(failedLogRotation.status, "failed");
+
+    __testing.setActionRunnersForTests({
+        logRotation: async () => ({ result: { ok: false }, stderr: "" }),
+    });
+    const failedNestedLogRotation = await runScheduledJob("ops.log-rotation");
+    assert.equal(failedNestedLogRotation.status, "failed");
 });
 
 test("runs default scheduled log rotation through the elevated helper", async () => {
@@ -237,8 +243,8 @@ test("runs default scheduled log rotation through the elevated helper", async ()
         stderr: "",
     });
     assert.equal(commands[0]?.file, "sudo");
-    assert.deepEqual(commands[0]?.args.slice(0, 2), ["-n", process.execPath]);
-    assert.match(commands[0]?.args[2] ?? "", /services\/logRotation\.js$/u);
+    assert.deepEqual(commands[0]?.args.slice(0, 3), ["-n", "-E", process.execPath]);
+    assert.match(commands[0]?.args[3] ?? "", /services\/logRotation\.js$/u);
     assert.equal(commands[0]?.args.includes("--dry-run"), false);
 });
 

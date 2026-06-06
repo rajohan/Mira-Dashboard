@@ -765,6 +765,12 @@ export async function pollDockerUpdaterRegistries(
     for (const service of services) {
         try {
             const latest = await lookupLatest(service);
+            const updatedService = {
+                ...service,
+                latest_tag: latest.latestTag ?? null,
+                latest_digest: latest.latestDigest ?? null,
+            };
+            const updateAvailable = hasUpdate(updatedService);
             db.prepare(
                 `UPDATE docker_managed_services
                  SET latest_tag = ?, latest_digest = ?, last_checked_at = ?, last_status = ?
@@ -773,19 +779,11 @@ export async function pollDockerUpdaterRegistries(
                 latest.latestTag ?? null,
                 latest.latestDigest ?? null,
                 timestamp,
-                latest.latestTag !== service.current_tag ||
-                    latest.latestDigest !== service.current_digest
-                    ? "update_available"
-                    : "current",
+                updateAvailable ? "update_available" : "current",
                 service.id
             );
             checked.push(serviceLabel(service));
-            const updatedService = {
-                ...service,
-                latest_tag: latest.latestTag ?? null,
-                latest_digest: latest.latestDigest ?? null,
-            };
-            if (hasUpdate(updatedService)) {
+            if (updateAvailable) {
                 updates.push(serviceLabel(service));
                 insertEvent(
                     updatedService,
@@ -928,6 +926,18 @@ export async function runDockerUpdaterService(
                     ok: false,
                     stdout: "",
                     stderr: "Docker updater service not found after registry poll",
+                },
+            ];
+        }
+        if (!hasUpdate(refreshedService)) {
+            return [
+                register,
+                poll,
+                {
+                    step: `manual-update-skipped:${serviceLabel(refreshedService)}`,
+                    ok: true,
+                    stdout: "No update available after registry poll",
+                    stderr: "",
                 },
             ];
         }

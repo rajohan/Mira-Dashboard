@@ -852,7 +852,7 @@ export async function runElevatedLogRotationService(options: {
     const modulePath = fileURLToPath(
         new URL("../services/logRotation.js", import.meta.url)
     );
-    const args = ["-n", process.execPath, modulePath, "--json"];
+    const args = ["-n", "-E", process.execPath, modulePath, "--json"];
     if (options.dryRun) {
         args.push("--dry-run");
     }

@@ -249,6 +249,18 @@ function isOkFalse(value: unknown): boolean {
     );
 }
 
+function isLogRotationFailure(value: unknown): boolean {
+    if (isOkFalse(value)) {
+        return true;
+    }
+    return Boolean(
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        isOkFalse((value as { result?: unknown }).result)
+    );
+}
+
 function nowIso(): string {
     return new Date().toISOString();
 }
@@ -542,7 +554,7 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
     if (job.actionType === "ops.logRotation") {
         const dryRun = job.settings.dryRun === true;
         const logRotation = await logRotationRunner({ dryRun });
-        if (isOkFalse(logRotation)) {
+        if (isLogRotationFailure(logRotation)) {
             throw new Error("Log rotation failed");
         }
         return { logRotation };
