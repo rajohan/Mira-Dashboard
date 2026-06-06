@@ -7,6 +7,7 @@ import {
     runScheduledJob,
     type ScheduledJobScheduleType,
     updateScheduledJob,
+    validateScheduledJobPatch,
 } from "../services/scheduledJobs.js";
 
 interface HttpStatusError extends Error {
@@ -25,6 +26,8 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 }
 
 const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily", "cron"]);
+const validationErrorPattern =
+    /intervalSeconds must be an integer >= 60|scheduleType must be interval, daily, or cron|timeOfDay must be HH:mm|cron schedule is not implemented yet/u;
 
 function invalidPatchField(patch: Record<string, unknown>): string | null {
     if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
@@ -90,6 +93,26 @@ export default function jobsRoutes(app: express.Application): void {
                 });
                 return;
             }
+            const existingJob = getScheduledJob(String(req.params.id));
+            if (!existingJob) {
+                res.status(404).json({ error: "Scheduled job not found" });
+                return;
+            }
+            const semanticError = validateScheduledJobPatch(existingJob, {
+                intervalSeconds:
+                    typeof patch.intervalSeconds === "number"
+                        ? patch.intervalSeconds
+                        : undefined,
+                scheduleType: patch.scheduleType as ScheduledJobScheduleType | undefined,
+                timeOfDay:
+                    typeof patch.timeOfDay === "string" || patch.timeOfDay === null
+                        ? patch.timeOfDay
+                        : undefined,
+            });
+            if (semanticError) {
+                res.status(400).json({ error: semanticError });
+                return;
+            }
 
             const enabled =
                 typeof patch.enabled === "boolean" ? patch.enabled : undefined;
@@ -97,23 +120,30 @@ export default function jobsRoutes(app: express.Application): void {
                 typeof patch.intervalSeconds === "number"
                     ? patch.intervalSeconds
                     : undefined;
-            const scheduleType =
-                patch.scheduleType === "interval" ||
-                patch.scheduleType === "daily" ||
-                patch.scheduleType === "cron"
-                    ? patch.scheduleType
-                    : undefined;
+            const scheduleType = patch.scheduleType as
+                | ScheduledJobScheduleType
+                | undefined;
             const timeOfDay =
                 typeof patch.timeOfDay === "string" || patch.timeOfDay === null
                     ? patch.timeOfDay
                     : undefined;
 
-            const job = updateScheduledJob(String(req.params.id), {
-                enabled,
-                intervalSeconds,
-                scheduleType,
-                timeOfDay,
-            });
+            let job;
+            try {
+                job = updateScheduledJob(String(req.params.id), {
+                    enabled,
+                    intervalSeconds,
+                    scheduleType,
+                    timeOfDay,
+                });
+            } catch (error) {
+                const message = errorMessage(error, "Invalid scheduled job patch");
+                if (validationErrorPattern.test(message)) {
+                    res.status(400).json({ error: message });
+                    return;
+                }
+                throw error;
+            }
             if (!job) {
                 res.status(404).json({ error: "Scheduled job not found" });
                 return;

@@ -136,12 +136,64 @@ test("returns validation and missing job errors", async () => {
             method: "PATCH",
             body: { patch: { enabled: true } },
         });
+        const partialIntervalPatch = await requestJson<{
+            job: { scheduleType: string };
+        }>(server, "/api/jobs/cache.weather", {
+            method: "PATCH",
+            body: { patch: { scheduleType: "interval" } },
+        });
+        const partialDailyPatch = await requestJson<{
+            job: { scheduleType: string; timeOfDay: string | null };
+        }>(server, "/api/jobs/cache.git", {
+            method: "PATCH",
+            body: { patch: { scheduleType: "daily" } },
+        });
         const cronPatch = await requestJson<{ error: string }>(
             server,
             "/api/jobs/cache.weather",
             {
                 method: "PATCH",
                 body: { patch: { scheduleType: "cron", timeOfDay: null } },
+            }
+        );
+        const badIntervalPatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { scheduleType: "interval", intervalSeconds: 10 } },
+            }
+        );
+        const fractionalIntervalPatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { scheduleType: "interval", intervalSeconds: 60.5 } },
+            }
+        );
+        const badDailyPatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { scheduleType: "daily", timeOfDay: null } },
+            }
+        );
+        const badDailyRangePatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { scheduleType: "daily", timeOfDay: "99:00" } },
+            }
+        );
+        const serviceValidationPatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { intervalSeconds: 10 } },
             }
         );
         const invalidPatchFields = await Promise.all(
@@ -162,8 +214,32 @@ test("returns validation and missing job errors", async () => {
         assert.equal(invalidPatch.status, 400);
         assert.equal(missingRun.status, 404);
         assert.equal(missingPatch.status, 404);
-        assert.equal(cronPatch.status, 500);
+        assert.equal(partialIntervalPatch.status, 200);
+        assert.equal(partialIntervalPatch.body.job.scheduleType, "interval");
+        assert.equal(partialDailyPatch.status, 200);
+        assert.equal(partialDailyPatch.body.job.scheduleType, "daily");
+        assert.equal(partialDailyPatch.body.job.timeOfDay, "02:40");
+        assert.equal(cronPatch.status, 400);
         assert.equal(cronPatch.body.error, "cron schedule is not implemented yet");
+        assert.equal(badIntervalPatch.status, 400);
+        assert.equal(
+            badIntervalPatch.body.error,
+            "intervalSeconds must be an integer >= 60"
+        );
+        assert.equal(fractionalIntervalPatch.status, 400);
+        assert.equal(
+            fractionalIntervalPatch.body.error,
+            "intervalSeconds must be an integer >= 60"
+        );
+        assert.equal(badDailyPatch.status, 400);
+        assert.equal(badDailyPatch.body.error, "timeOfDay must be HH:mm for daily jobs");
+        assert.equal(badDailyRangePatch.status, 400);
+        assert.equal(
+            badDailyRangePatch.body.error,
+            "timeOfDay must be HH:mm for daily jobs"
+        );
+        assert.equal(serviceValidationPatch.status, 400);
+        assert.match(serviceValidationPatch.body.error, /integer >= 60/u);
         assert.deepEqual(
             invalidPatchFields.map((response) => [response.status, response.body.error]),
             [
@@ -174,6 +250,88 @@ test("returns validation and missing job errors", async () => {
             ]
         );
     } finally {
+        await server.close();
+    }
+});
+
+test("maps scheduled job patch races and unexpected update errors", async () => {
+    const server = await startServer();
+    try {
+        const originalPrepare = db.prepare.bind(db);
+        let selectCount = 0;
+        const selectMock = test.mock.method(db, "prepare", (sql: string) => {
+            if (sql === "SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1") {
+                selectCount += 1;
+                const statement = originalPrepare(sql);
+                if (selectCount === 3) {
+                    return {
+                        get: () => null,
+                    } as unknown as ReturnType<typeof db.prepare>;
+                }
+                return statement;
+            }
+            return originalPrepare(sql);
+        });
+        const missingAfterUpdate = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            { method: "PATCH", body: { patch: { enabled: false } } }
+        );
+        selectMock.mock.restore();
+
+        let validationSelectCount = 0;
+        const validationRaceMock = test.mock.method(db, "prepare", (sql: string) => {
+            if (sql === "SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1") {
+                validationSelectCount += 1;
+                const statement = originalPrepare(sql);
+                if (validationSelectCount === 2) {
+                    return {
+                        get: (id: string) => ({
+                            ...(statement.get(id) as Record<string, unknown>),
+                            interval_seconds: 10,
+                        }),
+                    } as unknown as ReturnType<typeof db.prepare>;
+                }
+                return statement;
+            }
+            return originalPrepare(sql);
+        });
+        const validationRace = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            { method: "PATCH", body: { patch: { enabled: false } } }
+        );
+        validationRaceMock.mock.restore();
+
+        const updateMock = test.mock.method(db, "prepare", (sql: string) => {
+            const statement = originalPrepare(sql);
+            if (sql.includes("UPDATE scheduled_jobs")) {
+                return {
+                    run: () => {
+                        throw new Error("database crashed");
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return statement;
+        });
+        const unexpectedError = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            { method: "PATCH", body: { patch: { enabled: false } } }
+        );
+        updateMock.mock.restore();
+
+        assert.equal(missingAfterUpdate.status, 404);
+        assert.equal(missingAfterUpdate.body.error, "Scheduled job not found");
+        assert.equal(validationRace.status, 400);
+        assert.equal(
+            validationRace.body.error,
+            "intervalSeconds must be an integer >= 60"
+        );
+        assert.equal(unexpectedError.status, 500);
+        assert.equal(unexpectedError.body.error, "database crashed");
+    } finally {
+        test.mock.restoreAll();
         await server.close();
     }
 });

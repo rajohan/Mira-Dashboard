@@ -414,7 +414,8 @@ if (args === "exec kopia kopia snapshot list --all --json") {
   process.stdout.write(JSON.stringify([
     { id: "ignored", source: {}, stats: {} },
     { id: "fresh", source: { path: "/data/a" }, description: "Fresh", startTime: "2099-01-01T00:00:00.000Z", endTime: "2099-01-01T01:00:00.000Z", stats: { fileCount: "3", totalSize: "10", errorCount: "0", ignoredErrorCount: "1" }, retentionReason: ["latest"] },
-    { id: "stale", source: { path: "/data/b" }, startTime: "2020-01-01T00:00:00.000Z", stats: {} }
+    { id: "stale", source: { path: "/data/b" }, startTime: "2020-01-01T00:00:00.000Z", stats: {} },
+    { id: "invalid-time", source: { path: "/data/c" }, startTime: "2026-01-01T00:00:00.000Z", endTime: "not-a-date", stats: {} }
   ]));
 } else if (args === "exec walg wal-g backup-list --detail --json") {
   process.stdout.write(JSON.stringify([]));
@@ -992,7 +993,8 @@ const args = process.argv.slice(2).join(" ");
 if (args === "exec kopia kopia snapshot list --all --json") {
 	  process.stdout.write(JSON.stringify([
 	    { id: "old", source: { path: "/data/a" }, startTime: "2020-01-01T00:00:00.000Z", stats: {} },
-	    { id: "new", source: { path: "/data/a" }, endTime: "2099-01-01T00:00:00.000Z", stats: {} }
+	    { id: "new", source: { path: "/data/a" }, endTime: "2099-01-01T00:00:00.000Z", stats: {} },
+	    { id: "invalid-time", source: { path: "/data/c" }, startTime: "2026-01-01T00:00:00.000Z", endTime: "not-a-date", stats: {} }
 	  ]));
 } else {
 	  process.stdout.write("[]");
@@ -1034,9 +1036,11 @@ if (args === "exec kopia kopia snapshot list --all --json") {
         );
 
         const kopia = cacheRow("backup.kopia.status").data as {
+            stale: Array<{ path: string }>;
             snapshotsByPath: Array<{ latest: { id: string } }>;
         };
         assert.equal(kopia.snapshotsByPath[0]?.latest.id, "new");
+        assert.ok(kopia.stale.some((snapshot) => snapshot.path === "/data/c"));
         const quotas = cacheRow("quotas.summary");
         assert.ok((quotas.metadata.missing as string[]).includes("openrouter"));
         assert.ok((quotas.metadata.missing as string[]).includes("synthetic"));

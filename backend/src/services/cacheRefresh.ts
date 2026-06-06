@@ -674,7 +674,11 @@ async function refreshKopiaBackupCache() {
             if (!snapshot.endTime) {
                 return true;
             }
-            const ageHours = (Date.now() - new Date(snapshot.endTime).getTime()) / 36e5;
+            const endTimeMs = new Date(snapshot.endTime).getTime();
+            if (!Number.isFinite(endTimeMs)) {
+                return true;
+            }
+            const ageHours = (Date.now() - endTimeMs) / 36e5;
             return ageHours > 30;
         })
         .map((snapshot) => ({ path: snapshot.path, endTime: snapshot.endTime }));

@@ -362,6 +362,44 @@ function computeNextRunIso(job: {
     return nextIntervalRunIso(job.intervalSeconds);
 }
 
+function validateScheduledJobValues(job: {
+    intervalSeconds: number;
+    scheduleType: ScheduledJobScheduleType;
+    timeOfDay: string | null;
+}): string | null {
+    if (!Number.isSafeInteger(job.intervalSeconds) || job.intervalSeconds < 60) {
+        return "intervalSeconds must be an integer >= 60";
+    }
+    if (!["interval", "daily", "cron"].includes(job.scheduleType)) {
+        return "scheduleType must be interval, daily, or cron";
+    }
+    if (
+        job.scheduleType === "daily" &&
+        (!job.timeOfDay || !isValidTimeOfDay(job.timeOfDay))
+    ) {
+        return "timeOfDay must be HH:mm for daily jobs";
+    }
+    if (job.scheduleType === "cron") {
+        return "cron schedule is not implemented yet";
+    }
+    return null;
+}
+
+export function validateScheduledJobPatch(
+    existing: Pick<ScheduledJob, "intervalSeconds" | "scheduleType" | "timeOfDay">,
+    patch: {
+        intervalSeconds?: number;
+        scheduleType?: ScheduledJobScheduleType;
+        timeOfDay?: string | null;
+    }
+): string | null {
+    return validateScheduledJobValues({
+        intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
+        scheduleType: patch.scheduleType ?? existing.scheduleType,
+        timeOfDay: patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay,
+    });
+}
+
 function updateNextRunFromLatestJob(jobId: string): void {
     const row = db
         .prepare(`SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1`)
@@ -472,17 +510,13 @@ export function updateScheduledJob(
     const timeOfDay =
         patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay;
 
-    if (!Number.isSafeInteger(intervalSeconds) || intervalSeconds < 60) {
-        throw new Error("intervalSeconds must be an integer >= 60");
-    }
-    if (!["interval", "daily", "cron"].includes(scheduleType)) {
-        throw new Error("scheduleType must be interval, daily, or cron");
-    }
-    if (scheduleType === "daily" && (!timeOfDay || !isValidTimeOfDay(timeOfDay))) {
-        throw new Error("timeOfDay must be HH:mm for daily jobs");
-    }
-    if (scheduleType === "cron") {
-        throw new Error("cron schedule is not implemented yet");
+    const validationError = validateScheduledJobValues({
+        intervalSeconds,
+        scheduleType,
+        timeOfDay,
+    });
+    if (validationError) {
+        throw new Error(validationError);
     }
 
     const timestamp = nowIso();
@@ -612,10 +646,14 @@ export async function runScheduledJob(
     try {
         const output = await executeScheduledJob(job);
         finishRun(runId, "success", "Job completed", output);
-        updateNextRunFromLatestJob(job.id);
+        if (triggerType === "schedule") {
+            updateNextRunFromLatestJob(job.id);
+        }
     } catch (error) {
         finishRun(runId, "failed", errorMessage(error, "Job failed"), {});
-        updateNextRunFromLatestJob(job.id);
+        if (triggerType === "schedule") {
+            updateNextRunFromLatestJob(job.id);
+        }
     } finally {
         runningJobs.delete(job.id);
     }
@@ -714,6 +752,7 @@ export const __testing = {
     defaultJobs,
     ensureDefaultScheduledJobs,
     getDefaultActionTargetForTests: getDefaultActionTarget,
+    isScheduledJobRaceError,
     nextDailyRunIso,
     nextIntervalRunIso,
     parseObjectJson,

@@ -767,6 +767,42 @@ describe("docker routes", { concurrency: false }, () => {
                 },
             ],
         });
+        assert.deepEqual(
+            await __testing.runManualUpdaterForService({
+                id: 2,
+                appSlug: "media",
+                serviceName: "disabled",
+                composePath: "/opt/docker/apps/media/compose.yaml",
+                imageRepo: "repo/disabled",
+                composeImageRef: "repo/disabled:1",
+                composeImageField: "services.disabled.image",
+                currentTag: "1",
+                currentDigest: null,
+                latestTag: "2",
+                latestDigest: null,
+                policy: "notify",
+                pinMode: "tag",
+                enabled: false,
+                lastCheckedAt: null,
+                lastUpdatedAt: null,
+                lastStatus: null,
+                updateAvailable: true,
+                metadata: {},
+            }),
+            {
+                success: false,
+                output: {},
+                stderr: "Docker updater service is disabled",
+                steps: [
+                    {
+                        step: "manual-update",
+                        ok: false,
+                        stdout: "",
+                        stderr: "Docker updater service is disabled",
+                    },
+                ],
+            }
+        );
 
         let nextCalled = false;
         const handler = __testing.asyncRoute(async () => {

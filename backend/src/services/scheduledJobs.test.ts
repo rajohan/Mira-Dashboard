@@ -136,16 +136,18 @@ test("runs jobs and records success or failure", async () => {
         actionType: job.actionType,
         actionTarget: job.actionTarget,
     }));
+    const nextRunBeforeManualSuccess = getScheduledJob("cache.weather")?.nextRunAt;
     const success = await runScheduledJob("cache.weather");
     assert.equal(success.status, "success");
     assert.equal(success.output.actionTarget, "weather.spydeberg");
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.status, "success");
+    assert.equal(getScheduledJob("cache.weather")?.nextRunAt, nextRunBeforeManualSuccess);
 
     __testing.setActionExecutorForTests(async () => {
         updateScheduledJob("cache.weather", { enabled: false, intervalSeconds: 7200 });
         return { updated: true };
     });
-    const concurrentPatch = await runScheduledJob("cache.weather");
+    const concurrentPatch = await runScheduledJob("cache.weather", "schedule");
     assert.equal(concurrentPatch.status, "success");
     const patchedJob = getScheduledJob("cache.weather");
     assert.equal(patchedJob?.enabled, false);
@@ -165,6 +167,12 @@ test("runs jobs and records success or failure", async () => {
     assert.equal(failure.status, "failed");
     assert.equal(failure.triggerType, "schedule");
     assert.equal(failure.message, "boom");
+
+    updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
+    const nextRunBeforeManualFailure = getScheduledJob("cache.weather")?.nextRunAt;
+    const manualFailure = await runScheduledJob("cache.weather");
+    assert.equal(manualFailure.status, "failed");
+    assert.equal(getScheduledJob("cache.weather")?.nextRunAt, nextRunBeforeManualFailure);
 
     await assert.rejects(runScheduledJob("missing"), /not found/u);
 });
@@ -369,12 +377,16 @@ test("continues due-job tick across expected per-job races", async () => {
         ).run(id, id, target, timestamp, timestamp, timestamp);
     }
     const originalGet = db.prepare.bind(db);
+    let raceLookupCount = 0;
     const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
         if (sql.includes("SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1")) {
             return {
                 get: (id: string) => {
                     if (id === "custom.race") {
-                        return;
+                        raceLookupCount += 1;
+                        if (raceLookupCount > 1) {
+                            return;
+                        }
                     }
                     return originalGet(sql).get(id);
                 },
@@ -383,18 +395,56 @@ test("continues due-job tick across expected per-job races", async () => {
         return originalGet(sql);
     });
     const refreshed: string[] = [];
-    __testing.setActionRunnersForTests({
-        cacheRefresh: async (key) => {
-            refreshed.push(key);
-        },
+    __testing.setActionExecutorForTests(async (job) => {
+        refreshed.push(job.actionTarget);
+        return {};
     });
     try {
         await __testing.runDueJobs();
     } finally {
         prepareMock.mock.restore();
+        __testing.setActionExecutorForTests(undefined);
     }
 
     assert.deepEqual(refreshed, ["next"]);
+    assert.equal(__testing.isScheduledJobRaceError({ status: 409 }), true);
+    assert.equal(__testing.isScheduledJobRaceError({ statusCode: 404 }), true);
+    assert.equal(__testing.isScheduledJobRaceError({ code: "409" }), true);
+    assert.equal(
+        __testing.isScheduledJobRaceError(new Error("Job is already running")),
+        true
+    );
+    assert.equal(__testing.isScheduledJobRaceError({}), false);
+    assert.equal(__testing.isScheduledJobRaceError(new Error("boom")), false);
+});
+
+test("rethrows unexpected due-job errors", async () => {
+    const timestamp = "2000-01-01T00:00:00.000Z";
+    db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds,
+            action_type, action_target, settings_json, next_run_at, created_at, updated_at
+        ) VALUES (
+            'custom.unexpected-race', 'Unexpected', 'Due', 1, 'interval', 60,
+            'cache.refresh', 'weather', '{}', ?, ?, ?
+        )`
+    ).run(timestamp, timestamp, timestamp);
+    const originalGet = db.prepare.bind(db);
+    const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("INSERT INTO scheduled_job_runs")) {
+            return {
+                run: () => {
+                    throw new Error("run insert failed");
+                },
+            };
+        }
+        return originalGet(sql);
+    });
+    try {
+        await assert.rejects(__testing.runDueJobs(), /run insert failed/u);
+    } finally {
+        prepareMock.mock.restore();
+    }
 });
 
 test("covers scheduled job mapping and unsupported-action edge cases", async () => {

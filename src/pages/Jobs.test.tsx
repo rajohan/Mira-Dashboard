@@ -270,6 +270,14 @@ describe("Jobs page", () => {
             timeOfDayDraft: "09:00",
             updateJob,
         });
+        await saveScheduleAction({
+            intervalNumber: 60,
+            scheduleTypeDraft: "cron",
+            selectedJob: createJob({ scheduleType: "cron" }),
+            setActionError,
+            timeOfDayDraft: "09:00",
+            updateJob,
+        });
         await toggleSelectedAction({
             enabled: false,
             selectedJob: null,
@@ -278,8 +286,11 @@ describe("Jobs page", () => {
         });
         await runSelectedAction({ runJob, selectedJob: null, setActionError });
 
-        expect(setActionError).toHaveBeenCalledTimes(3);
+        expect(setActionError).toHaveBeenCalledTimes(4);
         expect(setActionError).toHaveBeenCalledWith("No scheduled job selected.");
+        expect(setActionError).toHaveBeenCalledWith(
+            "Cron schedules are read-only in the dashboard."
+        );
         expect(hooks.updateJob).not.toHaveBeenCalled();
         expect(hooks.runJob).not.toHaveBeenCalled();
     });
