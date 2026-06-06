@@ -372,6 +372,28 @@ process.stdout.write("updated\n");
             "utf8"
         );
         await writeFile(path.join(badDir, "compose.yaml"), "services:\n  [", "utf8");
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                'bad', 'kept', ?, 'busybox', 'busybox:1',
+                'services.kept.image', '1', NULL, 'notify', 'tag',
+                'exact', '1', 1, '{}'
+            )`
+        ).run(path.join(badDir, "compose.yaml"));
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                'removed', 'old', ?, 'busybox', 'busybox:1',
+                'services.old.image', '1', NULL, 'notify', 'tag',
+                'exact', '1', 1, '{}'
+            )`
+        ).run(path.join(appsRoot, "removed", "compose.yaml"));
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
@@ -386,6 +408,26 @@ process.stdout.write("updated\n");
             .get() as { current_tag: string; tag_match_pattern: string };
         assert.equal(web.current_tag, "latest");
         assert.equal(web.tag_match_pattern, "latest");
+        assert.equal(
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM docker_managed_services WHERE app_slug = 'bad'"
+                    )
+                    .get() as { count: number }
+            ).count,
+            1
+        );
+        assert.equal(
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM docker_managed_services WHERE app_slug = 'removed'"
+                    )
+                    .get() as { count: number }
+            ).count,
+            0
+        );
     });
 
     it("preserves registered services when the compose apps root is unavailable", async () => {
@@ -1237,6 +1279,27 @@ process.stdout.write("updated\n");
                 current_tag: null,
             }),
             { latestTag: null, latestDigest: "sha256:old" }
+        );
+        let dockerHubCall = 0;
+        globalThis.fetch = (async () => {
+            dockerHubCall += 1;
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    dockerHubCall === 1
+                        ? { results: [{ name: "2" }] }
+                        : { images: [], digest: null },
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupDockerHub({
+                ...baseService,
+                current_digest: null,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+            }),
+            { latestTag: "2", latestDigest: null }
         );
         assert.deepEqual(
             await updater.__testing.lookupLatest({

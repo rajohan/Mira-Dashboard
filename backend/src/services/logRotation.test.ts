@@ -14,7 +14,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import { db } from "../db.js";
-import { __testing, runLogRotationService } from "./logRotation.js";
+import {
+    __testing,
+    runElevatedLogRotationService,
+    runLogRotationService,
+} from "./logRotation.js";
 
 async function writeConfig(root: string, config: unknown) {
     const configPath = path.join(root, `log-rotation-${Math.random()}.json`);
@@ -203,6 +207,36 @@ describe("log rotation service", { concurrency: false }, () => {
                 () => runLogRotationService({ dryRun: true, config: configPath }),
                 message
             );
+        }
+    });
+
+    it("runs elevated log rotation through the CLI wrapper", async () => {
+        const commands: Array<{ args: readonly string[]; file: string }> = [];
+        __testing.setElevatedLogRotationExecFileRunner(
+            async (file: string, args: readonly string[] | undefined) => {
+                commands.push({ args: args ?? [], file });
+                return {
+                    stderr: "helper warning",
+                    stdout: JSON.stringify({ ok: true }),
+                };
+            }
+        );
+        try {
+            assert.deepEqual(await runElevatedLogRotationService({ dryRun: false }), {
+                result: { ok: true },
+                stderr: "helper warning",
+            });
+            assert.deepEqual(await runElevatedLogRotationService({ dryRun: true }), {
+                result: { ok: true },
+                stderr: "helper warning",
+            });
+            assert.equal(commands[0]?.file, "sudo");
+            assert.deepEqual(commands[0]?.args.slice(0, 2), ["-n", process.execPath]);
+            assert.match(commands[0]?.args[2] ?? "", /services\/logRotation\.js$/u);
+            assert.equal(commands[0]?.args.includes("--dry-run"), false);
+            assert.equal(commands[1]?.args.includes("--dry-run"), true);
+        } finally {
+            __testing.resetElevatedLogRotationExecFileRunner();
         }
     });
 

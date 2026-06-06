@@ -369,7 +369,8 @@ async function lookupDockerHub(service: ManagedServiceRow) {
         const image = (Array.isArray(tagData.images) ? tagData.images : []).find(
             (candidate) => imageMatchesPlatform(asRecord(candidate), platform)
         );
-        latestDigest = String(asRecord(image).digest ?? tagData.digest ?? latestDigest);
+        const digest = asRecord(image).digest ?? tagData.digest ?? latestDigest;
+        latestDigest = typeof digest === "string" ? digest : null;
     }
     return { latestTag, latestDigest };
 }
@@ -692,13 +693,13 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 }
             }
         }
-        const currentAppSlugs = new Set(
-            successfulDiscoveries.map((discovery) => discovery.appSlug)
+        const discoveredAppSlugs = new Set(
+            discoveries.map((discovery) => discovery.appSlug)
         );
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
-            if (!currentAppSlugs.has(row.app_slug)) {
+            if (!discoveredAppSlugs.has(row.app_slug)) {
                 db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
                     row.app_slug
                 );

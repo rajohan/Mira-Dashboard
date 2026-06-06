@@ -2,7 +2,7 @@ import { db } from "../db.js";
 import { errorMessage } from "../lib/errors.js";
 import { refreshCacheProducer } from "./cacheRefresh.js";
 import { runDockerUpdaterService } from "./dockerUpdater.js";
-import { runLogRotationService } from "./logRotation.js";
+import { runElevatedLogRotationService } from "./logRotation.js";
 import { runOpenClawNotificationCheck } from "./openclawNotifications.js";
 import { runQuotaNotificationCheck } from "./quotaNotifications.js";
 
@@ -236,7 +236,7 @@ let schedulerTickRunning = false;
 let actionExecutor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined;
 let cacheRefreshRunner: CacheRefreshRunner = refreshCacheProducer;
 let dockerUpdaterRunner: DockerUpdaterRunner = runDockerUpdaterService;
-let logRotationRunner: LogRotationRunner = runLogRotationService;
+let logRotationRunner: LogRotationRunner = runElevatedLogRotationService;
 let openClawNotificationRunner: NotificationRunner = runOpenClawNotificationCheck;
 let quotaNotificationRunner: NotificationRunner = runQuotaNotificationCheck;
 
@@ -668,7 +668,7 @@ export const __testing = {
     }): void {
         cacheRefreshRunner = runners?.cacheRefresh ?? refreshCacheProducer;
         dockerUpdaterRunner = runners?.dockerUpdater ?? runDockerUpdaterService;
-        logRotationRunner = runners?.logRotation ?? runLogRotationService;
+        logRotationRunner = runners?.logRotation ?? runElevatedLogRotationService;
         openClawNotificationRunner =
             runners?.openClawNotification ?? runOpenClawNotificationCheck;
         quotaNotificationRunner = runners?.quotaNotification ?? runQuotaNotificationCheck;

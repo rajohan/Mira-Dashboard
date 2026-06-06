@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import { constants, createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { createGzip } from "node:zlib";
 
 import { db } from "../db.js";
@@ -10,6 +12,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheRefresh.js";
 
 const STATE_CACHE_KEY = "log_rotation.state";
+const execFileAsync = promisify(execFile);
 const DEFAULT_CONFIG_PATH = nonEmptyEnvFallback(
     "MIRA_LOG_ROTATION_CONFIG",
     fileURLToPath(new URL("../../config/log-rotation.json", import.meta.url))
@@ -17,6 +20,14 @@ const DEFAULT_CONFIG_PATH = nonEmptyEnvFallback(
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
 const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
+
+type ExecFileRunner = (
+    file: string,
+    args: readonly string[] | undefined,
+    options: { env: NodeJS.ProcessEnv; maxBuffer: number }
+) => Promise<{ stderr: string; stdout: string }>;
+
+let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -582,6 +593,11 @@ export interface LogRotationSummary {
     files?: unknown[];
 }
 
+export interface ElevatedLogRotationResult {
+    result: Record<string, unknown>;
+    stderr: string;
+}
+
 async function acquireLogRotationLock(dryRun: boolean) {
     if (dryRun) return null;
     await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
@@ -830,6 +846,26 @@ export async function runLogRotationService(
     return summary;
 }
 
+export async function runElevatedLogRotationService(options: {
+    dryRun: boolean;
+}): Promise<ElevatedLogRotationResult> {
+    const modulePath = fileURLToPath(
+        new URL("../services/logRotation.js", import.meta.url)
+    );
+    const args = ["-n", process.execPath, modulePath, "--json"];
+    if (options.dryRun) {
+        args.push("--dry-run");
+    }
+    const { stdout, stderr } = await elevatedLogRotationExecFileRunner("sudo", args, {
+        env: process.env,
+        maxBuffer: 10 * 1024 * 1024,
+    });
+    return {
+        result: JSON.parse(stdout || "{}") as Record<string, unknown>,
+        stderr,
+    };
+}
+
 export const __testing = {
     acquireLogRotationLock,
     archiveRetentionKey,
@@ -846,6 +882,12 @@ export const __testing = {
     resolveGlob,
     shouldRotate,
     caughtMessage,
+    resetElevatedLogRotationExecFileRunner() {
+        elevatedLogRotationExecFileRunner = execFileAsync as ExecFileRunner;
+    },
+    setElevatedLogRotationExecFileRunner(runner: ExecFileRunner) {
+        elevatedLogRotationExecFileRunner = runner;
+    },
 };
 
 /* c8 ignore start */

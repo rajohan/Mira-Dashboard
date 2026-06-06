@@ -24,6 +24,7 @@ interface BackupJob {
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    refreshPending?: boolean;
     process?: ChildProcess;
 }
 
@@ -55,7 +56,7 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
         return null;
     }
 
-    if (job.status === "done") {
+    if (job.status === "done" && !job.refreshPending) {
         clear();
     }
 
@@ -154,12 +155,17 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         if (!signal && code === 0) {
             const cacheKey =
                 type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
-            void refreshBackupCache(cacheKey).catch((error: unknown) => {
-                const refreshMessage = errorMessage(error, "Unknown error");
-                job.stderr = trimOutput(
-                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                );
-            });
+            job.refreshPending = true;
+            void refreshBackupCache(cacheKey)
+                .catch((error: unknown) => {
+                    const refreshMessage = errorMessage(error, "Unknown error");
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                    );
+                })
+                .finally(() => {
+                    job.refreshPending = false;
+                });
         }
     });
 

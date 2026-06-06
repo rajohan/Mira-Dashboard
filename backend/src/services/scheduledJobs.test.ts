@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { db } from "../db.js";
+import { __testing as logRotationTesting } from "./logRotation.js";
 import {
     __testing,
     getScheduledJob,
@@ -21,6 +22,7 @@ test.beforeEach(() => {
 test.afterEach(() => {
     __testing.setActionExecutorForTests(undefined);
     __testing.setActionRunnersForTests(undefined);
+    logRotationTesting.resetElevatedLogRotationExecFileRunner();
 });
 
 test("creates built-in jobs with interval and precise daily schedules", () => {
@@ -216,6 +218,28 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.equal(failedOpenClaw.status, "failed");
     assert.equal(failedQuotas.status, "failed");
     assert.equal(failedLogRotation.status, "failed");
+});
+
+test("runs default scheduled log rotation through the elevated helper", async () => {
+    const commands: Array<{ args: readonly string[]; file: string }> = [];
+    logRotationTesting.setElevatedLogRotationExecFileRunner(
+        async (file: string, args: readonly string[] | undefined) => {
+            commands.push({ args: args ?? [], file });
+            return { stderr: "", stdout: JSON.stringify({ ok: true, dryRun: false }) };
+        }
+    );
+
+    const run = await runScheduledJob("ops.log-rotation");
+
+    assert.equal(run.status, "success");
+    assert.deepEqual(run.output.logRotation, {
+        result: { ok: true, dryRun: false },
+        stderr: "",
+    });
+    assert.equal(commands[0]?.file, "sudo");
+    assert.deepEqual(commands[0]?.args.slice(0, 2), ["-n", process.execPath]);
+    assert.match(commands[0]?.args[2] ?? "", /services\/logRotation\.js$/u);
+    assert.equal(commands[0]?.args.includes("--dry-run"), false);
 });
 
 test("runs due scheduled jobs and skips jobs already running", async () => {

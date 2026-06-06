@@ -329,8 +329,13 @@ describe("backup routes", () => {
     });
 
     it("records status refresh failures after successful backup jobs", async () => {
+        const refresh = {
+            reject: undefined as ((error: Error) => void) | undefined,
+        };
         backupTesting.setRefreshBackupCacheForTest(async () => {
-            throw new Error("refresh crashed");
+            return await new Promise<{ refreshed: string[] }>((_resolve, reject) => {
+                refresh.reject = reject;
+            });
         });
         try {
             const started = await requestJson<{
@@ -340,6 +345,24 @@ describe("backup routes", () => {
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
             assert.equal(started.body.job.type, "walg");
+
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                const pending = await requestJson<{
+                    job: { status: string; stderr: string } | null;
+                }>(server, "/api/backups/walg");
+                if (pending.body.job?.status === "done") {
+                    assert.equal(
+                        pending.body.job.stderr.includes("Status refresh failed"),
+                        false
+                    );
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            if (!refresh.reject) {
+                assert.fail("Backup refresh did not start");
+            }
+            refresh.reject(new Error("refresh crashed"));
 
             for (let attempt = 0; attempt < 30; attempt += 1) {
                 const done = await requestJson<{
