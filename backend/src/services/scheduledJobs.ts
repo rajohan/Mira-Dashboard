@@ -384,7 +384,7 @@ export function ensureDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            computeNextRunIso(job),
+            timestamp,
             timestamp,
             timestamp
         );

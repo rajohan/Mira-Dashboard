@@ -490,6 +490,28 @@ process.stdout.write("updated\n");
                 );
             }
         );
+        await withEnv(
+            {
+                MIRA_DOCKER_BIN: "/tmp/mira-docker",
+                MIRA_DOCKER_ROOT: path.join(tempDir, "docker-root-without-wrapper"),
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand("/srv/app/compose.yaml", "web"),
+                    {
+                        file: "/tmp/mira-docker",
+                        args: [
+                            "compose",
+                            "-f",
+                            "/srv/app/compose.yaml",
+                            "up",
+                            "-d",
+                            "web",
+                        ],
+                    }
+                );
+            }
+        );
         assert.equal(
             updater.__testing.isSafeTagRegexPattern(String.raw`^1\.2\.[0-9]+$`),
             true

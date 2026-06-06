@@ -187,7 +187,15 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
         await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
             await assert.rejects(() => refreshMoltbookCache(), /MOLTBOOK_API_KEY/u);
+            await assert.rejects(
+                () => refreshCacheProducer("moltbook.home"),
+                /MOLTBOOK_API_KEY/u
+            );
         });
+        const failureRow = cacheRow("moltbook.home");
+        assert.equal(failureRow.status, "error");
+        assert.match(failureRow.error_message ?? "", /MOLTBOOK_API_KEY/u);
+
         await assert.rejects(
             () => refreshCacheProducer("moltbook.unknown"),
             /Unsupported Moltbook cache key/u

@@ -1049,11 +1049,31 @@ async function refreshQuotasCache() {
 }
 
 export async function refreshCacheProducer(key: string) {
+    const refreshWithFailureRecord = async (
+        refresh: () => Promise<{ refreshed: string[] }>
+    ) => {
+        try {
+            return await refresh();
+        } catch (error) {
+            writeCacheFailure({
+                key,
+                source: "backend",
+                ttl: 15,
+                ttlUnit: "minutes",
+                error,
+                metadata: {
+                    producer: "refreshCacheProducer",
+                },
+            });
+            throw error;
+        }
+    };
+
     if (key === "moltbook") {
-        return refreshMoltbookCache();
+        return refreshWithFailureRecord(refreshMoltbookCache);
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
-        return refreshMoltbookCache();
+        return refreshWithFailureRecord(refreshMoltbookCache);
     }
     if (key.startsWith("moltbook.")) {
         throw Object.assign(new Error(`Unsupported Moltbook cache key: ${key}`), {
@@ -1061,22 +1081,22 @@ export async function refreshCacheProducer(key: string) {
         });
     }
     if (key === "weather.spydeberg") {
-        return refreshWeatherCache();
+        return refreshWithFailureRecord(refreshWeatherCache);
     }
     if (key === "git.workspace") {
-        return refreshGitCache();
+        return refreshWithFailureRecord(refreshGitCache);
     }
     if (key === "system.host") {
-        return refreshSystemCache();
+        return refreshWithFailureRecord(refreshSystemCache);
     }
     if (key === "backup.kopia.status") {
-        return refreshKopiaBackupCache();
+        return refreshWithFailureRecord(refreshKopiaBackupCache);
     }
     if (key === "backup.walg.status") {
-        return refreshWalgBackupCache();
+        return refreshWithFailureRecord(refreshWalgBackupCache);
     }
     if (key === "quotas.summary") {
-        return refreshQuotasCache();
+        return refreshWithFailureRecord(refreshQuotasCache);
     }
     throw Object.assign(
         new Error(`No backend refresh producer configured for cache key: ${key}`),

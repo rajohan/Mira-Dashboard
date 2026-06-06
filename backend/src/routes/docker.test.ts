@@ -35,6 +35,7 @@ function dockerNotifications() {
 const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
+const originalUpdaterSkipRegistry = process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
 const fakeEnvKeys = [
     "MIRA_DOCKER_COMPOSE_WRAPPER",
     "MIRA_FAKE_DOCKER_EMPTY",
@@ -646,7 +647,11 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
-        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        if (originalUpdaterSkipRegistry === undefined) {
+            delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        } else {
+            process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = originalUpdaterSkipRegistry;
+        }
         db.exec("DELETE FROM docker_update_events; DELETE FROM docker_managed_services;");
         __testing.setDockerBinForTests(originalDockerBin);
         __testing.setDockerExecPidWaitTimeoutForTests();

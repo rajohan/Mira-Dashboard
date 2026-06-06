@@ -52,6 +52,15 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     assert.equal(backupWalg?.timeOfDay, "03:10");
     assert.equal(openClawNotifications?.intervalSeconds, 60 * 60);
     assert.equal(quotaNotifications?.intervalSeconds, 15 * 60);
+    for (const job of jobs.filter((item) =>
+        __testing.defaultJobs.some((defaultJob) => defaultJob.id === item.id)
+    )) {
+        assert.ok(job.nextRunAt);
+        assert.ok(
+            new Date(job.nextRunAt).getTime() <= Date.now(),
+            `${job.id} should be due immediately on first insert`
+        );
+    }
 });
 
 test("computes next daily run for today or tomorrow", () => {

@@ -14,6 +14,10 @@ const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
 
+function getDockerBin(): string {
+    return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+}
+
 function getDockerComposeWrapper(): string {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     return nonEmptyEnvFallback(
@@ -38,7 +42,7 @@ function getComposeCommand(composePath: string, serviceName: string) {
         };
     }
     return {
-        file: "docker",
+        file: getDockerBin(),
         args: ["compose", "-f", composePath, "up", "-d", serviceName],
     };
 }
