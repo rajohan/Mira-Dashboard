@@ -48,13 +48,15 @@ const CODEX_TRUSTED_DIRS = [
     "/home/ubuntu/projects",
     "/home/ubuntu/projects/mira-dashboard",
 ];
-const MOLTBOOK_CACHE_KEYS = new Set([
+const MOLTBOOK_CACHE_KEY_LIST = [
     "moltbook.home",
     "moltbook.feed.hot",
     "moltbook.feed.new",
     "moltbook.profile",
     "moltbook.my-content",
-]);
+] as const;
+type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
+const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
 
 const gitRepos = [
     {
@@ -260,54 +262,62 @@ function normalizeMoltbookFeed(value: unknown, sort: "hot" | "new") {
     };
 }
 
-export async function refreshMoltbookCache() {
-    const [homeRaw, hotRaw, newRaw, profileRaw] = await Promise.all([
-        fetchMoltbookJson("/home"),
-        fetchMoltbookJson("/feed?sort=hot&limit=25"),
-        fetchMoltbookJson("/feed?sort=new&limit=25"),
-        fetchMoltbookJson("/agents/profile?name=mira_2026"),
-    ]);
-    const profile = asRecord(profileRaw);
-    const writes = [
-        {
+export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
+    const requestedKeys = targetKey ? [targetKey] : MOLTBOOK_CACHE_KEY_LIST;
+    const writes = [];
+
+    if (requestedKeys.includes("moltbook.home")) {
+        writes.push({
             key: "moltbook.home",
-            data: normalizeMoltbookHome(homeRaw),
+            data: normalizeMoltbookHome(await fetchMoltbookJson("/home")),
             metadata: { workflow: "Cache Foundation - Moltbook", kind: "home" },
-        },
-        {
-            key: "moltbook.feed.hot",
-            data: normalizeMoltbookFeed(hotRaw, "hot"),
+        });
+    }
+
+    for (const sort of ["hot", "new"] as const) {
+        const key = `moltbook.feed.${sort}` as MoltbookCacheKey;
+        if (!requestedKeys.includes(key)) continue;
+        writes.push({
+            key,
+            data: normalizeMoltbookFeed(
+                await fetchMoltbookJson(`/feed?sort=${sort}&limit=25`),
+                sort
+            ),
             metadata: {
                 workflow: "Cache Foundation - Moltbook",
                 kind: "feed",
-                sort: "hot",
+                sort,
             },
-        },
-        {
-            key: "moltbook.feed.new",
-            data: normalizeMoltbookFeed(newRaw, "new"),
-            metadata: {
-                workflow: "Cache Foundation - Moltbook",
-                kind: "feed",
-                sort: "new",
-            },
-        },
-        {
-            key: "moltbook.profile",
-            data: { agent: profile?.agent ?? null },
-            metadata: { workflow: "Cache Foundation - Moltbook", kind: "profile" },
-        },
-        {
-            key: "moltbook.my-content",
-            data: {
-                posts: Array.isArray(profile.recentPosts) ? profile.recentPosts : [],
-                comments: Array.isArray(profile.recentComments)
-                    ? profile.recentComments
-                    : [],
-            },
-            metadata: { workflow: "Cache Foundation - Moltbook", kind: "my-content" },
-        },
-    ];
+        });
+    }
+
+    if (
+        requestedKeys.includes("moltbook.profile") ||
+        requestedKeys.includes("moltbook.my-content")
+    ) {
+        const profile = asRecord(
+            await fetchMoltbookJson("/agents/profile?name=mira_2026")
+        );
+        if (requestedKeys.includes("moltbook.profile")) {
+            writes.push({
+                key: "moltbook.profile",
+                data: { agent: profile?.agent ?? null },
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "profile" },
+            });
+        }
+        if (requestedKeys.includes("moltbook.my-content")) {
+            writes.push({
+                key: "moltbook.my-content",
+                data: {
+                    posts: Array.isArray(profile.recentPosts) ? profile.recentPosts : [],
+                    comments: Array.isArray(profile.recentComments)
+                        ? profile.recentComments
+                        : [],
+                },
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "my-content" },
+            });
+        }
+    }
 
     for (const item of writes) {
         writeCacheSuccess({
@@ -1118,7 +1128,9 @@ export async function refreshCacheProducer(key: string) {
         return refreshWithFailureRecord(refreshMoltbookCache, [...MOLTBOOK_CACHE_KEYS]);
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
-        return refreshWithFailureRecord(refreshMoltbookCache);
+        return refreshWithFailureRecord(() =>
+            refreshMoltbookCache(key as MoltbookCacheKey)
+        );
     }
     if (key.startsWith("moltbook.")) {
         throw Object.assign(new Error(`Unsupported Moltbook cache key: ${key}`), {

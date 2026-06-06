@@ -613,7 +613,36 @@ function servicesFromCompose(composePath: string) {
 }
 
 export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStepResult> {
-    const composeFiles = listComposeFiles();
+    let composeFiles: string[];
+    try {
+        if (!fs.existsSync(APPS_ROOT)) {
+            return {
+                ok: false,
+                step: "register-services",
+                stdout: "",
+                stderr: JSON.stringify({
+                    registered: 0,
+                    failed: [
+                        {
+                            appSlug: "*",
+                            error: `Compose apps root not found: ${APPS_ROOT}`,
+                        },
+                    ],
+                }),
+            };
+        }
+        composeFiles = listComposeFiles();
+    } catch (error) {
+        return {
+            ok: false,
+            step: "register-services",
+            stdout: "",
+            stderr: JSON.stringify({
+                registered: 0,
+                failed: [{ appSlug: "*", error: caughtMessage(error) }],
+            }),
+        };
+    }
     const discoveries = composeFiles.map(servicesFromCompose);
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);

@@ -388,6 +388,70 @@ process.stdout.write("updated\n");
         assert.equal(web.tag_match_pattern, "latest");
     });
 
+    it("preserves registered services when the compose apps root is unavailable", async () => {
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json,
+                last_checked_at, last_status
+            ) VALUES (
+                'missing-root-app', 'web', '/missing/compose.yaml', 'nginx',
+                'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
+                'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
+            )`
+        ).run();
+
+        await withEnv(
+            { MIRA_DOCKER_APPS_ROOT: path.join(tempDir, "missing-apps") },
+            async () => {
+                const updater = await import(
+                    `./dockerUpdater.js?missing-root=${Date.now()}`
+                );
+                const result = await updater.registerDockerUpdaterServices();
+
+                assert.equal(result.ok, false);
+                assert.match(result.stderr, /Compose apps root not found/u);
+                assert.equal(serviceRows().length, 1);
+            }
+        );
+    });
+
+    it("preserves registered services when compose discovery throws", async () => {
+        const appsRoot = path.join(tempDir, "unreadable-apps");
+        await mkdir(appsRoot);
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json,
+                last_checked_at, last_status
+            ) VALUES (
+                'unreadable-root-app', 'web', '/unreadable/compose.yaml', 'nginx',
+                'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
+                'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
+            )`
+        ).run();
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?unreadable-root=${Date.now()}`
+            );
+            const readDirMock = mock.method(fs, "readdirSync", () => {
+                throw new Error("apps root unreadable");
+            });
+            try {
+                const result = await updater.registerDockerUpdaterServices();
+
+                assert.equal(result.ok, false);
+                assert.match(result.stderr, /apps root unreadable/u);
+                assert.equal(serviceRows().length, 1);
+            } finally {
+                readDirMock.mock.restore();
+            }
+        });
+    });
+
     it("skips unsupported registries and applies refreshed manual targets", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "manual");

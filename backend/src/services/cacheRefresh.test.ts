@@ -177,13 +177,10 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                         ],
                     });
                     assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
-                        refreshed: [
-                            "moltbook.home",
-                            "moltbook.feed.hot",
-                            "moltbook.feed.new",
-                            "moltbook.profile",
-                            "moltbook.my-content",
-                        ],
+                        refreshed: ["moltbook.home"],
+                    });
+                    assert.deepEqual(await refreshCacheProducer("moltbook.profile"), {
+                        refreshed: ["moltbook.profile"],
                     });
                 }
             );
@@ -197,6 +194,10 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.deepEqual(
             (cacheRow("moltbook.my-content").data as { posts: unknown[] }).posts,
             [{ id: "mine" }]
+        );
+        assert.deepEqual(
+            (cacheRow("moltbook.profile").data as { agent: { name: string } }).agent,
+            { name: "mira_2026" }
         );
 
         await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
@@ -1146,6 +1147,7 @@ if (process.argv.includes("kopia")) {
                     return { recentPosts: "bad", recentComments: "bad" };
                 },
                 async () => {
+                    await refreshCacheProducer("moltbook.my-content");
                     await refreshCacheProducer("moltbook.profile");
                 }
             );
@@ -1153,6 +1155,10 @@ if (process.argv.includes("kopia")) {
         assert.deepEqual(
             (cacheRow("moltbook.my-content").data as { comments: unknown[] }).comments,
             []
+        );
+        assert.equal(
+            (cacheRow("moltbook.profile").data as { agent: unknown }).agent,
+            null
         );
 
         await withFetch(

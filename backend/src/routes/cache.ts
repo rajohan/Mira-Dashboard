@@ -87,15 +87,24 @@ export async function refreshCacheKey(key: string) {
     if (!Array.isArray(result.refreshed) || result.refreshed.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
-    const refreshedRows = await Promise.all(
-        result.refreshed
-            .filter((entry): entry is string => typeof entry === "string")
-            .map((refreshKey) => getCacheEntry(refreshKey))
-    );
-    const rows = refreshedRows.filter((row): row is CacheEntryRow => row !== null);
-    if (rows.length === 0) {
+    const refreshedKeys = [
+        ...new Set(
+            result.refreshed.filter((entry): entry is string => typeof entry === "string")
+        ),
+    ];
+    if (refreshedKeys.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
+    const refreshedRows = await Promise.all(
+        refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
+    );
+    const missingKeys = refreshedKeys.filter(
+        (_refreshKey, index) => refreshedRows[index] === null
+    );
+    if (missingKeys.length > 0) {
+        throw new Error(`Cache key not found after refresh: ${missingKeys.join(", ")}`);
+    }
+    const rows = refreshedRows as CacheEntryRow[];
     const mapped = rows.map(mapCacheRowForResponse);
     return mapped.length === 1 ? mapped[0] : mapped;
 }

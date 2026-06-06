@@ -331,7 +331,7 @@ describe("log rotation service", { concurrency: false }, () => {
         });
         const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
         await mkdir(path.dirname(lockPath), { recursive: true });
-        await writeFile(lockPath, "123\n", "utf8");
+        await writeFile(lockPath, `${process.pid}\n`, "utf8");
         try {
             const summary = await runLogRotationService({ dryRun: false, config });
 
@@ -342,6 +342,43 @@ describe("log rotation service", { concurrency: false }, () => {
             );
             assert.equal(await readFile(file, "utf8"), "log");
         } finally {
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("recovers from stale non-dry-run rotation locks", async () => {
+        const root = path.join(tempDir, "stale-lock-logs");
+        await mkdir(root);
+        const file = path.join(root, "app.log");
+        await writeFile(file, "log", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [{ name: "stale-lock", paths: [file], maxSizeMb: 0 }],
+        });
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
+    });
+
+    it("treats inaccessible lock PIDs as running", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "123\n", "utf8");
+        const killMock = mock.method(process, "kill", () => {
+            const error = new Error("operation not permitted") as NodeJS.ErrnoException;
+            error.code = "EPERM";
+            throw error;
+        });
+        try {
+            assert.equal(await __testing.acquireLogRotationLock(false), null);
+        } finally {
+            killMock.mock.restore();
             await rm(lockPath, { force: true });
         }
     });

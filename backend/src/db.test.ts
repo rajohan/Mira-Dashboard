@@ -98,9 +98,13 @@ test("classifies duplicate-column migration errors", async () => {
 
 test("migrates cache updated_at to nullable while preserving rows", async () => {
     const { DatabaseSync } = await import("node:sqlite");
-    const result = await import(`./db.js?cacheNullable=${randomUUID()}`);
+    const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-cache-nullable-"));
+    process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "configured.db");
+    let result: Awaited<typeof import("./db.js")> | undefined;
     const testDb = new DatabaseSync(":memory:");
     try {
+        result = await import(`./db.js?cacheNullable=${randomUUID()}`);
         testDb.exec(`
             CREATE TABLE cache_entries (
                 key TEXT PRIMARY KEY,
@@ -125,6 +129,7 @@ test("migrates cache updated_at to nullable while preserving rows", async () => 
             );
         `);
 
+        assert.ok(result);
         result.__testing.ensureCacheEntriesUpdatedAtNullable(testDb);
 
         const updatedAtColumn = testDb
@@ -148,5 +153,66 @@ test("migrates cache updated_at to nullable while preserving rows", async () => 
         );
     } finally {
         testDb.close();
+        (result?.db as { close(): void } | undefined)?.close();
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+        }
+        await rm(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("rolls back failed cache updated_at nullable migrations", async () => {
+    const result = await import(`./db.js?cacheNullableRollback=${randomUUID()}`);
+    const calls: string[] = [];
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "updated_at", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            calls.push(sql);
+            if (sql.includes("ALTER TABLE cache_entries RENAME")) {
+                throw new Error("migration failed");
+            }
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.ensureCacheEntriesUpdatedAtNullable(targetDb),
+            /migration failed/u
+        );
+        assert.equal(calls[0], "BEGIN IMMEDIATE");
+        assert.match(calls[1], /ALTER TABLE cache_entries RENAME/u);
+        assert.equal(calls[2], "ROLLBACK");
+    } finally {
+        (result.db as { close(): void }).close();
+    }
+});
+
+test("preserves cache migration failures when rollback also fails", async () => {
+    const result = await import(`./db.js?cacheNullableRollbackFailure=${randomUUID()}`);
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "updated_at", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            if (sql === "ROLLBACK") {
+                throw new Error("rollback failed");
+            }
+            if (sql.includes("ALTER TABLE cache_entries RENAME")) {
+                throw new Error("migration failed");
+            }
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.ensureCacheEntriesUpdatedAtNullable(targetDb),
+            /migration failed/u
+        );
+    } finally {
+        (result.db as { close(): void }).close();
     }
 });

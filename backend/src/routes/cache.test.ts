@@ -330,6 +330,19 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
     });
 
+    it("rejects refresh output without string refreshed keys", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            return { refreshed: [123] } as unknown as { refreshed: string[] };
+        });
+        try {
+            await assert.rejects(() => refreshCacheKey("custom.numeric"), {
+                message: "Cache key not found after refresh: custom.numeric",
+            });
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
     it("uses aggregate refresh results when the producer returns multiple keys", async () => {
         __testing.setCacheRefreshRunnerForTests(async () => {
             for (const key of ["moltbook.home", "moltbook.feed.hot"]) {
@@ -356,6 +369,29 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 ["moltbook.home", "moltbook.feed.hot"]
             );
             assert.equal(refreshed[0]?.source, "aggregate");
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
+    it("fails aggregate refreshes when a declared refreshed key is missing", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            db.prepare(
+                `INSERT OR REPLACE INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES ('partial.one', '{"ok":true}', 'aggregate', ?, ?, ?, 'fresh', NULL, NULL, 0, '{}')`
+            ).run(
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T01:00:00.000Z"
+            );
+            return { refreshed: ["partial.one", "partial.two"] };
+        });
+        try {
+            await assert.rejects(() => refreshCacheKey("moltbook"), {
+                message: "Cache key not found after refresh: partial.two",
+            });
         } finally {
             __testing.resetCacheRefreshForTests();
         }

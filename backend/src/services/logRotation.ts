@@ -584,19 +584,41 @@ export interface LogRotationSummary {
 async function acquireLogRotationLock(dryRun: boolean) {
     if (dryRun) return null;
     await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
-    try {
+    const openLock = async () => {
         const handle = await fs.open(LOCK_FILE, "wx");
         await handle.writeFile(`${process.pid}\n`);
         return handle;
+    };
+    try {
+        return await openLock();
     } catch (error) {
         if (
             error instanceof Error &&
             "code" in error &&
             (error as NodeJS.ErrnoException).code === "EEXIST"
         ) {
+            const rawPid = await fs.readFile(LOCK_FILE, "utf8").catch(() => "");
+            const pid = Number.parseInt(rawPid.trim(), 10);
+            if (!Number.isFinite(pid) || !isProcessRunning(pid)) {
+                await fs.unlink(LOCK_FILE).catch(() => {});
+                return openLock();
+            }
             return null;
         }
         throw error;
+    }
+}
+
+function isProcessRunning(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return (
+            error instanceof Error &&
+            "code" in error &&
+            (error as NodeJS.ErrnoException).code === "EPERM"
+        );
     }
 }
 
