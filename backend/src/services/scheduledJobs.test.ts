@@ -39,14 +39,8 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     assert.equal(dockerUpdater?.actionType, "docker.updater");
     assert.equal(dockerUpdater?.scheduleType, "daily");
     assert.equal(dockerUpdater?.timeOfDay, "04:00");
-    assert.equal(moltbook?.actionType, "cache.refreshMany");
-    assert.deepEqual(moltbook?.settings.keys, [
-        "moltbook.home",
-        "moltbook.feed.hot",
-        "moltbook.feed.new",
-        "moltbook.profile",
-        "moltbook.my-content",
-    ]);
+    assert.equal(moltbook?.actionType, "cache.refresh");
+    assert.equal(moltbook?.actionTarget, "moltbook");
     assert.equal(oldMoltbookHome, undefined);
     assert.equal(system?.scheduleType, "daily");
     assert.equal(system?.timeOfDay, "02:50");
@@ -155,17 +149,8 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     const openClaw = await runScheduledJob("notification.openclaw");
     const quotas = await runScheduledJob("notification.quotas");
 
-    assert.deepEqual(refreshedKeys.slice(0, 5), [
-        "moltbook.home",
-        "moltbook.feed.hot",
-        "moltbook.feed.new",
-        "moltbook.profile",
-        "moltbook.my-content",
-    ]);
-    assert.deepEqual(
-        moltbook.output.entries,
-        refreshedKeys.slice(0, 5).map((key) => ({ key }))
-    );
+    assert.equal(refreshedKeys[0], "moltbook");
+    assert.deepEqual(moltbook.output.entry, { key: "moltbook" });
     assert.deepEqual(docker.output.steps, [{ ok: true, step: "docker-updater" }]);
     assert.deepEqual(logRotation.output.logRotation, {
         result: { dryRun: false, ok: true },
@@ -174,7 +159,7 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.deepEqual(backupWalg.output.entry, { key: "backup.walg.status" });
     assert.deepEqual(openClaw.output, { checked: true });
     assert.deepEqual(quotas.output, { checked: true });
-    assert.deepEqual(refreshedKeys.slice(5), [
+    assert.deepEqual(refreshedKeys.slice(1), [
         "backup.walg.status",
         "notification.openclaw",
         "notification.quotas",
@@ -247,22 +232,19 @@ test("covers scheduled job mapping and unsupported-action edge cases", async () 
         () => updateScheduledJob("cache.weather", { scheduleType: "bogus" as never }),
         /scheduleType must be/u
     );
-    assert.throws(
-        () =>
-            __testing.defaultJobs
-                .map((job) => ({ ...job }))
-                .map((job) =>
-                    job.id === "cache.weather"
-                        ? { ...job, cacheKey: undefined, actionTarget: undefined }
-                        : job
-                )
-                .forEach((job) => {
-                    if (job.id === "cache.weather") {
-                        __testing.getDefaultActionTargetForTests(job);
-                    }
-                }),
-        /missing an action target/u
-    );
+    assert.throws(() => {
+        for (const job of __testing.defaultJobs
+            .map((job) => ({ ...job }))
+            .map((job) =>
+                job.id === "cache.weather"
+                    ? { ...job, cacheKey: undefined, actionTarget: undefined }
+                    : job
+            )) {
+            if (job.id === "cache.weather") {
+                __testing.getDefaultActionTargetForTests(job);
+            }
+        }
+    }, /missing an action target/u);
 });
 
 test("rejects duplicate manual runs and starts the scheduler tick", async () => {

@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream } from "node:fs";
+import { constants, createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -55,6 +55,11 @@ interface LogRotationPolicy {
     strategy?: "copytruncate" | "rename";
     daily?: boolean;
     weekly?: boolean;
+}
+
+interface VerifiedLogFile {
+    handle: fs.FileHandle;
+    stat: import("node:fs").Stats;
 }
 
 interface LogRotationConfig {
@@ -210,17 +215,16 @@ async function assertSafePath(
         }
         throw error;
     }
-    const realRoots = (
-        await Promise.all(
-            approvedRoots.map(async (root) => {
-                try {
-                    return await fs.realpath(root);
-                } catch {
-                    return null;
-                }
-            })
-        )
-    ).filter((root): root is string => root !== null);
+    const resolvedRoots = await Promise.all(
+        approvedRoots.map(async (root) => {
+            try {
+                return await fs.realpath(root);
+            } catch {
+                return null;
+            }
+        })
+    );
+    const realRoots = resolvedRoots.filter((root): root is string => root !== null);
     if (realRoots.length === 0) {
         throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
     }
@@ -231,6 +235,26 @@ async function assertSafePath(
     if (lstat.isSymbolicLink()) throw new Error(`Refusing symlink path: ${filePath}`);
     if (!lstat.isFile()) throw new Error(`Refusing non-file path: ${filePath}`);
     return true;
+}
+
+async function openVerifiedLogFile(
+    filePath: string,
+    approvedRoots: string[]
+): Promise<VerifiedLogFile | null> {
+    const safe = await assertSafePath(filePath, approvedRoots);
+    if (!safe) return null;
+    const lstat = await fs.lstat(filePath);
+    const handle = await fs.open(filePath, constants.O_RDWR | constants.O_NOFOLLOW);
+    try {
+        const stat = await handle.stat();
+        if (stat.dev !== lstat.dev || stat.ino !== lstat.ino) {
+            throw new Error(`Unsafe path changed before rotation: ${filePath}`);
+        }
+        return { handle, stat };
+    } catch (error) {
+        await handle.close();
+        throw error;
+    }
 }
 
 function archiveBasePath(filePath: string, now: Date): string {
@@ -253,26 +277,26 @@ async function gzipFile(filePath: string): Promise<string> {
 }
 
 async function rotateCopyTruncate(
-    filePath: string,
+    file: VerifiedLogFile,
     archivePath: string,
     compress: boolean
 ): Promise<string> {
     await pipeline(
-        createReadStream(filePath),
+        createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
         createWriteStream(archivePath, { flags: "wx" })
     );
-    await fs.truncate(filePath, 0);
+    await file.handle.truncate(0);
     return compress ? gzipFile(archivePath) : archivePath;
 }
 
 async function rotateRename(
     filePath: string,
+    file: VerifiedLogFile,
     archivePath: string,
     compress: boolean
 ): Promise<string> {
-    const stat = await fs.stat(filePath);
     await fs.rename(filePath, archivePath);
-    await fs.writeFile(filePath, "", { mode: stat.mode & 0o777 });
+    await fs.writeFile(filePath, "", { mode: file.stat.mode & 0o777 });
     return compress ? gzipFile(archivePath) : archivePath;
 }
 
@@ -356,10 +380,8 @@ async function applyRetention(
 
 function archiveRetentionKey(archivePath: string, policy: LogRotationPolicy): string {
     if (policy.archiveRetentionScope === "basename") {
-        return path.join(
-            path.dirname(archivePath),
-            path.basename(archivePath).split(".")[0] || ""
-        );
+        const basename = path.basename(archivePath).replace(ROTATED_SUFFIX_RE, "");
+        return path.join(path.dirname(archivePath), basename);
     }
     if (policy.archiveRetentionScope === "parent") {
         return path.dirname(path.dirname(archivePath));
@@ -639,20 +661,29 @@ export async function runLogRotationService(
                     continue;
                 }
                 const archivePath = archiveBasePath(filePath, now);
-                let finalArchive = policy.compress ? `${archivePath}.gz` : archivePath;
-                if (!options.dryRun) {
-                    finalArchive =
-                        policy.strategy === "rename"
-                            ? await rotateRename(
-                                  filePath,
-                                  archivePath,
-                                  policy.compress !== false
-                              )
-                            : await rotateCopyTruncate(
-                                  filePath,
-                                  archivePath,
-                                  policy.compress !== false
-                              );
+                let finalArchive: string;
+                if (options.dryRun) {
+                    finalArchive = policy.compress ? `${archivePath}.gz` : archivePath;
+                } else {
+                    const verified = await openVerifiedLogFile(filePath, approvedRoots);
+                    if (!verified) continue;
+                    try {
+                        finalArchive =
+                            policy.strategy === "rename"
+                                ? await rotateRename(
+                                      filePath,
+                                      verified,
+                                      archivePath,
+                                      policy.compress !== false
+                                  )
+                                : await rotateCopyTruncate(
+                                      verified,
+                                      archivePath,
+                                      policy.compress !== false
+                                  );
+                    } finally {
+                        await verified.handle.close();
+                    }
                     state.files[filePath] = {
                         lastRotatedAt: now.toISOString(),
                         lastSizeBytes: stat.size,

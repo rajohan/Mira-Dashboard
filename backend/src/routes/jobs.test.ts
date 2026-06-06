@@ -191,6 +191,7 @@ test("maps manual duplicate run status codes", async () => {
         const first = fetch(`${server.baseUrl}/api/jobs/cache.weather/run`, {
             method: "POST",
         });
+        await new Promise((resolve) => setImmediate(resolve));
         const duplicate = await requestJson<{ error: string }>(
             server,
             "/api/jobs/cache.weather/run",

@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import fsPromises from "node:fs/promises";
+import {
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    symlink,
+    utimes,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import { db } from "../db.js";
-import { runLogRotationService, __testing } from "./logRotation.js";
+import { __testing, runLogRotationService } from "./logRotation.js";
 
 async function writeConfig(root: string, config: unknown) {
     const configPath = path.join(root, `log-rotation-${Math.random()}.json`);
@@ -46,8 +54,15 @@ describe("log rotation service", { concurrency: false }, () => {
     it("validates config shape and policy helpers", async () => {
         assert.equal(__testing.byteLimitFromMb("2"), 2 * 1024 * 1024);
         assert.equal(__testing.byteLimitFromMb(0), null);
-        assert.ok(__testing.globToRegex(path.join(tempDir, "*.log")).test(path.join(tempDir, "a.log")));
-        assert.equal(__testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep, 2);
+        assert.ok(
+            __testing
+                .globToRegex(path.join(tempDir, "*.log"))
+                .test(path.join(tempDir, "a.log"))
+        );
+        assert.equal(
+            __testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep,
+            2
+        );
         assert.equal(
             __testing.archiveRetentionKey(
                 path.join(tempDir, "parent", "child", "a.log"),
@@ -56,19 +71,18 @@ describe("log rotation service", { concurrency: false }, () => {
             path.join(tempDir, "parent")
         );
         assert.equal(
-            __testing.archiveRetentionKey(
-                path.join(tempDir, ".hidden"),
-                { archiveRetentionScope: "basename" }
-            ),
-            tempDir
+            __testing.archiveRetentionKey(path.join(tempDir, ".hidden"), {
+                archiveRetentionScope: "basename",
+            }),
+            path.join(tempDir, ".hidden")
         );
         assert.equal(__testing.caughtMessage("plain failure"), "plain failure");
-        assert.equal(__testing.caughtMessage(new Error("typed failure")), "typed failure");
         assert.equal(
-            __testing.hasRotatedInCadence(
-                { lastRotatedAt: "not-a-date" },
-                "daily"
-            ),
+            __testing.caughtMessage(new Error("typed failure")),
+            "typed failure"
+        );
+        assert.equal(
+            __testing.hasRotatedInCadence({ lastRotatedAt: "not-a-date" }, "daily"),
             false
         );
         assert.equal(
@@ -83,8 +97,14 @@ describe("log rotation service", { concurrency: false }, () => {
             await __testing.resolveGlob(path.join(tempDir, "missing", "*.log")),
             []
         );
-        assert.deepEqual(await __testing.resolveGlob(path.join(tempDir, "missing.log")), []);
-        assert.equal(await __testing.assertSafePath(path.join(tempDir, "missing.log"), [tempDir]), false);
+        assert.deepEqual(
+            await __testing.resolveGlob(path.join(tempDir, "missing.log")),
+            []
+        );
+        assert.equal(
+            await __testing.assertSafePath(path.join(tempDir, "missing.log"), [tempDir]),
+            false
+        );
         const safeFile = path.join(tempDir, "safe.log");
         await writeFile(safeFile, "safe", "utf8");
         assert.equal(
@@ -96,9 +116,7 @@ describe("log rotation service", { concurrency: false }, () => {
         );
         await assert.rejects(
             () =>
-                __testing.assertSafePath(safeFile, [
-                    path.join(tempDir, "missing-root"),
-                ]),
+                __testing.assertSafePath(safeFile, [path.join(tempDir, "missing-root")]),
             /No approved roots exist/u
         );
         await assert.rejects(
@@ -112,10 +130,9 @@ describe("log rotation service", { concurrency: false }, () => {
         await writeFile(globFile, "file", "utf8");
         await symlink(globChild, path.join(globRoot, "link"));
         await writeFile(path.join(globChild, "app.log"), "log", "utf8");
-        assert.deepEqual(
-            await __testing.resolveGlob(path.join(globRoot, "*", "*.log")),
-            [path.join(globChild, "app.log")]
-        );
+        assert.deepEqual(await __testing.resolveGlob(path.join(globRoot, "*", "*.log")), [
+            path.join(globChild, "app.log"),
+        ]);
         mock.method(fsPromises, "readdir", async () => {
             throw new Error("readdir crashed");
         });
@@ -216,11 +233,19 @@ describe("log rotation service", { concurrency: false }, () => {
                     strategy: "rename",
                     compress: true,
                 },
-                { name: "disabled", enabled: false, paths: [path.join(root, "nope.log")] },
+                {
+                    name: "disabled",
+                    enabled: false,
+                    paths: [path.join(root, "nope.log")],
+                },
             ],
         });
 
-        const summary = await runLogRotationService({ dryRun: false, config, verbose: true });
+        const summary = await runLogRotationService({
+            dryRun: false,
+            config,
+            verbose: true,
+        });
 
         assert.equal(summary.ok, true);
         assert.equal(summary.checkedGroups, 2);
@@ -231,7 +256,10 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(duplicate, "utf8"), "");
         const state = JSON.parse(
             (
-                db.prepare("SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'")
+                db
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                    )
                     .get() as { data_json: string }
             ).data_json
         ) as { files: Record<string, { lastArchive: string }> };
@@ -311,7 +339,9 @@ describe("log rotation service", { concurrency: false }, () => {
         await writeFile(target, "target", "utf8");
         await symlink(target, link);
         const oldTime = new Date("2020-01-01T00:00:00.000Z");
-        await Promise.all([oldA, oldB, unsafe].map((file) => utimes(file, oldTime, oldTime)));
+        await Promise.all(
+            [oldA, oldB, unsafe].map((file) => utimes(file, oldTime, oldTime))
+        );
 
         const config = await writeConfig(tempDir, {
             version: 1,
@@ -351,7 +381,9 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.ok, false);
         assert.equal(summary.groups[0]?.compressedFiles, 2);
         assert.ok(summary.groups[0]?.deletedArchives);
-        assert.ok(summary.errors.some((error) => JSON.stringify(error).includes("Unsafe path")));
+        assert.ok(
+            summary.errors.some((error) => JSON.stringify(error).includes("Unsafe path"))
+        );
     });
 
     it("reads malformed log rotation state with safe defaults", () => {
@@ -381,7 +413,10 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.checkedGroups, 1);
         assert.equal(summary.groups[0]?.name, "target");
         assert.equal(summary.ok, false);
-        assert.match((summary.errors[0] as { message?: string } | undefined)?.message ?? "", /Unsafe path/u);
+        assert.match(
+            (summary.errors[0] as { message?: string } | undefined)?.message ?? "",
+            /Unsafe path/u
+        );
     });
 
     it("covers copytruncate compression and disappearing safe-path races", async () => {
@@ -393,7 +428,10 @@ describe("log rotation service", { concurrency: false }, () => {
         const copyGzip = path.join(root, "copy-gzip.log");
         const vanish = path.join(root, "vanish.log");
         const archiveVanish = path.join(archiveRoot, "archive.log.2020-01-01T00-00-00Z");
-        const otherDirArchive = path.join(archiveRoot, "copy-plain.log.2020-01-01T00-00-00Z");
+        const otherDirArchive = path.join(
+            archiveRoot,
+            "copy-plain.log.2020-01-01T00-00-00Z"
+        );
         await writeFile(copyPlain, "plain", "utf8");
         await writeFile(copyGzip, "gzip", "utf8");
         await writeFile(vanish, "vanish", "utf8");

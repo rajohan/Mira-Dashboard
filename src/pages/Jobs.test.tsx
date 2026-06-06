@@ -152,7 +152,6 @@ describe("Jobs page", () => {
         expect(hooks.updateJob).toHaveBeenCalledWith({
             id: "cache.git",
             patch: {
-                intervalSeconds: 3600,
                 scheduleType: "daily",
                 timeOfDay: "03:15",
             },

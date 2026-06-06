@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { __testing, parseJsonField, parseTable } from "./cacheStore.js";
 import { db } from "../db.js";
+import { __testing, parseJsonField, parseTable } from "./cacheStore.js";
 import { getCacheEntry } from "./cacheStore.js";
 
 describe("cacheStore utilities", () => {
@@ -41,7 +41,8 @@ describe("cacheStore utilities", () => {
             ) VALUES ('cache.null', NULL, 'test', '', '', '', 'fresh', NULL, NULL, 0, '{}')`
         ).run();
         try {
-            assert.equal((await getCacheEntry("cache.null"))?.data, "");
+            const entry = await getCacheEntry("cache.null");
+            assert.equal(entry?.data, "");
         } finally {
             db.prepare("DELETE FROM cache_entries WHERE key = 'cache.null'").run();
         }

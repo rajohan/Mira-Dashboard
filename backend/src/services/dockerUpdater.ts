@@ -13,6 +13,35 @@ const APPS_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 
+function getDockerComposeWrapper(): string {
+    const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+    return nonEmptyEnvFallback(
+        "MIRA_DOCKER_COMPOSE_WRAPPER",
+        `${dockerRoot}/bin/docker-compose-doppler`
+    );
+}
+
+function getComposeCommand(composePath: string, serviceName: string) {
+    const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+    const wrapper = getDockerComposeWrapper();
+    const isManagedDockerPath = path
+        .resolve(composePath)
+        .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
+    if (
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
+        (isManagedDockerPath && fs.existsSync(wrapper))
+    ) {
+        return {
+            file: wrapper,
+            args: ["-f", composePath, "up", "-d", serviceName],
+        };
+    }
+    return {
+        file: "docker",
+        args: ["compose", "-f", composePath, "up", "-d", serviceName],
+    };
+}
+
 export interface DockerUpdaterStepResult {
     step: string;
     ok: boolean;
@@ -128,7 +157,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
         return response.json() as Promise<JsonRecord>;
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Request timeout for ${url}`);
+            throw new Error(`Request timeout for ${url}`, { cause: error });
         }
         throw error;
     } finally {
@@ -210,19 +239,13 @@ async function lookupGhcr(service: ManagedServiceRow) {
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
     }
-    const response = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
-        headers: {
-            Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
-            "User-Agent": "mira-dashboard-docker-updater/1.0",
-        },
+    const response = await fetchJson(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
+        Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json",
     });
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ghcr.io/${repo}:${tag}`);
-    }
     return {
         latestTag: tag,
         latestDigest:
-            response.headers.get("docker-content-digest") || service.latest_digest,
+            typeof response.digest === "string" ? response.digest : service.latest_digest,
     };
 }
 
@@ -264,7 +287,11 @@ function buildTargetImageRef(service: ManagedServiceRow): string {
 }
 
 function setNestedValue(target: JsonRecord, dottedPath: string, value: string) {
-    const parts = dottedPath.split(".");
+    const rawParts = dottedPath.split(".");
+    const parts =
+        rawParts[0] === "services" && rawParts.at(-1) === "image" && rawParts.length > 3
+            ? ["services", rawParts.slice(1, -1).join("."), "image"]
+            : rawParts;
     let current = target;
     for (const part of parts.slice(0, -1)) {
         current[part] =
@@ -325,16 +352,13 @@ async function applyComposeUpdate(service: ManagedServiceRow, targetImageRef: st
     setNestedValue(doc, service.compose_image_field, targetImageRef);
     fs.writeFileSync(composePath, YAML.stringify(doc));
     try {
-        const { stdout, stderr } = await execFileAsync(
-            "docker",
-            ["compose", "-f", composePath, "up", "-d", service.service_name],
-            {
-                cwd: path.dirname(composePath),
-                env: process.env,
-                maxBuffer: 10 * 1024 * 1024,
-                timeout: 180_000,
-            }
-        );
+        const command = getComposeCommand(composePath, service.service_name);
+        const { stdout, stderr } = await execFileAsync(command.file, command.args, {
+            cwd: path.dirname(composePath),
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: 180_000,
+        });
         return { stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
         try {
@@ -440,24 +464,49 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             last_checked_at = excluded.last_checked_at,
             last_status = excluded.last_status`
     );
-    for (const service of services) {
-        upsert.run(
-            service.appSlug,
-            service.serviceName,
-            service.composePath,
-            service.imageRepo,
-            service.composeImageRef,
-            service.composeImageField,
-            service.currentTag,
-            service.currentDigest,
-            service.policy,
-            service.pinMode,
-            service.tagMatchType,
-            service.tagMatchPattern,
-            service.enabled ? 1 : 0,
-            JSON.stringify(service.metadata),
-            timestamp
-        );
+    db.exec("BEGIN");
+    try {
+        for (const appSlug of new Set(services.map((service) => service.appSlug))) {
+            const serviceNames = new Set(
+                services
+                    .filter((service) => service.appSlug === appSlug)
+                    .map((service) => service.serviceName)
+            );
+            for (const row of db
+                .prepare(
+                    "SELECT id, service_name FROM docker_managed_services WHERE app_slug = ?"
+                )
+                .all(appSlug) as Array<{ id: number; service_name: string }>) {
+                if (!serviceNames.has(row.service_name)) {
+                    db.prepare("DELETE FROM docker_managed_services WHERE id = ?").run(
+                        row.id
+                    );
+                }
+            }
+        }
+        for (const service of services) {
+            upsert.run(
+                service.appSlug,
+                service.serviceName,
+                service.composePath,
+                service.imageRepo,
+                service.composeImageRef,
+                service.composeImageField,
+                service.currentTag,
+                service.currentDigest,
+                service.policy,
+                service.pinMode,
+                service.tagMatchType,
+                service.tagMatchPattern,
+                service.enabled ? 1 : 0,
+                JSON.stringify(service.metadata),
+                timestamp
+            );
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
     }
     return {
         step: "register",

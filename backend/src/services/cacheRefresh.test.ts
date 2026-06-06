@@ -111,52 +111,59 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
     it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
-            await withFetch((url, init) => {
-                assert.equal(
-                    (init?.headers as Record<string, string>).Authorization,
-                    "Bearer test-key"
-                );
-                if (url.endsWith("/home")) {
+            await withFetch(
+                (url, init) => {
+                    assert.equal(
+                        (init?.headers as Record<string, string>).Authorization,
+                        "Bearer test-key"
+                    );
+                    if (url.endsWith("/home")) {
+                        return {
+                            your_direct_messages: {
+                                pending_request_count: "2",
+                                unread_message_count: "3",
+                            },
+                            activity_on_your_posts: [{ id: 1 }],
+                            what_to_do_next: ["reply"],
+                            latest_moltbook_announcement: {
+                                post_id: "post-1",
+                                title: "News",
+                                author_name: "Mira",
+                                created_at: "2026-06-06T00:00:00.000Z",
+                                preview: "Preview",
+                            },
+                            posts_from_accounts_you_follow: [{ id: 2 }],
+                            explore: [{ id: 3 }, { id: 4 }],
+                        };
+                    }
+                    if (url.includes("sort=hot")) {
+                        return {
+                            posts: [{ id: "hot" }],
+                            feed_type: "hot",
+                            has_more: true,
+                        };
+                    }
+                    if (url.includes("sort=new")) {
+                        return { posts: [{ id: "new" }], feed_filter: "following" };
+                    }
                     return {
-                        your_direct_messages: {
-                            pending_request_count: "2",
-                            unread_message_count: "3",
-                        },
-                        activity_on_your_posts: [{ id: 1 }],
-                        what_to_do_next: ["reply"],
-                        latest_moltbook_announcement: {
-                            post_id: "post-1",
-                            title: "News",
-                            author_name: "Mira",
-                            created_at: "2026-06-06T00:00:00.000Z",
-                            preview: "Preview",
-                        },
-                        posts_from_accounts_you_follow: [{ id: 2 }],
-                        explore: [{ id: 3 }, { id: 4 }],
+                        agent: { name: "mira_2026" },
+                        recentPosts: [{ id: "mine" }],
+                        recentComments: [{ id: "comment" }],
                     };
+                },
+                async () => {
+                    assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
+                        refreshed: [
+                            "moltbook.home",
+                            "moltbook.feed.hot",
+                            "moltbook.feed.new",
+                            "moltbook.profile",
+                            "moltbook.my-content",
+                        ],
+                    });
                 }
-                if (url.includes("sort=hot")) {
-                    return { posts: [{ id: "hot" }], feed_type: "hot", has_more: true };
-                }
-                if (url.includes("sort=new")) {
-                    return { posts: [{ id: "new" }], feed_filter: "following" };
-                }
-                return {
-                    agent: { name: "mira_2026" },
-                    recentPosts: [{ id: "mine" }],
-                    recentComments: [{ id: "comment" }],
-                };
-            }, async () => {
-                assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
-                    refreshed: [
-                        "moltbook.home",
-                        "moltbook.feed.hot",
-                        "moltbook.feed.new",
-                        "moltbook.profile",
-                        "moltbook.my-content",
-                    ],
-                });
-            });
+            );
         });
 
         assert.equal(
@@ -175,55 +182,64 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     });
 
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
-        await withFetch((url) => {
-            assert.ok(url.includes("wttr.in"));
-            return {
-                current_condition: [
-                    {
-                        temp_C: "4",
-                        FeelsLikeC: "1",
-                        humidity: "80",
-                        windspeedKmph: "12",
-                        weatherDesc: [{ value: "Cloudy" }],
-                    },
-                ],
-                weather: [
-                    {
-                        date: "2026-06-06",
-                        mintempC: "2",
-                        maxtempC: "8",
-                        hourly: [{ weatherDesc: [{ value: "Rain" }] }],
-                    },
-                ],
-            };
-        }, async () => {
-            await refreshCacheProducer("weather.spydeberg");
-        });
+        await withFetch(
+            (url) => {
+                assert.ok(url.includes("wttr.in"));
+                return {
+                    current_condition: [
+                        {
+                            temp_C: "4",
+                            FeelsLikeC: "1",
+                            humidity: "80",
+                            windspeedKmph: "12",
+                            weatherDesc: [{ value: "Cloudy" }],
+                        },
+                    ],
+                    weather: [
+                        {
+                            date: "2026-06-06",
+                            mintempC: "2",
+                            maxtempC: "8",
+                            hourly: [{ weatherDesc: [{ value: "Rain" }] }],
+                        },
+                    ],
+                };
+            },
+            async () => {
+                await refreshCacheProducer("weather.spydeberg");
+            }
+        );
         assert.equal(cacheRow("weather.spydeberg").source, "wttr.in");
 
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) return { httpStatus: 503 };
-            return {
-                current: {
-                    temperature_2m: 5,
-                    apparent_temperature: 3,
-                    relative_humidity_2m: 70,
-                    wind_speed_10m: 10,
-                    weather_code: 95,
-                },
-                daily: {
-                    time: ["2026-06-06", "2026-06-07", "2026-06-08"],
-                    temperature_2m_min: [1, 2, 3],
-                    temperature_2m_max: [7, 8, 9],
-                    weather_code: [0, 45, 71],
-                },
-            };
-        }, async () => {
-            await refreshCacheProducer("weather.spydeberg");
-        });
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) return { httpStatus: 503 };
+                return {
+                    current: {
+                        temperature_2m: 5,
+                        apparent_temperature: 3,
+                        relative_humidity_2m: 70,
+                        wind_speed_10m: 10,
+                        weather_code: 95,
+                    },
+                    daily: {
+                        time: ["2026-06-06", "2026-06-07", "2026-06-08"],
+                        temperature_2m_min: [1, 2, 3],
+                        temperature_2m_max: [7, 8, 9],
+                        weather_code: [0, 45, 71],
+                    },
+                };
+            },
+            async () => {
+                await refreshCacheProducer("weather.spydeberg");
+            }
+        );
         const fallback = cacheRow("weather.spydeberg");
         assert.equal(fallback.source, "open-meteo");
-        assert.equal((fallback.data as { description: string }).description, "Thunderstorm");
+        assert.equal(
+            (fallback.data as { description: string }).description,
+            "Thunderstorm"
+        );
         assert.equal(fallback.metadata.fallbackUsed, true);
     });
 
@@ -254,11 +270,18 @@ else if (command === "status --short") {
         const data = cacheRow("git.workspace").data as {
             dirtyRepos: string[];
             missingRepos: string[];
-            repos: Array<{ key: string; dirty: boolean; statusSummary?: { total: number } }>;
+            repos: Array<{
+                key: string;
+                dirty: boolean;
+                statusSummary?: { total: number };
+            }>;
         };
         assert.deepEqual(data.dirtyRepos, ["openclaw"]);
         assert.deepEqual(data.missingRepos, ["docker"]);
-        assert.equal(data.repos.find((repo) => repo.key === "mira-dashboard")?.dirty, false);
+        assert.equal(
+            data.repos.find((repo) => repo.key === "mira-dashboard")?.dirty,
+            false
+        );
         assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,
             5
@@ -358,52 +381,63 @@ if (args.includes("capture-pane")) {
                 SYNTHETIC_API_KEY: "synthetic",
             },
             async () => {
-                await withFetch((url) => {
-                    if (url.includes("openrouter.ai/api/v1/key")) {
-                        return { data: { usage: "10", usage_monthly: "20" } };
-                    }
-                    if (url.includes("openrouter.ai/api/v1/credits")) {
-                        return { data: { total_credits: "25" } };
-                    }
-                    if (url.includes("elevenlabs")) {
+                await withFetch(
+                    (url) => {
+                        if (url.includes("openrouter.ai/api/v1/key")) {
+                            return { data: { usage: "10", usage_monthly: "20" } };
+                        }
+                        if (url.includes("openrouter.ai/api/v1/credits")) {
+                            return { data: { total_credits: "25" } };
+                        }
+                        if (url.includes("elevenlabs")) {
+                            return {
+                                subscription: {
+                                    character_count: "100",
+                                    character_limit: "200",
+                                    next_character_count_reset_unix: "1893456000",
+                                    tier: "pro",
+                                },
+                            };
+                        }
                         return {
-                            subscription: {
-                                character_count: "100",
-                                character_limit: "200",
-                                next_character_count_reset_unix: "1893456000",
-                                tier: "pro",
+                            subscription: { limit: 10, requests: 4, renewsAt: "soon" },
+                            search: {
+                                hourly: { limit: 20, requests: 5, renewsAt: "later" },
+                            },
+                            weeklyTokenLimit: {
+                                maxCredits: "$10.00",
+                                nextRegenCredits: "$2.50",
+                                percentRemaining: "75",
+                            },
+                            rollingFiveHourLimit: {
+                                max: 100,
+                                remaining: 80,
+                                limited: false,
+                                tickPercent: "10",
                             },
                         };
+                    },
+                    async () => {
+                        assert.deepEqual(await refreshCacheProducer("system.host"), {
+                            refreshed: ["system.host"],
+                        });
+                        assert.deepEqual(
+                            await refreshCacheProducer("backup.kopia.status"),
+                            {
+                                refreshed: ["backup.kopia.status"],
+                            }
+                        );
+                        assert.deepEqual(
+                            await refreshCacheProducer("backup.walg.status"),
+                            {
+                                refreshed: ["backup.walg.status"],
+                            }
+                        );
+                        assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
+                            refreshed: ["quotas.summary"],
+                        });
                     }
-                    return {
-                        subscription: { limit: 10, requests: 4, renewsAt: "soon" },
-                        search: { hourly: { limit: 20, requests: 5, renewsAt: "later" } },
-                        weeklyTokenLimit: {
-                            maxCredits: "$10.00",
-                            nextRegenCredits: "$2.50",
-                            percentRemaining: "75",
-                        },
-                        rollingFiveHourLimit: {
-                            max: 100,
-                            remaining: 80,
-                            limited: false,
-                            tickPercent: "10",
-                        },
-                    };
-                }, async () => {
-                    assert.deepEqual(await refreshCacheProducer("system.host"), {
-                        refreshed: ["system.host"],
-                    });
-                    assert.deepEqual(await refreshCacheProducer("backup.kopia.status"), {
-                        refreshed: ["backup.kopia.status"],
-                    });
-                    assert.deepEqual(await refreshCacheProducer("backup.walg.status"), {
-                        refreshed: ["backup.walg.status"],
-                    });
-                    assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
-                        refreshed: ["quotas.summary"],
-                    });
-                });
+                );
             }
         );
 
@@ -413,7 +447,10 @@ if (args.includes("capture-pane")) {
             true
         );
         assert.equal((cacheRow("backup.kopia.status").data as { ok: boolean }).ok, false);
-        assert.equal((cacheRow("backup.walg.status").data as { stale: boolean }).stale, true);
+        assert.equal(
+            (cacheRow("backup.walg.status").data as { stale: boolean }).stale,
+            true
+        );
         assert.equal(
             (cacheRow("quotas.summary").data as { openai: { percentUsed: number } })
                 .openai.percentUsed,
@@ -431,17 +468,20 @@ if (args.includes("capture-pane")) {
                 QUOTAS_CODEX_HOME: path.join(tempDir, "codex-home-existing"),
             },
             async () => {
-                await withFetch((url) => {
-                    if (url.includes("elevenlabs")) return { httpStatus: 500 };
-                    return {
-                        subscription: {},
-                        search: {},
-                        weeklyTokenLimit: {},
-                        rollingFiveHourLimit: {},
-                    };
-                }, async () => {
-                    await refreshCacheProducer("quotas.summary");
-                });
+                await withFetch(
+                    (url) => {
+                        if (url.includes("elevenlabs")) return { httpStatus: 500 };
+                        return {
+                            subscription: {},
+                            search: {},
+                            weeklyTokenLimit: {},
+                            rollingFiveHourLimit: {},
+                        };
+                    },
+                    async () => {
+                        await refreshCacheProducer("quotas.summary");
+                    }
+                );
             }
         );
 
@@ -470,7 +510,7 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.openMeteoCodeToDescription(63), "Rain");
         assert.equal(__testing.openMeteoCodeToDescription(77), "Snow");
         assert.equal(__testing.openMeteoCodeToDescription(999), "Unknown");
-        assert.equal(__testing.cleanPanelText(undefined), null);
+        assert.equal(__testing.cleanPanelText(""), null);
         assert.equal(__testing.cleanPanelText("╭ Account ╯"), "Account");
         assert.equal(__testing.cleanPanelText("╭╯"), null);
         assert.deepEqual(__testing.normalizeMoltbookFeed([], "new"), {
@@ -546,7 +586,10 @@ if (args.includes("capture-pane")) {
             null
         );
         assert.equal(
-            __testing.getSnapshotTime({ endTime: null, startTime: "2099-01-01T00:00:00.000Z" }),
+            __testing.getSnapshotTime({
+                endTime: null,
+                startTime: "2099-01-01T00:00:00.000Z",
+            }),
             new Date("2099-01-01T00:00:00.000Z").getTime()
         );
         assert.equal(__testing.getSnapshotTime({ endTime: null, startTime: null }), 0);
@@ -557,14 +600,10 @@ if (args.includes("capture-pane")) {
             "2099-01-01T00:00:00.000Z"
         );
         assert.equal(
-            __testing.summarizeWalgBackup({ time: "2099-01-02T00:00:00.000Z" })
-                .modified,
+            __testing.summarizeWalgBackup({ time: "2099-01-02T00:00:00.000Z" }).modified,
             "2099-01-02T00:00:00.000Z"
         );
-        assert.equal(
-            __testing.getWalgBackupTime({ modified: null }),
-            0
-        );
+        assert.equal(__testing.getWalgBackupTime({ modified: null }), 0);
         assert.equal(__testing.errorMessage("plain failure"), "plain failure");
         assert.equal(__testing.openMeteoCodeToDescription(0), "Clear");
         assert.deepEqual(
@@ -615,34 +654,38 @@ if (args.includes("capture-pane")) {
                 SYNTHETIC_API_KEY: "synthetic",
             },
             async () => {
-                await withFetch((url) => {
-                    if (url.includes("elevenlabs")) {
+                await withFetch(
+                    (url) => {
+                        if (url.includes("elevenlabs")) {
+                            return {
+                                subscription: {
+                                    character_count: 25,
+                                    character_limit: 100,
+                                    next_character_count_reset_unix_ms: "1893456000000",
+                                },
+                            };
+                        }
                         return {
-                            subscription: {
-                                character_count: 25,
-                                character_limit: 100,
-                                next_character_count_reset_unix_ms: "1893456000000",
+                            subscription: { limit: 0, requests: 0 },
+                            search: { hourly: { limit: 0, requests: 0 } },
+                            weeklyTokenLimit: {
+                                maxCredits: "$0.00",
+                                nextRegenCredits: "$0.00",
                             },
+                            rollingFiveHourLimit: { max: 0, remaining: 0 },
                         };
+                    },
+                    async () => {
+                        const elevenLabsQuota = await __testing.checkElevenLabsQuota();
+                        assert.equal(elevenLabsQuota.resetAt, "2030-01-01T00:00:00.000Z");
+                        const synthetic = (await __testing.checkSyntheticQuota()) as {
+                            weeklyTokenLimit: { nextRegenPercent: number | null };
+                            rollingFiveHourLimit: { percentUsed: number | null };
+                        };
+                        assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
+                        assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
                     }
-                    return {
-                        subscription: { limit: 0, requests: 0 },
-                        search: { hourly: { limit: 0, requests: 0 } },
-                        weeklyTokenLimit: {
-                            maxCredits: "$0.00",
-                            nextRegenCredits: "$0.00",
-                        },
-                        rollingFiveHourLimit: { max: 0, remaining: 0 },
-                    };
-                }, async () => {
-                    assert.equal((await __testing.checkElevenLabsQuota()).resetAt, "2030-01-01T00:00:00.000Z");
-                    const synthetic = (await __testing.checkSyntheticQuota()) as {
-                        weeklyTokenLimit: { nextRegenPercent: number | null };
-                        rollingFiveHourLimit: { percentUsed: number | null };
-                    };
-                    assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
-                    assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
-                });
+                );
             }
         );
 
@@ -655,15 +698,22 @@ if (args.includes("capture-pane")) {
             "utf8"
         );
         __testing.ensureCodexTrustConfig(codexHome);
-        assert.match(await import("node:fs/promises").then((fs) => fs.readFile(configPath, "utf8")), /trust_level/u);
+        assert.match(
+            await import("node:fs/promises").then((fs) =>
+                fs.readFile(configPath, "utf8")
+            ),
+            /trust_level/u
+        );
 
         const codexHomeNoNewline = path.join(tempDir, "codex-home-no-newline");
         await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeNoNewline));
         const noNewlineConfigPath = path.join(codexHomeNoNewline, "config.toml");
-        await writeFile(noNewlineConfigPath, "[profile]\nmodel = \"codex\"", "utf8");
+        await writeFile(noNewlineConfigPath, '[profile]\nmodel = "codex"', "utf8");
         __testing.ensureCodexTrustConfig(codexHomeNoNewline);
         assert.match(
-            await import("node:fs/promises").then((fs) => fs.readFile(noNewlineConfigPath, "utf8")),
+            await import("node:fs/promises").then((fs) =>
+                fs.readFile(noNewlineConfigPath, "utf8")
+            ),
             /model = "codex"\n\n\[projects/u
         );
 
@@ -673,34 +723,43 @@ if (args.includes("capture-pane")) {
                 QUOTAS_CODEX_HOME: undefined,
             },
             async () => {
-                assert.equal(__testing.getOpenclawBin(), "/home/ubuntu/.npm-global/bin/openclaw");
+                assert.equal(
+                    __testing.getOpenclawBin(),
+                    "/home/ubuntu/.npm-global/bin/openclaw"
+                );
                 assert.equal(__testing.getQuotaCodexHome(), "/home/ubuntu/.codex");
             }
         );
     });
 
     it("covers empty provider payloads and Codex status error branches", async () => {
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) {
-                return { current_condition: null, weather: null };
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) {
+                    return { current_condition: null, weather: null };
+                }
+                return {};
+            },
+            async () => {
+                const weather = await __testing.fetchSpydebergWeather();
+                assert.equal(weather.source, "wttr.in");
+                assert.equal(weather.data.temperatureC, null);
+                assert.equal(weather.data.description, "Unknown");
             }
-            return {};
-        }, async () => {
-            const weather = await __testing.fetchSpydebergWeather();
-            assert.equal(weather.source, "wttr.in");
-            assert.equal(weather.data.temperatureC, null);
-            assert.equal(weather.data.description, "Unknown");
-        });
+        );
 
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) return { httpStatus: 500 };
-            return { current: {}, daily: {} };
-        }, async () => {
-            const weather = await __testing.fetchSpydebergWeather();
-            assert.equal(weather.source, "open-meteo");
-            assert.equal(weather.data.minTempC, null);
-            assert.deepEqual(weather.data.forecast, []);
-        });
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) return { httpStatus: 500 };
+                return { current: {}, daily: {} };
+            },
+            async () => {
+                const weather = await __testing.fetchSpydebergWeather();
+                assert.equal(weather.source, "open-meteo");
+                assert.equal(weather.data.minTempC, null);
+                assert.deepEqual(weather.data.forecast, []);
+            }
+        );
 
         await withEnv(
             {
@@ -711,14 +770,17 @@ if (args.includes("capture-pane")) {
                 QUOTAS_CODEX_HOME: path.join(tempDir, "quota-home"),
             },
             async () => {
-                await withFetch((url) => {
-                    if (url.includes("openrouter") || url.includes("synthetic")) {
-                        return { httpStatus: 500 };
+                await withFetch(
+                    (url) => {
+                        if (url.includes("openrouter") || url.includes("synthetic")) {
+                            return { httpStatus: 500 };
+                        }
+                        return {};
+                    },
+                    async () => {
+                        await refreshCacheProducer("quotas.summary");
                     }
-                    return {};
-                }, async () => {
-                    await refreshCacheProducer("quotas.summary");
-                });
+                );
             }
         );
         const quotas = cacheRow("quotas.summary").data as {
@@ -787,36 +849,43 @@ if (args.includes("capture-pane")) {
         );
 
         await withEnv({ OPENROUTER_API_KEY: "openrouter" }, async () => {
-            await withFetch(() => ({
-                data: {
-                    usage: 0,
-                    usage_monthly: 0,
-                    total_credits: 0,
-                },
-            }), async () => {
-                assert.equal((await __testing.checkOpenRouterQuota()).percentUsed, null);
-            });
+            await withFetch(
+                () => ({
+                    data: {
+                        usage: 0,
+                        usage_monthly: 0,
+                        total_credits: 0,
+                    },
+                }),
+                async () => {
+                    const openRouterQuota = await __testing.checkOpenRouterQuota();
+                    assert.equal(openRouterQuota.percentUsed, null);
+                }
+            );
         });
     });
 
     it("covers remaining producer fallback lines", async () => {
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) {
-                return {
-                    current_condition: [{}],
-                    weather: [
-                        {
-                            date: "2026-06-06",
-                            hourly: [{}],
-                        },
-                    ],
-                };
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) {
+                    return {
+                        current_condition: [{}],
+                        weather: [
+                            {
+                                date: "2026-06-06",
+                                hourly: [{}],
+                            },
+                        ],
+                    };
+                }
+                return {};
+            },
+            async () => {
+                const weather = await __testing.fetchSpydebergWeather();
+                assert.equal(weather.data.forecast[0]?.description, "Unknown");
             }
-            return {};
-        }, async () => {
-            const weather = await __testing.fetchSpydebergWeather();
-            assert.equal(weather.data.forecast[0]?.description, "Unknown");
-        });
+        );
 
         const binDir = path.join(tempDir, "remaining-bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
@@ -848,20 +917,23 @@ if (args === "exec kopia kopia snapshot list --all --json") {
                 QUOTAS_CODEX_HOME: path.join(tempDir, "remaining-codex-home"),
             },
             async () => {
-                await withFetch((url) => {
-                    if (url.includes("elevenlabs")) {
-                        return {
-                            subscription: {
-                                character_count: 0,
-                                character_limit: 0,
-                            },
-                        };
+                await withFetch(
+                    (url) => {
+                        if (url.includes("elevenlabs")) {
+                            return {
+                                subscription: {
+                                    character_count: 0,
+                                    character_limit: 0,
+                                },
+                            };
+                        }
+                        return {};
+                    },
+                    async () => {
+                        await refreshCacheProducer("backup.kopia.status");
+                        await refreshCacheProducer("quotas.summary");
                     }
-                    return {};
-                }, async () => {
-                    await refreshCacheProducer("backup.kopia.status");
-                    await refreshCacheProducer("quotas.summary");
-                });
+                );
             }
         );
 
@@ -894,7 +966,10 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             },
             async () => {
                 await refreshCacheProducer("system.host");
-                assert.equal(__testing.getCodexBin(), "/home/ubuntu/.npm-global/bin/codex");
+                assert.equal(
+                    __testing.getCodexBin(),
+                    "/home/ubuntu/.npm-global/bin/codex"
+                );
             }
         );
         const system = cacheRow("system.host").data as {
@@ -910,57 +985,67 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
     it("covers empty backup command output fallbacks", async () => {
         const binDir = path.join(tempDir, "empty-backup-bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
-        await writeExecutable(
-            path.join(binDir, "docker"),
-            "#!/usr/bin/env node\n"
-        );
+        await writeExecutable(path.join(binDir, "docker"), "#!/usr/bin/env node\n");
         process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
 
         await refreshCacheProducer("backup.kopia.status");
         await refreshCacheProducer("backup.walg.status");
 
         assert.deepEqual(
-            (cacheRow("backup.kopia.status").data as { snapshotsByPath: unknown[] }).snapshotsByPath,
+            (cacheRow("backup.kopia.status").data as { snapshotsByPath: unknown[] })
+                .snapshotsByPath,
             []
         );
-        assert.equal((cacheRow("backup.walg.status").data as { stale: boolean }).stale, true);
+        assert.equal(
+            (cacheRow("backup.walg.status").data as { stale: boolean }).stale,
+            true
+        );
     });
 
     it("covers additional producer fallback branches", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
-            await withFetch((url) => {
-                if (url.endsWith("/home")) return {};
-                if (url.includes("feed")) return {};
-                return { recentPosts: "bad", recentComments: "bad" };
-            }, async () => {
-                await refreshCacheProducer("moltbook.profile");
-            });
+            await withFetch(
+                (url) => {
+                    if (url.endsWith("/home")) return {};
+                    if (url.includes("feed")) return {};
+                    return { recentPosts: "bad", recentComments: "bad" };
+                },
+                async () => {
+                    await refreshCacheProducer("moltbook.profile");
+                }
+            );
         });
         assert.deepEqual(
             (cacheRow("moltbook.my-content").data as { comments: unknown[] }).comments,
             []
         );
 
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) {
-                return {
-                    current_condition: [{}],
-                    weather: [{ date: "2026-06-06", hourly: "bad" }],
-                };
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) {
+                    return {
+                        current_condition: [{}],
+                        weather: [{ date: "2026-06-06", hourly: "bad" }],
+                    };
+                }
+                return {};
+            },
+            async () => {
+                const weather = await __testing.fetchSpydebergWeather();
+                assert.equal(weather.data.forecast[0]?.description, "Unknown");
             }
-            return {};
-        }, async () => {
-            const weather = await __testing.fetchSpydebergWeather();
-            assert.equal(weather.data.forecast[0]?.description, "Unknown");
-        });
+        );
 
-        await withFetch((url) => {
-            if (url.includes("wttr.in")) return { httpStatus: 500 };
-            return { current: {}, daily: { time: ["2026-06-06"] } };
-        }, async () => {
-            const weather = await __testing.fetchSpydebergWeather();
-            assert.equal(weather.data.forecast[0]?.minTempC, null);
-            assert.equal(weather.data.forecast[0]?.maxTempC, null);
-        });
+        await withFetch(
+            (url) => {
+                if (url.includes("wttr.in")) return { httpStatus: 500 };
+                return { current: {}, daily: { time: ["2026-06-06"] } };
+            },
+            async () => {
+                const weather = await __testing.fetchSpydebergWeather();
+                assert.equal(weather.data.forecast[0]?.minTempC, null);
+                assert.equal(weather.data.forecast[0]?.maxTempC, null);
+            }
+        );
     });
 });

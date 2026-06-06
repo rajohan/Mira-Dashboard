@@ -397,6 +397,10 @@ process.exit(1);
     await writeFile(
         composePath,
         String.raw`#!${process.execPath}
+if (process.env.MIRA_FAKE_DOCKER_COMPOSE_FAIL === "1") {
+  process.stderr.write("compose failed\n");
+  process.exit(12);
+}
 process.stdout.write("compose " + process.argv.slice(2).join(" ") + "\n");
 `,
         "utf8"
@@ -735,22 +739,19 @@ describe("docker routes", { concurrency: false }, () => {
         __testing.notifyDockerUpdaterFailure("manual", [
             { step: "ok", ok: true, stdout: "", stderr: "" },
         ]);
-        assert.deepEqual(
-            await __testing.runManualUpdaterForService(987_654),
-            {
-                success: false,
-                output: {},
-                stderr: "Docker updater service not found",
-                steps: [
-                    {
-                        step: "manual-update",
-                        ok: false,
-                        stdout: "",
-                        stderr: "Docker updater service not found",
-                    },
-                ],
-            }
-        );
+        assert.deepEqual(await __testing.runManualUpdaterForService(987_654), {
+            success: false,
+            output: {},
+            stderr: "Docker updater service not found",
+            steps: [
+                {
+                    step: "manual-update",
+                    ok: false,
+                    stdout: "",
+                    stderr: "Docker updater service not found",
+                },
+            ],
+        });
 
         let nextCalled = false;
         const handler = __testing.asyncRoute(async () => {
@@ -1931,7 +1932,10 @@ describe("docker routes", { concurrency: false }, () => {
         });
         assert.equal(success.status, 200);
         assert.equal(success.body.success, true);
-        assert.deepEqual(success.body.result, { serviceId: 1 });
+        assert.deepEqual(success.body.result, {
+            serviceId: 1,
+            summary: { updated: [1], failed: [] },
+        });
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);

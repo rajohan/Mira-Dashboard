@@ -146,13 +146,27 @@ describe("ops routes", () => {
 
         const response = await requestJson<{
             success: boolean;
-            lastRun: { finishedAt: string; ok: boolean };
+            lastRun: { finishedAt: string; ok: boolean; errors: unknown[] };
         }>(server, "/api/ops/log-rotation/status");
 
         assert.equal(response.status, 200);
         assert.deepEqual(response.body, {
             success: true,
-            lastRun: { finishedAt: "2026-05-11T01:00:00.000Z", ok: true },
+            lastRun: {
+                ok: true,
+                dryRun: false,
+                startedAt: null,
+                finishedAt: "2026-05-11T01:00:00.000Z",
+                checkedGroups: 0,
+                checkedFiles: 0,
+                rotatedFiles: 0,
+                compressedFiles: 0,
+                deletedArchives: 0,
+                skippedFiles: 0,
+                warnings: [],
+                errors: [],
+                groups: [],
+            },
         });
 
         db.prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'").run();

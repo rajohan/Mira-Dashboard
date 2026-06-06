@@ -76,13 +76,15 @@ export function Jobs() {
         if (!selectedJob || !scheduleIsValid) {
             return;
         }
+        const patch = {
+            scheduleType: scheduleTypeDraft,
+            ...(scheduleTypeDraft === "interval"
+                ? { intervalSeconds: intervalNumber, timeOfDay: null }
+                : { timeOfDay: timeOfDayDraft }),
+        };
         await updateJob.mutateAsync({
             id: selectedJob.id,
-            patch: {
-                scheduleType: scheduleTypeDraft,
-                intervalSeconds: intervalNumber,
-                timeOfDay: scheduleTypeDraft === "daily" ? timeOfDayDraft : null,
-            },
+            patch,
         });
     }
 

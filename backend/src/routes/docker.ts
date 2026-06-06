@@ -834,8 +834,12 @@ async function runManualUpdaterForService(serviceId: number) {
 
     return {
         success: true,
-        output: { serviceId },
+        output: {
+            serviceId,
+            summary: { updated: [serviceId], failed: [] },
+        },
         stderr: "",
+        summary: { updated: [serviceId], failed: [] },
         steps,
     };
 }

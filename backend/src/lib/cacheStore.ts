@@ -135,7 +135,7 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
 }
 
 function getDockerBinForTests(): undefined {
-    return undefined;
+    return;
 }
 
 function setDockerBinForTests(_value: string | undefined): void {}

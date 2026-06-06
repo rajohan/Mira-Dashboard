@@ -10,6 +10,40 @@ interface LogRotationResult {
     stderr: string;
 }
 
+function normalizeLastRun(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+    const run = value as Record<string, unknown>;
+    return {
+        ok: run.ok === true,
+        dryRun: run.dryRun === true,
+        startedAt: typeof run.startedAt === "string" ? run.startedAt : null,
+        finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : null,
+        checkedGroups: Number.isFinite(Number(run.checkedGroups))
+            ? Number(run.checkedGroups)
+            : 0,
+        checkedFiles: Number.isFinite(Number(run.checkedFiles))
+            ? Number(run.checkedFiles)
+            : 0,
+        rotatedFiles: Number.isFinite(Number(run.rotatedFiles))
+            ? Number(run.rotatedFiles)
+            : 0,
+        compressedFiles: Number.isFinite(Number(run.compressedFiles))
+            ? Number(run.compressedFiles)
+            : 0,
+        deletedArchives: Number.isFinite(Number(run.deletedArchives))
+            ? Number(run.deletedArchives)
+            : 0,
+        skippedFiles: Number.isFinite(Number(run.skippedFiles))
+            ? Number(run.skippedFiles)
+            : 0,
+        warnings: Array.isArray(run.warnings) ? run.warnings : [],
+        errors: Array.isArray(run.errors) ? run.errors : [],
+        groups: Array.isArray(run.groups) ? run.groups : [],
+    };
+}
+
 /** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return baseAsyncRoute(handler, {
@@ -34,7 +68,7 @@ async function readLogRotationStatus() {
     }
     return {
         success: true,
-        lastRun: data?.lastRun ?? null,
+        lastRun: normalizeLastRun(data?.lastRun),
     };
 }
 

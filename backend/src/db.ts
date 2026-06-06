@@ -29,10 +29,7 @@ function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
 }
 
 function isDuplicateColumnError(error: unknown): boolean {
-    return (
-        error instanceof Error &&
-        /duplicate column name:/iu.test(error.message)
-    );
+    return error instanceof Error && /duplicate column name:/iu.test(error.message);
 }
 
 function assertDuplicateColumnError(error: unknown): void {

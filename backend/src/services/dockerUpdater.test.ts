@@ -68,13 +68,13 @@ describe("docker updater service", { concurrency: false }, () => {
         const composePath = path.join(appDir, "compose.yaml");
         await writeFile(
             composePath,
-            `services:
+            String.raw`services:
   web:
     image: nginx:1.2.0
     labels:
       mira.updater.enabled: "true"
       mira.updater.autoUpdate: "true"
-      mira.updater.tagPattern: "^1\\\\.2\\\\.[0-9]+$"
+      mira.updater.tagPattern: "^1\\.2\\.[0-9]+$"
     container_name: demo-web
   worker:
     image: ghcr.io/owner/app:stable@sha256:old
@@ -320,7 +320,10 @@ process.stdout.write("updated\n");
             "library/redis"
         );
         assert.equal(updater.__testing.stripRegistry("ghcr.io/owner/app"), "owner/app");
-        assert.equal(updater.__testing.isSafeTagRegexPattern("^1\\.2\\.[0-9]+$"), true);
+        assert.equal(
+            updater.__testing.isSafeTagRegexPattern(String.raw`^1\.2\.[0-9]+$`),
+            true
+        );
         assert.equal(updater.__testing.isSafeTagRegexPattern("(a+)+$"), false);
         assert.equal(updater.__testing.isSafeTagRegexPattern("a".repeat(129)), false);
 
@@ -485,7 +488,7 @@ process.stdout.write("updated\n");
             await updater.__testing.lookupDockerHub({
                 ...baseService,
                 tag_match_type: "regex",
-                tag_match_pattern: "^\\d$",
+                tag_match_pattern: String.raw`^\d$`,
             }),
             {
                 latestTag: "2",

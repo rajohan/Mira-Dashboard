@@ -1,5 +1,5 @@
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
@@ -39,6 +39,13 @@ const CODEX_TRUSTED_DIRS = [
     "/home/ubuntu/projects",
     "/home/ubuntu/projects/mira-dashboard",
 ];
+const MOLTBOOK_CACHE_KEYS = new Set([
+    "moltbook.home",
+    "moltbook.feed.hot",
+    "moltbook.feed.new",
+    "moltbook.profile",
+    "moltbook.my-content",
+]);
 
 const gitRepos = [
     {
@@ -868,7 +875,14 @@ function getCodexBin() {
 function ensureCodexTrustConfig(codexHome: string) {
     mkdirSync(codexHome, { recursive: true });
     const configPath = `${codexHome}/config.toml`;
-    const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+    let existing = "";
+    try {
+        existing = readFileSync(configPath, "utf8");
+    } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            throw error;
+        }
+    }
     const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
         const header = `[projects.${JSON.stringify(dir)}]`;
         return existing.includes(header) ? [] : [`${header}\ntrust_level = "trusted"\n`];
@@ -876,10 +890,9 @@ function ensureCodexTrustConfig(codexHome: string) {
     if (additions.length > 0) {
         const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
         const separator = existing ? "\n" : "";
-        writeFileSync(
-            configPath,
-            `${existing}${prefix}${separator}${additions.join("\n")}`
-        );
+        appendFileSync(configPath, `${prefix}${separator}${additions.join("\n")}`, {
+            mode: 0o600,
+        });
     }
 }
 
@@ -939,7 +952,7 @@ function parseOpenAiQuotaOutput(output: string) {
     };
 }
 
-function checkOpenAiQuota() {
+async function checkOpenAiQuota() {
     try {
         const codexPath = getCodexBin();
         const codexHome = getQuotaCodexHome();
@@ -959,18 +972,17 @@ tmux send-keys -t "$SESSION" Enter
 for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break; sleep 1; done
 printf "%s\n" "$OUT"
 `;
-        const output = stripAnsi(
-            execFileSync("bash", ["-lc", command], {
-                env: {
-                    ...process.env,
-                    MIRA_QUOTA_CODEX_BIN: codexPath,
-                    MIRA_QUOTA_CODEX_HOME: codexHome,
-                },
-                stdio: ["ignore", "pipe", "pipe"],
-                encoding: "utf8",
-                timeout: 120_000,
-            })
-        ).replaceAll("\r", "");
+        const { stdout } = await execFileAsync("bash", ["-lc", command], {
+            env: {
+                ...process.env,
+                MIRA_QUOTA_CODEX_BIN: codexPath,
+                MIRA_QUOTA_CODEX_HOME: codexHome,
+            },
+            encoding: "utf8",
+            timeout: 120_000,
+            maxBuffer: 1024 * 1024,
+        });
+        const output = stripAnsi(stdout).replaceAll("\r", "");
         return parseOpenAiQuotaOutput(output);
     } catch (error) {
         return { status: "error", note: errorMessage(error) };
@@ -1006,7 +1018,7 @@ async function refreshQuotasCache() {
             status: "error",
             note: errorMessage(error),
         })),
-        Promise.resolve(checkOpenAiQuota()),
+        checkOpenAiQuota(),
     ]);
     const payload = {
         openrouter,
@@ -1037,8 +1049,13 @@ async function refreshQuotasCache() {
 }
 
 export async function refreshCacheProducer(key: string) {
-    if (key.startsWith("moltbook.")) {
+    if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshMoltbookCache();
+    }
+    if (key.startsWith("moltbook.")) {
+        throw Object.assign(new Error(`Unsupported Moltbook cache key: ${key}`), {
+            statusCode: 400,
+        });
     }
     if (key === "weather.spydeberg") {
         return refreshWeatherCache();

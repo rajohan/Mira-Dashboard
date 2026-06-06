@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
@@ -145,6 +145,10 @@ describe("backup routes", () => {
             return { refreshed: [key] };
         });
         server = await startServer(tempDir);
+    });
+
+    beforeEach(() => {
+        refreshedKeys.length = 0;
     });
 
     after(async () => {

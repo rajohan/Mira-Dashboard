@@ -141,17 +141,8 @@ const defaultJobs: ReadonlyArray<DefaultScheduledJob> = [
         id: "cache.moltbook",
         name: "Moltbook cache",
         description: "Refresh Moltbook home, feeds, profile, and own content caches.",
-        actionType: "cache.refreshMany",
+        cacheKey: "moltbook.home",
         actionTarget: "moltbook",
-        settings: {
-            keys: [
-                "moltbook.home",
-                "moltbook.feed.hot",
-                "moltbook.feed.new",
-                "moltbook.profile",
-                "moltbook.my-content",
-            ],
-        },
         scheduleType: "interval",
         intervalSeconds: 30 * 60,
         timeOfDay: null,
@@ -550,6 +541,9 @@ export async function runScheduledJob(
         ).run(computeNextRunIso(job), nowIso(), job.id);
     } catch (error) {
         finishRun(runId, "failed", errorMessage(error, "Job failed"), {});
+        db.prepare(
+            `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?`
+        ).run(computeNextRunIso(job), nowIso(), job.id);
     } finally {
         runningJobs.delete(job.id);
     }
@@ -588,7 +582,9 @@ export function startScheduledJobScheduler(): void {
     }
     ensureDefaultScheduledJobs();
     scheduler = setInterval(() => {
-        void runDueJobs();
+        runDueJobs().catch((error) => {
+            console.error("[scheduledJobs] runDueJobs failed", error);
+        });
     }, schedulerTickMs);
     scheduler.unref();
 }
