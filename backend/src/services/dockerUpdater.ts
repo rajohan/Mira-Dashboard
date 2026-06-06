@@ -13,6 +13,7 @@ const APPS_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
+const composeUpdateLocks = new Map<string, Promise<void>>();
 
 function getDockerBin(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
@@ -344,7 +345,13 @@ function imageMatchesPlatform(image: JsonRecord, platform: string): boolean {
     const [os = "linux", architecture = "", variant] = platform.split("/");
     const imageOs = typeof image.os === "string" ? image.os : "linux";
     if (imageOs !== os || image.architecture !== architecture) return false;
-    if (!variant) return image.variant === null || image.variant === undefined;
+    if (!variant) {
+        return (
+            image.variant === null ||
+            image.variant === undefined ||
+            (architecture === "arm64" && image.variant === "v8")
+        );
+    }
     return image.variant === variant;
 }
 
@@ -512,37 +519,70 @@ function createNotification(
     ).run(title, description, type, dedupeKey, timestamp, timestamp, timestamp);
 }
 
+function composeUpdateLockKey(service: ManagedServiceRow): string {
+    return `${service.compose_path}:${service.compose_image_field ?? service.service_name}`;
+}
+
+async function withComposeUpdateLock<T>(
+    service: ManagedServiceRow,
+    action: () => Promise<T>
+): Promise<T> {
+    const key = composeUpdateLockKey(service);
+    const previous = composeUpdateLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const next = previous.then(
+        () => current,
+        () => current
+    );
+    composeUpdateLocks.set(key, next);
+    await previous.catch(() => {});
+    try {
+        return await action();
+    } finally {
+        release();
+        if (composeUpdateLocks.get(key) === next) {
+            composeUpdateLocks.delete(key);
+        }
+    }
+}
+
 async function applyComposeUpdate(service: ManagedServiceRow, targetImageRef: string) {
     if (!service.compose_image_field) {
         throw new Error(
             `Service ${serviceLabel(service)} is missing compose image field`
         );
     }
-    const composePath = service.compose_path;
-    const raw = fs.readFileSync(composePath, "utf8");
-    const doc = YAML.parse(raw) as JsonRecord;
-    setNestedValue(doc, service.compose_image_field, targetImageRef);
-    fs.writeFileSync(composePath, YAML.stringify(doc));
-    try {
-        const command = getComposeCommand(composePath, service.service_name);
-        const { stdout, stderr } = await execFileAsync(command.file, command.args, {
-            cwd: path.dirname(composePath),
-            env: process.env,
-            maxBuffer: 10 * 1024 * 1024,
-            timeout: 180_000,
-        });
-        return { stdout: String(stdout), stderr: String(stderr) };
-    } catch (error) {
+    const composeImageField = service.compose_image_field;
+    return withComposeUpdateLock(service, async () => {
+        const composePath = service.compose_path;
+        const raw = fs.readFileSync(composePath, "utf8");
+        const doc = YAML.parse(raw) as JsonRecord;
+        setNestedValue(doc, composeImageField, targetImageRef);
+        fs.writeFileSync(composePath, YAML.stringify(doc));
         try {
-            fs.writeFileSync(composePath, raw);
-        } catch (rollbackError) {
-            console.error("[DockerUpdater] Failed to restore compose file", {
-                composePath,
-                rollbackError,
+            const command = getComposeCommand(composePath, service.service_name);
+            const { stdout, stderr } = await execFileAsync(command.file, command.args, {
+                cwd: path.dirname(composePath),
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+                timeout: 180_000,
             });
+            return { stdout: String(stdout), stderr: String(stderr) };
+        } catch (error) {
+            try {
+                fs.writeFileSync(composePath, raw);
+            } catch (rollbackError) {
+                console.error("[DockerUpdater] Failed to restore compose file", {
+                    composePath,
+                    rollbackError,
+                });
+            }
+            throw error;
         }
-        throw error;
-    }
+    });
 }
 
 function booleanLabel(value: string | undefined, fallback = false): boolean {
@@ -1001,6 +1041,7 @@ export const __testing = {
     fetchJson,
     getComposeCommand,
     imageRegistry,
+    imageMatchesPlatform,
     hasUpdate,
     listComposeFiles,
     lookupDockerHub,

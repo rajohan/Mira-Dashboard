@@ -484,7 +484,7 @@ describe("Docker page", () => {
         expect(await screen.findByText(/updated=1 failed=0/)).toBeInTheDocument();
 
         docker.manualUpdate.mockResolvedValueOnce({
-            result: { summary: { failed: ["db"], updated: ["web"] } },
+            result: { summary: { failed: 1, updated: 1 } },
             stderr: "",
         });
         await user.click(screen.getByRole("button", { name: "Update now" }));

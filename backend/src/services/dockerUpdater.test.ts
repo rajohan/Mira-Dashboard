@@ -503,6 +503,100 @@ process.stdout.write("updated\n");
         assert.equal(row.current_digest, "sha256:new");
     });
 
+    it("accepts arm64 v8 registry variants for linux/arm64 services", async () => {
+        const updater = await import(`./dockerUpdater.js?platform-v8=${Date.now()}`);
+
+        assert.equal(
+            updater.__testing.imageMatchesPlatform(
+                { architecture: "arm64", os: "linux", variant: "v8" },
+                "linux/arm64"
+            ),
+            true
+        );
+        assert.equal(
+            updater.__testing.imageMatchesPlatform(
+                { architecture: "amd64", os: "linux", variant: "v8" },
+                "linux/amd64"
+            ),
+            false
+        );
+    });
+
+    it("serializes concurrent compose updates for the same service", async () => {
+        const appDir = path.join(tempDir, "locked-apply");
+        const binDir = path.join(tempDir, "bin");
+        const seenPath = path.join(tempDir, "seen.txt");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const composePath = args[args.indexOf("-f") + 1];
+const image = fs.readFileSync(composePath, "utf8").match(/image:\s*(.+)/)?.[1]?.trim() || "";
+fs.appendFileSync(process.env.SEEN_COMPOSE_IMAGES, image + "\n");
+setTimeout(() => process.exit(0), 30);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?locked-apply=${Date.now()}`);
+        const baseService = {
+            id: 1,
+            app_slug: "locked-apply",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(baseService);
+
+        await withEnv({ SEEN_COMPOSE_IMAGES: seenPath }, async () => {
+            const first = updater.__testing.applyServiceUpdate(baseService, "manual");
+            const second = updater.__testing.applyServiceUpdate(
+                { ...baseService, latest_tag: "3" },
+                "manual"
+            );
+            const results = await Promise.all([first, second]);
+
+            assert.deepEqual(
+                results.map((result) => result.ok),
+                [true, true]
+            );
+        });
+
+        assert.equal(await readFile(seenPath, "utf8"), "repo/app:2\nrepo/app:3\n");
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:3/u);
+    });
+
     it("removes stale services after an empty successful compose scan", async () => {
         const appsRoot = path.join(tempDir, "empty-apps");
         await mkdir(appsRoot);
@@ -1340,7 +1434,7 @@ process.stdout.write("updated\n");
             }),
             {
                 latestTag: "3",
-                latestDigest: process.arch === "x64" ? "sha256:amd64" : "sha256:old",
+                latestDigest: process.arch === "x64" ? "sha256:amd64" : "sha256:v8",
             }
         );
         const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch");
@@ -1382,7 +1476,7 @@ process.stdout.write("updated\n");
                 }),
                 {
                     latestTag: "3",
-                    latestDigest: "sha256:old",
+                    latestDigest: "sha256:v8",
                 }
             );
         } finally {

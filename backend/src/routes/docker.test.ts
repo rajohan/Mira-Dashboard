@@ -1973,6 +1973,7 @@ describe("docker routes", { concurrency: false }, () => {
         const success = await requestJson<{
             success: boolean;
             result: { serviceId: number };
+            service: { currentTag: string | null; lastStatus: string | null };
             stderr: string;
         }>(server, "/api/docker/updater/services/1/update", {
             method: "POST",
@@ -1986,6 +1987,8 @@ describe("docker routes", { concurrency: false }, () => {
             updated: [1],
             failed: [],
         });
+        assert.equal(success.body.service.currentTag, "1.0.1");
+        assert.equal(success.body.service.lastStatus, "updated");
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);

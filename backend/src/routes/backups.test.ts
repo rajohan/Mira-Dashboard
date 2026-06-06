@@ -375,7 +375,7 @@ describe("backup routes", () => {
                 const pending = await requestJson<{
                     job: { status: string; stderr: string } | null;
                 }>(server, "/api/backups/walg");
-                if (pending.body.job?.status === "done") {
+                if (pending.body.job?.status === "done" && refresh.reject) {
                     assert.equal(
                         pending.body.job.stderr.includes("Status refresh failed"),
                         false
