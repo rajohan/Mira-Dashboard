@@ -14,6 +14,14 @@ function getBackupShell(): string {
     return nonEmptyEnvFallback("MIRA_BACKUP_SHELL", "bash");
 }
 
+function getDockerBin(): string {
+    return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+}
+
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+}
+
 /** Represents backup job. */
 interface BackupJob {
     id: string;
@@ -188,7 +196,7 @@ function startKopiaBackupJob() {
 function startWalgBackupJob() {
     return startBackupJob(
         "walg",
-        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh"
+        `${shellQuote(getDockerBin())} exec walg /bin/sh /usr/local/bin/backup-push.sh`
     );
 }
 
@@ -197,6 +205,8 @@ export const __testing = {
     getCurrentJob,
     mapJob,
     getBackupShell,
+    getDockerBin,
+    shellQuote,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },

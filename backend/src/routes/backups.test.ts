@@ -207,9 +207,31 @@ describe("backup routes", () => {
         const done = await waitForDone(server, "/api/backups/walg");
         assert.equal(done.status, "done");
         assert.equal(done.code, 0);
-        assert.match(done.stdout, /docker exec walg/);
+        assert.match(done.stdout, /'docker' exec walg/);
         assert.equal(done.stderr, "backup warning\n");
         assert.ok(refreshedKeys.includes("backup.walg.status"));
+    });
+
+    it("uses configured Docker binary for WAL-G backup jobs", async () => {
+        await withEnv({ MIRA_DOCKER_BIN: "/tmp/mira docker" }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.type, "walg");
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 0);
+            assert.match(
+                done.stdout,
+                /'\/tmp\/mira docker' exec walg \/bin\/sh \/usr\/local\/bin\/backup-push\.sh/u
+            );
+            assert.ok(refreshedKeys.includes("backup.walg.status"));
+        });
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
@@ -406,5 +428,9 @@ describe("backup routes", () => {
             assert.equal(backupTesting.getBackupShell(), "bash");
         });
         assert.equal(typeof backupTesting.getBackupShell(), "string");
+        await withEnv({ MIRA_DOCKER_BIN: "" }, async () => {
+            assert.equal(backupTesting.getDockerBin(), "docker");
+        });
+        assert.equal(backupTesting.shellQuote("can't"), String.raw`'can'\''t'`);
     });
 });
