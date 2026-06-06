@@ -319,7 +319,7 @@ describe("ops routes", () => {
         assert.equal(response.body.result.deletedArchives, 1);
         assert.equal(await readFile(logPath, "utf8"), "");
         await access(`${archiveNewPath}.gz`);
-        await assert.rejects(access(`${archiveOldPath}.gz`));
+        await assert.rejects(access(archiveOldPath));
 
         const status = await requestJson<{
             lastRun: { rotatedFiles: number; errors: unknown[] };

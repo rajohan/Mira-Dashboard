@@ -87,11 +87,16 @@ export async function refreshCacheKey(key: string) {
     if (!Array.isArray(result.refreshed) || result.refreshed.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
-    const refreshedKeys = [
-        ...new Set(
-            result.refreshed.filter((entry): entry is string => typeof entry === "string")
-        ),
-    ];
+    const invalidRefreshedEntry = result.refreshed.find(
+        (entry) => typeof entry !== "string"
+    );
+    if (invalidRefreshedEntry !== undefined) {
+        throw new Error(
+            `Invalid refreshed cache key for ${key}: ${JSON.stringify(invalidRefreshedEntry)}`
+        );
+    }
+    const refreshedKeys = [...new Set(result.refreshed)];
+    /* c8 ignore next 3 -- validated non-empty string arrays cannot produce an empty set. */
     if (refreshedKeys.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }

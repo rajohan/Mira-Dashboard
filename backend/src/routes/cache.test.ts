@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
@@ -112,7 +112,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     let tempDir: string;
     let server: TestServer;
 
-    before(async () => {
+    beforeEach(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-route-"));
         __testing.setCacheRefreshCwdForTests(tempDir);
         clearOwnedCacheRows();
@@ -120,7 +120,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         server = await startServer();
     });
 
-    after(async () => {
+    afterEach(async () => {
         if (server) {
             await server.close();
         }
@@ -130,6 +130,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }
+        server = undefined as unknown as TestServer;
+        tempDir = "";
     });
 
     it("keeps scalar cache payloads when they are not JSON", () => {
@@ -354,7 +356,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         });
         try {
             await assert.rejects(() => refreshCacheKey("custom.numeric"), {
-                message: "Cache key not found after refresh: custom.numeric",
+                message: "Invalid refreshed cache key for custom.numeric: 123",
             });
         } finally {
             __testing.resetCacheRefreshForTests();

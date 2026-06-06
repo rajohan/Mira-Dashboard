@@ -24,8 +24,8 @@
                 "/opt/docker/data/*/logs/*/*.txt",
                 "/opt/docker/data/*/logs/*/*.json",
                 "/opt/docker/data/*/*.log",
-                "/opt/docker/data/*/*log*.json",
-                "/opt/docker/data/*/*log*.txt",
+                "/opt/docker/data/*/*.log.json",
+                "/opt/docker/data/*/*.log.txt",
                 "/opt/docker/data/*/*/log.txt"
             ],
             "daily": true,

@@ -1915,7 +1915,7 @@ describe("docker routes", { concurrency: false }, () => {
             })),
             [
                 {
-                    dedupeKey: "docker:updater:updated:1:repo/app:1.0.0@sha256:new",
+                    dedupeKey: "docker:updater:updated:1:repo/app:1.0.1@sha256:new",
                     title: "Docker service updated",
                     type: "info",
                 },
@@ -1945,6 +1945,7 @@ describe("docker routes", { concurrency: false }, () => {
                 notification.dedupe_key.includes(":failed:auto-update:media/app")
             );
             assert.ok(failedNotification);
+            assert.equal(failedNotification.type, "error");
             assert.equal(failedNotification?.is_read, 0);
             db.prepare("UPDATE notifications SET is_read = 1 WHERE dedupe_key = ?").run(
                 failedNotification.dedupe_key
@@ -1959,6 +1960,7 @@ describe("docker routes", { concurrency: false }, () => {
             const reopenedNotification = dockerNotifications().find((notification) =>
                 notification.dedupe_key.includes(":failed:auto-update:media/app")
             );
+            assert.ok(reopenedNotification);
             assert.equal(reopenedNotification?.is_read, 0);
         });
     });

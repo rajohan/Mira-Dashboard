@@ -443,8 +443,9 @@ function hasUpdate(service: ManagedServiceRow): boolean {
 function buildTargetImageRef(service: ManagedServiceRow): string {
     const parsed = parseImageRef(service.compose_image_ref || service.image_repo);
     if (service.pin_mode === "digest" && service.latest_digest) {
-        return parsed.tag
-            ? `${parsed.repo}:${parsed.tag}@${service.latest_digest}`
+        const tag = service.latest_tag || parsed.tag;
+        return tag
+            ? `${parsed.repo}:${tag}@${service.latest_digest}`
             : `${parsed.repo}@${service.latest_digest}`;
     }
     return `${parsed.repo}:${service.latest_tag || service.current_tag || "latest"}`;
@@ -489,19 +490,26 @@ function insertEvent(
     );
 }
 
-function createNotification(title: string, description: string, dedupeKey: string) {
+function createNotification(
+    title: string,
+    description: string,
+    dedupeKey: string,
+    type: "info" | "error" = "info"
+) {
     const timestamp = nowIso();
     db.prepare(
         `INSERT INTO notifications (
             title, description, type, source, dedupe_key, metadata_json,
             is_read, created_at, updated_at, occurred_at
-         ) VALUES (?, ?, 'info', 'docker-updater', ?, '{}', 0, ?, ?, ?)
+         ) VALUES (?, ?, ?, 'docker-updater', ?, '{}', 0, ?, ?, ?)
          ON CONFLICT(dedupe_key) DO UPDATE SET
             title = excluded.title,
             description = excluded.description,
+            type = excluded.type,
+            is_read = 0,
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
-    ).run(title, description, dedupeKey, timestamp, timestamp, timestamp);
+    ).run(title, description, type, dedupeKey, timestamp, timestamp, timestamp);
 }
 
 async function applyComposeUpdate(service: ManagedServiceRow, targetImageRef: string) {
@@ -883,7 +891,8 @@ async function applyServiceUpdate(
         createNotification(
             `Docker ${eventPrefix} update failed`,
             `${serviceLabel(service)}: ${message}`,
-            `docker:updater:${eventPrefix}-failed:${service.id}:${nowIso().slice(0, 10)}`
+            `docker:updater:${eventPrefix}-failed:${service.id}:${nowIso().slice(0, 10)}`,
+            "error"
         );
         return {
             step: `${eventPrefix}-update:${serviceLabel(service)}`,
@@ -898,6 +907,9 @@ export async function runDockerUpdaterService(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult[]> {
     const register = await registerDockerUpdaterServices();
+    if (!register.ok) {
+        return [register];
+    }
     if (serviceId !== undefined) {
         const service = db
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")

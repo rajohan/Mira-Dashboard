@@ -480,6 +480,8 @@ process.stdout.write("updated\n");
                 assert.equal(result.ok, false);
                 assert.match(result.stderr, /Compose apps root not found/u);
                 assert.equal(serviceRows().length, 1);
+                const run = await updater.runDockerUpdaterService();
+                assert.deepEqual(run, [result]);
             }
         );
     });
@@ -927,7 +929,24 @@ process.stdout.write("updated\n");
                 ...baseService,
                 pin_mode: "digest",
             }),
+            "repo/app:2@sha256:new"
+        );
+        assert.equal(
+            updater.__testing.buildTargetImageRef({
+                ...baseService,
+                latest_tag: null,
+                pin_mode: "digest",
+            }),
             "repo/app:1@sha256:new"
+        );
+        assert.equal(
+            updater.__testing.buildTargetImageRef({
+                ...baseService,
+                compose_image_ref: "repo/app",
+                latest_tag: null,
+                pin_mode: "digest",
+            }),
+            "repo/app@sha256:new"
         );
         assert.equal(
             updater.__testing.buildTargetImageRef({
@@ -935,7 +954,7 @@ process.stdout.write("updated\n");
                 compose_image_ref: "repo/app",
                 pin_mode: "digest",
             }),
-            "repo/app@sha256:new"
+            "repo/app:2@sha256:new"
         );
         assert.equal(
             updater.__testing.buildTargetImageRef({

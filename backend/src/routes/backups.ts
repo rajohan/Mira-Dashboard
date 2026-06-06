@@ -156,25 +156,29 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.stderr = trimOutput(job.stderr + String(data));
     });
 
-    child.on("close", (code, signal) => {
-        job.status = "done";
-        job.code = signal ? 130 : code;
-        job.endedAt = Date.now();
+    child.on("close", async (code, signal) => {
         if (!signal && code === 0) {
             const cacheKey =
                 type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
             job.refreshPending = true;
-            void refreshBackupCache(cacheKey)
-                .catch((error: unknown) => {
-                    const refreshMessage = errorMessage(error, "Unknown error");
-                    job.stderr = trimOutput(
-                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                    );
-                })
-                .finally(() => {
-                    job.refreshPending = false;
-                });
+            try {
+                await refreshBackupCache(cacheKey);
+            } catch (error: unknown) {
+                const refreshMessage = errorMessage(error, "Unknown error");
+                job.stderr = trimOutput(
+                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                );
+            } finally {
+                job.refreshPending = false;
+                job.status = "done";
+                job.code = code;
+                job.endedAt = Date.now();
+            }
+            return;
         }
+        job.status = "done";
+        job.code = signal ? 130 : code;
+        job.endedAt = Date.now();
     });
 
     child.on("error", (error) => {

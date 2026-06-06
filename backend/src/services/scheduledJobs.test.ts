@@ -26,6 +26,7 @@ test.afterEach(() => {
 });
 
 test("creates built-in jobs with interval and precise daily schedules", () => {
+    const beforeList = Date.now();
     const jobs = listScheduledJobs();
     const dockerUpdater = jobs.find((job) => job.id === "docker.updater");
     const moltbook = jobs.find((job) => job.id === "cache.moltbook");
@@ -59,8 +60,8 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     )) {
         assert.ok(job.nextRunAt);
         assert.ok(
-            new Date(job.nextRunAt).getTime() <= Date.now(),
-            `${job.id} should be due immediately on first insert`
+            new Date(job.nextRunAt).getTime() >= beforeList,
+            `${job.id} should be scheduled from its configured schedule`
         );
     }
 });
@@ -138,6 +139,23 @@ test("runs jobs and records success or failure", async () => {
     assert.equal(success.status, "success");
     assert.equal(success.output.actionTarget, "weather.spydeberg");
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.status, "success");
+
+    __testing.setActionExecutorForTests(async () => {
+        updateScheduledJob("cache.weather", { enabled: false, intervalSeconds: 7200 });
+        return { updated: true };
+    });
+    const concurrentPatch = await runScheduledJob("cache.weather");
+    assert.equal(concurrentPatch.status, "success");
+    const patchedJob = getScheduledJob("cache.weather");
+    assert.equal(patchedJob?.enabled, false);
+    assert.equal(patchedJob?.nextRunAt, null);
+
+    db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("cache.weather");
+    __testing.updateNextRunFromLatestJob("cache.weather");
+    assert.equal(
+        db.prepare("SELECT id FROM scheduled_jobs WHERE id = ?").get("cache.weather"),
+        undefined
+    );
 
     __testing.setActionExecutorForTests(async () => {
         throw new Error("boom");

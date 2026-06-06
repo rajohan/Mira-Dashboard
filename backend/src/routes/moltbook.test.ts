@@ -117,6 +117,7 @@ describe("moltbook routes", () => {
         if (server) {
             await server.close();
         }
+        await clearCacheEntries();
     });
 
     it("returns cached Moltbook home metadata", async () => {

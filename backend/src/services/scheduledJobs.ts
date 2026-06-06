@@ -361,6 +361,19 @@ function computeNextRunIso(job: {
     return nextIntervalRunIso(job.intervalSeconds);
 }
 
+function updateNextRunFromLatestJob(jobId: string): void {
+    const row = db
+        .prepare(`SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1`)
+        .get(jobId) as ScheduledJobRow | undefined;
+    if (!row) {
+        return;
+    }
+    const freshJob = mapJob(row);
+    db.prepare(
+        `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?`
+    ).run(freshJob.enabled ? computeNextRunIso(freshJob) : null, nowIso(), freshJob.id);
+}
+
 function getDefaultActionTarget(job: DefaultScheduledJob): string {
     const target = job.actionTarget ?? job.cacheKey;
     if (!target) {
@@ -385,6 +398,7 @@ export function ensureDefaultScheduledJobs(): void {
     `);
     const timestamp = nowIso();
     for (const job of defaultJobs) {
+        const initialNextRunAt = computeNextRunIso(job);
         insert.run(
             job.id,
             job.name,
@@ -396,7 +410,7 @@ export function ensureDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            timestamp,
+            initialNextRunAt,
             timestamp,
             timestamp
         );
@@ -583,14 +597,10 @@ export async function runScheduledJob(
     try {
         const output = await executeScheduledJob(job);
         finishRun(runId, "success", "Job completed", output);
-        db.prepare(
-            `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?`
-        ).run(computeNextRunIso(job), nowIso(), job.id);
+        updateNextRunFromLatestJob(job.id);
     } catch (error) {
         finishRun(runId, "failed", errorMessage(error, "Job failed"), {});
-        db.prepare(
-            `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?`
-        ).run(computeNextRunIso(job), nowIso(), job.id);
+        updateNextRunFromLatestJob(job.id);
     } finally {
         runningJobs.delete(job.id);
     }
@@ -667,6 +677,7 @@ export const __testing = {
     parseObjectJson,
     requireRecordedRun,
     runDueJobs,
+    updateNextRunFromLatestJob,
     setActionExecutorForTests(
         executor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined
     ): void {

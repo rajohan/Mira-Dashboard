@@ -5,7 +5,7 @@ export interface CacheEntryRow {
     key: string;
     data: string;
     source: string;
-    updated_at: string;
+    updated_at: string | null;
     last_attempt_at: string;
     expires_at: string;
     status: string;
@@ -19,7 +19,7 @@ interface SqliteCacheEntryRow {
     key: string;
     data_json: string | null;
     source: string;
-    updated_at: string;
+    updated_at: string | null;
     last_attempt_at: string;
     expires_at: string;
     status: string;

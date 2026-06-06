@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fsPromises from "node:fs/promises";
 import {
+    chmod,
     mkdir,
     mkdtemp,
     readFile,
@@ -187,6 +188,31 @@ describe("log rotation service", { concurrency: false }, () => {
             () => __testing.gzipFile(gzipSource, [tempDir]),
             /EEXIST|file already exists/u
         );
+        const gzipDeniedRoot = path.join(tempDir, "gzip-denied");
+        await mkdir(gzipDeniedRoot);
+        const gzipDeniedSource = path.join(gzipDeniedRoot, "source.log");
+        await writeFile(gzipDeniedSource, "source", "utf8");
+        await chmod(gzipDeniedRoot, 0o555);
+        try {
+            await assert.rejects(
+                () => __testing.gzipFile(gzipDeniedSource, [tempDir]),
+                /EACCES|permission denied/u
+            );
+            await assert.rejects(() => fsPromises.access(`${gzipDeniedSource}.gz`));
+            const unlinkMock = mock.method(fsPromises, "unlink", async () => {
+                throw new Error("unlink crashed");
+            });
+            try {
+                await assert.rejects(
+                    () => __testing.gzipFile(gzipDeniedSource, [tempDir]),
+                    /unlink crashed/u
+                );
+            } finally {
+                unlinkMock.mock.restore();
+            }
+        } finally {
+            await chmod(gzipDeniedRoot, 0o755);
+        }
         mock.method(fsPromises, "realpath", async () => {
             throw new Error("realpath crashed");
         });
@@ -574,6 +600,42 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.ok(summary.groups[0]?.deletedArchives);
         assert.ok(
             summary.errors.some((error) => JSON.stringify(error).includes("Unsafe path"))
+        );
+    });
+
+    it("reports missing literal paths when missingOk is false", async () => {
+        const root = path.join(tempDir, "required-logs");
+        await mkdir(root);
+        const existingLog = path.join(root, "existing.log");
+        const missingLog = path.join(root, "missing.log");
+        const missingExclude = path.join(root, "missing-exclude.log");
+        await writeFile(existingLog, "existing", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "missing-literal-path",
+                    paths: [missingLog],
+                    missingOk: false,
+                },
+                {
+                    name: "missing-literal-exclude",
+                    paths: [existingLog],
+                    excludePaths: [missingExclude],
+                    missingOk: false,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, false);
+        assert.equal(
+            summary.errors.filter((error) =>
+                JSON.stringify(error).includes("Log rotation path does not exist")
+            ).length,
+            2
         );
     });
 

@@ -139,9 +139,6 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
 
 export function writeCacheFailure(options: CacheFailureOptions): void {
     const timestamp = nowIso();
-    const existing = db
-        .prepare("SELECT consecutive_failures FROM cache_entries WHERE key = ?")
-        .get(options.key) as { consecutive_failures?: number } | undefined;
     db.prepare(
         `INSERT INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
@@ -153,7 +150,7 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
             status = 'error',
             error_code = excluded.error_code,
             error_message = excluded.error_message,
-            consecutive_failures = excluded.consecutive_failures,
+            consecutive_failures = COALESCE(cache_entries.consecutive_failures, 0) + 1,
             metadata_json = excluded.metadata_json`
     ).run(
         options.key,
@@ -161,7 +158,7 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
         timestamp,
         ttlDate(options.ttl, options.ttlUnit),
         errorMessage(options.error),
-        Number(existing?.consecutive_failures || 0) + 1,
+        1,
         JSON.stringify({ ...options.metadata, lastFailureAt: timestamp })
     );
 }
