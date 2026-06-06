@@ -104,4 +104,32 @@ describe("cache hooks", () => {
         });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
     });
+
+    it("invalidates related Moltbook queries for the aggregate producer key", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, entries: [{ key: "moltbook.home" }] }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+        const { result } = renderHook(() => useRefreshCacheEntry(), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        await act(async () => {
+            await result.current.mutateAsync("moltbook");
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/cache/moltbook/refresh",
+            expect.objectContaining({ method: "POST" })
+        );
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("moltbook.home"),
+        });
+    });
 });
