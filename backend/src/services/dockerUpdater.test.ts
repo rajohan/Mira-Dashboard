@@ -71,6 +71,7 @@ describe("docker updater service", { concurrency: false }, () => {
             String.raw`services:
   web:
     image: nginx:1.2.0
+    platform: linux/arm64
     labels:
       mira.updater.enabled: "true"
       mira.updater.autoUpdate: "true"
