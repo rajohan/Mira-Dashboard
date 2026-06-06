@@ -1880,4 +1880,66 @@ setTimeout(() => process.exit(0), 30);
         assert.equal(result.ok, false);
         assert.match(result.stderr, /compose failed/u);
     });
+
+    it("restores the compose file when writing the updated file fails", async () => {
+        const appDir = path.join(tempDir, "write-failure");
+        await mkdir(appDir, { recursive: true });
+        const composePath = path.join(appDir, "compose.yaml");
+        const originalCompose = ["services:", "  web:", "    image: repo/app:1", ""].join(
+            "\n"
+        );
+        await writeFile(composePath, originalCompose, "utf8");
+        const updater = await import(`./dockerUpdater.js?write-failure=${Date.now()}`);
+        const service = {
+            id: 1,
+            app_slug: "write-failure",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(service);
+        const originalWriteFileSync = fs.writeFileSync.bind(fs);
+        let writeCount = 0;
+        mock.method(
+            fs,
+            "writeFileSync",
+            (...args: Parameters<typeof fs.writeFileSync>) => {
+                writeCount += 1;
+                if (writeCount === 1) {
+                    originalWriteFileSync(composePath, "partial", "utf8");
+                    throw new Error("disk full");
+                }
+                return originalWriteFileSync(...args);
+            }
+        );
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /disk full/u);
+        assert.equal(await readFile(composePath, "utf8"), originalCompose);
+    });
 });

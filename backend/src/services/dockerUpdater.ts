@@ -566,8 +566,8 @@ async function applyComposeUpdate(service: ManagedServiceRow, targetImageRef: st
         const raw = fs.readFileSync(composePath, "utf8");
         const doc = YAML.parse(raw) as JsonRecord;
         setNestedValue(doc, composeImageField, targetImageRef);
-        fs.writeFileSync(composePath, YAML.stringify(doc));
         try {
+            fs.writeFileSync(composePath, YAML.stringify(doc));
             const command = getComposeCommand(composePath, service.service_name);
             const { stdout, stderr } = await execFileAsync(command.file, command.args, {
                 cwd: path.dirname(composePath),

@@ -615,6 +615,97 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
     });
 
+    it("allows only one concurrent caller to reclaim a stale lock", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+
+        const locks = await Promise.all([
+            __testing.acquireLogRotationLock(false),
+            __testing.acquireLogRotationLock(false),
+        ]);
+
+        const acquired = locks.filter((handle) => handle !== null);
+        assert.equal(acquired.length, 1);
+        assert.equal(locks.filter((handle) => handle === null).length, 1);
+        await acquired[0]?.close();
+        await rm(lockPath, { force: true });
+    });
+
+    it("rethrows unexpected stale lock reclaim setup errors", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalMkdir = fsPromises.mkdir.bind(fsPromises);
+        const mkdirMock = mock.method(
+            fsPromises,
+            "mkdir",
+            (
+                target: Parameters<typeof fsPromises.mkdir>[0],
+                options?: Parameters<typeof fsPromises.mkdir>[1]
+            ) => {
+                if (String(target).endsWith(".reclaim")) {
+                    const error = new Error(
+                        "reclaim mkdir failed"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalMkdir(target, options);
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /reclaim mkdir failed/u
+            );
+        } finally {
+            mkdirMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("handles stale lock unlink races and errors", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalUnlink = fsPromises.unlink.bind(fsPromises);
+        let unlinkMode: "enoent" | "denied" = "enoent";
+        const unlinkMock = mock.method(
+            fsPromises,
+            "unlink",
+            async (target: Parameters<typeof fsPromises.unlink>[0]) => {
+                if (String(target) === lockPath) {
+                    if (unlinkMode === "enoent") {
+                        await originalUnlink(target);
+                    }
+                    const error = new Error(
+                        unlinkMode === "enoent" ? "already gone" : "unlink denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = unlinkMode === "enoent" ? "ENOENT" : "EACCES";
+                    throw error;
+                }
+                return originalUnlink(target);
+            }
+        );
+        try {
+            const lock = await __testing.acquireLogRotationLock(false);
+            assert.ok(lock);
+            await lock.close();
+            await rm(lockPath, { force: true });
+
+            unlinkMode = "denied";
+            await writeFile(lockPath, "not-a-pid\n", "utf8");
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /unlink denied/u
+            );
+        } finally {
+            unlinkMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("treats inaccessible lock PIDs as running", async () => {
         const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
         await mkdir(path.dirname(lockPath), { recursive: true });

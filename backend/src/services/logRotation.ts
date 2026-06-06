@@ -19,6 +19,7 @@ const BUNDLED_CONFIG_PATH = fileURLToPath(
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
 const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
+const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
 
 type ExecFileRunner = (
     file: string,
@@ -734,15 +735,45 @@ async function acquireLogRotationLock(dryRun: boolean) {
             "code" in error &&
             (error as NodeJS.ErrnoException).code === "EEXIST"
         ) {
-            const rawPid = await fs.readFile(LOCK_FILE, "utf8").catch(() => "");
-            const pid = Number.parseInt(rawPid.trim(), 10);
-            if (!Number.isFinite(pid) || !isProcessRunning(pid)) {
-                await fs.unlink(LOCK_FILE).catch(() => {});
-                return openLock();
-            }
+            return reclaimStaleLogRotationLock(openLock);
+        }
+        throw error;
+    }
+}
+
+async function reclaimStaleLogRotationLock(openLock: () => Promise<fs.FileHandle>) {
+    try {
+        await fs.mkdir(LOCK_RECLAIM_DIR);
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            "code" in error &&
+            (error as NodeJS.ErrnoException).code === "EEXIST"
+        ) {
             return null;
         }
         throw error;
+    }
+    try {
+        const rawPid = await fs.readFile(LOCK_FILE, "utf8").catch(() => "");
+        const pid = Number.parseInt(rawPid.trim(), 10);
+        if (Number.isFinite(pid) && isProcessRunning(pid)) {
+            return null;
+        }
+        await fs.unlink(LOCK_FILE).catch((error: unknown) => {
+            if (
+                !(
+                    error instanceof Error &&
+                    "code" in error &&
+                    (error as NodeJS.ErrnoException).code === "ENOENT"
+                )
+            ) {
+                throw error;
+            }
+        });
+        return openLock();
+    } finally {
+        await fs.rmdir(LOCK_RECLAIM_DIR).catch(() => {});
     }
 }
 
