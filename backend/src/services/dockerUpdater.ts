@@ -193,9 +193,10 @@ function parseBearerChallenge(header: string | null): Record<string, string> | n
 async function fetchRegistryResponse(
     url: string,
     options: RegistryFetchOptions = {}
-): Promise<Response> {
+): Promise<{ response: Response; clearTimer: () => void }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
+    const clearTimer = () => clearTimeout(timeout);
     const headers = {
         Accept: options.accept || "application/json",
         "User-Agent": "mira-dashboard-docker-updater/1.0",
@@ -203,11 +204,11 @@ async function fetchRegistryResponse(
     try {
         const response = await fetch(url, { headers, signal: controller.signal });
         if (response.status !== 401) {
-            return response;
+            return { response, clearTimer };
         }
         const challenge = parseBearerChallenge(response.headers.get("www-authenticate"));
         if (!challenge?.realm) {
-            return response;
+            return { response, clearTimer };
         }
         const tokenUrl = new URL(challenge.realm);
         if (challenge.service) tokenUrl.searchParams.set("service", challenge.service);
@@ -220,7 +221,7 @@ async function fetchRegistryResponse(
             signal: controller.signal,
         });
         if (!tokenResponse.ok) {
-            return response;
+            return { response, clearTimer };
         }
         const tokenBody = asRecord(await tokenResponse.json());
         const token =
@@ -230,17 +231,19 @@ async function fetchRegistryResponse(
                   ? tokenBody.access_token
                   : null;
         if (!token) {
-            return response;
+            return { response, clearTimer };
         }
-        return fetch(url, {
+        const authenticated = await fetch(url, {
             headers: {
                 ...headers,
                 Authorization: `Bearer ${token}`,
             },
             signal: controller.signal,
         });
-    } finally {
-        clearTimeout(timeout);
+        return { response: authenticated, clearTimer };
+    } catch (error) {
+        clearTimer();
+        throw error;
     }
 }
 
@@ -254,14 +257,17 @@ async function fetchRegistryJsonWithHeaders(
     options: RegistryFetchOptions = {}
 ): Promise<{ body: JsonRecord; headers: Headers }> {
     try {
-        const response = await fetchRegistryResponse(url, options);
+        const { response, clearTimer } = await fetchRegistryResponse(url, options);
         if (!response.ok) {
+            clearTimer();
             throw new Error(`HTTP ${response.status} for ${url}`);
         }
-        return {
-            body: asRecord(await response.json()),
-            headers: response.headers,
-        };
+        try {
+            const body = asRecord(await response.json());
+            return { body, headers: response.headers };
+        } finally {
+            clearTimer();
+        }
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ${url}`, { cause: error });
@@ -696,13 +702,15 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const discoveredAppSlugs = new Set(
             discoveries.map((discovery) => discovery.appSlug)
         );
-        for (const row of db
-            .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
-            .all() as Array<{ app_slug: string }>) {
-            if (!discoveredAppSlugs.has(row.app_slug)) {
-                db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
-                    row.app_slug
-                );
+        if (discoveries.length > 0) {
+            for (const row of db
+                .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
+                .all() as Array<{ app_slug: string }>) {
+                if (!discoveredAppSlugs.has(row.app_slug)) {
+                    db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
+                        row.app_slug
+                    );
+                }
             }
         }
         for (const service of services) {
