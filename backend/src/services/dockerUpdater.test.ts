@@ -986,6 +986,10 @@ setTimeout(() => process.exit(0), 30);
         );
         assert.equal(updater.__testing.imageRegistry("nginx"), "docker.io");
         assert.equal(updater.__testing.imageRegistry(""), "docker.io");
+        assert.equal(
+            updater.__testing.imageRegistry("index.docker.io/library/redis"),
+            "docker.io"
+        );
         assert.deepEqual([...updater.__testing.normalizeLabels(null)], []);
         assert.deepEqual(
             [...updater.__testing.normalizeLabels(["flag"])],
@@ -1011,6 +1015,10 @@ setTimeout(() => process.exit(0), 30);
         );
         assert.equal(
             updater.__testing.stripRegistry("docker.io/library/redis"),
+            "library/redis"
+        );
+        assert.equal(
+            updater.__testing.stripRegistry("index.docker.io/library/redis"),
             "library/redis"
         );
         assert.equal(updater.__testing.stripRegistry("ghcr.io/owner/app"), "owner/app");

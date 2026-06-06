@@ -286,17 +286,19 @@ function isGhcrRepo(repo: string): boolean {
 
 function imageRegistry(repo: string): string {
     const first = repo.split("/")[0] || "";
-    return first.includes(".") || first.includes(":") || first === "localhost"
-        ? first
-        : "docker.io";
+    const registry =
+        first.includes(".") || first.includes(":") || first === "localhost"
+            ? first
+            : "docker.io";
+    return registry === "index.docker.io" ? "docker.io" : registry;
 }
 
 function stripRegistry(repo: string) {
     if (isGhcrRepo(repo)) {
         return repo.replace(/^ghcr\.io\//u, "");
     }
-    if (repo.startsWith("docker.io/")) {
-        return repo.replace(/^docker\.io\//u, "");
+    if (repo.startsWith("docker.io/") || repo.startsWith("index.docker.io/")) {
+        return repo.replace(/^(?:index\.)?docker\.io\//u, "");
     }
     return repo;
 }
