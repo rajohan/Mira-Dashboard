@@ -1,0 +1,57 @@
+{
+    "version": 1,
+    "approvedRoots": ["/opt/docker/data"],
+    "defaults": {
+        "compress": true,
+        "skipEmpty": true,
+        "missingOk": true,
+        "maxSizeMb": 10,
+        "keep": 3,
+        "strategy": "copytruncate"
+    },
+    "groups": [
+        {
+            "name": "docker-file-logs",
+            "enabled": true,
+            "paths": [
+                "/opt/docker/data/*/log/*.log",
+                "/opt/docker/data/*/log/*.txt",
+                "/opt/docker/data/*/log/*.json",
+                "/opt/docker/data/*/logs/*.log",
+                "/opt/docker/data/*/logs/*.txt",
+                "/opt/docker/data/*/logs/*.json",
+                "/opt/docker/data/*/logs/*/*.log",
+                "/opt/docker/data/*/logs/*/*.txt",
+                "/opt/docker/data/*/logs/*/*.json",
+                "/opt/docker/data/*/*.log",
+                "/opt/docker/data/*/*log*.json",
+                "/opt/docker/data/*/*log*.txt",
+                "/opt/docker/data/*/*/log.txt"
+            ],
+            "daily": true,
+            "maxSizeMb": 10,
+            "keep": 3,
+            "strategy": "copytruncate",
+            "archivePaths": [
+                "/opt/docker/data/*/*/log.txt.*.txt",
+                "/opt/docker/data/*/*/log.txt.*.txt.gz"
+            ],
+            "excludePaths": [
+                "/opt/docker/data/kopia/logs/*/*.log*",
+                "/opt/docker/data/crowdsec/*.txt*"
+            ]
+        },
+        {
+            "name": "kopia-generated-logs",
+            "enabled": true,
+            "paths": [],
+            "archiveOnly": true,
+            "archivePaths": ["/opt/docker/data/kopia/logs/*/*.log*"],
+            "archiveRetentionScope": "directory",
+            "archiveMinAgeMinutes": 60,
+            "compress": true,
+            "keep": 25,
+            "keepDays": 7
+        }
+    ]
+}

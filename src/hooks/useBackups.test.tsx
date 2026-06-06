@@ -13,35 +13,39 @@ import {
 import { cacheKeys } from "./useCache";
 
 describe("backup hooks", () => {
-    it("fetches kopia and walg backup state", async () => {
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce({
-                ok: true,
-                status: 200,
-                json: async () => ({ job: null }),
-            })
-            .mockResolvedValueOnce({
-                ok: true,
-                status: 200,
-                json: async () => ({ job: { id: "walg", status: "running" } }),
-            });
+    it("fetches kopia backup state", async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({ job: null }),
+        });
         vi.stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: kopia } = renderHook(() => useKopiaBackup(), { wrapper });
         await waitFor(() => expect(kopia.current.data?.job).toBeNull());
 
-        const { result: walg } = renderHook(() => useWalgBackup(), { wrapper });
-        await waitFor(() => expect(walg.current.data?.job?.id).toBe("walg"));
-
         expect(fetchMock).toHaveBeenNthCalledWith(
             1,
             "/api/backups/kopia",
             expect.any(Object)
         );
+    });
+
+    it("fetches walg backup state", async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({ job: null }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const wrapper = createQueryWrapper();
+
+        const { result: walg } = renderHook(() => useWalgBackup(), { wrapper });
+        await waitFor(() => expect(walg.current.data?.job).toBeNull());
+
         expect(fetchMock).toHaveBeenNthCalledWith(
-            2,
+            1,
             "/api/backups/walg",
             expect.any(Object)
         );
@@ -62,7 +66,7 @@ describe("backup hooks", () => {
         await waitFor(() => expect(result.current.data?.job?.status).toBe("running"));
     });
 
-    it("runs backups and invalidates status caches", async () => {
+    it("runs kopia backup and invalidates status caches", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -74,11 +78,9 @@ describe("backup hooks", () => {
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: kopia } = renderHook(() => useRunKopiaBackup(), { wrapper });
-        const { result: walg } = renderHook(() => useRunWalgBackup(), { wrapper });
 
         await act(async () => {
             await kopia.current.mutateAsync();
-            await walg.current.mutateAsync();
         });
 
         expect(fetchMock).toHaveBeenNthCalledWith(
@@ -86,13 +88,36 @@ describe("backup hooks", () => {
             "/api/backups/kopia/run",
             expect.objectContaining({ method: "POST" })
         );
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.kopia() });
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cacheKeys.heartbeat() });
+    });
+
+    it("runs walg backup and invalidates status caches", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, job: { id: "job" } }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const wrapper = createQueryWrapper(queryClient);
+
+        const { result: walg } = renderHook(() => useRunWalgBackup(), { wrapper });
+
+        await act(async () => {
+            await walg.current.mutateAsync();
+        });
+
         expect(fetchMock).toHaveBeenNthCalledWith(
-            2,
+            1,
             "/api/backups/walg/run",
             expect.objectContaining({ method: "POST" })
         );
-        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.kopia() });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.walg() });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("backup.walg.status"),
+        });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cacheKeys.heartbeat() });
     });
 });

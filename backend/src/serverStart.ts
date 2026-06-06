@@ -4,13 +4,9 @@ import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
 import { resolveListenPort, server } from "./server.js";
 import {
-    startOpenClawNotificationMonitor,
-    stopOpenClawNotificationMonitor,
-} from "./services/openclawNotifications.js";
-import {
-    startQuotaNotificationMonitor,
-    stopQuotaNotificationMonitor,
-} from "./services/quotaNotifications.js";
+    startScheduledJobScheduler,
+    stopScheduledJobScheduler,
+} from "./services/scheduledJobs.js";
 
 let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void) | undefined;
@@ -18,8 +14,7 @@ let afterBackgroundServicesStartedForTest: (() => void) | undefined;
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
-    let quotaMonitorStarted = false;
-    let openClawMonitorStarted = false;
+    let scheduledJobSchedulerStarted = false;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -31,10 +26,8 @@ export function handleServerListening(): void {
             );
         }
 
-        startQuotaNotificationMonitor();
-        quotaMonitorStarted = true;
-        startOpenClawNotificationMonitor();
-        openClawMonitorStarted = true;
+        startScheduledJobScheduler();
+        scheduledJobSchedulerStarted = true;
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
@@ -45,16 +38,10 @@ export function handleServerListening(): void {
                 console.error(label, cleanupError);
             }
         };
-        if (openClawMonitorStarted) {
+        if (scheduledJobSchedulerStarted) {
             rollback(
-                stopOpenClawNotificationMonitor,
-                "[Backend] Failed to stop OpenClaw notification monitor:"
-            );
-        }
-        if (quotaMonitorStarted) {
-            rollback(
-                stopQuotaNotificationMonitor,
-                "[Backend] Failed to stop quota notification monitor:"
+                stopScheduledJobScheduler,
+                "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
         if (gatewayStarted) {

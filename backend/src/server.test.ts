@@ -14,8 +14,7 @@ import { WebSocket } from "ws";
 
 import { db, ensureTaskAutomationColumn } from "./db.js";
 import gateway from "./gateway.js";
-import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
-import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
+import { stopScheduledJobScheduler } from "./services/scheduledJobs.js";
 
 let originalPort: string | undefined;
 let originalTrustProxy: string | undefined;
@@ -758,8 +757,7 @@ describe("server bootstrap", () => {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -781,8 +779,8 @@ describe("server bootstrap", () => {
             let intervalCalls = 0;
             globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
                 intervalCalls += 1;
-                if (intervalCalls === 2) {
-                    throw new Error("monitor failed");
+                if (intervalCalls === 1) {
+                    throw new Error("scheduler failed");
                 }
                 return originalSetInterval(...args);
             }) as typeof setInterval;
@@ -790,23 +788,21 @@ describe("server bootstrap", () => {
                 closeCalled = true;
                 return server;
             }) as typeof server.close;
-            assert.throws(() => handleServerListening(), /monitor failed/u);
+            assert.throws(() => handleServerListening(), /scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             globalThis.setInterval = originalSetInterval;
             closeCalled = false;
             shutdownCalled = false;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("post monitor failed");
+                throw new Error("post scheduler failed");
             });
-            assert.throws(() => handleServerListening(), /post monitor failed/u);
+            assert.throws(() => handleServerListening(), /post scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             gateway.shutdown = () => {
                 throw new Error("shutdown cleanup failed");
             };
@@ -814,9 +810,12 @@ describe("server bootstrap", () => {
                 throw new Error("server cleanup failed");
             }) as typeof server.close;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("post monitor cleanup failed");
+                throw new Error("post scheduler cleanup failed");
             });
-            assert.throws(() => handleServerListening(), /post monitor cleanup failed/u);
+            assert.throws(
+                () => handleServerListening(),
+                /post scheduler cleanup failed/u
+            );
             assert.equal(
                 errors.some((entry) =>
                     String(entry[0]).includes("Failed to stop gateway")
@@ -830,8 +829,7 @@ describe("server bootstrap", () => {
                 true
             );
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {
@@ -946,8 +944,7 @@ describe("server bootstrap", () => {
             globalThis.setInterval = originalSetInterval;
             gateway.shutdown = originalShutdown;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);
             } else {

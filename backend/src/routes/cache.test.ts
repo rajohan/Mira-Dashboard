@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -7,8 +7,7 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
-import { __testing as cacheStoreTesting } from "../lib/cacheStore.js";
-import { withEnv } from "../testUtils/env.js";
+import { db } from "../db.js";
 import cacheRoutes from "./cache.js";
 import {
     __testing,
@@ -36,27 +35,23 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function installFakeDocker(tempDir: string): Promise<string> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-const command = process.argv.join(" ");
-const header = "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta";
-const row = "quotas.summary\t{\"usage\":12}\tn8n\t2026-05-10T19:00:00.000Z\t2026-05-10T19:01:00.000Z\t2026-05-10T20:00:00.000Z\tfresh\t\t\t2\t{\"job\":\"quotas\"}";
-if (command.includes("WHERE key = 'missing.key'")) {
-  process.stdout.write(header + "\n");
-} else {
-  process.stdout.write(header + "\n" + row + "\n");
-}
-`,
-        "utf8"
+function seedCacheRow(): void {
+    db.prepare(
+        `INSERT OR REPLACE INTO cache_entries (
+            key, data_json, source, updated_at, last_attempt_at, expires_at,
+            status, error_code, error_message, consecutive_failures, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
+    ).run(
+        "quotas.summary",
+        '{"usage":12}',
+        "backend-test",
+        "2026-05-10T19:00:00.000Z",
+        "2026-05-10T19:01:00.000Z",
+        "2026-05-10T20:00:00.000Z",
+        "fresh",
+        2,
+        '{"job":"quotas"}'
     );
-    await chmod(dockerPath, 0o755);
-    cacheStoreTesting.setDockerBinForTests(dockerPath);
-    return dockerPath;
 }
 
 async function startServer(): Promise<TestServer> {
@@ -97,7 +92,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-route-"));
         __testing.setCacheRefreshCwdForTests(tempDir);
-        await installFakeDocker(tempDir);
+        db.exec("DELETE FROM cache_entries;");
+        seedCacheRow();
         server = await startServer();
     });
 
@@ -107,7 +103,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
         __testing.setCacheRefreshCwdForTests(undefined);
         __testing.resetCacheRefreshForTests();
-        cacheStoreTesting.setDockerBinForTests(undefined);
+        db.exec("DELETE FROM cache_entries;");
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }
@@ -158,24 +154,14 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     it("rejects refresh requests for unconfigured cache keys before shelling out", async () => {
-        assert.deepEqual(__testing.getCacheRefreshCommand("quotas.summary"), [
-            "/usr/local/bin/doppler",
-            "run",
-            "--project",
-            "rajohan",
-            "--config",
-            "prd",
-            "--",
-            "node",
-            `${tempDir}/scripts/quotas-cache.mjs`,
-        ]);
+        assert.equal(__testing.getCacheRefreshCommand("quotas.summary"), undefined);
 
         await assert.rejects(
             () => refreshCacheKey("not.configured"),
             (error: unknown) => {
                 assert.equal(
                     (error as Error).message,
-                    "No refresh command configured for cache key: not.configured"
+                    "No backend refresh producer configured for cache key: not.configured"
                 );
                 assert.equal((error as { statusCode?: number }).statusCode, 400);
                 return true;
@@ -228,7 +214,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         );
         assert.equal(refresh.status, 400);
         assert.deepEqual(await refresh.json(), {
-            error: "No refresh command configured for cache key: not.configured",
+            error: "No backend refresh producer configured for cache key: not.configured",
         });
     });
 
@@ -239,6 +225,22 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             const refreshed = await refreshCacheKey("quotas.summary");
             assert.equal(refreshed.key, "quotas.summary");
+
+            db.prepare(
+                "DELETE FROM cache_entries WHERE key = 'backup.walg.status'"
+            ).run();
+            __testing.setCacheRefreshCommandForTests("weather.spydeberg", refreshCommand);
+            const originalPath = process.env.PATH;
+            process.env.PATH = tempDir;
+            try {
+                await assert.rejects(
+                    () => refreshCacheKey("backup.walg.status"),
+                    /spawn docker ENOENT/u
+                );
+            } finally {
+                process.env.PATH = originalPath;
+                __testing.setCacheRefreshCommandForTests("weather.spydeberg", undefined);
+            }
 
             __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
             try {
@@ -271,110 +273,83 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
     });
 
-    it("does not pass literal undefined database credentials to refresh commands", async () => {
-        const envPath = path.join(tempDir, "refresh-env.json");
-        const refreshCommand = [
-            process.execPath,
-            "-e",
-            `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ user: process.env.DB_POSTGRESDB_USER, password: process.env.DB_POSTGRESDB_PASSWORD }))`,
-        ];
-
+    it("uses injected cache refresh runners for tests", async () => {
+        __testing.setCacheRefreshRunnerForTests(async (key) => {
+            db.prepare(
+                `INSERT OR REPLACE INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES (?, '{"ok":true}', 'injected', ?, ?, ?, 'fresh', NULL, NULL, 0, '{}')`
+            ).run(
+                key,
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T00:00:00.000Z",
+                "2026-06-06T01:00:00.000Z"
+            );
+            return { refreshed: [key] };
+        });
         try {
-            __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
-
-            await withEnv({ DOPPLER_BIN: "/tmp/custom-doppler" }, async () => {
-                assert.equal(
-                    __testing.getCacheRefreshCommand("quotas.summary")?.[0],
-                    "/tmp/custom-doppler"
-                );
-            });
-
-            await withEnv(
-                {
-                    DATABASE_USERNAME: undefined,
-                    DATABASE_PASSWORD: undefined,
-                    DB_POSTGRESDB_USER: undefined,
-                    DB_POSTGRESDB_PASSWORD: undefined,
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-
-            const payload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(payload, { user: "postgres", password: "postgres" });
-
-            await withEnv(
-                {
-                    DATABASE_USERNAME: "",
-                    DATABASE_PASSWORD: "",
-                    DB_POSTGRESDB_USER: "",
-                    DB_POSTGRESDB_PASSWORD: "",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const blankPayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(blankPayload, { user: "postgres", password: "postgres" });
-
-            await withEnv(
-                {
-                    DATABASE_USERNAME: " legacy-user ",
-                    DATABASE_PASSWORD: "\tlegacy-password ",
-                    DB_POSTGRESDB_USER: "  ",
-                    DB_POSTGRESDB_PASSWORD: "\t",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const whitespacePayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(whitespacePayload, {
-                user: " legacy-user ",
-                password: "\tlegacy-password ",
-            });
-
-            await withEnv(
-                {
-                    DATABASE_USERNAME: "  ",
-                    DATABASE_PASSWORD: "\t",
-                    DB_POSTGRESDB_USER: undefined,
-                    DB_POSTGRESDB_PASSWORD: undefined,
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const whitespaceLegacyPayload = JSON.parse(
-                await readFile(envPath, "utf8")
-            ) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(whitespaceLegacyPayload, {
-                user: "postgres",
-                password: "postgres",
-            });
-
-            await withEnv(
-                {
-                    DB_POSTGRESDB_USER: "native-user",
-                    DB_POSTGRESDB_PASSWORD: "native-password",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const inheritedPayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(inheritedPayload, {
-                user: "native-user",
-                password: "native-password",
-            });
+            const refreshed = await refreshCacheKey("custom.injected");
+            assert.equal(refreshed.key, "custom.injected");
+            assert.equal(refreshed.source, "injected");
         } finally {
-            __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
+    it("refreshes WAL-G backup status through backend SQLite cache", async () => {
+        const binDir = await mkdtemp(path.join(tempDir, "fake-bin-"));
+        const dockerPath = path.join(binDir, "docker");
+        await writeFile(
+            dockerPath,
+            String.raw`#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.join(" ") !== "exec walg wal-g backup-list --detail --json") {
+    console.error("unexpected docker args: " + args.join(" "));
+    process.exit(2);
+}
+process.stdout.write(JSON.stringify([
+    {
+        backup_name: "base_0002",
+        modified: "2099-01-02T03:04:05.000Z",
+        time: "2099-01-02T03:00:00.000Z",
+        start_time: "2099-01-02T03:00:00.000Z",
+        finish_time: "2099-01-02T03:04:05.000Z",
+        wal_file_name: "0000000100000000000000BB",
+        storage_name: "default"
+    },
+    {
+        backup_name: "base_0001",
+        finish_time: "2099-01-01T03:04:05.000Z",
+        wal_file_name: "0000000100000000000000AA"
+    }
+]));
+`,
+            "utf8"
+        );
+        await chmod(dockerPath, 0o755);
+        const originalPath = process.env.PATH;
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        try {
+            const refreshed = await refreshCacheKey("backup.walg.status");
+
+            assert.equal(refreshed.key, "backup.walg.status");
+            assert.equal(refreshed.source, "backend");
+            assert.equal(refreshed.status, "fresh");
+            assert.equal(
+                (refreshed.data as { latest?: { backupName?: string } }).latest
+                    ?.backupName,
+                "base_0002"
+            );
+            assert.equal(
+                (refreshed.data as { latest?: { walFileName?: string } }).latest
+                    ?.walFileName,
+                "0000000100000000000000BB"
+            );
+            assert.equal((refreshed.data as { backupCount?: number }).backupCount, 2);
+            assert.equal((refreshed.data as { ok?: boolean }).ok, true);
+        } finally {
+            process.env.PATH = originalPath;
         }
     });
 });

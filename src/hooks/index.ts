@@ -37,6 +37,13 @@ export {
 } from "./useCron";
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { useHealth } from "./useHealth";
+export type { ScheduledJob, ScheduledJobRun } from "./useJobs";
+export {
+    jobKeys,
+    useRunScheduledJob,
+    useScheduledJobs,
+    useUpdateScheduledJob,
+} from "./useJobs";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export {

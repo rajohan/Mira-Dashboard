@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { __testing, parseJsonField, parseTable } from "./cacheStore.js";
+import { db } from "../db.js";
+import { getCacheEntry } from "./cacheStore.js";
 
 describe("cacheStore utilities", () => {
     it("parses tab-delimited psql output into keyed rows", () => {
@@ -26,92 +28,22 @@ describe("cacheStore utilities", () => {
         assert.equal(parseJsonField(""), null);
     });
 
-    it("builds Postgres URIs from defaults and environment overrides", () => {
-        const original = {
-            username: process.env.DATABASE_USERNAME,
-            password: process.env.DATABASE_PASSWORD,
-            host: process.env.DATABASE_HOST,
-            port: process.env.DATABASE_PORT,
-        };
+    it("keeps legacy docker-bin test hooks as no-op compatibility helpers", () => {
+        assert.equal(__testing.getDockerBinForTests(), undefined);
+        assert.equal(__testing.setDockerBinForTests("/bin/docker"), undefined);
+    });
 
+    it("maps nullable SQLite cache payloads to legacy empty fields", async () => {
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, error_code, error_message, consecutive_failures, metadata_json
+            ) VALUES ('cache.null', NULL, 'test', '', '', '', 'fresh', NULL, NULL, 0, '{}')`
+        ).run();
         try {
-            delete process.env.DATABASE_USERNAME;
-            delete process.env.DATABASE_PASSWORD;
-            delete process.env.DATABASE_HOST;
-            delete process.env.DATABASE_PORT;
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://postgres:postgres@postgres:5432/n8n"
-            );
-
-            process.env.DATABASE_USERNAME = "";
-            process.env.DATABASE_PASSWORD = "";
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://:@postgres:5432/n8n"
-            );
-
-            process.env.DATABASE_HOST = "   ";
-            process.env.DATABASE_PORT = "\t";
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://:@postgres:5432/n8n"
-            );
-
-            process.env.DATABASE_USERNAME = "user@name";
-            process.env.DATABASE_PASSWORD = "p:a/ss#";
-            process.env.DATABASE_HOST = "db";
-            process.env.DATABASE_PORT = "6543";
-            assert.equal(
-                __testing.buildPostgresUri("cache/name?#"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/cache%2Fname%3F%23"
-            );
-            process.env.DATABASE_HOST = "192.168.0.1";
-            assert.equal(
-                __testing.buildPostgresUri("n8n"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@192.168.0.1:6543/n8n"
-            );
-            process.env.DATABASE_HOST = "::1";
-            assert.equal(
-                __testing.buildPostgresUri("n8n"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@[::1]:6543/n8n"
-            );
-
-            process.env.DATABASE_HOST = "db$(touch /tmp/nope)";
-            assert.throws(() => __testing.buildPostgresUri(), {
-                message: "Invalid DATABASE_HOST",
-            });
-            process.env.DATABASE_HOST = "999.999.999.999";
-            assert.throws(() => __testing.buildPostgresUri(), {
-                message: "Invalid DATABASE_HOST",
-            });
-            process.env.DATABASE_HOST = "[::::]";
-            assert.throws(() => __testing.buildPostgresUri(), {
-                message: "Invalid DATABASE_HOST",
-            });
-            process.env.DATABASE_HOST = "[2001:db8::1]";
-            process.env.DATABASE_PORT = "not-a-port";
-            assert.throws(() => __testing.buildPostgresUri(), {
-                message: "Invalid DATABASE_PORT",
-            });
-            process.env.DATABASE_PORT = "70000";
-            assert.throws(() => __testing.buildPostgresUri(), {
-                message: "Invalid DATABASE_PORT",
-            });
-            process.env.DATABASE_PORT = "05432";
-            assert.equal(
-                __testing.buildPostgresUri("n8n"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@[2001:db8::1]:5432/n8n"
-            );
+            assert.equal((await getCacheEntry("cache.null"))?.data, "");
         } finally {
-            if (original.username === undefined) delete process.env.DATABASE_USERNAME;
-            else process.env.DATABASE_USERNAME = original.username;
-            if (original.password === undefined) delete process.env.DATABASE_PASSWORD;
-            else process.env.DATABASE_PASSWORD = original.password;
-            if (original.host === undefined) delete process.env.DATABASE_HOST;
-            else process.env.DATABASE_HOST = original.host;
-            if (original.port === undefined) delete process.env.DATABASE_PORT;
-            else process.env.DATABASE_PORT = original.port;
+            db.prepare("DELETE FROM cache_entries WHERE key = 'cache.null'").run();
         }
     });
 });

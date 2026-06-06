@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { seedCacheEntry } from "../testUtils/cacheEntries.js";
 
 const originalPath = process.env.PATH;
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
@@ -31,7 +32,7 @@ const data = process.env.FAKE_QUOTAS_JSON
     };
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "quotas.summary\t" + JSON.stringify(data) + "\tquotas\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
+  "quotas.summary\t" + JSON.stringify(data) + "\tquotas\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2099-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
   "",
 ].join("\n"));
 `,
@@ -51,6 +52,31 @@ function quotaNotifications(): Array<{
             "SELECT title, dedupe_key, metadata_json FROM notifications WHERE source = 'quota' ORDER BY dedupe_key"
         )
         .all() as Array<{ title: string; dedupe_key: string; metadata_json: string }>;
+}
+
+function seedQuotasCache(): void {
+    const percent = Number(process.env.FAKE_OPENROUTER_PERCENT || "91");
+    const data = process.env.FAKE_QUOTAS_JSON
+        ? (JSON.parse(process.env.FAKE_QUOTAS_JSON) as Record<string, unknown>)
+        : {
+              openrouter: {
+                  usage: 9,
+                  totalCredits: 10,
+                  remaining: 1.23,
+                  usageMonthly: 9,
+                  percentUsed: percent,
+              },
+              elevenlabs: { status: "not_configured" },
+              synthetic: { status: "not_configured" },
+              openai: { status: "not_configured" },
+              checkedAt: 1_800_000_000_000,
+              cacheAgeMs: 0,
+          };
+    seedCacheEntry({
+        key: "quotas.summary",
+        source: "quotas",
+        data,
+    });
 }
 
 describe("quota notifications", () => {
@@ -77,6 +103,7 @@ describe("quota notifications", () => {
         db.exec("DELETE FROM quota_alert_state");
         process.env.FAKE_OPENROUTER_PERCENT = "91";
         delete process.env.FAKE_QUOTAS_JSON;
+        seedQuotasCache();
     });
 
     afterEach(() => {
@@ -127,6 +154,7 @@ describe("quota notifications", () => {
         ]);
 
         process.env.FAKE_OPENROUTER_PERCENT = "70";
+        seedQuotasCache();
         await runQuotaNotificationCheck();
 
         const rearmed = (
@@ -177,6 +205,7 @@ describe("quota notifications", () => {
             checkedAt: 1_800_000_000_000,
             cacheAgeMs: 0,
         });
+        seedQuotasCache();
 
         await runQuotaNotificationCheck();
 
@@ -200,7 +229,11 @@ describe("quota notifications", () => {
     });
 
     it("handles concurrent checks, cache failures, and monitor interval fallbacks", async () => {
-        process.env.FAKE_QUOTAS_JSON = "{not-json";
+        seedCacheEntry({
+            key: "quotas.summary",
+            source: "quotas",
+            data: "not-json",
+        });
         const originalError = console.error;
         const errors: unknown[][] = [];
         console.error = (...args: unknown[]) => {
@@ -219,6 +252,7 @@ describe("quota notifications", () => {
                 checkedAt: 1_800_000_000_000,
                 cacheAgeMs: 0,
             });
+            seedQuotasCache();
             const originalSetInterval = globalThis.setInterval;
             const scheduled: number[] = [];
             globalThis.setInterval = ((_callback: () => void, intervalMs?: number) => {
@@ -229,7 +263,9 @@ describe("quota notifications", () => {
             try {
                 startQuotaNotificationMonitor(1);
                 startQuotaNotificationMonitor(60_000);
-                assert.deepEqual(scheduled, [15 * 60 * 1000]);
+                stopQuotaNotificationMonitor();
+                startQuotaNotificationMonitor(Number.MAX_SAFE_INTEGER);
+                assert.deepEqual(scheduled, [15 * 60 * 1000, 2_147_483_647]);
                 await new Promise((resolve) => setTimeout(resolve, 100));
             } finally {
                 stopQuotaNotificationMonitor();
@@ -270,6 +306,7 @@ describe("quota notifications", () => {
             checkedAt: 1_800_000_000_000,
             cacheAgeMs: 0,
         });
+        seedQuotasCache();
 
         await runQuotaNotificationCheck();
 

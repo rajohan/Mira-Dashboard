@@ -48,6 +48,7 @@ vi.mock("./pages/Docker", () => ({ Docker: () => <div>Docker</div> }));
 vi.mock("./pages/Files", () => ({ Files: () => <div>Files</div> }));
 vi.mock("./pages/Login", () => ({ Login: () => <div>Login</div> }));
 vi.mock("./pages/Logs", () => ({ Logs: () => <div>Logs</div> }));
+vi.mock("./pages/Jobs", () => ({ Jobs: () => <div>Jobs</div> }));
 vi.mock("./pages/Moltbook", () => ({ Moltbook: () => <div>Moltbook</div> }));
 vi.mock("./pages/PullRequests", () => ({
     PullRequests: () => <div>PullRequests</div>,
@@ -91,6 +92,7 @@ describe("router", () => {
             "/sessions",
             "/chat",
             "/logs",
+            "/jobs",
             "/cron",
             "/pull-requests",
             "/files",

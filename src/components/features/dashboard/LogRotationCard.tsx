@@ -27,8 +27,7 @@ export function LogRotationCard() {
                             Log rotation
                         </div>
                         <div className="text-primary-400 text-xs">
-                            n8n scheduled workflow for approved file logs under
-                            /opt/docker/data.
+                            Dashboard scheduled runner for approved file logs
                         </div>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">

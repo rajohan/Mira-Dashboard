@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { seedCacheEntry } from "../testUtils/cacheEntries.js";
 
 const originalPath = process.env.PATH;
 const originalUpdateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
@@ -32,7 +33,7 @@ async function installFakeDocker(tempDir: string): Promise<void> {
 	};
 process.stdout.write([
   "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "system.host\t" + JSON.stringify(data) + "\tsystem\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
+  "system.host\t" + JSON.stringify(data) + "\tsystem\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2099-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
   "",
 ].join("\n"));
 `,
@@ -69,6 +70,28 @@ function openClawNotifications(): Array<{
         });
 }
 
+function seedSystemHostCache({
+    latest = process.env.FAKE_OPENCLAW_LATEST || "v2026.5.99",
+    updateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE !== "false",
+    includeVersion = process.env.FAKE_OPENCLAW_MISSING_VERSION !== "true",
+} = {}): void {
+    seedCacheEntry({
+        key: "system.host",
+        source: "system",
+        data: {
+            version: includeVersion
+                ? {
+                      current: "v2026.5.4",
+                      latest,
+                      updateAvailable,
+                      checkedAt: 1_800_000_000_000,
+                  }
+                : undefined,
+            checkedAt: "2026-05-11T00:00:00.000Z",
+        },
+    });
+}
+
 describe("OpenClaw update notifications", () => {
     let tempDir: string;
     let runOpenClawNotificationCheck: () => Promise<void>;
@@ -91,6 +114,7 @@ describe("OpenClaw update notifications", () => {
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "true";
         process.env.FAKE_OPENCLAW_LATEST = "v2026.5.99";
         delete process.env.FAKE_OPENCLAW_MISSING_VERSION;
+        seedSystemHostCache();
     });
 
     afterEach(() => {
@@ -153,6 +177,7 @@ describe("OpenClaw update notifications", () => {
         await runOpenClawNotificationCheck();
 
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "false";
+        seedSystemHostCache();
         await runOpenClawNotificationCheck();
 
         const rearmed = db
@@ -167,6 +192,7 @@ describe("OpenClaw update notifications", () => {
 
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "true";
         process.env.FAKE_OPENCLAW_LATEST = "v2026.6.0";
+        seedSystemHostCache();
         await runOpenClawNotificationCheck();
 
         assert.deepEqual(
@@ -183,6 +209,7 @@ describe("OpenClaw update notifications", () => {
         const stateBeforeMalformedCache = getState();
 
         process.env.FAKE_OPENCLAW_MISSING_VERSION = "true";
+        seedSystemHostCache();
         await runOpenClawNotificationCheck();
         assert.equal(openClawNotifications().length, 1);
         assert.deepEqual(getState(), stateBeforeMalformedCache);
@@ -190,8 +217,10 @@ describe("OpenClaw update notifications", () => {
 
     it("starts the monitor with a safe interval fallback", async () => {
         const originalSetInterval = globalThis.setInterval;
+        const originalClearInterval = globalThis.clearInterval;
         let scheduledInterval = 0;
         let callbackRuns = 0;
+        let clearedIntervals = 0;
         globalThis.setInterval = ((callback: () => void, intervalMs?: number) => {
             scheduledInterval = intervalMs ?? 0;
             callback();
@@ -199,19 +228,23 @@ describe("OpenClaw update notifications", () => {
             const timer = { unref: () => timer } as unknown as NodeJS.Timeout;
             return timer;
         }) as typeof setInterval;
+        globalThis.clearInterval = ((_timer?: NodeJS.Timeout | number | string) => {
+            clearedIntervals += 1;
+        }) as typeof clearInterval;
         try {
             startOpenClawNotificationMonitor(Number.MAX_SAFE_INTEGER);
             assert.equal(scheduledInterval, 2_147_483_647);
-            stopOpenClawNotificationMonitorForTest();
 
             startOpenClawNotificationMonitor(1);
             assert.equal(scheduledInterval, 60 * 60 * 1000);
+            assert.equal(clearedIntervals, 1);
             assert.equal(callbackRuns, 2);
             await new Promise((resolve) => setTimeout(resolve, 100));
         } finally {
             stopOpenClawNotificationMonitorForTest();
             stopOpenClawNotificationMonitorForTest();
             globalThis.setInterval = originalSetInterval;
+            globalThis.clearInterval = originalClearInterval;
         }
     });
 });

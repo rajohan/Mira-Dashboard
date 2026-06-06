@@ -311,7 +311,8 @@ export function Docker() {
                         <div className="min-w-0">
                             <div className="text-lg font-semibold">Updater overview</div>
                             <div className="text-primary-400 text-xs">
-                                Registry poll state from n8n, plus recent updater history.
+                                Registry poll state from Dashboard, plus recent updater
+                                history.
                             </div>
                         </div>
                         <Button

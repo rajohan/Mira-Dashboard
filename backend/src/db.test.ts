@@ -64,3 +64,22 @@ test("uses configured db path when provided", async () => {
         await rm(tempDir, { recursive: true, force: true });
     }
 });
+
+test("classifies duplicate-column migration errors", async () => {
+    const result = await import(`./db.js?migrationHelpers=${randomUUID()}`);
+    assert.equal(
+        result.__testing.isDuplicateColumnError(
+            new Error("duplicate column name: schedule_type")
+        ),
+        true
+    );
+    assert.doesNotThrow(() =>
+        result.__testing.assertDuplicateColumnError(
+            new Error("duplicate column name: automation_json")
+        )
+    );
+    assert.throws(
+        () => result.__testing.assertDuplicateColumnError(new Error("syntax error")),
+        /syntax error/u
+    );
+});

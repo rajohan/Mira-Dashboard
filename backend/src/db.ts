@@ -31,8 +31,14 @@ function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
 function isDuplicateColumnError(error: unknown): boolean {
     return (
         error instanceof Error &&
-        /duplicate column name:\s*automation_json/u.test(error.message)
+        /duplicate column name:/iu.test(error.message)
     );
+}
+
+function assertDuplicateColumnError(error: unknown): void {
+    if (!isDuplicateColumnError(error)) {
+        throw error;
+    }
 }
 
 function isTransientSqliteLock(error: unknown): boolean {
@@ -99,6 +105,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_occurred_at ON notifications(occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+
+CREATE TABLE IF NOT EXISTS cache_entries (
+    key TEXT PRIMARY KEY,
+    data_json TEXT,
+    source TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_attempt_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error_code TEXT,
+    error_message TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
+CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
 
 CREATE TABLE IF NOT EXISTS quota_alert_state (
     provider TEXT NOT NULL,
@@ -172,7 +195,99 @@ CREATE TABLE IF NOT EXISTS deployment_lock (
     job_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    schedule_type TEXT NOT NULL DEFAULT 'interval',
+    interval_seconds INTEGER NOT NULL,
+    time_of_day TEXT,
+    cron_expression TEXT,
+    action_type TEXT NOT NULL,
+    action_target TEXT NOT NULL,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled_next_run
+    ON scheduled_jobs(enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    message TEXT,
+    output_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
+    ON scheduled_job_runs(job_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS docker_managed_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_slug TEXT NOT NULL,
+    service_name TEXT NOT NULL,
+    compose_path TEXT NOT NULL,
+    image_repo TEXT NOT NULL,
+    compose_image_ref TEXT,
+    compose_image_field TEXT,
+    current_tag TEXT,
+    current_digest TEXT,
+    latest_tag TEXT,
+    latest_digest TEXT,
+    policy TEXT NOT NULL DEFAULT 'notify',
+    pin_mode TEXT NOT NULL DEFAULT 'tag',
+    tag_match_type TEXT NOT NULL DEFAULT 'exact',
+    tag_match_pattern TEXT,
+    version_group TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    last_checked_at TEXT,
+    last_updated_at TEXT,
+    last_status TEXT,
+    UNIQUE(app_slug, service_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docker_managed_services_enabled
+    ON docker_managed_services(enabled);
+
+CREATE TABLE IF NOT EXISTS docker_update_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    managed_service_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    from_tag TEXT,
+    to_tag TEXT,
+    from_digest TEXT,
+    to_digest TEXT,
+    message TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
+    ON docker_update_events(created_at DESC);
 `);
+
+for (const sql of [
+    "ALTER TABLE scheduled_jobs ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'interval'",
+    "ALTER TABLE scheduled_jobs ADD COLUMN time_of_day TEXT",
+    "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT",
+]) {
+    try {
+        db.exec(sql);
+    } catch (error) {
+        assertDuplicateColumnError(error);
+    }
+}
 
 /** Ensures older task databases have the automation column. */
 export async function ensureTaskAutomationColumn(
@@ -232,3 +347,8 @@ export async function ensureTaskAutomationColumn(
 }
 
 await ensureTaskAutomationColumn(db);
+
+export const __testing = {
+    assertDuplicateColumnError,
+    isDuplicateColumnError,
+};

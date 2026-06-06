@@ -185,8 +185,7 @@ export function BackupOverviewCard() {
                                 Run Kopia filesystem backup
                             </div>
                             <div className="text-primary-400 mt-1 text-xs">
-                                Snapshots Docker, Projects, and OpenClaw files. Postgres
-                                data is not included here.
+                                Snapshots Docker, Projects, and OpenClaw files.
                             </div>
                         </div>
                         <Button

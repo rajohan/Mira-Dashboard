@@ -16,13 +16,12 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-const originalDopplerBin = process.env.DOPPLER_BIN;
-const originalN8nRoot = process.env.MIRA_N8N_ROOT;
+const originalBackupShell = process.env.MIRA_BACKUP_SHELL;
 
-async function installFakeDoppler(tempDir: string): Promise<string> {
-    const dopplerPath = path.join(tempDir, "doppler");
+async function installFakeShell(tempDir: string): Promise<string> {
+    const shellPath = path.join(tempDir, "backup-shell");
     await writeFile(
-        dopplerPath,
+        shellPath,
         String.raw`#!${process.execPath}
 const args = process.argv.slice(2);
 const command = args.at(-1) || "";
@@ -47,31 +46,21 @@ if (process.env.FAKE_BACKUP_SIGNAL === "1") {
 `,
         "utf8"
     );
-    await chmod(dopplerPath, 0o755);
-    return dopplerPath;
+    await chmod(shellPath, 0o755);
+    return shellPath;
 }
 
-async function createTestServer(
-    tempDir: string,
-    dopplerBin: string
-): Promise<TestServer> {
-    const savedDopplerBin = process.env.DOPPLER_BIN;
-    const savedN8nRoot = process.env.MIRA_N8N_ROOT;
+async function createTestServer(backupShell: string): Promise<TestServer> {
+    const savedBackupShell = process.env.MIRA_BACKUP_SHELL;
     const restoreEnv = () => {
-        if (savedDopplerBin === undefined) {
-            delete process.env.DOPPLER_BIN;
+        if (savedBackupShell === undefined) {
+            delete process.env.MIRA_BACKUP_SHELL;
         } else {
-            process.env.DOPPLER_BIN = savedDopplerBin;
-        }
-        if (savedN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = savedN8nRoot;
+            process.env.MIRA_BACKUP_SHELL = savedBackupShell;
         }
     };
 
-    process.env.DOPPLER_BIN = dopplerBin;
-    process.env.MIRA_N8N_ROOT = tempDir;
+    process.env.MIRA_BACKUP_SHELL = backupShell;
     try {
         const app = express();
         app.use(express.json());
@@ -106,14 +95,11 @@ async function createTestServer(
 }
 
 async function startServer(tempDir: string): Promise<TestServer> {
-    return createTestServer(tempDir, await installFakeDoppler(tempDir));
+    return createTestServer(await installFakeShell(tempDir));
 }
 
-async function startServerWithDoppler(
-    tempDir: string,
-    dopplerBin: string
-): Promise<TestServer> {
-    return createTestServer(tempDir, dopplerBin);
+async function startServerWithBackupShell(backupShell: string): Promise<TestServer> {
+    return createTestServer(backupShell);
 }
 
 async function requestJson<T>(
@@ -150,32 +136,31 @@ async function waitForDone(
 describe("backup routes", () => {
     let server: TestServer;
     let tempDir: string;
+    const refreshedKeys: string[] = [];
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-backup-routes-"));
+        backupTesting.setRefreshBackupCacheForTest(async (key) => {
+            refreshedKeys.push(key);
+            return { refreshed: [key] };
+        });
         server = await startServer(tempDir);
     });
 
     after(async () => {
+        backupTesting.setRefreshBackupCacheForTest();
         await server.close();
-        if (originalDopplerBin === undefined) {
-            delete process.env.DOPPLER_BIN;
+        if (originalBackupShell === undefined) {
+            delete process.env.MIRA_BACKUP_SHELL;
         } else {
-            process.env.DOPPLER_BIN = originalDopplerBin;
-        }
-        if (originalN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = originalN8nRoot;
+            process.env.MIRA_BACKUP_SHELL = originalBackupShell;
         }
         await rm(tempDir, { recursive: true, force: true });
     });
 
     it("reports no active backup jobs initially", async () => {
-        const [kopia, walg] = await Promise.all([
-            requestJson<{ job: null }>(server, "/api/backups/kopia"),
-            requestJson<{ job: null }>(server, "/api/backups/walg"),
-        ]);
+        const kopia = await requestJson<{ job: null }>(server, "/api/backups/kopia");
+        const walg = await requestJson<{ job: null }>(server, "/api/backups/walg");
 
         assert.equal(kopia.status, 200);
         assert.deepEqual(kopia.body, { job: null });
@@ -183,7 +168,7 @@ describe("backup routes", () => {
         assert.deepEqual(walg.body, { job: null });
     });
 
-    it("starts and completes Kopia backup jobs through Doppler", async () => {
+    it("starts and completes Kopia backup jobs through the configured shell", async () => {
         const started = await requestJson<{
             ok: boolean;
             job: { id: string; type: string; status: string; code: number | null };
@@ -198,8 +183,29 @@ describe("backup routes", () => {
         const done = await waitForDone(server, "/api/backups/kopia");
         assert.equal(done.status, "done");
         assert.equal(done.code, 0);
-        assert.match(done.stdout, /backup-kopia-status\.mjs/);
+        assert.match(done.stdout, /\/opt\/docker\/apps\/kopia\/backup\.sh/);
         assert.equal(done.stderr, "backup warning\n");
+        assert.ok(refreshedKeys.includes("backup.kopia.status"));
+    });
+
+    it("starts and completes WAL-G backup jobs through the configured shell", async () => {
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string; code: number | null };
+        }>(server, "/api/backups/walg/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+        assert.equal(started.body.job.type, "walg");
+        assert.equal(started.body.job.status, "running");
+        assert.equal(started.body.job.code, null);
+
+        const done = await waitForDone(server, "/api/backups/walg");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+        assert.match(done.stdout, /docker exec walg/);
+        assert.equal(done.stderr, "backup warning\n");
+        assert.ok(refreshedKeys.includes("backup.walg.status"));
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
@@ -227,25 +233,6 @@ describe("backup routes", () => {
         });
     });
 
-    it("starts and completes WAL-G backup jobs through Doppler", async () => {
-        const started = await requestJson<{
-            ok: boolean;
-            job: { id: string; type: string; status: string; code: number | null };
-        }>(server, "/api/backups/walg/run", { method: "POST" });
-
-        assert.equal(started.status, 200);
-        assert.equal(started.body.ok, true);
-        assert.equal(started.body.job.type, "walg");
-        assert.equal(started.body.job.status, "running");
-        assert.equal(started.body.job.code, null);
-
-        const done = await waitForDone(server, "/api/backups/walg");
-        assert.equal(done.status, "done");
-        assert.equal(done.code, 0);
-        assert.match(done.stdout, /backup-walg-status\.mjs/);
-        assert.equal(done.stderr, "backup warning\n");
-    });
-
     it("maps signaled backup exits to interrupted status code", async () => {
         process.env.FAKE_BACKUP_SIGNAL = "1";
         try {
@@ -271,30 +258,28 @@ describe("backup routes", () => {
         const brokenTempDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-backup-broken-")
         );
-        const brokenServer = await startServerWithDoppler(
-            brokenTempDir,
-            path.join(brokenTempDir, "missing-doppler")
+        const brokenServer = await startServerWithBackupShell(
+            path.join(brokenTempDir, "missing-shell")
         );
         try {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
-            }>(brokenServer, "/api/backups/walg/run", { method: "POST" });
+            }>(brokenServer, "/api/backups/kopia/run", { method: "POST" });
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
             assert.equal(started.body.job.status, "running");
             assert.equal(started.body.job.code, null);
 
-            const done = await waitForDone(brokenServer, "/api/backups/walg");
+            const done = await waitForDone(brokenServer, "/api/backups/kopia");
             assert.equal(done.status, "done");
             assert.notEqual(done.code, 0);
-            assert.match(done.stderr, /ENOENT|missing-doppler/);
+            assert.match(done.stderr, /ENOENT|missing-shell/);
         } finally {
             try {
                 await brokenServer.close();
             } finally {
-                process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
-                process.env.MIRA_N8N_ROOT = tempDir;
+                process.env.MIRA_BACKUP_SHELL = await installFakeShell(tempDir);
                 await rm(brokenTempDir, { recursive: true, force: true });
             }
         }
@@ -339,6 +324,43 @@ describe("backup routes", () => {
         }
     });
 
+    it("records status refresh failures after successful backup jobs", async () => {
+        backupTesting.setRefreshBackupCacheForTest(async () => {
+            throw new Error("refresh crashed");
+        });
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { type: string; status: string };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.type, "walg");
+
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                const done = await requestJson<{
+                    job: { status: string; stderr: string } | null;
+                }>(server, "/api/backups/walg");
+                if (
+                    done.body.job?.status === "done" &&
+                    done.body.job.stderr.includes(
+                        "Status refresh failed: refresh crashed"
+                    )
+                ) {
+                    assert.match(done.body.job.stderr, /backup warning/);
+                    return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            assert.fail("Backup refresh failure was not recorded");
+        } finally {
+            backupTesting.setRefreshBackupCacheForTest(async (key) => {
+                refreshedKeys.push(key);
+                return { refreshed: [key] };
+            });
+        }
+    });
+
     it("covers backup helper edge cases directly", async () => {
         let cleared = false;
         const missing = backupTesting.getCurrentJob("missing-job", () => {
@@ -353,96 +375,9 @@ describe("backup routes", () => {
         );
         assert.equal(backupTesting.mapJob(null), null);
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
-        assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: " native-user ",
-                DB_POSTGRESDB_PASSWORD: " native-password ",
-                DATABASE_USERNAME: undefined,
-                DATABASE_PASSWORD: undefined,
-            },
-            async () => {
-                const env = backupTesting.createBackupEnv();
-                assert.equal(env.DB_POSTGRESDB_USER, " native-user ");
-                assert.equal(env.DB_POSTGRESDB_PASSWORD, " native-password ");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: "",
-                DB_POSTGRESDB_PASSWORD: "",
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const fallbackEnv = backupTesting.createBackupEnv();
-                assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: "   ",
-                DB_POSTGRESDB_PASSWORD: "\t",
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const whitespaceEnv = backupTesting.createBackupEnv();
-                assert.equal(whitespaceEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(whitespaceEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: undefined,
-                DB_POSTGRESDB_PASSWORD: undefined,
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const legacyEnv = backupTesting.createBackupEnv();
-                assert.equal(legacyEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: undefined,
-                DB_POSTGRESDB_PASSWORD: undefined,
-                DATABASE_USERNAME: " ",
-                DATABASE_PASSWORD: "\t",
-            },
-            async () => {
-                const blankCredentialEnv = backupTesting.createBackupEnv();
-                assert.equal("DB_POSTGRESDB_USER" in blankCredentialEnv, false);
-                assert.equal("DB_POSTGRESDB_PASSWORD" in blankCredentialEnv, false);
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: "",
-                DB_POSTGRESDB_PASSWORD: "",
-                DATABASE_USERNAME: " ",
-                DATABASE_PASSWORD: "\t",
-            },
-            async () => {
-                const blankNativeEnv = backupTesting.createBackupEnv();
-                assert.equal("DB_POSTGRESDB_USER" in blankNativeEnv, false);
-                assert.equal("DB_POSTGRESDB_PASSWORD" in blankNativeEnv, false);
-            }
-        );
-        assert.equal(backupTesting.getN8nRoot(), tempDir);
-        await withEnv({ MIRA_N8N_ROOT: "" }, async () => {
-            assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");
+        await withEnv({ MIRA_BACKUP_SHELL: "" }, async () => {
+            assert.equal(backupTesting.getBackupShell(), "bash");
         });
-        await withEnv({ DOPPLER_BIN: "" }, async () => {
-            assert.equal(backupTesting.getDopplerBin(), "/usr/local/bin/doppler");
-        });
-        assert.equal(typeof backupTesting.getDopplerBin(), "string");
-        assert.equal(
-            backupTesting.shellQuote("/srv/mira dashboard/it's/scripts/status.mjs"),
-            String.raw`'/srv/mira dashboard/it'\''s/scripts/status.mjs'`
-        );
+        assert.equal(typeof backupTesting.getBackupShell(), "string");
     });
 });

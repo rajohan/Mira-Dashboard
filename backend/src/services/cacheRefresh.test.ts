@@ -1,0 +1,966 @@
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+
+import { db } from "../db.js";
+import { withEnv } from "../testUtils/env.js";
+import {
+    __testing,
+    refreshCacheProducer,
+    refreshMoltbookCache,
+    writeCacheFailure,
+} from "./cacheRefresh.js";
+
+const originalFetch = globalThis.fetch;
+
+function cacheRow(key: string) {
+    const row = db
+        .prepare("SELECT * FROM cache_entries WHERE key = ? LIMIT 1")
+        .get(key) as
+        | {
+              key: string;
+              data_json: string | null;
+              source: string;
+              status: string;
+              error_message: string | null;
+              consecutive_failures: number;
+              metadata_json: string;
+          }
+        | undefined;
+    assert.ok(row);
+    return {
+        ...row,
+        data: row.data_json ? (JSON.parse(row.data_json) as unknown) : null,
+        metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    };
+}
+
+async function withFetch(
+    handler: (url: string, init: RequestInit | undefined) => unknown,
+    callback: () => Promise<void>
+) {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        const body = handler(url, init);
+        return {
+            ok: !(body && typeof body === "object" && "httpStatus" in body),
+            status:
+                body && typeof body === "object" && "httpStatus" in body
+                    ? Number((body as { httpStatus: number }).httpStatus)
+                    : 200,
+            headers: new Headers({ "docker-content-digest": "sha256:ghcr-latest" }),
+            json: async () => body,
+        } as Response;
+    }) as typeof fetch;
+    try {
+        await callback();
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+}
+
+async function writeExecutable(filePath: string, script: string) {
+    await writeFile(filePath, script, "utf8");
+    await chmod(filePath, 0o755);
+}
+
+describe("backend cache refresh producers", { concurrency: false }, () => {
+    let tempDir: string;
+    let originalPath: string | undefined;
+
+    beforeEach(async () => {
+        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-refresh-"));
+        originalPath = process.env.PATH;
+        db.exec("DELETE FROM cache_entries;");
+    });
+
+    afterEach(async () => {
+        globalThis.fetch = originalFetch;
+        process.env.PATH = originalPath;
+        await rm(tempDir, { recursive: true, force: true });
+        db.exec("DELETE FROM cache_entries;");
+    });
+
+    it("records cache refresh failures with incrementing failure counts", () => {
+        writeCacheFailure({
+            key: "weather.spydeberg",
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            error: new Error("first failure"),
+            metadata: { producer: "weather" },
+        });
+        writeCacheFailure({
+            key: "weather.spydeberg",
+            source: "backend-test",
+            ttl: 1,
+            ttlUnit: "hours",
+            error: "second failure",
+            metadata: { producer: "weather" },
+        });
+
+        const row = cacheRow("weather.spydeberg");
+        assert.equal(row.status, "error");
+        assert.equal(row.error_message, "second failure");
+        assert.equal(row.consecutive_failures, 2);
+        assert.equal(row.metadata.producer, "weather");
+        assert.equal(typeof row.metadata.lastFailureAt, "string");
+    });
+
+    it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch((url, init) => {
+                assert.equal(
+                    (init?.headers as Record<string, string>).Authorization,
+                    "Bearer test-key"
+                );
+                if (url.endsWith("/home")) {
+                    return {
+                        your_direct_messages: {
+                            pending_request_count: "2",
+                            unread_message_count: "3",
+                        },
+                        activity_on_your_posts: [{ id: 1 }],
+                        what_to_do_next: ["reply"],
+                        latest_moltbook_announcement: {
+                            post_id: "post-1",
+                            title: "News",
+                            author_name: "Mira",
+                            created_at: "2026-06-06T00:00:00.000Z",
+                            preview: "Preview",
+                        },
+                        posts_from_accounts_you_follow: [{ id: 2 }],
+                        explore: [{ id: 3 }, { id: 4 }],
+                    };
+                }
+                if (url.includes("sort=hot")) {
+                    return { posts: [{ id: "hot" }], feed_type: "hot", has_more: true };
+                }
+                if (url.includes("sort=new")) {
+                    return { posts: [{ id: "new" }], feed_filter: "following" };
+                }
+                return {
+                    agent: { name: "mira_2026" },
+                    recentPosts: [{ id: "mine" }],
+                    recentComments: [{ id: "comment" }],
+                };
+            }, async () => {
+                assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
+                    refreshed: [
+                        "moltbook.home",
+                        "moltbook.feed.hot",
+                        "moltbook.feed.new",
+                        "moltbook.profile",
+                        "moltbook.my-content",
+                    ],
+                });
+            });
+        });
+
+        assert.equal(
+            (cacheRow("moltbook.home").data as { unreadMessageCount: number })
+                .unreadMessageCount,
+            3
+        );
+        assert.deepEqual(
+            (cacheRow("moltbook.my-content").data as { posts: unknown[] }).posts,
+            [{ id: "mine" }]
+        );
+
+        await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
+            await assert.rejects(() => refreshMoltbookCache(), /MOLTBOOK_API_KEY/u);
+        });
+    });
+
+    it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
+        await withFetch((url) => {
+            assert.ok(url.includes("wttr.in"));
+            return {
+                current_condition: [
+                    {
+                        temp_C: "4",
+                        FeelsLikeC: "1",
+                        humidity: "80",
+                        windspeedKmph: "12",
+                        weatherDesc: [{ value: "Cloudy" }],
+                    },
+                ],
+                weather: [
+                    {
+                        date: "2026-06-06",
+                        mintempC: "2",
+                        maxtempC: "8",
+                        hourly: [{ weatherDesc: [{ value: "Rain" }] }],
+                    },
+                ],
+            };
+        }, async () => {
+            await refreshCacheProducer("weather.spydeberg");
+        });
+        assert.equal(cacheRow("weather.spydeberg").source, "wttr.in");
+
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) return { httpStatus: 503 };
+            return {
+                current: {
+                    temperature_2m: 5,
+                    apparent_temperature: 3,
+                    relative_humidity_2m: 70,
+                    wind_speed_10m: 10,
+                    weather_code: 95,
+                },
+                daily: {
+                    time: ["2026-06-06", "2026-06-07", "2026-06-08"],
+                    temperature_2m_min: [1, 2, 3],
+                    temperature_2m_max: [7, 8, 9],
+                    weather_code: [0, 45, 71],
+                },
+            };
+        }, async () => {
+            await refreshCacheProducer("weather.spydeberg");
+        });
+        const fallback = cacheRow("weather.spydeberg");
+        assert.equal(fallback.source, "open-meteo");
+        assert.equal((fallback.data as { description: string }).description, "Thunderstorm");
+        assert.equal(fallback.metadata.fallbackUsed, true);
+    });
+
+    it("refreshes git workspace status with dirty, clean, and missing repos", async () => {
+        const binDir = path.join(tempDir, "bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "git"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2);
+const repo = args[1];
+const command = args.slice(2).join(" ");
+if (repo.includes("/opt/docker")) process.exit(1);
+if (command === "rev-parse --is-inside-work-tree") process.stdout.write("true\n");
+else if (command === "branch --show-current") process.stdout.write(repo.includes(".openclaw") ? "main\n" : "\n");
+else if (command === "rev-parse HEAD") process.stdout.write("abc123\n");
+else if (command === "remote -v") process.stdout.write("origin\tgit@github.com:rajohan/repo.git (fetch)\n");
+else if (command === "status --short") {
+  if (repo.includes(".openclaw")) process.stdout.write(" M a.ts\nD  b.ts\n?? c.ts\nR  d.ts -> e.ts\nUU conflict.ts\n");
+  else process.exit(2);
+}
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+
+        await refreshCacheProducer("git.workspace");
+
+        const data = cacheRow("git.workspace").data as {
+            dirtyRepos: string[];
+            missingRepos: string[];
+            repos: Array<{ key: string; dirty: boolean; statusSummary?: { total: number } }>;
+        };
+        assert.deepEqual(data.dirtyRepos, ["openclaw"]);
+        assert.deepEqual(data.missingRepos, ["docker"]);
+        assert.equal(data.repos.find((repo) => repo.key === "mira-dashboard")?.dirty, false);
+        assert.equal(
+            data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,
+            5
+        );
+    });
+
+    it("covers git workspace command fallback fields", async () => {
+        const binDir = path.join(tempDir, "git-fallback-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "git"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2);
+const repo = args[1];
+const command = args.slice(2).join(" ");
+if (repo.includes("/opt/docker")) process.exit(1);
+if (command === "rev-parse --is-inside-work-tree") process.stdout.write("true\n");
+else if (repo.includes("mira-dashboard")) process.exit(2);
+else if (command === "branch --show-current") process.stdout.write("\n");
+else if (command === "rev-parse HEAD") process.stdout.write("\n");
+else if (command === "remote -v") process.stdout.write("origin\n");
+else if (command === "status --short") process.stdout.write("");
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+
+        await refreshCacheProducer("git.workspace");
+
+        const data = cacheRow("git.workspace").data as {
+            repos: Array<{
+                key: string;
+                branch?: string | null;
+                head?: string | null;
+                remote?: string | null;
+            }>;
+        };
+        const openclaw = data.repos.find((repo) => repo.key === "openclaw");
+        const dashboard = data.repos.find((repo) => repo.key === "mira-dashboard");
+        assert.equal(openclaw?.branch, null);
+        assert.equal(openclaw?.head, null);
+        assert.equal(openclaw?.remote, null);
+        assert.equal(dashboard?.branch, null);
+        assert.equal(dashboard?.head, null);
+        assert.equal(dashboard?.remote, null);
+    });
+
+    it("refreshes system, backup, quota, and producer-dispatch caches", async () => {
+        const binDir = path.join(tempDir, "bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "openclaw"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "status --json") {
+  process.stdout.write(JSON.stringify({ runtimeVersion: "2026.5.1", update: { registry: { latestVersion: "2026.5.2" } }, gateway: { ok: true } }));
+} else if (args === "doctor") {
+  process.stdout.write("- OK: fine\n- WARNING: Gateway clients warning\n");
+} else if (args === "security audit --json") {
+  process.stdout.write(JSON.stringify({ ok: true, warnings: [] }));
+}
+`
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "exec kopia kopia snapshot list --all --json") {
+  process.stdout.write(JSON.stringify([
+    { id: "ignored", source: {}, stats: {} },
+    { id: "fresh", source: { path: "/data/a" }, description: "Fresh", startTime: "2099-01-01T00:00:00.000Z", endTime: "2099-01-01T01:00:00.000Z", stats: { fileCount: "3", totalSize: "10", errorCount: "0", ignoredErrorCount: "1" }, retentionReason: ["latest"] },
+    { id: "stale", source: { path: "/data/b" }, startTime: "2020-01-01T00:00:00.000Z", stats: {} }
+  ]));
+} else if (args === "exec walg wal-g backup-list --detail --json") {
+  process.stdout.write(JSON.stringify([]));
+}
+`
+        );
+        await writeExecutable(
+            path.join(binDir, "tmux"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes("capture-pane")) {
+  process.stdout.write("Account: raymond@example.test\nModel: gpt-5.5 (high)\n5h limit: 80% left (resets 12:00)\nWeekly limit: 50% left (resets Monday)\n");
+}
+`
+        );
+        await writeExecutable(path.join(binDir, "codex"), "#!/usr/bin/env node\n");
+
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        await withEnv(
+            {
+                OPENCLAW_BIN: path.join(binDir, "openclaw"),
+                CODEX_BIN: path.join(binDir, "codex"),
+                QUOTAS_CODEX_HOME: path.join(tempDir, "codex-home"),
+                OPENROUTER_API_KEY: "openrouter",
+                ELEVENLABS_API_KEY: "eleven",
+                SYNTHETIC_API_KEY: "synthetic",
+            },
+            async () => {
+                await withFetch((url) => {
+                    if (url.includes("openrouter.ai/api/v1/key")) {
+                        return { data: { usage: "10", usage_monthly: "20" } };
+                    }
+                    if (url.includes("openrouter.ai/api/v1/credits")) {
+                        return { data: { total_credits: "25" } };
+                    }
+                    if (url.includes("elevenlabs")) {
+                        return {
+                            subscription: {
+                                character_count: "100",
+                                character_limit: "200",
+                                next_character_count_reset_unix: "1893456000",
+                                tier: "pro",
+                            },
+                        };
+                    }
+                    return {
+                        subscription: { limit: 10, requests: 4, renewsAt: "soon" },
+                        search: { hourly: { limit: 20, requests: 5, renewsAt: "later" } },
+                        weeklyTokenLimit: {
+                            maxCredits: "$10.00",
+                            nextRegenCredits: "$2.50",
+                            percentRemaining: "75",
+                        },
+                        rollingFiveHourLimit: {
+                            max: 100,
+                            remaining: 80,
+                            limited: false,
+                            tickPercent: "10",
+                        },
+                    };
+                }, async () => {
+                    assert.deepEqual(await refreshCacheProducer("system.host"), {
+                        refreshed: ["system.host"],
+                    });
+                    assert.deepEqual(await refreshCacheProducer("backup.kopia.status"), {
+                        refreshed: ["backup.kopia.status"],
+                    });
+                    assert.deepEqual(await refreshCacheProducer("backup.walg.status"), {
+                        refreshed: ["backup.walg.status"],
+                    });
+                    assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
+                        refreshed: ["quotas.summary"],
+                    });
+                });
+            }
+        );
+
+        assert.equal(
+            (cacheRow("system.host").data as { version: { updateAvailable: boolean } })
+                .version.updateAvailable,
+            true
+        );
+        assert.equal((cacheRow("backup.kopia.status").data as { ok: boolean }).ok, false);
+        assert.equal((cacheRow("backup.walg.status").data as { stale: boolean }).stale, true);
+        assert.equal(
+            (cacheRow("quotas.summary").data as { openai: { percentUsed: number } })
+                .openai.percentUsed,
+            50
+        );
+    });
+
+    it("reports quota providers as missing or errored when credentials and calls fail", async () => {
+        await withEnv(
+            {
+                OPENROUTER_API_KEY: undefined,
+                ELEVENLABS_API_KEY: "eleven",
+                SYNTHETIC_API_KEY: "synthetic",
+                CODEX_BIN: path.join(tempDir, "missing-codex"),
+                QUOTAS_CODEX_HOME: path.join(tempDir, "codex-home-existing"),
+            },
+            async () => {
+                await withFetch((url) => {
+                    if (url.includes("elevenlabs")) return { httpStatus: 500 };
+                    return {
+                        subscription: {},
+                        search: {},
+                        weeklyTokenLimit: {},
+                        rollingFiveHourLimit: {},
+                    };
+                }, async () => {
+                    await refreshCacheProducer("quotas.summary");
+                });
+            }
+        );
+
+        const data = cacheRow("quotas.summary").data as {
+            openrouter: { status: string };
+            elevenlabs: { status: string };
+            synthetic: { subscription: { percentUsed: number | null } };
+            openai: { status: string };
+        };
+        assert.equal(data.openrouter.status, "not_configured");
+        assert.equal(data.elevenlabs.status, "error");
+        assert.equal(data.synthetic.subscription.percentUsed, null);
+        assert.ok(["not_configured", "error"].includes(data.openai.status));
+    });
+
+    it("covers cache refresh normalizer fallback branches directly", async () => {
+        assert.equal(__testing.toCurrencyNumber(12), 12);
+        assert.equal(__testing.toCurrencyNumber(Number.NaN), null);
+        assert.equal(__testing.toCurrencyNumber("USD 1,234.50"), 1234.5);
+        assert.equal(__testing.toCurrencyNumber("USD nope"), 0);
+        assert.equal(__testing.toCurrencyNumber("-"), null);
+        assert.equal(__testing.toCurrencyNumber({}), null);
+        assert.equal(__testing.openMeteoCodeToDescription(2), "Partly cloudy");
+        assert.equal(__testing.openMeteoCodeToDescription(48), "Fog");
+        assert.equal(__testing.openMeteoCodeToDescription(53), "Drizzle");
+        assert.equal(__testing.openMeteoCodeToDescription(63), "Rain");
+        assert.equal(__testing.openMeteoCodeToDescription(77), "Snow");
+        assert.equal(__testing.openMeteoCodeToDescription(999), "Unknown");
+        assert.equal(__testing.cleanPanelText(undefined), null);
+        assert.equal(__testing.cleanPanelText("╭ Account ╯"), "Account");
+        assert.equal(__testing.cleanPanelText("╭╯"), null);
+        assert.deepEqual(__testing.normalizeMoltbookFeed([], "new"), {
+            posts: [],
+            feedType: "new",
+            feedFilter: null,
+            hasMore: false,
+            tip: null,
+        });
+        assert.equal(
+            __testing.normalizeMoltbookHome({
+                your_direct_messages: null,
+                activity_on_your_posts: "bad",
+                what_to_do_next: "bad",
+                latest_moltbook_announcement: {},
+                posts_from_accounts_you_follow: "bad",
+                explore: "bad",
+            }).latestAnnouncement,
+            null
+        );
+        assert.deepEqual(
+            __testing.normalizeMoltbookHome({
+                latest_moltbook_announcement: {
+                    post_id: "post",
+                    title: "Title",
+                    author_name: "Mira",
+                    created_at: "now",
+                    preview: "preview",
+                },
+            }).latestAnnouncement,
+            {
+                postId: "post",
+                title: "Title",
+                authorName: "Mira",
+                createdAt: "now",
+                preview: "preview",
+            }
+        );
+        assert.deepEqual(
+            __testing.normalizeMoltbookHome({
+                latest_moltbook_announcement: {
+                    post_id: "post",
+                },
+            }).latestAnnouncement,
+            {
+                postId: "post",
+                title: null,
+                authorName: null,
+                createdAt: null,
+                preview: null,
+            }
+        );
+        assert.deepEqual(
+            __testing.normalizeMoltbookHome({
+                latest_moltbook_announcement: {
+                    title: "Title",
+                },
+            }).latestAnnouncement,
+            {
+                postId: null,
+                title: "Title",
+                authorName: null,
+                createdAt: null,
+                preview: null,
+            }
+        );
+        assert.equal(
+            __testing.summarizeKopiaSnapshot({
+                source: { path: "/data" },
+                stats: { fileCount: Number.NaN },
+                retentionReason: "bad",
+            }).fileCount,
+            null
+        );
+        assert.equal(
+            __testing.getSnapshotTime({ endTime: null, startTime: "2099-01-01T00:00:00.000Z" }),
+            new Date("2099-01-01T00:00:00.000Z").getTime()
+        );
+        assert.equal(__testing.getSnapshotTime({ endTime: null, startTime: null }), 0);
+        assert.equal(
+            __testing.summarizeWalgBackup({
+                finish_time: "2099-01-01T00:00:00.000Z",
+            }).modified,
+            "2099-01-01T00:00:00.000Z"
+        );
+        assert.equal(
+            __testing.summarizeWalgBackup({ time: "2099-01-02T00:00:00.000Z" })
+                .modified,
+            "2099-01-02T00:00:00.000Z"
+        );
+        assert.equal(
+            __testing.getWalgBackupTime({ modified: null }),
+            0
+        );
+        assert.equal(__testing.errorMessage("plain failure"), "plain failure");
+        assert.equal(__testing.openMeteoCodeToDescription(0), "Clear");
+        assert.deepEqual(
+            __testing.summarizeStatus([
+                "A  staged.ts",
+                " M modified.ts",
+                " D deleted.ts",
+                "?? untracked.ts",
+                "R  old.ts -> new.ts",
+                "UU conflict.ts",
+            ]),
+            {
+                staged: 3,
+                modified: 1,
+                deleted: 1,
+                untracked: 1,
+                renamed: 1,
+                conflicted: 1,
+                total: 6,
+            }
+        );
+    });
+
+    it("covers quota producer helper fallback branches directly", async () => {
+        await withEnv(
+            {
+                OPENROUTER_API_KEY: undefined,
+                ELEVENLABS_API_KEY: undefined,
+                SYNTHETIC_API_KEY: undefined,
+                QUOTAS_CODEX_HOME: path.join(tempDir, "codex-home"),
+            },
+            async () => {
+                assert.deepEqual(await __testing.checkOpenRouterQuota(), {
+                    status: "not_configured",
+                });
+                assert.deepEqual(await __testing.checkElevenLabsQuota(), {
+                    status: "not_configured",
+                });
+                assert.deepEqual(await __testing.checkSyntheticQuota(), {
+                    status: "not_configured",
+                });
+            }
+        );
+
+        await withEnv(
+            {
+                ELEVENLABS_API_KEY: "eleven",
+                SYNTHETIC_API_KEY: "synthetic",
+            },
+            async () => {
+                await withFetch((url) => {
+                    if (url.includes("elevenlabs")) {
+                        return {
+                            subscription: {
+                                character_count: 25,
+                                character_limit: 100,
+                                next_character_count_reset_unix_ms: "1893456000000",
+                            },
+                        };
+                    }
+                    return {
+                        subscription: { limit: 0, requests: 0 },
+                        search: { hourly: { limit: 0, requests: 0 } },
+                        weeklyTokenLimit: {
+                            maxCredits: "$0.00",
+                            nextRegenCredits: "$0.00",
+                        },
+                        rollingFiveHourLimit: { max: 0, remaining: 0 },
+                    };
+                }, async () => {
+                    assert.equal((await __testing.checkElevenLabsQuota()).resetAt, "2030-01-01T00:00:00.000Z");
+                    const synthetic = (await __testing.checkSyntheticQuota()) as {
+                        weeklyTokenLimit: { nextRegenPercent: number | null };
+                        rollingFiveHourLimit: { percentUsed: number | null };
+                    };
+                    assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
+                    assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
+                });
+            }
+        );
+
+        const codexHome = path.join(tempDir, "codex-home-existing");
+        await import("node:fs/promises").then((fs) => fs.mkdir(codexHome));
+        const configPath = path.join(codexHome, "config.toml");
+        await writeFile(
+            configPath,
+            '[projects."/home/ubuntu/.openclaw"]\ntrust_level = "trusted"\n',
+            "utf8"
+        );
+        __testing.ensureCodexTrustConfig(codexHome);
+        assert.match(await import("node:fs/promises").then((fs) => fs.readFile(configPath, "utf8")), /trust_level/u);
+
+        const codexHomeNoNewline = path.join(tempDir, "codex-home-no-newline");
+        await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeNoNewline));
+        const noNewlineConfigPath = path.join(codexHomeNoNewline, "config.toml");
+        await writeFile(noNewlineConfigPath, "[profile]\nmodel = \"codex\"", "utf8");
+        __testing.ensureCodexTrustConfig(codexHomeNoNewline);
+        assert.match(
+            await import("node:fs/promises").then((fs) => fs.readFile(noNewlineConfigPath, "utf8")),
+            /model = "codex"\n\n\[projects/u
+        );
+
+        await withEnv(
+            {
+                OPENCLAW_BIN: undefined,
+                QUOTAS_CODEX_HOME: undefined,
+            },
+            async () => {
+                assert.equal(__testing.getOpenclawBin(), "/home/ubuntu/.npm-global/bin/openclaw");
+                assert.equal(__testing.getQuotaCodexHome(), "/home/ubuntu/.codex");
+            }
+        );
+    });
+
+    it("covers empty provider payloads and Codex status error branches", async () => {
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) {
+                return { current_condition: null, weather: null };
+            }
+            return {};
+        }, async () => {
+            const weather = await __testing.fetchSpydebergWeather();
+            assert.equal(weather.source, "wttr.in");
+            assert.equal(weather.data.temperatureC, null);
+            assert.equal(weather.data.description, "Unknown");
+        });
+
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) return { httpStatus: 500 };
+            return { current: {}, daily: {} };
+        }, async () => {
+            const weather = await __testing.fetchSpydebergWeather();
+            assert.equal(weather.source, "open-meteo");
+            assert.equal(weather.data.minTempC, null);
+            assert.deepEqual(weather.data.forecast, []);
+        });
+
+        await withEnv(
+            {
+                OPENROUTER_API_KEY: "openrouter",
+                ELEVENLABS_API_KEY: undefined,
+                SYNTHETIC_API_KEY: "synthetic",
+                CODEX_BIN: path.join(tempDir, "missing-codex"),
+                QUOTAS_CODEX_HOME: path.join(tempDir, "quota-home"),
+            },
+            async () => {
+                await withFetch((url) => {
+                    if (url.includes("openrouter") || url.includes("synthetic")) {
+                        return { httpStatus: 500 };
+                    }
+                    return {};
+                }, async () => {
+                    await refreshCacheProducer("quotas.summary");
+                });
+            }
+        );
+        const quotas = cacheRow("quotas.summary").data as {
+            openrouter: { status: string };
+            elevenlabs: { status: string };
+            synthetic: { status: string };
+        };
+        assert.equal(quotas.openrouter.status, "error");
+        assert.equal(quotas.elevenlabs.status, "not_configured");
+        assert.equal(quotas.synthetic.status, "error");
+
+        assert.deepEqual(__testing.parseOpenAiQuotaOutput("__ERR__:tmux_not_found"), {
+            status: "error",
+            note: "tmux not found",
+        });
+        assert.deepEqual(__testing.parseOpenAiQuotaOutput("__ERR__:codex_not_found"), {
+            status: "not_configured",
+            note: "codex binary not found",
+        });
+        assert.deepEqual(__testing.parseOpenAiQuotaOutput("Account: test\n"), {
+            status: "error",
+            note: "Could not parse Codex /status output",
+        });
+        assert.deepEqual(
+            __testing.parseOpenAiQuotaOutput(
+                "Account: raymond@example.test\nModel: gpt-5.5 (high)\n5h limit: 80% left (resets 12:00)\nWeekly limit: 50% left (resets Monday)\n"
+            ),
+            {
+                account: "raymond@example.test",
+                model: "gpt-5.5",
+                fiveHourLeftPercent: 80,
+                weeklyLeftPercent: 50,
+                fiveHourReset: "12:00",
+                weeklyReset: "Monday",
+                percentUsed: 50,
+                resetAt: "Monday",
+            }
+        );
+        assert.deepEqual(
+            __testing.parseOpenAiQuotaOutput(
+                "5h limit: 80% left\nWeekly limit: 50% left\n"
+            ),
+            {
+                account: null,
+                model: null,
+                fiveHourLeftPercent: 80,
+                weeklyLeftPercent: 50,
+                fiveHourReset: null,
+                weeklyReset: null,
+                percentUsed: 50,
+                resetAt: null,
+            }
+        );
+        assert.deepEqual(__testing.parseOpenAiQuotaOutput("5h limit: left\n"), {
+            status: "error",
+            note: "Could not parse Codex /status output",
+        });
+        assert.deepEqual(
+            __testing.buildQuotaMissingProviders(
+                { status: "not_configured" },
+                { status: "ok" },
+                { status: "not_configured" },
+                { status: "not_configured" }
+            ),
+            ["openrouter", "synthetic", "openai"]
+        );
+
+        await withEnv({ OPENROUTER_API_KEY: "openrouter" }, async () => {
+            await withFetch(() => ({
+                data: {
+                    usage: 0,
+                    usage_monthly: 0,
+                    total_credits: 0,
+                },
+            }), async () => {
+                assert.equal((await __testing.checkOpenRouterQuota()).percentUsed, null);
+            });
+        });
+    });
+
+    it("covers remaining producer fallback lines", async () => {
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) {
+                return {
+                    current_condition: [{}],
+                    weather: [
+                        {
+                            date: "2026-06-06",
+                            hourly: [{}],
+                        },
+                    ],
+                };
+            }
+            return {};
+        }, async () => {
+            const weather = await __testing.fetchSpydebergWeather();
+            assert.equal(weather.data.forecast[0]?.description, "Unknown");
+        });
+
+        const binDir = path.join(tempDir, "remaining-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "exec kopia kopia snapshot list --all --json") {
+	  process.stdout.write(JSON.stringify([
+	    { id: "old", source: { path: "/data/a" }, startTime: "2020-01-01T00:00:00.000Z", stats: {} },
+	    { id: "new", source: { path: "/data/a" }, endTime: "2099-01-01T00:00:00.000Z", stats: {} }
+	  ]));
+} else {
+	  process.stdout.write("[]");
+}
+	`
+        );
+        await writeExecutable(
+            path.join(binDir, "tmux"),
+            "#!/usr/bin/env node\nif (process.argv.includes('capture-pane')) process.stdout.write('__ERR__:codex_not_found\\n');\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        await withEnv(
+            {
+                CODEX_BIN: path.join(tempDir, "missing-codex"),
+                ELEVENLABS_API_KEY: "eleven",
+                OPENROUTER_API_KEY: undefined,
+                SYNTHETIC_API_KEY: undefined,
+                QUOTAS_CODEX_HOME: path.join(tempDir, "remaining-codex-home"),
+            },
+            async () => {
+                await withFetch((url) => {
+                    if (url.includes("elevenlabs")) {
+                        return {
+                            subscription: {
+                                character_count: 0,
+                                character_limit: 0,
+                            },
+                        };
+                    }
+                    return {};
+                }, async () => {
+                    await refreshCacheProducer("backup.kopia.status");
+                    await refreshCacheProducer("quotas.summary");
+                });
+            }
+        );
+
+        const kopia = cacheRow("backup.kopia.status").data as {
+            snapshotsByPath: Array<{ latest: { id: string } }>;
+        };
+        assert.equal(kopia.snapshotsByPath[0]?.latest.id, "new");
+        const quotas = cacheRow("quotas.summary");
+        assert.deepEqual(quotas.metadata.missing, ["openrouter", "synthetic"]);
+    });
+
+    it("covers system and Codex default fallbacks", async () => {
+        const binDir = path.join(tempDir, "system-fallback-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "openclaw"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "status --json") process.stdout.write(JSON.stringify({}));
+else if (args === "doctor") process.stdout.write("- OK: fine\n");
+else if (args === "security audit --json") process.stdout.write(JSON.stringify({}));
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        await withEnv(
+            {
+                OPENCLAW_BIN: path.join(binDir, "openclaw"),
+                CODEX_BIN: undefined,
+                QUOTAS_CODEX_HOME: path.join(tempDir, "default-codex-home"),
+            },
+            async () => {
+                await refreshCacheProducer("system.host");
+                assert.equal(__testing.getCodexBin(), "/home/ubuntu/.npm-global/bin/codex");
+            }
+        );
+        const system = cacheRow("system.host").data as {
+            version: { current: string; latest: string | null; updateAvailable: boolean };
+            gateway: unknown;
+        };
+        assert.equal(system.version.current, "unknown");
+        assert.equal(system.version.latest, null);
+        assert.equal(system.version.updateAvailable, false);
+        assert.equal(system.gateway, null);
+    });
+
+    it("covers empty backup command output fallbacks", async () => {
+        const binDir = path.join(tempDir, "empty-backup-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+
+        await refreshCacheProducer("backup.kopia.status");
+        await refreshCacheProducer("backup.walg.status");
+
+        assert.deepEqual(
+            (cacheRow("backup.kopia.status").data as { snapshotsByPath: unknown[] }).snapshotsByPath,
+            []
+        );
+        assert.equal((cacheRow("backup.walg.status").data as { stale: boolean }).stale, true);
+    });
+
+    it("covers additional producer fallback branches", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch((url) => {
+                if (url.endsWith("/home")) return {};
+                if (url.includes("feed")) return {};
+                return { recentPosts: "bad", recentComments: "bad" };
+            }, async () => {
+                await refreshCacheProducer("moltbook.profile");
+            });
+        });
+        assert.deepEqual(
+            (cacheRow("moltbook.my-content").data as { comments: unknown[] }).comments,
+            []
+        );
+
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) {
+                return {
+                    current_condition: [{}],
+                    weather: [{ date: "2026-06-06", hourly: "bad" }],
+                };
+            }
+            return {};
+        }, async () => {
+            const weather = await __testing.fetchSpydebergWeather();
+            assert.equal(weather.data.forecast[0]?.description, "Unknown");
+        });
+
+        await withFetch((url) => {
+            if (url.includes("wttr.in")) return { httpStatus: 500 };
+            return { current: {}, daily: { time: ["2026-06-06"] } };
+        }, async () => {
+            const weather = await __testing.fetchSpydebergWeather();
+            assert.equal(weather.data.forecast[0]?.minTempC, null);
+            assert.equal(weather.data.forecast[0]?.maxTempC, null);
+        });
+    });
+});
