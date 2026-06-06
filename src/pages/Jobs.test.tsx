@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ScheduledJob } from "../hooks/useJobs";
-import { Jobs } from "./Jobs";
+import {
+    Jobs,
+    requireSelectedJobForAction,
+    runSelectedAction,
+    saveScheduleAction,
+    toggleSelectedAction,
+} from "./Jobs";
 
 const hooks = vi.hoisted(() => ({
     runJob: vi.fn(),
@@ -242,6 +248,42 @@ describe("Jobs page", () => {
         expect(await screen.findByText("save failed")).toBeInTheDocument();
     });
 
+    it("rejects actions when no scheduled job is selected", async () => {
+        const setActionError = vi.fn();
+        const updateJob = { mutateAsync: hooks.updateJob } as ReturnType<
+            typeof hooks.useUpdateScheduledJob
+        >;
+        const runJob = { mutateAsync: hooks.runJob } as ReturnType<
+            typeof hooks.useRunScheduledJob
+        >;
+
+        expect(() => requireSelectedJobForAction(null)).toThrow(
+            "No scheduled job selected."
+        );
+        expect(requireSelectedJobForAction(createJob()).id).toBe("cache.weather");
+
+        await saveScheduleAction({
+            intervalNumber: 60,
+            scheduleTypeDraft: "interval",
+            selectedJob: null,
+            setActionError,
+            timeOfDayDraft: "09:00",
+            updateJob,
+        });
+        await toggleSelectedAction({
+            enabled: false,
+            selectedJob: null,
+            setActionError,
+            updateJob,
+        });
+        await runSelectedAction({ runJob, selectedJob: null, setActionError });
+
+        expect(setActionError).toHaveBeenCalledTimes(3);
+        expect(setActionError).toHaveBeenCalledWith("No scheduled job selected.");
+        expect(hooks.updateJob).not.toHaveBeenCalled();
+        expect(hooks.runJob).not.toHaveBeenCalled();
+    });
+
     it("updates daily schedules with precise clock times", async () => {
         const user = userEvent.setup();
         render(<Jobs />);
@@ -259,6 +301,16 @@ describe("Jobs page", () => {
                 timeOfDay: "03:15",
             },
         });
+    });
+
+    it("switches daily jobs back to interval schedules", async () => {
+        const user = userEvent.setup();
+        render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: /Schedule type/u }));
+        await user.click(screen.getByRole("menuitem", { name: /Interval/u }));
+
+        expect(screen.getByLabelText("Interval seconds")).toBeInTheDocument();
     });
 
     it("shows cron schedules without allowing schedule edits", async () => {
@@ -310,16 +362,14 @@ describe("Jobs page", () => {
             await screen.findByText("Interval must be an integer of at least 60 seconds.")
         ).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: /Schedule type/u }));
-        await user.click(screen.getByRole("menuitem", { name: /Daily time/u }));
+        await user.click(screen.getByRole("button", { name: /Git.*Daily at 02:40/u }));
         await user.clear(screen.getByLabelText("Time of day"));
         await user.type(screen.getByLabelText("Time of day"), "25:00");
         expect(
             await screen.findByText("Time of day must use HH:mm, for example 02:40.")
         ).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: /Schedule type/u }));
-        await user.click(screen.getByRole("menuitem", { name: /Interval/u }));
+        await user.click(screen.getByRole("button", { name: /Weather.*Every 1h/u }));
         expect(screen.getByLabelText("Interval seconds")).toBeInTheDocument();
     });
 });

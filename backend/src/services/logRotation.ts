@@ -967,16 +967,30 @@ export async function runElevatedLogRotationService(options: {
     const modulePath = fileURLToPath(
         new URL("../services/logRotation.js", import.meta.url)
     );
-    const args = ["-n", "-E", process.execPath, modulePath, "--json"];
+    const importLogRotationCli = [
+        `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
+        "await runLogRotationCli();",
+    ].join("\n");
+    const args = [
+        "-n",
+        "-E",
+        process.execPath,
+        "--input-type=module",
+        "--eval",
+        importLogRotationCli,
+        "--",
+        "--json",
+    ];
     if (options.dryRun) {
         args.push("--dry-run");
     }
-    const { stdout, stderr } = await elevatedLogRotationExecFileRunner("sudo", args, {
+    const { stderr, stdout } = await elevatedLogRotationExecFileRunner("sudo", args, {
         env: elevatedLogRotationEnvironment(),
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: 1024 * 1024,
     });
+    const trimmed = stdout.trim();
     return {
-        result: JSON.parse(stdout || "{}") as Record<string, unknown>,
+        result: trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : {},
         stderr,
     };
 }
@@ -1019,10 +1033,10 @@ export const __testing = {
     },
 };
 
-/* c8 ignore start */
-async function runCli(): Promise<void> {
+export async function runLogRotationCli(): Promise<void> {
     try {
         const summary = await runLogRotationService({
+            config: process.env.MIRA_LOG_ROTATION_CONFIG,
             dryRun: process.argv.includes("--dry-run"),
         });
         if (process.argv.includes("--json")) {
@@ -1033,8 +1047,3 @@ async function runCli(): Promise<void> {
         process.exitCode = 1;
     }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    await runCli();
-}
-/* c8 ignore stop */

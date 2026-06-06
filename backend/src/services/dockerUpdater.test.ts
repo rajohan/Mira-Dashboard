@@ -360,7 +360,7 @@ process.stdout.write("updated\n");
         );
     });
 
-    it("continues discovery after malformed compose files and treats bare images as latest", async () => {
+    it("fails registration after malformed compose files without pruning existing rows", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -398,16 +398,22 @@ process.stdout.write("updated\n");
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
-            assert.equal(result.ok, true);
+            assert.equal(result.ok, false);
+            assert.equal(result.step, "register-services");
+            assert.match(result.stderr, /bad/u);
+            const run = await updater.runDockerUpdaterService();
+            assert.deepEqual(
+                (run as StepResult[]).map((step) => step.step),
+                ["register-services"]
+            );
         });
 
         const web = db
             .prepare(
                 "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
             )
-            .get() as { current_tag: string; tag_match_pattern: string };
-        assert.equal(web.current_tag, "latest");
-        assert.equal(web.tag_match_pattern, "latest");
+            .get() as { current_tag: string; tag_match_pattern: string } | undefined;
+        assert.equal(web, undefined);
         assert.equal(
             (
                 db
@@ -426,8 +432,75 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            0
+            1
         );
+    });
+
+    it("sets the current tag when applying digest-pinned tag updates", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "digest-apply");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1@sha256:old\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.exit(0);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?digest-apply=${Date.now()}`);
+        const service = {
+            id: 1,
+            app_slug: "digest-apply",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1@sha256:old",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: "sha256:old",
+            latest_tag: "2",
+            latest_digest: "sha256:new",
+            policy: "manual",
+            pin_mode: "digest",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:2@sha256:new/u);
+        const row = db
+            .prepare(
+                `SELECT current_tag, current_digest
+                 FROM docker_managed_services WHERE id = ?`
+            )
+            .get(service.id) as {
+            current_digest: string | null;
+            current_tag: string | null;
+        };
+        assert.equal(row.current_tag, "2");
+        assert.equal(row.current_digest, "sha256:new");
     });
 
     it("removes stale services after an empty successful compose scan", async () => {

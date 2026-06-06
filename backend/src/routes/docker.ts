@@ -13,10 +13,7 @@ import {
     objectFallback,
     stringFallback,
 } from "../lib/values.js";
-import {
-    type DockerUpdaterStepResult,
-    runDockerUpdaterService,
-} from "../services/dockerUpdater.js";
+import { runDockerUpdaterService } from "../services/dockerUpdater.js";
 
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
@@ -37,16 +34,24 @@ const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 50;
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const SENSITIVE_ENV_KEY_PATTERN =
     /(?:SECRET|TOKEN|KEY|PASSWORD|API[_-]?KEY|ACCESS[_-]?TOKEN)/iu;
+const SAFE_ENV_VALUE_KEYS = new Set([
+    "HOME",
+    "HOSTNAME",
+    "LANG",
+    "NODE_ENV",
+    "PATH",
+    "TZ",
+]);
 
 function redactEnvValue(value: unknown): string {
     const envValue = String(value);
     const separatorIndex = envValue.indexOf("=");
     if (separatorIndex === -1) {
-        return SENSITIVE_ENV_KEY_PATTERN.test(envValue) ? `${envValue}=***` : envValue;
+        return envValue;
     }
 
     const key = envValue.slice(0, separatorIndex);
-    if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) {
+    if (SAFE_ENV_VALUE_KEYS.has(key) && !SENSITIVE_ENV_KEY_PATTERN.test(key)) {
         return envValue;
     }
 
@@ -76,14 +81,6 @@ interface DockerUpdaterServiceRow {
 /** Represents docker manual update request. */
 interface DockerManualUpdateRequest {
     serviceId?: number;
-}
-
-interface DockerUpdaterNotification {
-    title: string;
-    description: string;
-    type: "error" | "info" | "success" | "warning";
-    dedupeKey: string;
-    metadata: Record<string, unknown>;
 }
 
 /** Represents one docker ps row. */
@@ -373,51 +370,6 @@ function extractTrailingJson(input: string) {
     const start = trimmed.lastIndexOf("\n{");
     const candidate = start === -1 ? trimmed : trimmed.slice(start + 1);
     return JSON.parse(candidate);
-}
-
-function insertDockerUpdaterNotification(notification: DockerUpdaterNotification): void {
-    const now = new Date().toISOString();
-    db.prepare(
-        `INSERT INTO notifications (
-            title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
-        ) VALUES (?, ?, ?, 'docker', ?, ?, 0, ?, ?, ?)
-        ON CONFLICT(dedupe_key) DO UPDATE SET
-            title = excluded.title,
-            description = excluded.description,
-            type = excluded.type,
-            source = excluded.source,
-            metadata_json = excluded.metadata_json,
-            is_read = 0,
-            updated_at = excluded.updated_at,
-            occurred_at = excluded.occurred_at`
-    ).run(
-        notification.title,
-        notification.description,
-        notification.type,
-        notification.dedupeKey,
-        JSON.stringify(notification.metadata),
-        now,
-        now,
-        now
-    );
-}
-
-function notifyDockerUpdaterFailure(
-    scope: string,
-    steps: DockerUpdaterStepResult[]
-): void {
-    const failed = steps.find((step) => !step.ok);
-    if (!failed) {
-        return;
-    }
-
-    insertDockerUpdaterNotification({
-        title: "Docker updater failed",
-        description: `${scope} failed at ${failed.step}.`,
-        type: "error",
-        dedupeKey: `docker:updater:${scope}:failed:${failed.step}`,
-        metadata: { scope, step: failed.step, stderr: failed.stderr },
-    });
 }
 
 /** Parses labels. */
@@ -819,7 +771,6 @@ async function runManualUpdaterForService(serviceId: number) {
     }
     const steps = await runDockerUpdaterService(serviceId);
     if (steps.some((step) => !step.ok)) {
-        notifyDockerUpdaterFailure("manual", steps);
         return {
             success: false,
             output: {},
@@ -856,9 +807,6 @@ async function runManualUpdaterForService(serviceId: number) {
 /** Performs run docker updater now. */
 export async function runDockerUpdaterNow() {
     const steps = await runDockerUpdaterService();
-    if (steps.some((step) => !step.ok)) {
-        notifyDockerUpdaterFailure("auto", steps);
-    }
     return steps;
 }
 
@@ -1179,7 +1127,6 @@ export const __testing = {
     cleanupDockerExecJobs,
     activeDockerExecJobCount,
     dockerIdentifierFallback,
-    notifyDockerUpdaterFailure,
     runManualUpdaterForService,
     runDockerExecCommand,
     setDockerBinForTests: (nextDockerBin: string | undefined) => {

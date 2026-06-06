@@ -96,10 +96,6 @@ export async function refreshCacheKey(key: string) {
         );
     }
     const refreshedKeys = [...new Set(result.refreshed)];
-    /* c8 ignore next 3 -- validated non-empty string arrays cannot produce an empty set. */
-    if (refreshedKeys.length === 0) {
-        throw new Error(`Cache key not found after refresh: ${key}`);
-    }
     const refreshedRows = await Promise.all(
         refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
     );

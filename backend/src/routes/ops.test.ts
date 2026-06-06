@@ -283,8 +283,10 @@ describe("ops routes", () => {
             assert.equal(command.current?.args[0], "-n");
             assert.equal(command.current?.args[1], "-E");
             assert.equal(command.current?.args[2], process.execPath);
-            assert.match(command.current?.args[3] ?? "", /services\/logRotation\.js$/u);
-            assert.equal(command.current?.args[4], "--json");
+            assert.equal(command.current?.args[3], "--input-type=module");
+            assert.equal(command.current?.args[4], "--eval");
+            assert.match(command.current?.args[5] ?? "", /services\/logRotation\.js/u);
+            assert.equal(command.current?.args[7], "--json");
 
             __testing.setLogRotationExecFileRunner(async () => ({
                 stderr: "",

@@ -387,7 +387,7 @@ describe("Docker page", () => {
         docker.deleteImage.mockResolvedValue(Promise.resolve());
         docker.deleteVolume.mockResolvedValue(Promise.resolve());
         docker.manualUpdate.mockResolvedValue({
-            result: { summary: { failed: [], updated: ["web"] } },
+            result: { summary: { failed: 0, updated: 1 } },
             stderr: "",
         });
         docker.prune.mockResolvedValue({ output: "pruned" });
@@ -482,6 +482,14 @@ describe("Docker page", () => {
         await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
         expect(docker.manualUpdate).toHaveBeenCalledWith(7);
         expect(await screen.findByText(/updated=1 failed=0/)).toBeInTheDocument();
+
+        docker.manualUpdate.mockResolvedValueOnce({
+            result: { summary: { failed: ["db"], updated: ["web"] } },
+            stderr: "",
+        });
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(await screen.findByText(/updated=1 failed=1/)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Prune images" }));
         expect(docker.prune).toHaveBeenCalledWith("images");

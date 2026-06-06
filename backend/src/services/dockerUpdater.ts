@@ -622,7 +622,7 @@ function servicesFromCompose(composePath: string) {
             composePath,
             error,
         });
-        return { appSlug, ok: false, services: [] };
+        return { appSlug, error: caughtMessage(error), ok: false, services: [] };
     }
 }
 
@@ -658,6 +658,21 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         };
     }
     const discoveries = composeFiles.map(servicesFromCompose);
+    const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
+    if (failedDiscoveries.length > 0) {
+        return {
+            ok: false,
+            step: "register-services",
+            stdout: "",
+            stderr: JSON.stringify({
+                registered: 0,
+                failed: failedDiscoveries.map((discovery) => ({
+                    appSlug: discovery.appSlug,
+                    error: discovery.error,
+                })),
+            }),
+        };
+    }
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
@@ -853,7 +868,7 @@ async function applyServiceUpdate(
              WHERE id = ?`
         ).run(
             target,
-            service.pin_mode === "tag" ? service.latest_tag : service.current_tag,
+            service.latest_tag,
             service.pin_mode === "digest"
                 ? service.latest_digest
                 : service.current_digest,

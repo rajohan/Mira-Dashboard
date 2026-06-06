@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
@@ -48,14 +45,12 @@ function seedQuotasCache(): void {
 }
 
 describe("quota notifications", () => {
-    let tempDir: string;
     let runQuotaNotificationCheck: () => Promise<boolean>;
     let startQuotaNotificationMonitor: (intervalMs?: number) => void;
     let stopQuotaNotificationMonitor: () => void;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;
 
     before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-quota-notifications-"));
         ({
             runQuotaNotificationCheck,
             startQuotaNotificationMonitor,
@@ -88,7 +83,6 @@ describe("quota notifications", () => {
         } else {
             process.env.FAKE_QUOTAS_JSON = originalQuotasJson;
         }
-        await rm(tempDir, { recursive: true, force: true });
     });
 
     it("creates quota notifications for crossed thresholds and rearms after hysteresis", async () => {

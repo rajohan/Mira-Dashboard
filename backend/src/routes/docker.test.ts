@@ -164,6 +164,9 @@ const inspect = [{
         "ACCESS-TOKEN=also-hidden",
         "NO_EQUALS_TOKEN",
         "PLAIN_FLAG",
+        "DATABASE_URL=postgres://secret",
+        "PATH=/usr/local/bin",
+        "TZ=Europe/Oslo",
     ],
     Labels: {
       "com.docker.compose.service": "web",
@@ -751,9 +754,6 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(__testing.resolveManualUpdateServiceId("", {}), null);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
-        __testing.notifyDockerUpdaterFailure("manual", [
-            { step: "ok", ok: true, stdout: "", stderr: "" },
-        ]);
         assert.deepEqual(await __testing.runManualUpdaterForService(987_654), {
             success: false,
             output: {},
@@ -1582,8 +1582,11 @@ describe("docker routes", { concurrency: false }, () => {
             "SECRET_TOKEN=***",
             "api-key=***",
             "ACCESS-TOKEN=***",
-            "NO_EQUALS_TOKEN=***",
+            "NO_EQUALS_TOKEN",
             "PLAIN_FLAG",
+            "DATABASE_URL=***",
+            "PATH=/usr/local/bin",
+            "TZ=Europe/Oslo",
         ]);
         assert.deepEqual(details.body.labels, {
             "com.docker.compose.service": "web",
@@ -1942,7 +1945,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(failedRun.body.steps[2]?.ok, false);
             assert.match(failedRun.body.steps[2]?.stderr || "", /compose failed/u);
             const failedNotification = dockerNotifications().find((notification) =>
-                notification.dedupe_key.includes(":failed:auto-update:media/app")
+                notification.dedupe_key.includes("docker:updater:auto-failed:")
             );
             assert.ok(failedNotification);
             assert.equal(failedNotification.type, "error");
@@ -1958,7 +1961,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(failedAgain.status, 200);
             assert.equal(failedAgain.body.success, false);
             const reopenedNotification = dockerNotifications().find((notification) =>
-                notification.dedupe_key.includes(":failed:auto-update:media/app")
+                notification.dedupe_key.includes("docker:updater:auto-failed:")
             );
             assert.ok(reopenedNotification);
             assert.equal(reopenedNotification?.is_read, 0);

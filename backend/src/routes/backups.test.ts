@@ -305,8 +305,11 @@ describe("backup routes", () => {
             try {
                 await brokenServer.close();
             } finally {
-                process.env.MIRA_BACKUP_SHELL = await installFakeShell(tempDir);
-                await rm(brokenTempDir, { recursive: true, force: true });
+                try {
+                    process.env.MIRA_BACKUP_SHELL = await installFakeShell(tempDir);
+                } finally {
+                    await rm(brokenTempDir, { recursive: true, force: true });
+                }
             }
         }
     });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fsPromises from "node:fs/promises";
 import {
     chmod,
@@ -13,6 +14,8 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { db } from "../db.js";
 import {
@@ -20,6 +23,9 @@ import {
     runElevatedLogRotationService,
     runLogRotationService,
 } from "./logRotation.js";
+
+const execFileAsync = promisify(execFile);
+const modulePath = fileURLToPath(new URL("logRotation.ts", import.meta.url));
 
 async function writeConfig(root: string, config: unknown) {
     const configPath = path.join(root, `log-rotation-${Math.random()}.json`);
@@ -311,7 +317,13 @@ describe("log rotation service", { concurrency: false }, () => {
                 "-E",
                 process.execPath,
             ]);
-            assert.match(commands[0]?.args[3] ?? "", /services\/logRotation\.js$/u);
+            assert.deepEqual(commands[0]?.args.slice(3, 7), [
+                "--input-type=module",
+                "--eval",
+                commands[0]?.args[5] ?? "",
+                "--",
+            ]);
+            assert.match(commands[0]?.args[5] ?? "", /services\/logRotation\.js/u);
             assert.equal(commands[0]?.args.includes("--dry-run"), false);
             assert.equal(commands[1]?.args.includes("--dry-run"), true);
             assert.equal(commands[0]?.env.PATH, process.env.PATH);
@@ -319,6 +331,84 @@ describe("log rotation service", { concurrency: false }, () => {
         } finally {
             __testing.resetElevatedLogRotationExecFileRunner();
         }
+    });
+
+    it("runs the log rotation CLI entrypoint", async () => {
+        const logPath = path.join(tempDir, "cli.log");
+        await writeFile(logPath, "", "utf8");
+        const configPath = await writeConfig(tempDir, {
+            version: 1,
+            groups: [
+                {
+                    name: "cli",
+                    paths: [logPath],
+                    policy: { maxBytes: 1024 },
+                },
+            ],
+        });
+
+        const { stdout } = await execFileAsync(
+            process.execPath,
+            [
+                "--import",
+                "tsx",
+                "--input-type=module",
+                "--eval",
+                `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)}; await runLogRotationCli();`,
+                "--",
+                "--dry-run",
+                "--json",
+            ],
+            {
+                env: { ...process.env, MIRA_LOG_ROTATION_CONFIG: configPath },
+            }
+        );
+
+        assert.match(stdout, /"dryRun":true/u);
+
+        const originalArgv = process.argv;
+        const originalConfig = process.env.MIRA_LOG_ROTATION_CONFIG;
+        const writeMock = mock.method(process.stdout, "write", () => true);
+        try {
+            process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
+            process.argv = [process.execPath, "--dry-run", "--json"];
+            const { runLogRotationCli } = await import(
+                `${pathToFileURL(modulePath).href}?cli=${Date.now()}`
+            );
+            assert.equal(writeMock.mock.callCount(), 0);
+            await runLogRotationCli();
+            assert.equal(writeMock.mock.callCount(), 1);
+        } finally {
+            process.argv = originalArgv;
+            if (originalConfig === undefined) {
+                delete process.env.MIRA_LOG_ROTATION_CONFIG;
+            } else {
+                process.env.MIRA_LOG_ROTATION_CONFIG = originalConfig;
+            }
+            writeMock.mock.restore();
+        }
+
+        const badConfigPath = await writeConfig(tempDir, { groups: [] });
+        await assert.rejects(
+            () =>
+                execFileAsync(
+                    process.execPath,
+                    [
+                        "--import",
+                        "tsx",
+                        "--input-type=module",
+                        "--eval",
+                        `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)}; await runLogRotationCli();`,
+                    ],
+                    {
+                        env: {
+                            ...process.env,
+                            MIRA_LOG_ROTATION_CONFIG: badConfigPath,
+                        },
+                    }
+                ),
+            /Command failed/u
+        );
     });
 
     it("rotates files, skips excluded entries, and persists SQLite state", async () => {

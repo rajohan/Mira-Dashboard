@@ -264,7 +264,9 @@ test("runs default scheduled log rotation through the elevated helper", async ()
     });
     assert.equal(commands[0]?.file, "sudo");
     assert.deepEqual(commands[0]?.args.slice(0, 3), ["-n", "-E", process.execPath]);
-    assert.match(commands[0]?.args[3] ?? "", /services\/logRotation\.js$/u);
+    assert.equal(commands[0]?.args[3], "--input-type=module");
+    assert.equal(commands[0]?.args[4], "--eval");
+    assert.match(commands[0]?.args[5] ?? "", /services\/logRotation\.js/u);
     assert.equal(commands[0]?.args.includes("--dry-run"), false);
 });
 

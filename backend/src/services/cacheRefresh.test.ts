@@ -1091,6 +1091,32 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         );
     });
 
+    it("treats WAL-G backups without valid timestamps as stale", async () => {
+        const binDir = path.join(tempDir, "walg-untimestamped-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "exec walg wal-g backup-list --detail --json") {
+  process.stdout.write(JSON.stringify([{ name: "base_1", finish_time: "not-a-date" }]));
+}
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+
+        await refreshCacheProducer("backup.walg.status");
+
+        const data = cacheRow("backup.walg.status").data as {
+            latestAgeHours: number | null;
+            ok: boolean;
+            stale: boolean;
+        };
+        assert.equal(data.latestAgeHours, null);
+        assert.equal(data.stale, true);
+        assert.equal(data.ok, false);
+    });
+
     it("uses the configured Docker binary for backup cache producers", async () => {
         const binDir = path.join(tempDir, "configured-docker-bin");
         await mkdir(binDir);

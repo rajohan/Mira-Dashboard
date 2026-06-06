@@ -741,10 +741,13 @@ async function refreshWalgBackupCache() {
         );
 
     const latest = backups[0] ?? null;
-    const latestAgeHours = latest?.modified
-        ? (Date.now() - new Date(latest.modified).getTime()) / 36e5
+    const latestModifiedMs = latest?.modified
+        ? new Date(latest.modified).getTime()
+        : Number.NaN;
+    const latestAgeHours = Number.isFinite(latestModifiedMs)
+        ? (Date.now() - latestModifiedMs) / 36e5
         : null;
-    const stale = !latest || (latestAgeHours !== null && latestAgeHours > 30);
+    const stale = !latest || latestAgeHours === null || latestAgeHours > 30;
     const payload = {
         checkedAt: nowIso(),
         tool: "wal-g",

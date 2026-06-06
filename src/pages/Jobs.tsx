@@ -14,6 +14,8 @@ import type { ScheduledJob } from "../hooks/useJobs";
 import { formatDate } from "../utils/format";
 
 type EditableScheduleType = "interval" | "daily";
+type UpdateJobMutation = ReturnType<typeof useUpdateScheduledJob>;
+type RunJobMutation = ReturnType<typeof useRunScheduledJob>;
 
 const SCHEDULE_TYPE_OPTIONS = [
     { value: "interval", label: "Interval", description: "Run every N seconds" },
@@ -53,6 +55,105 @@ function formatSchedule(job: ScheduledJob): string {
     return `Every ${formatInterval(job.intervalSeconds)}`;
 }
 
+export function requireSelectedJobForAction(
+    selectedJob: ScheduledJob | null
+): ScheduledJob {
+    if (!selectedJob) {
+        throw new Error("No scheduled job selected.");
+    }
+    return selectedJob;
+}
+
+function actionErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+export async function saveScheduleAction(options: {
+    intervalNumber: number;
+    scheduleTypeDraft: EditableScheduleType;
+    selectedJob: ScheduledJob | null;
+    setActionError: (message: string) => void;
+    timeOfDayDraft: string;
+    updateJob: UpdateJobMutation;
+}) {
+    const {
+        intervalNumber,
+        scheduleTypeDraft,
+        selectedJob,
+        setActionError,
+        timeOfDayDraft,
+        updateJob,
+    } = options;
+    let job: ScheduledJob;
+    try {
+        job = requireSelectedJobForAction(selectedJob);
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+        return;
+    }
+    const patch = {
+        scheduleType: scheduleTypeDraft,
+        ...(scheduleTypeDraft === "interval"
+            ? { intervalSeconds: intervalNumber, timeOfDay: null }
+            : { timeOfDay: timeOfDayDraft }),
+    };
+    setActionError("");
+    try {
+        await updateJob.mutateAsync({
+            id: job.id,
+            patch,
+        });
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+    }
+}
+
+export async function toggleSelectedAction(options: {
+    enabled: boolean;
+    selectedJob: ScheduledJob | null;
+    setActionError: (message: string) => void;
+    updateJob: UpdateJobMutation;
+}) {
+    const { enabled, selectedJob, setActionError, updateJob } = options;
+    let job: ScheduledJob;
+    try {
+        job = requireSelectedJobForAction(selectedJob);
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+        return;
+    }
+    setActionError("");
+    try {
+        await updateJob.mutateAsync({
+            id: job.id,
+            patch: { enabled },
+        });
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+    }
+}
+
+export async function runSelectedAction(options: {
+    runJob: RunJobMutation;
+    selectedJob: ScheduledJob | null;
+    setActionError: (message: string) => void;
+}) {
+    const { runJob, selectedJob, setActionError } = options;
+    let job: ScheduledJob;
+    try {
+        job = requireSelectedJobForAction(selectedJob);
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+        return;
+    }
+    setActionError("");
+    try {
+        await runJob.mutateAsync({ id: job.id });
+    } catch (error) {
+        setActionError(actionErrorMessage(error));
+    }
+}
+
 /** Renders backend-native scheduled jobs UI. */
 export function Jobs() {
     const { data: jobs = [], isLoading, error } = useScheduledJobs();
@@ -86,56 +187,23 @@ export function Jobs() {
     const scheduleIsValid =
         scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
 
-    function handleActionError(error: unknown) {
-        setActionError(error instanceof Error ? error.message : String(error));
-    }
-
     async function saveSchedule() {
-        if (!selectedJob) {
-            return;
-        }
-        const patch = {
-            scheduleType: scheduleTypeDraft,
-            ...(scheduleTypeDraft === "interval"
-                ? { intervalSeconds: intervalNumber, timeOfDay: null }
-                : { timeOfDay: timeOfDayDraft }),
-        };
-        setActionError("");
-        try {
-            await updateJob.mutateAsync({
-                id: selectedJob.id,
-                patch,
-            });
-        } catch (error) {
-            handleActionError(error);
-        }
+        await saveScheduleAction({
+            intervalNumber,
+            scheduleTypeDraft,
+            selectedJob,
+            setActionError,
+            timeOfDayDraft,
+            updateJob,
+        });
     }
 
     async function toggleSelected(enabled: boolean) {
-        if (!selectedJob) {
-            return;
-        }
-        setActionError("");
-        try {
-            await updateJob.mutateAsync({
-                id: selectedJob.id,
-                patch: { enabled },
-            });
-        } catch (error) {
-            handleActionError(error);
-        }
+        await toggleSelectedAction({ enabled, selectedJob, setActionError, updateJob });
     }
 
     async function runSelected() {
-        if (!selectedJob) {
-            return;
-        }
-        setActionError("");
-        try {
-            await runJob.mutateAsync({ id: selectedJob.id });
-        } catch (error) {
-            handleActionError(error);
-        }
+        await runSelectedAction({ runJob, selectedJob, setActionError });
     }
 
     return (
