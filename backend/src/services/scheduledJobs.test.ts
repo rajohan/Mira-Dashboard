@@ -55,13 +55,23 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
 });
 
 test("computes next daily run for today or tomorrow", () => {
+    const beforeDailyTime = new Date("2026-06-05T00:00:00.000Z");
+    const expectedSameDay = new Date(beforeDailyTime);
+    expectedSameDay.setHours(2, 40, 0, 0);
     assert.equal(
-        __testing.nextDailyRunIso("02:40", new Date("2026-06-05T00:00:00.000Z")),
-        "2026-06-05T00:40:00.000Z"
+        __testing.nextDailyRunIso("02:40", beforeDailyTime),
+        expectedSameDay.toISOString()
     );
+
+    const afterDailyTime = new Date("2026-06-05T03:00:00.000Z");
+    const expectedNextDay = new Date(afterDailyTime);
+    expectedNextDay.setHours(2, 40, 0, 0);
+    if (expectedNextDay.getTime() <= afterDailyTime.getTime()) {
+        expectedNextDay.setDate(expectedNextDay.getDate() + 1);
+    }
     assert.equal(
-        __testing.nextDailyRunIso("02:40", new Date("2026-06-05T03:00:00.000Z")),
-        "2026-06-06T00:40:00.000Z"
+        __testing.nextDailyRunIso("02:40", afterDailyTime),
+        expectedNextDay.toISOString()
     );
     assert.throws(() => __testing.nextDailyRunIso("25:00"), /HH:mm/u);
 });

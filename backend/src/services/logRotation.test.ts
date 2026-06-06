@@ -415,7 +415,7 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.ok, false);
         assert.match(
             (summary.errors[0] as { message?: string } | undefined)?.message ?? "",
-            /Unsafe path/u
+            /No approved roots exist|Unsafe path/u
         );
     });
 

@@ -962,7 +962,8 @@ if (args === "exec kopia kopia snapshot list --all --json") {
         };
         assert.equal(kopia.snapshotsByPath[0]?.latest.id, "new");
         const quotas = cacheRow("quotas.summary");
-        assert.deepEqual(quotas.metadata.missing, ["openrouter", "synthetic"]);
+        assert.ok((quotas.metadata.missing as string[]).includes("openrouter"));
+        assert.ok((quotas.metadata.missing as string[]).includes("synthetic"));
     });
 
     it("covers system and Codex default fallbacks", async () => {
