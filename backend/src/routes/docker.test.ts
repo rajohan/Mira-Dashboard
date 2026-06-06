@@ -1971,7 +1971,7 @@ describe("docker routes", { concurrency: false }, () => {
                 method: "POST",
                 body: {},
             });
-            assert.equal(manualFailure.status, 200);
+            assert.equal(manualFailure.status, 500);
             assert.equal(manualFailure.body.success, false);
             assert.deepEqual(manualFailure.body.result, {});
             assert.match(manualFailure.body.stderr, /compose failed/u);
