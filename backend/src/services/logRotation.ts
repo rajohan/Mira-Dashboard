@@ -79,6 +79,8 @@ interface VerifiedLogFile {
     stat: import("node:fs").Stats;
 }
 
+type RetentionArchive = { path: string; mtimeMs: number; compress: boolean };
+
 interface LogRotationConfig {
     version: number;
     approvedRoots?: string[];
@@ -435,10 +437,15 @@ async function rotateRename(
 ): Promise<string> {
     await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
-    await createNoFollowFile(filePath, file.stat.mode & 0o777, {
-        uid: file.stat.uid,
-        gid: file.stat.gid,
-    });
+    try {
+        await createNoFollowFile(filePath, file.stat.mode & 0o777, {
+            uid: file.stat.uid,
+            gid: file.stat.gid,
+        });
+    } catch (error) {
+        await fs.rename(archivePath, filePath).catch(() => {});
+        throw error;
+    }
     return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
 
@@ -455,7 +462,7 @@ async function listArchives(
 ) {
     const dir = path.dirname(filePath);
     const managedRegex = managedArchiveRegexFor(filePath);
-    const archives: Array<{ path: string; mtimeMs: number; compress: boolean }> = [];
+    const archives: RetentionArchive[] = [];
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         if (!entry.isFile() || !managedRegex.test(entry.name)) continue;
         const fullPath = path.join(dir, entry.name);
@@ -477,7 +484,7 @@ async function listArchives(
 }
 
 async function compressArchiveIfNeeded(
-    archive: { path: string; mtimeMs: number; compress: boolean },
+    archive: RetentionArchive,
     dryRun: boolean,
     approvedRoots: string[]
 ) {
@@ -494,21 +501,8 @@ async function compressArchiveIfNeeded(
     };
 }
 
-async function applyRetention(
-    filePath: string,
-    policy: LogRotationPolicy,
-    approvedRoots: string[],
-    dryRun: boolean
-) {
-    const archives: Array<{ path: string; mtimeMs: number; compress: boolean }> = [];
-    const compressed: string[] = [];
-    for (const archive of await listArchives(filePath, policy, approvedRoots)) {
-        const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
-        archives.push(result.archive);
-        if (result.compressed) compressed.push(result.archive.path);
-    }
-    archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    const deleteSet = new Map<string, { path: string; mtimeMs: number }>();
+function retentionDeleteSet(archives: RetentionArchive[], policy: LogRotationPolicy) {
+    const deleteSet = new Map<string, RetentionArchive>();
     if (Number.isInteger(policy.keep) && Number(policy.keep) >= 0) {
         for (const archive of archives.slice(Number(policy.keep))) {
             deleteSet.set(archive.path, archive);
@@ -520,6 +514,29 @@ async function applyRetention(
             if (archive.mtimeMs < cutoff) deleteSet.set(archive.path, archive);
         }
     }
+    return deleteSet;
+}
+
+async function applyRetention(
+    filePath: string,
+    policy: LogRotationPolicy,
+    approvedRoots: string[],
+    dryRun: boolean
+) {
+    const listedArchives = await listArchives(filePath, policy, approvedRoots);
+    const deleteSet = retentionDeleteSet(listedArchives, policy);
+    const archives: RetentionArchive[] = [];
+    const compressed: string[] = [];
+    for (const archive of listedArchives) {
+        if (deleteSet.has(archive.path)) {
+            archives.push(archive);
+            continue;
+        }
+        const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
+        archives.push(result.archive);
+        if (result.compressed) compressed.push(result.archive.path);
+    }
+    archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
     const deleted: string[] = [];
     for (const archive of deleteSet.values()) {
         deleted.push(archive.path);
@@ -576,37 +593,26 @@ async function applyArchiveOnlyRetention(
     approvedRoots: string[],
     dryRun: boolean
 ) {
-    const archivesByScope = new Map<
-        string,
-        Array<{ path: string; mtimeMs: number; compress: boolean }>
-    >();
+    const archivesByScope = new Map<string, RetentionArchive[]>();
     const compressed: string[] = [];
     const deleted: string[] = [];
     let checked = 0;
 
     for (const archive of await listArchiveOnlyArchives(policy, approvedRoots)) {
         checked += 1;
-        const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
-        if (result.compressed) compressed.push(result.archive.path);
-        const key = archiveRetentionKey(result.archive.path, policy);
+        const key = archiveRetentionKey(archive.path, policy);
         const scoped = archivesByScope.get(key) || [];
-        scoped.push(result.archive);
+        scoped.push(archive);
         archivesByScope.set(key, scoped);
     }
 
     for (const archives of archivesByScope.values()) {
         archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
-        const deleteSet = new Map<string, { path: string; mtimeMs: number }>();
-        if (Number.isInteger(policy.keep) && Number(policy.keep) >= 0) {
-            for (const archive of archives.slice(Number(policy.keep))) {
-                deleteSet.set(archive.path, archive);
-            }
-        }
-        if (Number.isFinite(Number(policy.keepDays)) && Number(policy.keepDays) >= 0) {
-            const cutoff = Date.now() - Number(policy.keepDays) * 24 * 60 * 60 * 1000;
-            for (const archive of archives) {
-                if (archive.mtimeMs < cutoff) deleteSet.set(archive.path, archive);
-            }
+        const deleteSet = retentionDeleteSet(archives, policy);
+        for (const archive of archives) {
+            if (deleteSet.has(archive.path)) continue;
+            const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
+            if (result.compressed) compressed.push(result.archive.path);
         }
         for (const archive of deleteSet.values()) {
             deleted.push(archive.path);

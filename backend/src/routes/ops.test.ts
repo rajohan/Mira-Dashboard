@@ -317,7 +317,7 @@ describe("ops routes", () => {
         assert.equal(response.body.success, true);
         assert.equal(response.body.result.dryRun, false);
         assert.equal(response.body.result.rotatedFiles, 1);
-        assert.equal(response.body.result.compressedFiles, 3);
+        assert.equal(response.body.result.compressedFiles, 2);
         assert.equal(response.body.result.deletedArchives, 1);
         assert.equal(await readFile(logPath, "utf8"), "");
         await access(`${archiveNewPath}.gz`);

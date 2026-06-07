@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import fsPromises from "node:fs/promises";
 import {
     chmod,
@@ -515,6 +516,57 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.match(state.files[rotate]?.lastArchive ?? "", /app\.log\./u);
     });
 
+    it("restores renamed logs when replacement creation fails", async () => {
+        const root = path.join(tempDir, "rename-restore");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        await writeFile(logFile, "active log", "utf8");
+        const open = fsPromises.open.bind(fsPromises);
+        mock.method(
+            fsPromises,
+            "open",
+            async (
+                filePath: Parameters<typeof fsPromises.open>[0],
+                flags: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                if (
+                    String(filePath) === logFile &&
+                    typeof flags === "number" &&
+                    (flags & constants.O_CREAT) !== 0
+                ) {
+                    throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+                }
+                return open(filePath, flags, mode);
+            }
+        );
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "rename",
+                    paths: [logFile],
+                    strategy: "rename",
+                    compress: false,
+                    maxSizeMb: 0.000001,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, false);
+        assert.equal(summary.rotatedFiles, 0);
+        assert.equal(await readFile(logFile, "utf8"), "active log");
+        assert.match(JSON.stringify(summary.errors), /disk full/u);
+        const archiveNames = await fsPromises.readdir(root);
+        assert.deepEqual(
+            archiveNames.filter((name) => name.startsWith("app.log.")),
+            []
+        );
+    });
+
     it("handles dry-run, empty files, not-due cadence, retention compression, and invalid state", async () => {
         const root = path.join(tempDir, "logs");
         await mkdir(root);
@@ -554,7 +606,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const dryRun = await runLogRotationService({ dryRun: true, config });
         assert.equal(dryRun.skippedFiles, 1);
         assert.equal(dryRun.rotatedFiles, 1);
-        assert.equal(dryRun.compressedFiles, 1);
+        assert.equal(dryRun.compressedFiles, 0);
         assert.equal(dryRun.deletedArchives, 2);
         assert.equal(await readFile(daily, "utf8"), "small");
 
@@ -566,6 +618,103 @@ describe("log rotation service", { concurrency: false }, () => {
         const notDue = await runLogRotationService({ dryRun: false, config });
         assert.equal(notDue.skippedFiles, 2);
         assert.equal(notDue.rotatedFiles, 0);
+    });
+
+    it("deletes expired per-file archives without compressing them first", async () => {
+        const root = path.join(tempDir, "retention-delete-first");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        const archive = path.join(root, "app.log.2020-01-01T00-00-00Z");
+        await writeFile(logFile, "active", "utf8");
+        await writeFile(archive, "expired", "utf8");
+        const oldTime = new Date("2020-01-01T00:00:00.000Z");
+        await utimes(archive, oldTime, oldTime);
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "retention",
+                    paths: [logFile],
+                    archivePaths: [path.join(root, "app.log.*")],
+                    compress: true,
+                    keep: 0,
+                    maxSizeMb: 100,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.skippedFiles, 1);
+        assert.equal(summary.deletedArchives, 1);
+        assert.equal(summary.compressedFiles, 0);
+        await assert.rejects(() => fsPromises.stat(archive), /ENOENT/u);
+        await assert.rejects(() => fsPromises.stat(`${archive}.gz`), /ENOENT/u);
+    });
+
+    it("retains managed per-file archives without compressing them", async () => {
+        const root = path.join(tempDir, "retention-managed");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        const archive = path.join(root, "app.log.2026-06-06T00-00-00Z");
+        await writeFile(logFile, "active", "utf8");
+        await writeFile(archive, "retained", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "retention",
+                    paths: [logFile],
+                    compress: true,
+                    keep: 1,
+                    maxSizeMb: 100,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.skippedFiles, 1);
+        assert.equal(summary.deletedArchives, 0);
+        assert.equal(summary.compressedFiles, 0);
+        assert.equal(await readFile(archive, "utf8"), "retained");
+        await assert.rejects(() => fsPromises.stat(`${archive}.gz`), /ENOENT/u);
+    });
+
+    it("compresses retained per-file archivePaths", async () => {
+        const root = path.join(tempDir, "retention-archive-paths");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        const archive = path.join(root, "external.archive");
+        await writeFile(logFile, "active", "utf8");
+        await writeFile(archive, "retained", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "retention",
+                    paths: [logFile],
+                    archivePaths: [archive],
+                    compress: true,
+                    keep: 1,
+                    maxSizeMb: 100,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.skippedFiles, 1);
+        assert.equal(summary.deletedArchives, 0);
+        assert.equal(summary.compressedFiles, 1);
+        await assert.rejects(() => fsPromises.stat(archive), /ENOENT/u);
+        assert.ok(await fsPromises.stat(`${archive}.gz`));
     });
 
     it("returns a failed summary when non-dry-run rotation is already locked", async () => {
@@ -773,6 +922,7 @@ describe("log rotation service", { concurrency: false }, () => {
         await mkdir(outside);
         const recent = path.join(root, "a.log.2026-06-06T00-00-00Z");
         const oldA = path.join(root, "a.log.2020-01-01T00-00-00Z");
+        const oldAExpired = path.join(root, "a.log.2019-01-01T00-00-00Z");
         const oldB = path.join(root, "nested.log.2020-01-01T00-00-00Z");
         const unsafe = path.join(outside, "unsafe.log.2020-01-01T00-00-00Z");
         const unsafePlain = path.join(outside, "plain.log");
@@ -780,6 +930,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const link = path.join(root, "link.log");
         await writeFile(recent, "recent", "utf8");
         await writeFile(oldA, "old a", "utf8");
+        await writeFile(oldAExpired, "old a expired", "utf8");
         await writeFile(oldB, "old b", "utf8");
         await writeFile(unsafe, "unsafe", "utf8");
         await writeFile(unsafePlain, "unsafe", "utf8");
@@ -787,7 +938,9 @@ describe("log rotation service", { concurrency: false }, () => {
         await symlink(target, link);
         const oldTime = new Date("2020-01-01T00:00:00.000Z");
         await Promise.all(
-            [oldA, oldB, unsafe].map((file) => utimes(file, oldTime, oldTime))
+            [oldA, oldAExpired, oldB, unsafe].map((file) =>
+                utimes(file, oldTime, oldTime)
+            )
         );
 
         const config = await writeConfig(tempDir, {
@@ -802,7 +955,6 @@ describe("log rotation service", { concurrency: false }, () => {
                     archiveMinAgeMinutes: 1,
                     compress: true,
                     keep: 1,
-                    keepDays: 0,
                 },
                 {
                     name: "unsafe-archive",
@@ -826,7 +978,7 @@ describe("log rotation service", { concurrency: false }, () => {
         );
 
         assert.equal(summary.ok, false);
-        assert.equal(summary.groups[0]?.checkedFiles, 2);
+        assert.equal(summary.groups[0]?.checkedFiles, 3);
         assert.equal(summary.groups[0]?.compressedFiles, 2);
         assert.ok(summary.groups[0]?.deletedArchives);
         assert.ok(
