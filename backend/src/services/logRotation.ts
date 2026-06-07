@@ -1144,10 +1144,22 @@ export async function runElevatedLogRotationService(options: {
         timeout: 10 * 60_000,
     });
     const trimmed = stdout.trim();
-    return {
-        result: trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : {},
-        stderr,
-    };
+    if (!trimmed) {
+        return { result: {}, stderr };
+    }
+    try {
+        return {
+            result: JSON.parse(trimmed) as Record<string, unknown>,
+            stderr,
+        };
+    } catch (error) {
+        const parseError = caughtMessage(error);
+        const parseContext = `Failed to parse elevated log rotation JSON: ${parseError}; stdout: ${trimmed}`;
+        return {
+            result: {},
+            stderr: stderr ? `${stderr}\n${parseContext}` : parseContext,
+        };
+    }
 }
 
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {

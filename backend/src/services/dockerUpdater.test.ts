@@ -1061,10 +1061,16 @@ setTimeout(() => process.exit(0), 30);
             .prepare("SELECT last_status FROM docker_managed_services WHERE id = 720")
             .get() as { last_status: string };
         assert.equal(row.last_status, "unsupported_registry");
-        const manualSteps = (await updater.runDockerUpdaterService(720)) as StepResult[];
-        assert.equal(manualSteps.at(-1)?.step, "manual-update:external/swag");
-        assert.equal(manualSteps.at(-1)?.ok, false);
-        assert.equal(manualSteps.at(-1)?.code, "UNSUPPORTED_REGISTRY");
+        const appsRoot = path.join(tempDir, "empty-apps-for-unsupported");
+        await mkdir(appsRoot, { recursive: true });
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const manualSteps = (await updater.runDockerUpdaterService(
+                720
+            )) as StepResult[];
+            assert.equal(manualSteps.at(-1)?.step, "manual-update:external/swag");
+            assert.equal(manualSteps.at(-1)?.ok, false);
+            assert.equal(manualSteps.at(-1)?.code, "UNSUPPORTED_REGISTRY");
+        });
     });
 
     it("does not block a manual update on unrelated registry failures", async () => {

@@ -458,6 +458,30 @@ describe("log rotation service", { concurrency: false }, () => {
                 result: { ok: true },
                 stderr: "helper warning",
             });
+            __testing.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "helper warning",
+                stdout: "not json",
+            }));
+            const malformed = await runElevatedLogRotationService({ dryRun: false });
+            assert.deepEqual(malformed.result, {});
+            assert.match(
+                malformed.stderr,
+                /helper warning\nFailed to parse elevated log rotation JSON: /u
+            );
+            assert.match(malformed.stderr, /stdout: not json/u);
+            __testing.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: "still not json",
+            }));
+            const malformedWithoutStderr = await runElevatedLogRotationService({
+                dryRun: false,
+            });
+            assert.deepEqual(malformedWithoutStderr.result, {});
+            assert.match(
+                malformedWithoutStderr.stderr,
+                /^Failed to parse elevated log rotation JSON: /u
+            );
+            assert.match(malformedWithoutStderr.stderr, /stdout: still not json/u);
             assert.equal(commands[0]?.file, "sudo");
             assert.deepEqual(commands[0]?.args.slice(0, 3), [
                 "-n",
