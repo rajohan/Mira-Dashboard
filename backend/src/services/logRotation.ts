@@ -17,7 +17,7 @@ const BUNDLED_CONFIG_PATH = fileURLToPath(
     new URL("../../config/log-rotation.json", import.meta.url)
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
-const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$/u;
+const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)?$/u;
 const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
 const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
 
@@ -446,10 +446,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
 }
 
 function archiveBasePath(filePath: string, now: Date): string {
-    const stamp = now
-        .toISOString()
-        .replaceAll(/[:.]/gu, "-")
-        .replace(/-\d{3}Z$/u, "Z");
+    const stamp = now.toISOString().replaceAll(":", "-");
     return `${filePath}.${stamp}`;
 }
 
@@ -468,12 +465,15 @@ async function rotateCopyTruncate(
         archivePath,
         constants.O_WRONLY | constants.O_NOFOLLOW
     );
-    await pipeline(
-        createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
-        createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
-    );
-    await destination.close();
-    await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
+    try {
+        await pipeline(
+            createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
+            createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
+        );
+        await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
+    } finally {
+        await destination.close();
+    }
     await file.handle.truncate(0);
     return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
@@ -501,7 +501,7 @@ async function rotateRename(
 
 function managedArchiveRegexFor(filePath: string): RegExp {
     return new RegExp(
-        String.raw`^${escapeRegExp(path.basename(filePath))}\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:\.gz)?$`
+        String.raw`^${escapeRegExp(path.basename(filePath))}\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)?$`
     );
 }
 
@@ -908,10 +908,10 @@ export async function runLogRotationService(
         summary.finishedAt = new Date().toISOString();
         return summary;
     }
-    const state = readLogRotationState();
-    const now = new Date();
-    const seenFiles = new Set<string>();
     try {
+        const state = readLogRotationState();
+        const now = new Date();
+        const seenFiles = new Set<string>();
         for (const group of groups) {
             const policy = mergePolicy(config.defaults || {}, group);
             const effectiveApprovedRoots =

@@ -12,6 +12,7 @@ import {
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
+import { nonEmptyEnvFallback } from "../lib/values.js";
 
 const execFileAsync = promisify(execFile);
 const codexTrustConfigLocks = new Map<string, Promise<void>>();
@@ -123,10 +124,20 @@ function sleepSync(ms: number): void {
 type CodexTrustConfigLockDependencies = {
     now?: () => number;
     open?: typeof openSync;
-    rm?: typeof rmSync;
+    remove?: typeof rmSync;
+    rename?: typeof renameSync;
     sleep?: typeof sleepSync;
     stat?: typeof statSync;
 };
+
+function sameFileStat(
+    left: NonNullable<ReturnType<typeof statSync>>,
+    right: NonNullable<ReturnType<typeof statSync>>
+): boolean {
+    return (
+        left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
+    );
+}
 
 function acquireCodexTrustConfigLock(
     lockPath: string,
@@ -134,7 +145,8 @@ function acquireCodexTrustConfigLock(
 ): number {
     const now = dependencies.now ?? Date.now;
     const openFile = dependencies.open ?? openSync;
-    const removeFile = dependencies.rm ?? rmSync;
+    const removeFile = dependencies.remove ?? rmSync;
+    const renameFile = dependencies.rename ?? renameSync;
     const sleep = dependencies.sleep ?? sleepSync;
     const statFile = dependencies.stat ?? statSync;
     const startedAt = now();
@@ -156,8 +168,24 @@ function acquireCodexTrustConfigLock(
                 try {
                     const stat = statFile(lockPath);
                     if (now() - stat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
-                        removeFile(lockPath, { force: true });
-                        continue;
+                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
+                        try {
+                            renameFile(lockPath, reclaimedPath);
+                            const reclaimedStat = statFile(reclaimedPath);
+                            if (sameFileStat(stat, reclaimedStat)) {
+                                removeFile(reclaimedPath, { force: true });
+                                continue;
+                            }
+                        } catch (renameError) {
+                            if (
+                                renameError instanceof Error &&
+                                "code" in renameError &&
+                                renameError.code === "ENOENT"
+                            ) {
+                                continue;
+                            }
+                        }
+                        throw error;
                     }
                 } catch (statError) {
                     if (
@@ -971,19 +999,19 @@ async function checkSyntheticQuota() {
 }
 
 function getQuotaCodexHome() {
-    return process.env.QUOTAS_CODEX_HOME || "/home/ubuntu/.codex";
+    return nonEmptyEnvFallback("QUOTAS_CODEX_HOME", "/home/ubuntu/.codex");
 }
 
 function getOpenclawBin() {
-    return process.env.OPENCLAW_BIN || "/home/ubuntu/.npm-global/bin/openclaw";
+    return nonEmptyEnvFallback("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw");
 }
 
 function getDockerBin() {
-    return process.env.MIRA_DOCKER_BIN || "docker";
+    return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 }
 
 function getCodexBin() {
-    return process.env.CODEX_BIN || "/home/ubuntu/.npm-global/bin/codex";
+    return nonEmptyEnvFallback("CODEX_BIN", "/home/ubuntu/.npm-global/bin/codex");
 }
 
 async function ensureCodexTrustConfig(codexHome: string) {

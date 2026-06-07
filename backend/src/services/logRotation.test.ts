@@ -501,7 +501,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const duplicate = path.join(root, "duplicate.log");
         const compressed = path.join(root, "compressed.log");
         const excluded = path.join(root, "excluded.log");
-        const alreadyRotated = path.join(root, "old.log.2026-06-06T00-00-00Z");
+        const alreadyRotated = path.join(root, "old.log.2026-06-06T00-00-00.000Z");
         await writeFile(rotate, "needs rotation", "utf8");
         await writeFile(duplicate, "dup", "utf8");
         await writeFile(compressed, "gzip me", "utf8");
@@ -614,7 +614,7 @@ describe("log rotation service", { concurrency: false }, () => {
         await mkdir(root);
         const empty = path.join(root, "empty.log");
         const daily = path.join(root, "daily.log");
-        const archive = path.join(root, "daily.log.2020-01-01T00-00-00Z");
+        const archive = path.join(root, "daily.log.2020-01-01T00-00-00.000Z");
         await writeFile(empty, "", "utf8");
         await writeFile(daily, "small", "utf8");
         await writeFile(archive, "old archive", "utf8");
@@ -666,7 +666,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const root = path.join(tempDir, "retention-delete-first");
         await mkdir(root);
         const logFile = path.join(root, "app.log");
-        const archive = path.join(root, "app.log.2020-01-01T00-00-00Z");
+        const archive = path.join(root, "app.log.2020-01-01T00-00-00.000Z");
         await writeFile(logFile, "active", "utf8");
         await writeFile(archive, "expired", "utf8");
         const oldTime = new Date("2020-01-01T00:00:00.000Z");
@@ -700,7 +700,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const root = path.join(tempDir, "retention-managed");
         await mkdir(root);
         const logFile = path.join(root, "app.log");
-        const archive = path.join(root, "app.log.2026-06-06T00-00-00Z");
+        const archive = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
         await writeFile(logFile, "active", "utf8");
         await writeFile(archive, "retained", "utf8");
         const config = await writeConfig(tempDir, {
@@ -936,8 +936,8 @@ describe("log rotation service", { concurrency: false }, () => {
         await mkdir(root);
         await mkdir(archiveRoot);
         const file = path.join(root, "app.log");
-        const archive = path.join(root, "other.log.2020-01-01T00-00-00Z");
-        const centralArchive = path.join(archiveRoot, "app.log.2020-01-01T00-00-00Z");
+        const archive = path.join(root, "other.log.2020-01-01T00-00-00.000Z");
+        const centralArchive = path.join(archiveRoot, "app.log.2020-01-01T00-00-00.000Z");
         await writeFile(file, "log", "utf8");
         await writeFile(archive, "archive", "utf8");
         await writeFile(centralArchive, "central archive", "utf8");
@@ -984,11 +984,11 @@ describe("log rotation service", { concurrency: false }, () => {
         const outside = path.join(tempDir, "outside");
         await mkdir(root);
         await mkdir(outside);
-        const recent = path.join(root, "a.log.2026-06-06T00-00-00Z");
-        const oldA = path.join(root, "a.log.2020-01-01T00-00-00Z");
-        const oldAExpired = path.join(root, "a.log.2019-01-01T00-00-00Z");
-        const oldB = path.join(root, "nested.log.2020-01-01T00-00-00Z");
-        const unsafe = path.join(outside, "unsafe.log.2020-01-01T00-00-00Z");
+        const recent = path.join(root, "a.log.2026-06-06T00-00-00.000Z");
+        const oldA = path.join(root, "a.log.2020-01-01T00-00-00.000Z");
+        const oldAExpired = path.join(root, "a.log.2019-01-01T00-00-00.000Z");
+        const oldB = path.join(root, "nested.log.2020-01-01T00-00-00.000Z");
+        const unsafe = path.join(outside, "unsafe.log.2020-01-01T00-00-00.000Z");
         const unsafePlain = path.join(outside, "plain.log");
         const target = path.join(root, "target.log");
         const link = path.join(root, "link.log");
@@ -1170,10 +1170,13 @@ describe("log rotation service", { concurrency: false }, () => {
         const copyPlain = path.join(root, "copy-plain.log");
         const copyGzip = path.join(root, "copy-gzip.log");
         const vanish = path.join(root, "vanish.log");
-        const archiveVanish = path.join(archiveRoot, "archive.log.2020-01-01T00-00-00Z");
+        const archiveVanish = path.join(
+            archiveRoot,
+            "archive.log.2020-01-01T00-00-00.000Z"
+        );
         const otherDirArchive = path.join(
             archiveRoot,
-            "copy-plain.log.2020-01-01T00-00-00Z"
+            "copy-plain.log.2020-01-01T00-00-00.000Z"
         );
         await writeFile(copyPlain, "plain", "utf8");
         await writeFile(copyGzip, "gzip", "utf8");

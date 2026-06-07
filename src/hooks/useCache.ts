@@ -107,7 +107,7 @@ export function useRefreshCacheEntry() {
                 ...keys.map((key) =>
                     queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
                 ),
-                ...(keys.some((key) => key.startsWith("moltbook."))
+                ...(keys.some((key) => key === "moltbook" || key.startsWith("moltbook."))
                     ? [queryClient.invalidateQueries({ queryKey: ["moltbook"] })]
                     : []),
             ]);

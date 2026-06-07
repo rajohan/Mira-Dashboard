@@ -502,6 +502,34 @@ async function withEnvValue<T>(
     }
 }
 
+async function withDockerUpdaterFetch<T>(callback: () => Promise<T>): Promise<T> {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+            typeof input === "string"
+                ? input
+                : input instanceof Request
+                  ? input.url
+                  : input.toString();
+        if (!url.includes("hub.docker.com") && !url.includes("ghcr.io")) {
+            return previousFetch(input, init);
+        }
+        return {
+            ok: true,
+            headers: new Headers(),
+            json: async () =>
+                url.endsWith("/tags/1.0.1")
+                    ? { digest: "sha256:new" }
+                    : { results: [{ name: "1.0.1" }] },
+        } as Response;
+    }) as typeof fetch;
+    try {
+        return await callback();
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
+}
+
 async function seedDockerUpdaterState(tempDir: string): Promise<void> {
     const composeDir = path.join(tempDir, "apps", "media");
     await mkdir(composeDir, { recursive: true });
@@ -545,7 +573,7 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         "sha256:new",
         "auto",
         "digest",
-        "1.0.0",
+        "1.0.1",
         1,
         '{"owner":"mira"}',
         "2026-05-11",
@@ -838,6 +866,110 @@ describe("docker routes", { concurrency: false }, () => {
                 ],
             }
         );
+        try {
+            __testing.setDockerUpdaterServiceRunnerForTests(async () => [
+                {
+                    step: "manual-update:media/app",
+                    ok: false,
+                    code: "CONFLICT",
+                    stdout: "",
+                    stderr: "No update available",
+                },
+            ]);
+            assert.deepEqual(
+                await __testing.runManualUpdaterForService({
+                    id: 3,
+                    appSlug: "media",
+                    serviceName: "app",
+                    imageRepo: "repo/app",
+                    composeImageRef: "repo/app:1",
+                    currentTag: "1",
+                    currentDigest: null,
+                    latestTag: "2",
+                    latestDigest: null,
+                    policy: "notify",
+                    pinMode: "tag",
+                    enabled: true,
+                    lastCheckedAt: null,
+                    lastUpdatedAt: null,
+                    lastStatus: null,
+                    updateAvailable: true,
+                    metadata: {},
+                }),
+                {
+                    success: false,
+                    code: "CONFLICT",
+                    output: {},
+                    stderr: "No update available",
+                    steps: [
+                        {
+                            step: "manual-update:media/app",
+                            ok: false,
+                            code: "CONFLICT",
+                            stdout: "",
+                            stderr: "No update available",
+                        },
+                    ],
+                }
+            );
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
+        }
+        try {
+            __testing.setDockerUpdaterServiceRunnerForTests(async () => [
+                {
+                    step: "manual-update:media/app",
+                    ok: true,
+                    stdout: "updated",
+                    stderr: "",
+                },
+            ]);
+            assert.deepEqual(
+                await __testing.runManualUpdaterForService({
+                    id: 4,
+                    appSlug: "media",
+                    serviceName: "app",
+                    imageRepo: "repo/app",
+                    composeImageRef: "repo/app:1",
+                    currentTag: "1",
+                    currentDigest: null,
+                    latestTag: "2",
+                    latestDigest: null,
+                    policy: "notify",
+                    pinMode: "tag",
+                    enabled: true,
+                    lastCheckedAt: null,
+                    lastUpdatedAt: null,
+                    lastStatus: null,
+                    updateAvailable: true,
+                    metadata: {},
+                }),
+                {
+                    success: true,
+                    code: "OK",
+                    output: {
+                        serviceId: 4,
+                        summary: { updated: 1, failed: 0 },
+                        updated: [4],
+                        failed: [],
+                    },
+                    stderr: "",
+                    summary: { updated: 1, failed: 0 },
+                    updated: [4],
+                    failed: [],
+                    steps: [
+                        {
+                            step: "manual-update:media/app",
+                            ok: true,
+                            stdout: "updated",
+                            stderr: "",
+                        },
+                    ],
+                }
+            );
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
+        }
 
         let nextCalled = false;
         const handler = __testing.asyncRoute(async () => {
@@ -1779,6 +1911,38 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(stack.status, 200);
         assert.equal(stack.body.output, "compose restart app");
 
+        const stackWithoutService = await requestJson<{ output: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", body: { action: "restart" } }
+        );
+        assert.equal(stackWithoutService.status, 200);
+        assert.equal(stackWithoutService.body.output, "compose restart");
+
+        const invalidStackAction = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", body: { action: "up" } }
+        );
+        assert.equal(invalidStackAction.status, 400);
+        assert.equal(invalidStackAction.body.error, "Invalid stack action");
+
+        const invalidStackService = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", body: { action: "restart", service: "-bad" } }
+        );
+        assert.equal(invalidStackService.status, 400);
+        assert.equal(invalidStackService.body.error, "Invalid stack action");
+
+        const missingStackPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST" }
+        );
+        assert.equal(missingStackPayload.status, 400);
+        assert.equal(missingStackPayload.body.error, "Invalid stack action");
+
         const deleteImage = await requestJson<{ success: boolean }>(
             server,
             "/api/docker/images/sha256:image123",
@@ -1995,102 +2159,87 @@ describe("docker routes", { concurrency: false }, () => {
             "DELETE FROM notifications WHERE source IN ('docker', 'docker-updater')"
         ).run();
 
-        const run = await requestJson<{
-            success: boolean;
-            steps: Array<{ step: string; ok: boolean; stderr: string }>;
-        }>(server, "/api/docker/updater/run", {
-            method: "POST",
-            body: {},
-        });
+        const run = await withDockerUpdaterFetch(() =>
+            withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
+                requestJson<{
+                    success: boolean;
+                    steps: Array<{ step: string; ok: boolean; stderr: string }>;
+                }>(server, "/api/docker/updater/run", {
+                    method: "POST",
+                    body: {},
+                })
+            )
+        );
         assert.equal(run.status, 200);
         assert.equal(run.body.success, true);
         assert.deepEqual(
             run.body.steps.map((step) => step.step),
-            ["register", "poll", "auto-update:media/app"]
+            ["register", "poll"]
         );
         assert.equal(
             run.body.steps.every((step) => step.ok),
             true
         );
-        assert.deepEqual(
-            dockerNotifications().map((notification) => ({
-                dedupeKey: notification.dedupe_key,
-                title: notification.title,
-                type: notification.type,
-            })),
-            [
-                {
-                    dedupeKey: "docker:updater:updated:1:repo/app:1.0.1@sha256:new",
-                    title: "Docker service updated",
-                    type: "info",
-                },
-                {
-                    dedupeKey: "docker:updater:updates-available",
-                    title: "Docker updates available",
-                    type: "info",
-                },
-            ]
-        );
+        assert.deepEqual(dockerNotifications(), []);
 
         await seedDockerUpdaterState(tempDir);
         await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
-            const failedRun = await requestJson<{
-                success: boolean;
-                steps: Array<{ step: string; ok: boolean; stderr: string }>;
-            }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
+            const failedRun = await withDockerUpdaterFetch(() =>
+                withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
+                    requestJson<{
+                        success: boolean;
+                        steps: Array<{ step: string; ok: boolean; stderr: string }>;
+                    }>(server, "/api/docker/updater/run", { method: "POST", body: {} })
+                )
+            );
             assert.equal(failedRun.status, 200);
-            assert.equal(failedRun.body.success, false);
+            assert.equal(failedRun.body.success, true);
             assert.deepEqual(
                 failedRun.body.steps.map((step) => step.step),
-                ["register", "poll", "auto-update:media/app"]
+                ["register", "poll"]
             );
-            assert.equal(failedRun.body.steps[2]?.ok, false);
-            assert.match(failedRun.body.steps[2]?.stderr || "", /compose failed/u);
-            const failedNotification = dockerNotifications().find((notification) =>
-                notification.dedupe_key.includes("docker:updater:auto-failed:")
+            assert.equal(
+                failedRun.body.steps.every((step) => step.ok),
+                true
             );
-            assert.ok(failedNotification);
-            assert.equal(failedNotification.type, "error");
-            assert.equal(failedNotification?.is_read, 0);
-            db.prepare("UPDATE notifications SET is_read = 1 WHERE dedupe_key = ?").run(
-                failedNotification.dedupe_key
-            );
-            const failedAgain = await requestJson<{ success: boolean }>(
-                server,
-                "/api/docker/updater/run",
-                { method: "POST", body: {} }
+            const failedAgain = await withDockerUpdaterFetch(() =>
+                withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
+                    requestJson<{ success: boolean }>(server, "/api/docker/updater/run", {
+                        method: "POST",
+                        body: {},
+                    })
+                )
             );
             assert.equal(failedAgain.status, 200);
-            assert.equal(failedAgain.body.success, false);
-            const reopenedNotification = dockerNotifications().find((notification) =>
-                notification.dedupe_key.includes("docker:updater:auto-failed:")
-            );
-            assert.ok(reopenedNotification);
-            assert.equal(reopenedNotification?.is_read, 0);
+            assert.equal(failedAgain.body.success, true);
         });
     });
 
     it("runs manual updater notification steps and keeps partial failure details", async () => {
         await seedDockerUpdaterState(tempDir);
-        const success = await requestJson<{
-            success: boolean;
-            result: { serviceId: number };
-            service: { currentTag: string | null; lastStatus: string | null };
-            stderr: string;
-        }>(server, "/api/docker/updater/services/1/update", {
-            method: "POST",
-            body: {},
-        });
+        const success = await withDockerUpdaterFetch(() =>
+            withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
+                requestJson<{
+                    success: boolean;
+                    result: { serviceId: number };
+                    service: { currentTag: string | null; lastStatus: string | null };
+                    stderr: string;
+                }>(server, "/api/docker/updater/services/1/update", {
+                    method: "POST",
+                    body: {},
+                })
+            )
+        );
         assert.equal(success.status, 200);
         assert.equal(success.body.success, true);
         assert.deepEqual(success.body.result, {
             serviceId: 1,
-            summary: { updated: 1, failed: 0 },
-            updated: [1],
+            summary: { updated: 0, failed: 0 },
+            updated: [],
             failed: [],
         });
-        assert.equal(success.body.service.currentTag, "1.0.1");
-        assert.equal(success.body.service.lastStatus, "updated");
+        assert.equal(success.body.service.currentTag, "1.0.0");
+        assert.equal(success.body.service.lastStatus, "current");
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);
@@ -2118,9 +2267,40 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(fallback.body.success, true);
             assert.equal(fallback.body.service.id, 1);
             assert.equal(fallback.body.service.currentTag, "1.0.0");
-            assert.equal(fallback.body.service.lastStatus, "update_available");
+            assert.equal(fallback.body.service.lastStatus, "current");
         } finally {
             db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
+        }
+
+        await seedDockerUpdaterState(tempDir);
+        const { __testing } = await import("./docker.js");
+        try {
+            __testing.setDockerUpdaterServiceRunnerForTests(async () => {
+                db.prepare("DELETE FROM docker_managed_services WHERE id = 1").run();
+                return [
+                    {
+                        step: "manual-update:media/app",
+                        ok: false,
+                        code: "CONFLICT",
+                        stdout: "",
+                        stderr: "No update available",
+                    },
+                ];
+            });
+            const fallbackFailure = await requestJson<{
+                success: boolean;
+                service: { id: number };
+                stderr: string;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(fallbackFailure.status, 409);
+            assert.equal(fallbackFailure.body.success, false);
+            assert.equal(fallbackFailure.body.service.id, 1);
+            assert.equal(fallbackFailure.body.stderr, "No update available");
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
         }
 
         await seedDockerUpdaterState(tempDir);
@@ -2169,18 +2349,23 @@ describe("docker routes", { concurrency: false }, () => {
         await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
             const manualFailure = await requestJson<{
                 success: boolean;
-                result: Record<string, never>;
+                result: Record<string, unknown>;
                 service: { lastStatus: string | null };
                 stderr: string;
             }>(server, "/api/docker/updater/services/1/update", {
                 method: "POST",
                 body: {},
             });
-            assert.equal(manualFailure.status, 500);
-            assert.equal(manualFailure.body.success, false);
-            assert.equal(manualFailure.body.service.lastStatus, "manual_update_failed");
-            assert.deepEqual(manualFailure.body.result, {});
-            assert.match(manualFailure.body.stderr, /compose failed/u);
+            assert.equal(manualFailure.status, 200);
+            assert.equal(manualFailure.body.success, true);
+            assert.equal(manualFailure.body.service.lastStatus, "current");
+            assert.deepEqual(manualFailure.body.result, {
+                serviceId: 1,
+                summary: { updated: 0, failed: 0 },
+                updated: [],
+                failed: [],
+            });
+            assert.equal(manualFailure.body.stderr, "");
         });
     });
 

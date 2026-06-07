@@ -85,7 +85,11 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
     afterEach(async () => {
         globalThis.fetch = originalFetch;
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         await rm(tempDir, { recursive: true, force: true });
         db.exec("DELETE FROM cache_entries;");
     });
@@ -1050,6 +1054,37 @@ if (args.includes("capture-pane")) {
             456
         );
 
+        let reclaimedOpenCalls = 0;
+        let reclaimedRemovedPath: string | null = null;
+        let reclaimedStatCalls = 0;
+        assert.equal(
+            __testing.acquireCodexTrustConfigLock(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                    };
+                })(),
+                open: () => {
+                    reclaimedOpenCalls += 1;
+                    if (reclaimedOpenCalls === 1) throw existsError;
+                    return 567;
+                },
+                remove: (reclaimedPath) => {
+                    reclaimedRemovedPath = String(reclaimedPath);
+                },
+                rename: () => {},
+                stat: () => {
+                    reclaimedStatCalls += 1;
+                    return { dev: 1, ino: 2, mtimeMs: 1 } as never;
+                },
+            }),
+            567
+        );
+        assert.equal(reclaimedRemovedPath, `${lockPath}.reclaimed.${process.pid}`);
+        assert.equal(reclaimedStatCalls, 2);
+
         assert.throws(
             () =>
                 __testing.acquireCodexTrustConfigLock(lockPath, {
@@ -1066,6 +1101,76 @@ if (args.includes("capture-pane")) {
                     stat: () => ({ mtimeMs: 9_999 }) as never,
                 }),
             /exists/u
+        );
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    rename: () => {
+                        throw Object.assign(new Error("rename denied"), {
+                            code: "EACCES",
+                        });
+                    },
+                    stat: () => ({ dev: 1, ino: 2, mtimeMs: 1 }) as never,
+                }),
+            /exists/u
+        );
+        let statCalls = 0;
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    rename: () => {},
+                    stat: () => {
+                        statCalls += 1;
+                        return {
+                            dev: statCalls === 1 ? 1 : 3,
+                            ino: statCalls === 1 ? 2 : 4,
+                            mtimeMs: 1,
+                        } as never;
+                    },
+                }),
+            /exists/u
+        );
+        let renameMissingOpenCalls = 0;
+        assert.equal(
+            __testing.acquireCodexTrustConfigLock(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                    };
+                })(),
+                open: () => {
+                    renameMissingOpenCalls += 1;
+                    if (renameMissingOpenCalls === 1) throw existsError;
+                    return 789;
+                },
+                rename: () => {
+                    throw Object.assign(new Error("gone"), { code: "ENOENT" });
+                },
+                stat: () => ({ dev: 1, ino: 2, mtimeMs: 1 }) as never,
+            }),
+            789
         );
         assert.throws(
             () =>

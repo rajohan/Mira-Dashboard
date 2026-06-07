@@ -21,6 +21,7 @@ import {
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
 let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+let runDockerUpdaterServiceForRoutes = runDockerUpdaterService;
 const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
     "MIRA_DOCKER_COMPOSE_WRAPPER",
     `${DOCKER_ROOT}/bin/docker-compose-doppler`
@@ -282,6 +283,33 @@ interface DockerActionRequest {
 interface DockerStackActionRequest {
     action: "restart";
     service?: string;
+}
+
+function isSafeDockerArgument(value: string): boolean {
+    const trimmed = value.trim();
+    return trimmed.length > 0 && !trimmed.startsWith("-");
+}
+
+function validateDockerStackActionRequest(
+    payload: unknown
+): DockerStackActionRequest | null {
+    if (!payload || typeof payload !== "object") {
+        return null;
+    }
+    const request = payload as Partial<DockerStackActionRequest>;
+    if (request.action !== "restart") {
+        return null;
+    }
+    if (request.service !== undefined) {
+        if (
+            typeof request.service !== "string" ||
+            !isSafeDockerArgument(request.service)
+        ) {
+            return null;
+        }
+        return { action: request.action, service: request.service.trim() };
+    }
+    return { action: request.action };
 }
 
 /** Represents docker prune request. */
@@ -815,7 +843,7 @@ async function runManualUpdaterForService(
         };
     }
     const serviceId = service.id;
-    const steps = await runDockerUpdaterService(serviceId);
+    const steps = await runDockerUpdaterServiceForRoutes(serviceId);
     if (steps.some((step) => !step.ok)) {
         const stderr = steps
             .filter((step) => !step.ok)
@@ -883,7 +911,7 @@ function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefin
 /** Performs run updater command. */
 /** Performs run docker updater now. */
 export async function runDockerUpdaterNow() {
-    const steps = await runDockerUpdaterService();
+    const steps = await runDockerUpdaterServiceForRoutes();
     return steps;
 }
 
@@ -956,7 +984,7 @@ async function runContainerAction(
 
 /** Performs run stack action. */
 async function runStackAction(request: DockerStackActionRequest) {
-    const args = ["restart"];
+    const args: string[] = [request.action];
     if (request.service) {
         args.push(request.service);
     }
@@ -1213,6 +1241,11 @@ export const __testing = {
     setDockerBinForTests: (nextDockerBin: string | undefined) => {
         dockerBin = nextDockerBin || nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
     },
+    setDockerUpdaterServiceRunnerForTests: (
+        nextRunner?: typeof runDockerUpdaterService
+    ) => {
+        runDockerUpdaterServiceForRoutes = nextRunner ?? runDockerUpdaterService;
+    },
     setDockerExecPidWaitTimeoutForTests: (nextTimeoutMs?: number) => {
         dockerExecPidWaitTimeoutMs =
             nextTimeoutMs ?? DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
@@ -1414,7 +1447,11 @@ export default function dockerRoutes(app: express.Application): void {
         "/api/docker/stack/action",
         express.json(),
         asyncRoute(async (req, res) => {
-            const payload = req.body as DockerStackActionRequest;
+            const payload = validateDockerStackActionRequest(req.body);
+            if (!payload) {
+                res.status(400).json({ error: "Invalid stack action" });
+                return;
+            }
             const result = await runStackAction(payload);
             res.json(result);
         })

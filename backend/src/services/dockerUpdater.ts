@@ -412,7 +412,7 @@ async function lookupDockerHub(service: ManagedServiceRow) {
 
 async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
-    let tag = service.current_tag || service.tag_match_pattern;
+    let tag = service.current_tag;
     if (service.tag_match_pattern) {
         const tags: string[] = [];
         let tagsUrl: string | null = `https://ghcr.io/v2/${repo}/tags/list`;
@@ -428,7 +428,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
         const candidates = tags
             .filter((candidate) => candidate && tagMatches(service, candidate))
             .sort(compareTags);
-        tag = candidates.at(-1) || tag;
+        tag = candidates.at(-1) ?? tag;
     }
     if (!tag) {
         return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
@@ -450,8 +450,8 @@ async function lookupGhcr(service: ManagedServiceRow) {
 async function lookupLatest(service: ManagedServiceRow) {
     if (process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY === "1") {
         return {
-            latestTag: service.latest_tag || service.current_tag,
-            latestDigest: service.latest_digest || service.current_digest,
+            latestTag: service.current_tag,
+            latestDigest: service.current_digest,
         };
     }
     const registry = imageRegistry(service.image_repo);
