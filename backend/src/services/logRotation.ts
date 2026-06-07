@@ -24,7 +24,12 @@ const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
 type ExecFileRunner = (
     file: string,
     args: readonly string[] | undefined,
-    options: { env: NodeJS.ProcessEnv; maxBuffer: number; timeout?: number }
+    options: {
+        encoding?: BufferEncoding;
+        env: NodeJS.ProcessEnv;
+        maxBuffer: number;
+        timeout?: number;
+    }
 ) => Promise<{ stderr: string; stdout: string }>;
 
 let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
@@ -1126,6 +1131,7 @@ export async function runElevatedLogRotationService(options: {
         args.push("--dry-run");
     }
     const { stderr, stdout } = await elevatedLogRotationExecFileRunner("sudo", args, {
+        encoding: "utf8",
         env: elevatedLogRotationEnvironment(),
         maxBuffer: 1024 * 1024,
         timeout: 10 * 60_000,

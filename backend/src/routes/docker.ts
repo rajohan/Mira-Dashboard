@@ -1340,6 +1340,7 @@ export default function dockerRoutes(app: express.Application): void {
                 result.success ? 200 : manualUpdaterFailureStatus(result.code)
             ).json({
                 success: result.success,
+                error: result.success ? undefined : result.stderr,
                 service: updatedService,
                 result: result.output,
                 stderr: result.stderr,

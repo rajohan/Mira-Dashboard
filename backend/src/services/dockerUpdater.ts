@@ -886,13 +886,16 @@ export async function pollDockerUpdaterRegistries(
                   .all(serviceId) as unknown as ManagedServiceRow[]);
     const checked: string[] = [];
     const updates: string[] = [];
+    const skipped: Array<{ service: string; reason: string }> = [];
     const failures: Array<{ service: string; error: string }> = [];
     for (const service of services) {
         try {
             const latest = await lookupLatest(service);
             if ("unsupported" in latest && latest.unsupported) {
-                const error = `Unsupported image registry: ${imageRegistry(service.image_repo)}`;
-                failures.push({ service: serviceLabel(service), error });
+                skipped.push({
+                    service: serviceLabel(service),
+                    reason: `Unsupported image registry: ${imageRegistry(service.image_repo)}`,
+                });
                 db.prepare(
                     `UPDATE docker_managed_services
                      SET latest_tag = NULL, latest_digest = NULL,
@@ -954,6 +957,7 @@ export async function pollDockerUpdaterRegistries(
             ok: failures.length === 0,
             checkedAt: timestamp,
             checked,
+            skipped,
             updates,
         }),
         stderr: failures

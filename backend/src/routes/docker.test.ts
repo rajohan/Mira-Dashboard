@@ -522,7 +522,8 @@ async function withDockerUpdaterFetch<T>(callback: () => Promise<T>): Promise<T>
                     ? {
                           images: [
                               {
-                                  architecture: process.arch === "arm64" ? "arm64" : "amd64",
+                                  architecture:
+                                      process.arch === "arm64" ? "arm64" : "amd64",
                                   digest: "sha256:new",
                                   os: "linux",
                               },
@@ -2045,9 +2046,10 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     it("returns updater services, events, and validates manual update state", async () => {
-        db.prepare(
+        const markStackAsFailed = db.prepare(
             "UPDATE docker_managed_services SET last_status = 'registry_check_failed' WHERE id = 3"
-        ).run();
+        );
+        markStackAsFailed.run();
         const services = await requestJson<{
             services: Array<{
                 id: number;
@@ -2298,6 +2300,7 @@ describe("docker routes", { concurrency: false }, () => {
                 ];
             });
             const fallbackFailure = await requestJson<{
+                error: string;
                 success: boolean;
                 service: { id: number };
                 stderr: string;
@@ -2307,6 +2310,7 @@ describe("docker routes", { concurrency: false }, () => {
             });
             assert.equal(fallbackFailure.status, 409);
             assert.equal(fallbackFailure.body.success, false);
+            assert.equal(fallbackFailure.body.error, "No update available");
             assert.equal(fallbackFailure.body.service.id, 1);
             assert.equal(fallbackFailure.body.stderr, "No update available");
         } finally {

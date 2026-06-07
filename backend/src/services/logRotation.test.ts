@@ -375,9 +375,15 @@ describe("log rotation service", { concurrency: false }, () => {
             async (
                 file: string,
                 args: readonly string[] | undefined,
-                options: { env: NodeJS.ProcessEnv; maxBuffer: number; timeout?: number }
+                options: {
+                    encoding?: BufferEncoding;
+                    env: NodeJS.ProcessEnv;
+                    maxBuffer: number;
+                    timeout?: number;
+                }
             ) => {
                 commands.push({ args: args ?? [], env: options.env, file });
+                assert.equal(options.encoding, "utf8");
                 assert.equal(options.timeout, 10 * 60_000);
                 return {
                     stderr: "helper warning",

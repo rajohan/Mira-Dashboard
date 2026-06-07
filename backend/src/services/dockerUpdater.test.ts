@@ -1029,8 +1029,28 @@ setTimeout(() => process.exit(0), 30);
         ).run();
 
         const result = await updater.pollDockerUpdaterRegistries(720);
-        assert.equal(result.ok, false);
-        assert.match(result.stderr, /Unsupported image registry: lscr.io/u);
+        assert.equal(result.ok, true);
+        assert.equal(result.stderr, "");
+        const stdout = JSON.parse(result.stdout) as {
+            checkedAt: string;
+            checked: string[];
+            ok: boolean;
+            skipped: Array<{ reason: string; service: string }>;
+            updates: string[];
+        };
+        assert.match(stdout.checkedAt, /^\d{4}-\d{2}-\d{2}T/u);
+        assert.deepEqual(stdout, {
+            checked: [],
+            checkedAt: stdout.checkedAt,
+            ok: true,
+            skipped: [
+                {
+                    reason: "Unsupported image registry: lscr.io",
+                    service: "external/swag",
+                },
+            ],
+            updates: [],
+        });
         const row = db
             .prepare("SELECT last_status FROM docker_managed_services WHERE id = 720")
             .get() as { last_status: string };
